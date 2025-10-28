@@ -152,12 +152,6 @@ RangeShouldSkip(const T& lower_val,
     } else {
         should_skip = (lower_val >= upper_bound) || (upper_val <= lower_bound);
     }
-    std::cout << "RangeShouldSkip: lower_val=" << lower_val
-              << ", upper_val=" << upper_val << ", lower_bound=" << lower_bound
-              << ", upper_bound=" << upper_bound
-              << ", lower_inclusive=" << lower_inclusive
-              << ", upper_inclusive=" << upper_inclusive
-              << ", should_skip=" << should_skip << std::endl;
     return should_skip;
 }
 
@@ -471,9 +465,6 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
                     typed_max = current_val;
                 }
             }
-            std::cout << "typed_min: " << typed_min
-                      << ", typed_max: " << typed_max << ", min_: " << min_
-                      << ", max_: " << max_ << std::endl;
             return RangeShouldSkip(
                 typed_min, typed_max, min_, max_, true, true);
         }
@@ -543,8 +534,6 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
           max_(max),
           bloom_filter_(bloom_filter),
           ngram_bloom_filter_(ngram_bloom_filter) {
-        std::cout << "StringFieldChunkMetrics created with min: " << min_
-                  << ", max: " << max_ << std::endl;
         this->has_value_ = true;
     }
 
@@ -602,10 +591,7 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
                 ankerl::unordered_dense::set<std::string> ngrams;
                 ExtractNgrams(
                     ngrams, *typed_val, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
-                std::cout << "Extracted " << ngrams.size()
-                          << " ngrams for value: " << value << std::endl;
                 for (const auto& ngram : ngrams) {
-                    std::cout << "Extracted ngram: " << ngram << std::endl;
                     if (!ngram_bloom_filter_->Test(ngram)) {
                         return true;
                     }
@@ -642,8 +628,6 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
                     max = v;
                 }
             }
-            std::cout << "StringFieldChunkMetrics created with min: " << min
-                      << ", max: " << max << std::endl;
             return RangeShouldSkip(min,
                                    max,
                                    std::string_view(min_),
@@ -791,8 +775,6 @@ class SkipIndexStatsBuilder {
         auto enable_bloom_filter =
             GetValueFromConfig<bool>(config, "enable_bloom_filter");
         if (enable_bloom_filter.has_value()) {
-            std::cout << "SkipIndexStatsBuilder enable_bloom_filter: "
-                      << *enable_bloom_filter << std::endl;
             enable_bloom_filter_ = *enable_bloom_filter;
         }
     }
