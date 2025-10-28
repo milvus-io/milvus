@@ -29,13 +29,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -88,7 +85,6 @@ func newCompositeBinlogRecordReader(
 	schema *schemapb.CollectionSchema,
 	neededFields typeutil.Set[int64],
 	blobs []*Blob,
-	opts ...BinlogReaderOption,
 ) (*CompositeBinlogRecordReader, error) {
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	if neededFields != nil {
@@ -109,7 +105,7 @@ func newCompositeBinlogRecordReader(
 	rrs := make([]array.RecordReader, len(allFields))
 	brs := make([]*BinlogReader, len(allFields))
 	for _, b := range blobs {
-		reader, err := NewBinlogReader(b.Value, opts...)
+		reader, err := NewBinlogReader(b.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +135,6 @@ func newIterativeCompositeBinlogRecordReader(
 	schema *schemapb.CollectionSchema,
 	neededFields typeutil.Set[int64],
 	chunkedBlobs ChunkedBlobsReader,
-	opts ...BinlogReaderOption,
 ) *IterativeRecordReader {
 	return &IterativeRecordReader{
 		iterate: func() (RecordReader, error) {
@@ -147,7 +142,7 @@ func newIterativeCompositeBinlogRecordReader(
 			if err != nil {
 				return nil, err
 			}
-			return newCompositeBinlogRecordReader(schema, neededFields, blobs, opts...)
+			return newCompositeBinlogRecordReader(schema, neededFields, blobs)
 		},
 	}
 }
@@ -240,46 +235,14 @@ func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader C
 	}), nil
 }
 
-type HeaderExtraWriterOption func(header *descriptorEvent)
-
-func WithEncryptionKey(ezID int64, edek []byte) HeaderExtraWriterOption {
-	return func(header *descriptorEvent) {
-		header.AddExtra(edekKey, string(edek))
-		header.AddExtra(ezIDKey, ezID)
-	}
-}
-
-type StreamWriterOption func(*BinlogStreamWriter)
-
-func WithEncryptor(encryptor hook.Encryptor) StreamWriterOption {
-	return func(w *BinlogStreamWriter) {
-		w.encryptor = encryptor
-	}
-}
-
-func WithHeaderExtraOptions(headerOpt HeaderExtraWriterOption) StreamWriterOption {
-	return func(w *BinlogStreamWriter) {
-		w.headerOpt = headerOpt
-	}
-}
-
-func GetEncryptionOptions(ezID int64, edek []byte, encryptor hook.Encryptor) []StreamWriterOption {
-	return []StreamWriterOption{
-		WithEncryptor(encryptor),
-		WithHeaderExtraOptions(WithEncryptionKey(ezID, edek)),
-	}
-}
-
 type BinlogStreamWriter struct {
 	collectionID UniqueID
 	partitionID  UniqueID
 	segmentID    UniqueID
 	fieldSchema  *schemapb.FieldSchema
 
-	buf       bytes.Buffer
-	rw        *singleFieldRecordWriter
-	headerOpt HeaderExtraWriterOption
-	encryptor hook.Encryptor
+	buf bytes.Buffer
+	rw  *singleFieldRecordWriter
 }
 
 func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
@@ -306,12 +269,6 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		return nil, err
 	}
 
-	// Everything but descryptor event is encrypted
-	tmpBuf := &b
-	if bsw.encryptor != nil {
-		tmpBuf = &bytes.Buffer{}
-	}
-
 	eh := newEventHeader(InsertEventType)
 
 	ev := newInsertEventData()
@@ -321,37 +278,17 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 	// eh.NextPosition = eh.EventLength + w.Offset()
 
 	// Write event header
-	if err := eh.Write(tmpBuf); err != nil {
+	if err := eh.Write(&b); err != nil {
 		return nil, err
 	}
 
 	// Write event data, which ic startTs and endTs for insert event data
-	if err := ev.WriteEventData(tmpBuf); err != nil {
+	if err := ev.WriteEventData(&b); err != nil {
 		return nil, err
 	}
 
-	if err := binary.Write(tmpBuf, common.Endian, bsw.buf.Bytes()); err != nil {
+	if err := binary.Write(&b, common.Endian, bsw.buf.Bytes()); err != nil {
 		return nil, err
-	}
-
-	// tmpBuf could be "b" or new "tmpBuf"
-	// if encryptor is not nil, tmpBuf is new tmpBuf, which need to be written into
-	// b after encryption
-	if bsw.encryptor != nil {
-		cipherText, err := bsw.encryptor.Encrypt(tmpBuf.Bytes())
-		if err != nil {
-			return nil, err
-		}
-		log.Debug("Binlog stream writer encrypted cipher text",
-			zap.Int64("collectionID", bsw.collectionID),
-			zap.Int64("segmentID", bsw.segmentID),
-			zap.Int64("fieldID", bsw.fieldSchema.FieldID),
-			zap.Int("plain size", tmpBuf.Len()),
-			zap.Int("cipher size", len(cipherText)),
-		)
-		if err := binary.Write(&b, common.Endian, cipherText); err != nil {
-			return nil, err
-		}
 	}
 
 	return &Blob{
@@ -373,10 +310,6 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 	de.FieldID = bsw.fieldSchema.FieldID
 	de.descriptorEventData.AddExtra(originalSizeKey, strconv.Itoa(int(bsw.rw.writtenUncompressed)))
 	de.descriptorEventData.AddExtra(nullableKey, bsw.fieldSchema.Nullable)
-	// Additional head options
-	if bsw.headerOpt != nil {
-		bsw.headerOpt(de)
-	}
 	if err := de.Write(w); err != nil {
 		return err
 	}
@@ -396,24 +329,17 @@ func newBinlogWriter(collectionID, partitionID, segmentID UniqueID,
 
 func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 	schema *schemapb.CollectionSchema,
-	writerOptions ...StreamWriterOption,
 ) map[FieldID]*BinlogStreamWriter {
 	bws := make(map[FieldID]*BinlogStreamWriter)
 
 	for _, f := range schema.Fields {
 		writer := newBinlogWriter(collectionID, partitionID, segmentID, f)
-		for _, writerOption := range writerOptions {
-			writerOption(writer)
-		}
 		bws[f.FieldID] = writer
 	}
 
 	for _, structField := range schema.StructArrayFields {
 		for _, subField := range structField.Fields {
 			writer := newBinlogWriter(collectionID, partitionID, segmentID, subField)
-			for _, writerOption := range writerOptions {
-				writerOption(writer)
-			}
 			bws[subField.FieldID] = writer
 		}
 	}
@@ -508,7 +434,6 @@ type CompositeBinlogRecordWriter struct {
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog
 
 	flushedUncompressed uint64
-	options             []StreamWriterOption
 
 	ttlFieldID     int64
 	ttlFieldValues []int64
@@ -580,7 +505,7 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 
 func (c *CompositeBinlogRecordWriter) initWriters() error {
 	if c.rw == nil {
-		c.fieldWriters = NewBinlogStreamWriters(c.collectionID, c.partitionID, c.segmentID, c.schema, c.options...)
+		c.fieldWriters = NewBinlogStreamWriters(c.collectionID, c.partitionID, c.segmentID, c.schema)
 		rws := make(map[FieldID]RecordWriter, len(c.fieldWriters))
 		for fid, w := range c.fieldWriters {
 			rw, err := w.GetRecordWriter()
@@ -739,7 +664,6 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
-	options ...StreamWriterOption,
 ) (*CompositeBinlogRecordWriter, error) {
 	writer := &CompositeBinlogRecordWriter{
 		collectionID:   collectionID,
@@ -751,7 +675,6 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		chunkSize:      chunkSize,
 		rootPath:       rootPath,
 		maxRowNum:      maxRowNum,
-		options:        options,
 		tsFrom:         math.MaxUint64,
 		tsTo:           0,
 		ttlFieldID:     getTTLFieldID(schema),
