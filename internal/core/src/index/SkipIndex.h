@@ -11,44 +11,20 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string>
-#include <string_view>
-#include <type_traits>
-#include <vector>
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/FieldDataInterface.h"
-#include "common/Chunk.h"
 #include "common/Types.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "parquet/statistics.h"
-#include "parquet/types.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
 
 namespace milvus {
-
-// MetricsDataType is used to avoid copy when get min/max value from index::FieldChunkMetrics
-template <typename T>
-using MetricsDataType =
-    std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
-
-// ReverseMetricsDataType is used to avoid copy when get min/max value from index::FieldChunkMetrics
-template <typename T>
-using ReverseMetricsDataType =
-    std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-
-template <typename T>
-using HighPrecisionType =
-    std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
-                       int64_t,
-                       T>;
-
 class FieldChunkMetricsTranslatorFromStatistics
     : public cachinglayer::Translator<index::FieldChunkMetrics> {
  public:
@@ -200,6 +176,12 @@ class SkipIndex {
             std::is_integral<T>::value && !std::is_same<T, bool>::value;
         static constexpr bool in_value = isAllowedType;
     };
+
+    template <typename T>
+    using HighPrecisionType =
+        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           T>;
 
  public:
     template <typename T>

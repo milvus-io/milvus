@@ -73,7 +73,10 @@ SkipIndexStatsBuilder::Build(
                 ProcessFieldMetrics<parquet::ByteArrayType, std::string>(
                     statistic);
             chunk_metrics = std::make_unique<StringFieldChunkMetrics>(
-                std::string(info.min_), std::string(info.max_), nullptr);
+                std::string(info.min_),
+                std::string(info.max_),
+                nullptr,
+                nullptr);
             break;
         }
         default: {

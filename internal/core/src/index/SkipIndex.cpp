@@ -10,12 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SkipIndex.h"
-#include <memory>
 
-#include "arrow/type_fwd.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
-#include "common/FieldDataInterface.h"
 
 namespace milvus {
 

@@ -28,12 +28,13 @@
 #include "arrow/type_fwd.h"
 #include "arrow/array/array_primitive.h"
 #include "parquet/statistics.h"
-#include "index/Utils.h"
 #include "common/BloomFilter.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/Types.h"
 #include "common/FieldDataInterface.h"
+#include "index/Utils.h"
+#include "index/skipindex_stats/utils.h"
 
 namespace milvus::index {
 
@@ -141,10 +142,6 @@ RangeShouldSkip(const T& lower_val,
                 const T& upper_bound,
                 bool lower_inclusive,
                 bool upper_inclusive) {
-    if (lower_bound == MetricsDataType<T>() ||
-        upper_bound == MetricsDataType<T>()) {
-        return false;
-    }
     bool should_skip = false;
     if (lower_inclusive && upper_inclusive) {
         should_skip = (lower_val > upper_bound) || (upper_val < lower_bound);
@@ -155,6 +152,12 @@ RangeShouldSkip(const T& lower_val,
     } else {
         should_skip = (lower_val >= upper_bound) || (upper_val <= lower_bound);
     }
+    std::cout << "RangeShouldSkip: lower_val=" << lower_val
+              << ", upper_val=" << upper_val << ", lower_bound=" << lower_bound
+              << ", upper_bound=" << upper_bound
+              << ", lower_inclusive=" << lower_inclusive
+              << ", upper_inclusive=" << upper_inclusive
+              << ", should_skip=" << should_skip << std::endl;
     return should_skip;
 }
 
@@ -468,6 +471,9 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
                     typed_max = current_val;
                 }
             }
+            std::cout << "typed_min: " << typed_min
+                      << ", typed_max: " << typed_max << ", min_: " << min_
+                      << ", max_: " << max_ << std::endl;
             return RangeShouldSkip(
                 typed_min, typed_max, min_, max_, true, true);
         }
@@ -529,14 +535,6 @@ class IntFieldChunkMetrics : public FieldChunkMetrics {
 
 class StringFieldChunkMetrics : public FieldChunkMetrics {
  public:
-    StringFieldChunkMetrics() = default;
-    StringFieldChunkMetrics(std::string min,
-                            std::string max,
-                            BloomFilterPtr bloom_filter)
-        : min_(min), max_(max), bloom_filter_(bloom_filter) {
-        this->has_value_ = true;
-    }
-
     StringFieldChunkMetrics(std::string min,
                             std::string max,
                             BloomFilterPtr bloom_filter,
@@ -545,6 +543,8 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
           max_(max),
           bloom_filter_(bloom_filter),
           ngram_bloom_filter_(ngram_bloom_filter) {
+        std::cout << "StringFieldChunkMetrics created with min: " << min_
+                  << ", max: " << max_ << std::endl;
         this->has_value_ = true;
     }
 
@@ -598,11 +598,14 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
                     typed_val->size() < DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH) {
                     return false;
                 }
-                for (size_t i = 0; i <= typed_val->size() -
-                                            DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH;
-                     ++i) {
-                    std::string_view ngram = typed_val->substr(
-                        i, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
+
+                ankerl::unordered_dense::set<std::string> ngrams;
+                ExtractNgrams(
+                    ngrams, *typed_val, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
+                std::cout << "Extracted " << ngrams.size()
+                          << " ngrams for value: " << value << std::endl;
+                for (const auto& ngram : ngrams) {
+                    std::cout << "Extracted ngram: " << ngram << std::endl;
                     if (!ngram_bloom_filter_->Test(ngram)) {
                         return true;
                     }
@@ -639,6 +642,8 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
                     max = v;
                 }
             }
+            std::cout << "StringFieldChunkMetrics created with min: " << min
+                      << ", max: " << max << std::endl;
             return RangeShouldSkip(min,
                                    max,
                                    std::string_view(min_),
@@ -783,9 +788,13 @@ class SkipIndexStatsBuilder {
  public:
     SkipIndexStatsBuilder() = default;
     SkipIndexStatsBuilder(const Config& config) {
-        disable_bloom_filter_ =
-            GetValueFromConfig<bool>(config, "disable_bloom_filter")
-                .has_value();
+        auto enable_bloom_filter =
+            GetValueFromConfig<bool>(config, "enable_bloom_filter");
+        if (enable_bloom_filter.has_value()) {
+            std::cout << "SkipIndexStatsBuilder enable_bloom_filter: "
+                      << *enable_bloom_filter << std::endl;
+            enable_bloom_filter_ = *enable_bloom_filter;
+        }
     }
 
     std::unique_ptr<FieldChunkMetrics>
@@ -813,7 +822,7 @@ class SkipIndexStatsBuilder {
         bool contains_false_ = false;
 
         ankerl::unordered_dense::set<MetricsDataType<T>> unique_values_;
-        ankerl::unordered_dense::set<std::string_view> ngram_values_;
+        ankerl::unordered_dense::set<std::string> ngram_values_;
     };
 
     template <typename ParquetType, typename T>
@@ -883,7 +892,7 @@ class SkipIndexStatsBuilder {
                         max = value;
                     }
                 }
-                if (disable_bloom_filter_) {
+                if (!enable_bloom_filter_) {
                     continue;
                 }
                 if constexpr (std::is_integral_v<T>) {
@@ -910,7 +919,7 @@ class SkipIndexStatsBuilder {
         std::string_view min;
         std::string_view max;
         ankerl::unordered_dense::set<std::string_view> unique_values;
-        ankerl::unordered_dense::set<std::string_view> ngram_values;
+        ankerl::unordered_dense::set<std::string> ngram_values;
 
         bool has_first_valid = false;
         for (const auto& batch : batches) {
@@ -934,21 +943,14 @@ class SkipIndexStatsBuilder {
                         max = value;
                     }
                 }
-                if (disable_bloom_filter_ ||
+                if (!enable_bloom_filter_ ||
                     unique_values.find(value) != unique_values.end()) {
                     continue;
                 }
                 unique_values.insert(value);
                 size_t length = value.length();
-                if (length >= DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH) {
-                    for (size_t j = 0;
-                         j + DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH <= length;
-                         ++j) {
-                        std::string_view ngram =
-                            value.substr(j, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
-                        ngram_values.insert(ngram);
-                    }
-                }
+                ExtractNgrams(
+                    ngram_values, value, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
             }
             total_rows += array->length();
         }
@@ -1001,7 +1003,7 @@ class SkipIndexStatsBuilder {
                     max = value;
                 }
             }
-            if (disable_bloom_filter_) {
+            if (!enable_bloom_filter_) {
                 continue;
             }
             if constexpr (std::is_integral_v<T>) {
@@ -1026,7 +1028,7 @@ class SkipIndexStatsBuilder {
         std::string_view min;
         std::string_view max;
         ankerl::unordered_dense::set<std::string_view> unique_values;
-        ankerl::unordered_dense::set<std::string_view> ngram_values;
+        ankerl::unordered_dense::set<std::string> ngram_values;
 
         for (int64_t i = 0; i < total_rows; ++i) {
             bool is_valid = chunk->isValid(i);
@@ -1047,21 +1049,14 @@ class SkipIndexStatsBuilder {
                     max = value;
                 }
             }
-            if (disable_bloom_filter_ ||
+            if (!enable_bloom_filter_ ||
                 unique_values.find(value) != unique_values.end()) {
                 continue;
             }
             unique_values.insert(value);
             size_t length = value.length();
-            if (length >= DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH) {
-                for (size_t j = 0;
-                     j + DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH <= length;
-                     ++j) {
-                    std::string_view ngram =
-                        value.substr(j, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
-                    ngram_values.insert(ngram);
-                }
-            }
+            ExtractNgrams(
+                ngram_values, value, DEFAULT_SKIPINDEX_MIN_NGRAM_LENGTH);
         }
         return {total_rows,
                 null_count,
@@ -1097,7 +1092,7 @@ class SkipIndexStatsBuilder {
         if constexpr (std::is_floating_point_v<T>) {
             return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
         }
-        if (disable_bloom_filter_) {
+        if (!enable_bloom_filter_) {
             if constexpr (std::is_same_v<T, std::string>) {
                 return std::make_unique<StringFieldChunkMetrics>(
                     min, max, nullptr, nullptr);
@@ -1121,7 +1116,7 @@ class SkipIndexStatsBuilder {
                                        DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE,
                                        BFType::Blocked);
             for (const auto& ngram : info.ngram_values_) {
-                ngram_bloom_filter->Add(ngram);
+                ngram_bloom_filter->Add(std::string_view(ngram));
             }
             return std::make_unique<StringFieldChunkMetrics>(
                 min,
@@ -1139,7 +1134,7 @@ class SkipIndexStatsBuilder {
     }
 
  private:
-    bool disable_bloom_filter_ = false;
+    bool enable_bloom_filter_ = false;
 };
 
 }  // namespace milvus::index
