@@ -602,8 +602,6 @@ func (suite *ServiceSuite) TestDDLCallbacksReleasePartition() {
 }
 
 /*
-*
-
 	func (suite *ServiceSuite) TestDynamicRelease() {
 		ctx := context.Background()
 
