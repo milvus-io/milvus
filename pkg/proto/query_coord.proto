@@ -1020,11 +1020,11 @@ message ValidateAnalyzerRequest{
 message HighlightTask{
     string field_name = 1;
     int64 field_id = 2;
-    repeated string target_texts = 3;
-    repeated string target_analyzers = 4;
+    repeated string search_texts = 3;
+    repeated string search_analyzer_names = 4;
 
-    repeated string texts = 5;
-    repeated string analyzers = 6;
+    repeated string result_texts = 5;
+    repeated string result_analyzer_names = 6;
 }
 
 message GetHighlightRequest{
