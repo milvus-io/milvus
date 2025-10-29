@@ -20,9 +20,11 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -217,6 +219,7 @@ func (m *SegmentDistManager) Update(nodeID typeutil.UniqueID, segments ...*Segme
 		segment.Node = nodeID
 	}
 	m.segments[nodeID] = composeNodeSegments(segments)
+	log.Info("update segment dist manager", zap.Int64("nodeID", nodeID), zap.Int("segments", len(segments)), zap.Stack("stack"))
 }
 
 // GetByFilter return segment list which match all given filters

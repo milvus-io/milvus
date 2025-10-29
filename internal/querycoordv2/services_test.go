@@ -2166,6 +2166,16 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 	}
 }
 
+func (suite *ServiceSuite) releaseSegmentDist(nodeID int64) {
+	suite.dist.SegmentDistManager.Update(nodeID)
+}
+
+func (suite *ServiceSuite) releaseAllChannelDist() {
+	for _, node := range suite.nodes {
+		suite.dist.ChannelDistManager.Update(node)
+	}
+}
+
 func (suite *ServiceSuite) sortInt64(ints []int64) []int64 {
 	sort.Slice(ints, func(i int, j int) bool {
 		return ints[i] < ints[j]

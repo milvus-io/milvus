@@ -312,9 +312,11 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 	defer m.rwmutex.Unlock()
 
 	newServiceableChannels := make([]*DmChannel, 0)
+	chs := make([]string, len(channels))
 	for _, channel := range channels {
 		channel.Node = nodeID
 
+		chs = append(chs, channel.GetChannelName())
 		old, ok := m.channels[nodeID].nameChannel[channel.GetChannelName()]
 		if channel.IsServiceable() && (!ok || !old.IsServiceable()) {
 			newServiceableChannels = append(newServiceableChannels, channel)
@@ -323,6 +325,7 @@ func (m *ChannelDistManager) Update(nodeID typeutil.UniqueID, channels ...*DmCha
 
 	m.channels[nodeID] = composeNodeChannels(channels...)
 	m.updateCollectionIndex()
+	log.Info("update channel dist manager", zap.Int64("nodeID", nodeID), zap.Strings("channels", chs), zap.Stack("stack"))
 	return newServiceableChannels
 }
 

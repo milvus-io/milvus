@@ -27,23 +27,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) error {
+func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (collectionReleased bool, err error) {
 	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
 	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
 	if currentLoadConfig.Collection == nil {
 		// collection is not loaded, return success directly.
-		return nil
+		return true, nil
 	}
 
 	// remove the partitions that should be released.
@@ -55,7 +55,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 
 	// no partition to be released, return success directly.
 	if len(partitionIDsSet) == previousLength {
-		return job.ErrIgnoredAlterLoadConfig
+		return false, job.ErrIgnoredAlterLoadConfig
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -69,6 +69,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 			WithBody(&message.DropLoadConfigMessageBody{}).
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}). // TODO: after we support query view in 3.0, we should broadcast the drop load config message to all vchannels.
 			MustBuildBroadcast()
+		collectionReleased = true
 	} else {
 		// only some partitions are released, alter the load config.
 		alterLoadConfigReq := &job.AlterLoadConfigRequest{
@@ -85,9 +86,10 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 			},
 		}
 		if msg, err = job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq); err != nil {
-			return err
+			return false, err
 		}
+		collectionReleased = false
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	return collectionReleased, err
 }

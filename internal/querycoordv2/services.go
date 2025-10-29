@@ -343,7 +343,8 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		return merr.Status(err), nil
 	}
 
-	if err := s.broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx, req); err != nil {
+	collectionReleased, err := s.broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx, req)
+	if err != nil {
 		if errors.Is(err, job.ErrIgnoredAlterLoadConfig) {
 			logger.Info("release partitions ignored, partitions are already released")
 			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
@@ -353,10 +354,13 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-
-	job.WaitCurrentTargetUpdated(ctx, s.targetObserver, req.GetCollectionID())
-	job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID(), req.GetPartitionIDs()...)
-	logger.Info("release partitions done")
+	if collectionReleased {
+		job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID())
+	} else {
+		job.WaitCurrentTargetUpdated(ctx, s.targetObserver, req.GetCollectionID())
+		job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID(), req.GetPartitionIDs()...)
+	}
+	logger.Info("release partitions done", zap.Bool("collectionReleased", collectionReleased))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 	return merr.Success(), nil
