@@ -1642,8 +1642,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 			Tasks: []*querypb.HighlightTask{
 				{
 					FieldId:     100,
-					TargetTexts: []string{"test"},
-					Texts:       []string{"this is a test document", "another test case"},
+					SearchTexts: []string{"test"},
+					ResultTexts: []string{"this is a test document", "another test case"},
 				},
 			},
 		})
@@ -1696,11 +1696,11 @@ func (s *DelegatorSuite) TestGetHighlight() {
 			Topks: []int64{1, 1},
 			Tasks: []*querypb.HighlightTask{
 				{
-					FieldId:         100,
-					TargetTexts:     []string{"test", "test2"},
-					TargetAnalyzers: []string{"default"},
-					Texts:           []string{"this is a test1 document", "another test2 case"},
-					Analyzers:       []string{"default", "default"},
+					FieldId:             100,
+					SearchTexts:         []string{"test", "test2"},
+					SearchAnalyzerNames: []string{"default"},
+					ResultTexts:         []string{"this is a test1 document", "another test2 case"},
+					ResultAnalyzerNames: []string{"default", "default"},
 				},
 			},
 		})
@@ -1712,11 +1712,11 @@ func (s *DelegatorSuite) TestGetHighlight() {
 			Topks: []int64{1, 1},
 			Tasks: []*querypb.HighlightTask{
 				{
-					FieldId:         100,
-					TargetTexts:     []string{"test1", "test2"},
-					TargetAnalyzers: []string{"default", "standard"},
-					Texts:           []string{"this is a test1 document", "another test2 case"},
-					Analyzers:       []string{"default", "default"},
+					FieldId:             100,
+					SearchTexts:         []string{"test1", "test2"},
+					SearchAnalyzerNames: []string{"default", "standard"},
+					ResultTexts:         []string{"this is a test1 document", "another test2 case"},
+					ResultAnalyzerNames: []string{"default", "default"},
 				},
 			},
 		})
@@ -1729,11 +1729,11 @@ func (s *DelegatorSuite) TestGetHighlight() {
 			Topks: []int64{1, 1},
 			Tasks: []*querypb.HighlightTask{
 				{
-					FieldId:         100,
-					TargetTexts:     []string{"test1", "test2"},
-					TargetAnalyzers: nil,
-					Texts:           []string{"this is a test1 document", "another test2 case"},
-					Analyzers:       []string{"default", "default"},
+					FieldId:             100,
+					SearchTexts:         []string{"test1", "test2"},
+					SearchAnalyzerNames: nil,
+					ResultTexts:         []string{"this is a test1 document", "another test2 case"},
+					ResultAnalyzerNames: []string{"default", "default"},
 				},
 			},
 		})
@@ -1771,8 +1771,8 @@ func (s *DelegatorSuite) TestGetHighlight() {
 			Tasks: []*querypb.HighlightTask{
 				{
 					FieldId:     100,
-					TargetTexts: []string{},
-					Texts:       []string{"test document"},
+					SearchTexts: []string{},
+					ResultTexts: []string{"test document"},
 				},
 			},
 		})

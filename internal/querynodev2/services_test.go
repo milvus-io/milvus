@@ -2498,12 +2498,12 @@ func (suite *ServiceSuite) TestGetHighlight() {
 			Topks:   []int64{1, 1},
 			Tasks: []*querypb.HighlightTask{
 				{
-					FieldName:       "text_field",
-					FieldId:         100,
-					TargetTexts:     []string{"target text", "target text2"},
-					TargetAnalyzers: []string{"standard"},
-					Texts:           []string{"text", "text2"},
-					Analyzers:       []string{"standard"},
+					FieldName:           "text_field",
+					FieldId:             100,
+					SearchTexts:         []string{"target text", "target text2"},
+					SearchAnalyzerNames: []string{"standard"},
+					ResultTexts:         []string{"text", "text2"},
+					ResultAnalyzerNames: []string{"standard"},
 				},
 			},
 		})
