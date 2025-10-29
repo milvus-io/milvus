@@ -111,11 +111,8 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
 
         // Default parameters for get_record_batch_reader
         const char* predicate = nullptr;  // No filtering
-        int64_t batch_size = 8192;        // Default batch size
-        // int64_t buffer_size = 8 * 1024 * 1024; // 8MB buffer
-
-        FFIResult result = get_record_batch_reader(
-            reader_handle, predicate, batch_size, buffer_size, out_stream);
+        FFIResult result =
+            get_record_batch_reader(reader_handle, predicate, out_stream);
 
         if (!IsSuccess(&result)) {
             auto message = GetErrorMessage(&result);
