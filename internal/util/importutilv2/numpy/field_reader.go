@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -170,6 +171,22 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+	case schemapb.DataType_Geometry:
+		var strs []string
+		strs, err = c.ReadString(readCount)
+		if err != nil {
+			return nil, err
+		}
+		byteArr := make([][]byte, 0)
+		for _, wktValue := range strs {
+			wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
+			if err != nil {
+				return nil, err
+			}
+			byteArr = append(byteArr, wkbValue)
+		}
+		data = byteArr
+		c.readPosition += int(readCount)
 	case schemapb.DataType_JSON:
 		var strs []string
 		strs, err = c.ReadString(readCount)

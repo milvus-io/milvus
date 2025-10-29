@@ -25,9 +25,6 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
-	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -35,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -728,11 +726,7 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 			wkbValues = append(wkbValues, []byte(nil))
 			continue
 		}
-		geomT, err := wkt.Unmarshal(wktValue)
-		if err != nil {
-			return nil, nil, err
-		}
-		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -753,11 +747,7 @@ func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
 
 	wkbValues := make([][]byte, 0)
 	for _, wktValue := range data.([]string) {
-		geomT, err := wkt.Unmarshal(wktValue)
-		if err != nil {
-			return nil, err
-		}
-		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, err
 		}
