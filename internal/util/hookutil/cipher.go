@@ -18,6 +18,7 @@ package hookutil
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"plugin"
 	"strconv"
@@ -40,6 +41,7 @@ import (
 var (
 	Cipher                 atomic.Value
 	initCipherOnce         sync.Once
+	cipherReloadMutex      sync.RWMutex
 	ErrCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
@@ -329,12 +331,12 @@ func initCipher() error {
 		return fmt.Errorf("fail to convert the `CipherPlugin` interface")
 	}
 
-	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
-	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
-	initConfigs[paramtable.Get().ServiceParam.LocalStorageCfg.Path.Key] = paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue()
+	initConfigs := buildCipherInitConfig()
 	if err = cipherVal.Init(initConfigs); err != nil {
 		return fmt.Errorf("fail to init configs for the cipher plugin, error: %s", err.Error())
 	}
+
+	registerCallback()
 	storeCipher((cipherVal))
 	return nil
 }
@@ -349,6 +351,50 @@ func InitOnceCipher() {
 				zap.Error(err))
 		}
 	})
+}
+
+func buildCipherInitConfig() map[string]string {
+	initConfigs := lo.Assign(paramtable.Get().EtcdCfg.GetAll(), paramtable.GetCipherParams().GetAll())
+	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
+	initConfigs[paramtable.Get().ServiceParam.LocalStorageCfg.Path.Key] = paramtable.Get().ServiceParam.LocalStorageCfg.Path.GetValue()
+	return initConfigs
+}
+
+func registerCallback() {
+	params := paramtable.GetCipherParams()
+	params.DefaultRootKey.RegisterCallback(reloadCipherConfig)
+	params.KmsAwsRoleARN.RegisterCallback(reloadCipherConfig)
+	params.KmsAwsExternalID.RegisterCallback(reloadCipherConfig)
+	params.RotationPeriodInHours.RegisterCallback(reloadCipherConfig)
+	params.UpdatePerieldInMinutes.RegisterCallback(reloadCipherConfig)
+	log.Info("cipher config callbacks registered")
+}
+
+func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
+	cipher := GetCipher()
+	if cipher == nil {
+		log.Warn("cipher plugin not loaded, skip config reload", zap.String("key", key))
+		return nil
+	}
+
+	cipherReloadMutex.Lock()
+	defer cipherReloadMutex.Unlock()
+
+	log.Info("reloading cipher plugin config",
+		zap.String("key", key),
+		zap.String("oldValue", oldValue),
+		zap.String("newValue", newValue))
+
+	initConfigs := buildCipherInitConfig()
+	if err := cipher.Init(initConfigs); err != nil {
+		log.Error("fail to reload cipher plugin config",
+			zap.String("key", key),
+			zap.Error(err))
+		return err
+	}
+
+	log.Info("cipher plugin config reloaded successfully", zap.String("key", key))
+	return nil
 }
 
 // testCipher encryption will append magicStr to plainText, magicStr is str of ezID and collectionID
