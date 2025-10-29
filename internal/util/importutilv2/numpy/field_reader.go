@@ -175,13 +175,13 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		var strs []string
 		strs, err = c.ReadString(readCount)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		byteArr := make([][]byte, 0)
 		for _, wktValue := range strs {
 			wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			byteArr = append(byteArr, wkbValue)
 		}
