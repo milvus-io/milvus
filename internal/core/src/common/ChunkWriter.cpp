@@ -162,9 +162,12 @@ void
 GeometryChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
     std::vector<std::string> wkb_strs;
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
     std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
     for (auto batch : *data) {
-        auto data = batch.ValueOrDie()->column(0);
+        auto batch_data = batch.ValueOrDie();
+        batches.emplace_back(batch_data);
+        auto data = batch_data->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
