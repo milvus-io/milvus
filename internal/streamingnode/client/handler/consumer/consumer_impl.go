@@ -43,15 +43,14 @@ func CreateConsumer(
 	opts *ConsumerOptions,
 	handlerClient streamingpb.StreamingNodeHandlerServiceClient,
 ) (Consumer, error) {
-	ctxWithReq, err := createConsumeRequest(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
+	ctx = contextutil.WithCreateConsumer(ctx, &streamingpb.CreateConsumerRequest{
+		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
+	})
 
 	// TODO: configurable or auto adjust grpc.MaxCallRecvMsgSize
 	// The messages are always managed by milvus cluster, so the size of message shouldn't be controlled here
 	// to avoid infinitely blocks.
-	streamClient, err := handlerClient.Consume(ctxWithReq, grpc.MaxCallRecvMsgSize(math.MaxInt32))
+	streamClient, err := handlerClient.Consume(ctx, grpc.MaxCallRecvMsgSize(math.MaxInt32))
 	if err != nil {
 		return nil, err
 	}
@@ -82,16 +81,6 @@ func CreateConsumer(
 	}
 	go cli.execute()
 	return cli, nil
-}
-
-// createConsumeRequest creates the consume request.
-func createConsumeRequest(ctx context.Context, opts *ConsumerOptions) (context.Context, error) {
-	// select server to consume.
-	ctx = contextutil.WithPickServerID(ctx, opts.Assignment.Node.ServerID)
-	// create the consumer request.
-	return contextutil.WithCreateConsumer(ctx, &streamingpb.CreateConsumerRequest{
-		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
-	}), nil
 }
 
 type consumerImpl struct {

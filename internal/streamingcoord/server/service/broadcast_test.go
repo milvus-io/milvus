@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -54,4 +56,35 @@ func TestBroadcastService(t *testing.T) {
 			Properties: map[string]string{"key": "value"},
 		},
 	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reached := make(chan struct{})
+	done := make(chan struct{})
+	mb.EXPECT().Ack(mock.Anything, mock.Anything).Unset()
+	mb.EXPECT().Ack(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.ImmutableMessage) error {
+		close(reached)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return nil
+		}
+	})
+	go func() {
+		<-reached
+		cancel()
+		time.Sleep(10 * time.Millisecond)
+		close(done)
+	}()
+	_, err := service.Ack(ctx, &streamingpb.BroadcastAckRequest{
+		BroadcastId: 1,
+		Vchannel:    "v1",
+		Message: &commonpb.ImmutableMessage{
+			Id:         walimplstest.NewTestMessageID(1).IntoProto(),
+			Payload:    []byte("payload"),
+			Properties: map[string]string{"key": "value"},
+		},
+	})
+
+	assert.NoError(t, err)
 }
