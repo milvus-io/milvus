@@ -202,3 +202,139 @@ func (s *UtilSuite) TestIsCrossMetrics() {
 		s.True(descending)
 	}
 }
+
+// TestNewRerankOutputsWithEmptyFieldsData tests newRerankOutputs when FieldsData is empty (requery scenario)
+func (s *UtilSuite) TestNewRerankOutputsWithEmptyFieldsData() {
+	// Test case 1: All fieldData have empty FieldsData
+	{
+		inputs := &rerankInputs{
+			fieldData: []*schemapb.SearchResultData{
+				{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1, 2, 3},
+							},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{}, // Empty
+				},
+				{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{4, 5, 6},
+							},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{}, // Empty
+				},
+			},
+		}
+		searchParams := &SearchParams{limit: 10}
+		outputs := newRerankOutputs(inputs, searchParams)
+		s.NotNil(outputs)
+		// FieldsData should be empty since all inputs were empty
+		s.Equal(0, len(outputs.searchResultData.FieldsData))
+	}
+
+	// Test case 2: First fieldData has empty FieldsData, second has data
+	{
+		inputs := &rerankInputs{
+			fieldData: []*schemapb.SearchResultData{
+				{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1, 2, 3},
+							},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{}, // Empty
+				},
+				{
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{4, 5, 6},
+							},
+						},
+					},
+					FieldsData: []*schemapb.FieldData{
+						{
+							Type:      schemapb.DataType_Int64,
+							FieldName: "field1",
+							FieldId:   100,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_LongData{
+										LongData: &schemapb.LongArray{
+											Data: []int64{40, 50, 60},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		searchParams := &SearchParams{limit: 10}
+		outputs := newRerankOutputs(inputs, searchParams)
+		s.NotNil(outputs)
+		// Should use the second fieldData which has non-empty FieldsData
+		s.Greater(len(outputs.searchResultData.FieldsData), 0)
+	}
+
+	// Test case 3: nil fieldData
+	{
+		inputs := &rerankInputs{
+			fieldData: []*schemapb.SearchResultData{nil, nil},
+		}
+		searchParams := &SearchParams{limit: 10}
+		outputs := newRerankOutputs(inputs, searchParams)
+		s.NotNil(outputs)
+		// FieldsData should be empty
+		s.Equal(0, len(outputs.searchResultData.FieldsData))
+	}
+}
+
+// TestAppendResultWithEmptyFieldsData tests appendResult when FieldsData is empty
+func (s *UtilSuite) TestAppendResultWithEmptyFieldsData() {
+	// Test case: appendResult should not panic when FieldsData is empty
+	inputs := &rerankInputs{
+		fieldData: []*schemapb.SearchResultData{
+			{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				FieldsData: []*schemapb.FieldData{}, // Empty
+			},
+		},
+	}
+	searchParams := &SearchParams{limit: 10}
+	outputs := newRerankOutputs(inputs, searchParams)
+
+	// Create idScores with locations
+	idScores := &IDScores[int64]{
+		ids:       []int64{1, 2},
+		scores:    []float32{0.9, 0.8},
+		locations: []IDLoc{{batchIdx: 0, offset: 0}, {batchIdx: 0, offset: 1}},
+	}
+
+	// This should not panic even when FieldsData is empty
+	s.NotPanics(func() {
+		appendResult(inputs, outputs, idScores)
+	})
+
+	// Verify that IDs and scores were appended correctly
+	s.Equal(int64(2), outputs.searchResultData.Topks[0])
+	s.Equal([]float32{0.9, 0.8}, outputs.searchResultData.Scores)
+	s.Equal([]int64{1, 2}, outputs.searchResultData.Ids.GetIntId().Data)
+	// FieldsData should still be empty
+	s.Equal(0, len(outputs.searchResultData.FieldsData))
+}
