@@ -651,7 +651,7 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 		if !ok {
 			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
 		}
-		task.Texts = textFieldDatas.GetScalars().GetStringData().GetData()
+		task.ResultTexts = textFieldDatas.GetScalars().GetStringData().GetData()
 
 		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
 			return schema.GetFieldID() == task.GetFieldId()
@@ -678,7 +678,7 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 			if !ok {
 				return nil, errors.Errorf("get highlight failed, analyzer field not in output field")
 			}
-			task.Analyzers = analyzerFieldDatas.GetScalars().GetStringData().GetData()
+			task.ResultAnalyzerNames = analyzerFieldDatas.GetScalars().GetStringData().GetData()
 		}
 	}
 
@@ -719,7 +719,7 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 }
 
 func buildStringFragments(task *highlightTask, i int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
-	bytes := []byte(task.Texts[i])
+	bytes := []byte(task.ResultTexts[i])
 	preTagsNum := len(task.preTags)
 	postTagsNum := len(task.postTags)
 	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
