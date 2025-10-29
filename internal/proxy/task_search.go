@@ -625,9 +625,9 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		return err
 	}
 
-	task.TargetTexts = texts
+	task.SearchTexts = texts
 	if analyzerName != "" {
-		task.TargetAnalyzers = []string{analyzerName}
+		task.SearchAnalyzerNames = []string{analyzerName}
 	}
 
 	t.highlightTasks = append(t.highlightTasks, task)

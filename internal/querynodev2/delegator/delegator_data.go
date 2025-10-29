@@ -1008,7 +1008,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 	for _, task := range req.GetTasks() {
 		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
 		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the high light field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
 		}
 		topks := req.GetTopks()
 		var searchTokens [][]*milvuspb.AnalyzerToken
@@ -1016,37 +1016,40 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 		var err error
 
 		if len(analyzer.GetInputFields()) == 1 {
-			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetTargetTexts())
+			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetSearchTexts())
 			if err != nil {
 				return nil, err
 			}
 
-			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetTexts())
+			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetResultTexts())
 			if err != nil {
 				return nil, err
 			}
 		} else if len(analyzer.GetInputFields()) == 2 {
-			var targetAnalyzers []string
-			if len(task.Analyzers) == 1 && len(task.GetTargetTexts()) > 1 {
-				targetAnalyzers = make([]string, len(task.GetTargetTexts()))
-				for i := 0; i < len(task.GetTargetTexts()); i++ {
-					targetAnalyzers[i] = task.Analyzers[0]
+			var searchAnalyzerNames []string
+			// use the first analyzer name for all search texts if only one provided
+			if len(task.GetSearchAnalyzerNames()) == 1 && len(task.GetSearchTexts()) > 1 {
+				searchAnalyzerNames = make([]string, len(task.GetSearchTexts()))
+				for i := 0; i < len(task.GetSearchTexts()); i++ {
+					searchAnalyzerNames[i] = task.SearchAnalyzerNames[0]
 				}
-			} else if len(task.Analyzers) == 0 {
-				targetAnalyzers = make([]string, len(task.GetTargetTexts()))
-				for i := 0; i < len(task.GetTargetTexts()); i++ {
-					targetAnalyzers[i] = "default"
+				// use default analyzer if no analyzer name provided
+			} else if len(task.SearchAnalyzerNames) == 0 {
+				searchAnalyzerNames = make([]string, len(task.GetSearchTexts()))
+				for i := 0; i < len(task.GetSearchTexts()); i++ {
+					searchAnalyzerNames[i] = "default"
 				}
 			} else {
-				targetAnalyzers = task.GetAnalyzers()
+				// use user provided analyzer names
+				searchAnalyzerNames = task.GetSearchAnalyzerNames()
 			}
 
-			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetTargetTexts(), targetAnalyzers)
+			searchTokens, err = analyzer.BatchAnalyze(false, false, task.GetSearchTexts(), searchAnalyzerNames)
 			if err != nil {
 				return nil, err
 			}
 
-			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzers())
+			textTokens, err = analyzer.BatchAnalyze(true, false, task.GetResultTexts(), task.GetResultTexts())
 			if err != nil {
 				return nil, err
 			}
@@ -1066,7 +1069,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 						offsets = append(offsets, token.GetStartOffset(), token.GetEndOffset())
 					}
 				}
-				result = append(result, &querypb.HighlightResult{Fragments: []*querypb.HighlightFragment{{StartOffset: 0, EndOffset: int64(len(task.Texts[textIdx])), Offsets: offsets}}})
+				result = append(result, &querypb.HighlightResult{Fragments: []*querypb.HighlightFragment{{StartOffset: 0, EndOffset: int64(len(task.ResultTexts[textIdx])), Offsets: offsets}}})
 				textIdx++
 			}
 		}
