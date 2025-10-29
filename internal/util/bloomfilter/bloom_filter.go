@@ -45,8 +45,8 @@ const (
 )
 
 var bfNames = map[BFType]string{
-	BasicBF:       BlockBFName,
-	BlockedBF:     BasicBFName,
+	BasicBF:       BasicBFName,
+	BlockedBF:     BlockBFName,
 	AlwaysTrueBF:  AlwaysTrueBFName,
 	UnsupportedBF: UnsupportedBFName,
 }
