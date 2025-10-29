@@ -1179,11 +1179,10 @@ class SegmentExpr : public Expr {
         auto size = std::min(
             std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
             int64_t(chunk_valid_res.size()));
-        size =
-            (field_type_ == DataType::GEOMETRY && segment_->type() == Growing)
-                ? std::min(batch_size_ - processed_rows,
-                           int64_t(chunk_valid_res.size()) - data_pos)
-                : size;
+        if (field_type_ == DataType::GEOMETRY && segment_->type() == Growing) {
+            size = std::min(batch_size_ - processed_rows,
+                            int64_t(chunk_valid_res.size()) - data_pos);
+        }
 
         valid_result.append(chunk_valid_res, data_pos, size);
         return size;
