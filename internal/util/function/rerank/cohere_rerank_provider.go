@@ -38,8 +38,8 @@ type cohereProvider struct {
 	params       map[string]any
 }
 
-func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
-	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.CohereAIAKEnvStr)
+func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extralInfo map[string]string) (modelProvider, error) {
+	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.CohereAIAKEnvStr, extralInfo[models.ClusterIDKey])
 	if err != nil {
 		return nil, err
 	}

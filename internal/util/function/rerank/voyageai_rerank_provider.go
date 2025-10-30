@@ -38,8 +38,8 @@ type voyageaiProvider struct {
 	params         map[string]any
 }
 
-func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
-	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.VoyageAIAKEnvStr)
+func newVoyageaiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extralInfo map[string]string) (modelProvider, error) {
+	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.VoyageAIAKEnvStr, extralInfo[models.ClusterIDKey])
 	if err != nil {
 		return nil, err
 	}

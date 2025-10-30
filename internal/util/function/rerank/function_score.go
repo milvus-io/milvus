@@ -127,7 +127,7 @@ type FunctionScore struct {
 	reranker Reranker
 }
 
-func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
+func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extralInfo map[string]string) (Reranker, error) {
 	if funcSchema.GetType() != schemapb.FunctionType_Rerank {
 		return nil, fmt.Errorf("%s is not rerank function.", funcSchema.GetType().String())
 	}
@@ -142,7 +142,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	case DecayFunctionName:
 		rerankFunc, newRerankErr = newDecayFunction(collSchema, funcSchema)
 	case ModelFunctionName:
-		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema)
+		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema, extralInfo)
 	case RRFName:
 		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
 	case WeightedName:
@@ -159,11 +159,11 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	return rerankFunc, nil
 }
 
-func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore) (*FunctionScore, error) {
+func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore, extralInfo map[string]string) (*FunctionScore, error) {
 	funcScore := &FunctionScore{}
 
 	for _, function := range funcScoreSchema.Functions {
-		reranker, err := createFunction(collSchema, function)
+		reranker, err := createFunction(collSchema, function, extralInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +240,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 		return nil, fmt.Errorf("unsupported rank type %s", rankTypeStr)
 	}
 	funcScore := &FunctionScore{}
-	if funcScore.reranker, err = createFunction(collSchema, &fSchema); err != nil {
+	if funcScore.reranker, err = createFunction(collSchema, &fSchema, map[string]string{}); err != nil {
 		return nil, err
 	}
 	return funcScore, nil
