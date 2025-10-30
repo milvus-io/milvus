@@ -1,7 +1,9 @@
 package model
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 type StructArrayField struct {
@@ -9,6 +11,7 @@ type StructArrayField struct {
 	Name        string
 	Description string
 	Fields      []*Field
+	Properties  []*commonpb.KeyValuePair
 }
 
 func (s *StructArrayField) Clone() *StructArrayField {
@@ -17,6 +20,7 @@ func (s *StructArrayField) Clone() *StructArrayField {
 		Name:        s.Name,
 		Description: s.Description,
 		Fields:      CloneFields(s.Fields),
+		Properties:  common.CloneKeyValuePairs(s.Properties),
 	}
 }
 
@@ -29,10 +33,12 @@ func CloneStructArrayFields(structArrayFields []*StructArrayField) []*StructArra
 }
 
 func (s *StructArrayField) Equal(other StructArrayField) bool {
+	var propsA common.KeyValuePairs = s.Properties
 	return s.FieldID == other.FieldID &&
 		s.Name == other.Name &&
 		s.Description == other.Description &&
-		CheckFieldsEqual(s.Fields, other.Fields)
+		CheckFieldsEqual(s.Fields, other.Fields) &&
+		propsA.Equal(other.Properties)
 }
 
 func CheckStructArrayFieldsEqual(structArrayFieldsA, structArrayFieldsB []*StructArrayField) bool {
@@ -63,6 +69,7 @@ func MarshalStructArrayFieldModel(structArrayField *StructArrayField) *schemapb.
 		Name:        structArrayField.Name,
 		Description: structArrayField.Description,
 		Fields:      MarshalFieldModels(structArrayField.Fields),
+		Properties:  structArrayField.Properties,
 	}
 }
 
@@ -88,6 +95,7 @@ func UnmarshalStructArrayFieldModel(fieldSchema *schemapb.StructArrayFieldSchema
 		Name:        fieldSchema.Name,
 		Description: fieldSchema.Description,
 		Fields:      UnmarshalFieldModels(fieldSchema.Fields),
+		Properties:  fieldSchema.Properties,
 	}
 }
 
