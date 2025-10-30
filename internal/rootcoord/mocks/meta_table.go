@@ -567,6 +567,56 @@ func (_c *IMetaTable_CheckIfAliasDroppable_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// CheckIfCollectionRenamable provides a mock function with given fields: ctx, dbName, oldName, newDBName, newName
+func (_m *IMetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error {
+	ret := _m.Called(ctx, dbName, oldName, newDBName, newName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CheckIfCollectionRenamable")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, string) error); ok {
+		r0 = rf(ctx, dbName, oldName, newDBName, newName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CheckIfCollectionRenamable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckIfCollectionRenamable'
+type IMetaTable_CheckIfCollectionRenamable_Call struct {
+	*mock.Call
+}
+
+// CheckIfCollectionRenamable is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - oldName string
+//   - newDBName string
+//   - newName string
+func (_e *IMetaTable_Expecter) CheckIfCollectionRenamable(ctx interface{}, dbName interface{}, oldName interface{}, newDBName interface{}, newName interface{}) *IMetaTable_CheckIfCollectionRenamable_Call {
+	return &IMetaTable_CheckIfCollectionRenamable_Call{Call: _e.mock.On("CheckIfCollectionRenamable", ctx, dbName, oldName, newDBName, newName)}
+}
+
+func (_c *IMetaTable_CheckIfCollectionRenamable_Call) Run(run func(ctx context.Context, dbName string, oldName string, newDBName string, newName string)) *IMetaTable_CheckIfCollectionRenamable_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfCollectionRenamable_Call) Return(_a0 error) *IMetaTable_CheckIfCollectionRenamable_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CheckIfCollectionRenamable_Call) RunAndReturn(run func(context.Context, string, string, string, string) error) *IMetaTable_CheckIfCollectionRenamable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckIfCreateRole provides a mock function with given fields: ctx, req
 func (_m *IMetaTable) CheckIfCreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) error {
 	ret := _m.Called(ctx, req)
@@ -3281,57 +3331,6 @@ func (_c *IMetaTable_RemovePartition_Call) Return(_a0 error) *IMetaTable_RemoveP
 }
 
 func (_c *IMetaTable_RemovePartition_Call) RunAndReturn(run func(context.Context, int64, int64, int64, uint64) error) *IMetaTable_RemovePartition_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RenameCollection provides a mock function with given fields: ctx, dbName, oldName, newDBName, newName, ts
-func (_m *IMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts uint64) error {
-	ret := _m.Called(ctx, dbName, oldName, newDBName, newName, ts)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RenameCollection")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, string, string, uint64) error); ok {
-		r0 = rf(ctx, dbName, oldName, newDBName, newName, ts)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// IMetaTable_RenameCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RenameCollection'
-type IMetaTable_RenameCollection_Call struct {
-	*mock.Call
-}
-
-// RenameCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - dbName string
-//   - oldName string
-//   - newDBName string
-//   - newName string
-//   - ts uint64
-func (_e *IMetaTable_Expecter) RenameCollection(ctx interface{}, dbName interface{}, oldName interface{}, newDBName interface{}, newName interface{}, ts interface{}) *IMetaTable_RenameCollection_Call {
-	return &IMetaTable_RenameCollection_Call{Call: _e.mock.On("RenameCollection", ctx, dbName, oldName, newDBName, newName, ts)}
-}
-
-func (_c *IMetaTable_RenameCollection_Call) Run(run func(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts uint64)) *IMetaTable_RenameCollection_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(string), args[4].(string), args[5].(uint64))
-	})
-	return _c
-}
-
-func (_c *IMetaTable_RenameCollection_Call) Return(_a0 error) *IMetaTable_RenameCollection_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *IMetaTable_RenameCollection_Call) RunAndReturn(run func(context.Context, string, string, string, string, uint64) error) *IMetaTable_RenameCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

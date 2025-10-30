@@ -72,48 +72,6 @@ func TestLockerKey(t *testing.T) {
 }
 
 func TestGetLockerKey(t *testing.T) {
-	t.Run("alter collection task locker key", func(t *testing.T) {
-		metaMock := mockrootcoord.NewIMetaTable(t)
-		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(ctx context.Context, s string, s2 string, u uint64) (*model.Collection, error) {
-				return &model.Collection{
-					Name:         s2,
-					CollectionID: 111,
-				}, nil
-			})
-		c := &Core{
-			meta: metaMock,
-		}
-		tt := &alterCollectionTask{
-			baseTask: baseTask{
-				core: c,
-			},
-			Req: &milvuspb.AlterCollectionRequest{
-				DbName:         "foo",
-				CollectionName: "bar",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
-	})
-	t.Run("alter collection task locker key by ID", func(t *testing.T) {
-		metaMock := mockrootcoord.NewIMetaTable(t)
-		c := &Core{
-			meta: metaMock,
-		}
-		tt := &alterCollectionTask{
-			baseTask: baseTask{
-				core: c,
-			},
-			Req: &milvuspb.AlterCollectionRequest{
-				DbName:         "foo",
-				CollectionName: "",
-				CollectionID:   111,
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-false|foo-1-false|111-2-true")
-	})
 	t.Run("describe collection task locker key", func(t *testing.T) {
 		metaMock := mockrootcoord.NewIMetaTable(t)
 		metaMock.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -195,17 +153,6 @@ func TestGetLockerKey(t *testing.T) {
 		tt := &listDatabaseTask{}
 		key := tt.GetLockerKey()
 		assert.Equal(t, GetLockerKeyString(key), "$-0-false")
-	})
-	t.Run("rename collection task locker key", func(t *testing.T) {
-		tt := &renameCollectionTask{
-			Req: &milvuspb.RenameCollectionRequest{
-				DbName:  "foo",
-				OldName: "bar",
-				NewName: "baz",
-			},
-		}
-		key := tt.GetLockerKey()
-		assert.Equal(t, GetLockerKeyString(key), "$-0-true")
 	})
 	t.Run("show collection task locker key", func(t *testing.T) {
 		tt := &showCollectionTask{

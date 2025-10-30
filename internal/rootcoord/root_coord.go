@@ -100,7 +100,6 @@ type Core struct {
 	scheduler        IScheduler
 	broker           Broker
 	ddlTsLockManager DdlTsLockManager
-	stepExecutor     StepExecutor
 
 	metaKVCreator metaKVCreator
 
@@ -441,7 +440,6 @@ func (c *Core) initInternal() error {
 
 	c.broker = newServerBroker(c)
 	c.ddlTsLockManager = newDdlTsLockManager(c.tsoAllocator)
-	c.stepExecutor = newBgStepExecutor(c.ctx)
 
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
@@ -648,7 +646,6 @@ func (c *Core) startInternal() error {
 	}
 
 	c.scheduler.Start()
-	c.stepExecutor.Start()
 	go func() {
 		// refresh rbac cache
 		if err := retry.Do(c.ctx, func() error {
@@ -688,13 +685,6 @@ func (c *Core) Start() error {
 	return err
 }
 
-func (c *Core) stopExecutor() {
-	if c.stepExecutor != nil {
-		c.stepExecutor.Stop()
-		log.Ctx(c.ctx).Info("stop rootcoord executor")
-	}
-}
-
 func (c *Core) stopScheduler() {
 	if c.scheduler != nil {
 		c.scheduler.Stop()
@@ -726,7 +716,6 @@ func (c *Core) Stop() error {
 	if c.tombstoneSweeper != nil {
 		c.tombstoneSweeper.Close()
 	}
-	c.stopExecutor()
 	c.stopScheduler()
 
 	if c.proxyWatcher != nil {
