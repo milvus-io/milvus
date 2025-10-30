@@ -4,27 +4,25 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetCollectionName()),
-	)
+	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
+	defer broadcaster.Close()
 
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
@@ -49,7 +47,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	newFieldProperties := common.NewKeyValuePairs(oldFieldPropertiesMap)
 	if newFieldProperties.Equal(oldFieldProperties) {
 		// if there's no change, return nil directly to promise idempotent.
-		return nil
+		return errIgnoredAlterCollection
 	}
 
 	// build new collection schema.
@@ -62,6 +60,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
+		Version:            coll.SchemaVersion + 1,
 	}
 	for _, field := range schema.Fields {
 		if field.Name == req.GetFieldName() {

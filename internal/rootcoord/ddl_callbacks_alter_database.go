@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -71,12 +70,16 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 	var newProperties []*commonpb.KeyValuePair
 	if (len(req.GetProperties())) > 0 {
 		if IsSubsetOfProperties(req.GetProperties(), oldDB.Properties) {
-			log.Info("skip to alter database due to no changes were detected in the properties")
-			return nil
+			// no changes were detected in the properties
+			return errIgnoredAlterDatabase
 		}
 		newProperties = MergeProperties(oldDB.Properties, req.GetProperties())
 	} else if (len(req.GetDeleteKeys())) > 0 {
 		newProperties = DeleteProperties(oldDB.Properties, req.GetDeleteKeys())
+		if len(newProperties) == len(oldDB.Properties) {
+			// no changes were detected in the properties
+			return errIgnoredAlterDatabase
+		}
 	}
 
 	msg := message.NewAlterDatabaseMessageBuilderV2().
@@ -129,6 +132,16 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 	if err := c.meta.AlterDatabase(ctx, db, result.GetControlChannelResult().TimeTick); err != nil {
 		return errors.Wrap(err, "failed to alter database")
 	}
+	if body.AlterLoadConfig != nil {
+		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+			CollectionIDs:  body.AlterLoadConfig.CollectionIds,
+			ReplicaNumber:  body.AlterLoadConfig.ReplicaNumber,
+			ResourceGroups: body.AlterLoadConfig.ResourceGroups,
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return errors.Wrap(err, "failed to update load config")
+		}
+	}
 	if err := c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(header.DbName),
@@ -136,15 +149,6 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 		),
 		result.GetControlChannelResult().TimeTick); err != nil {
 		return errors.Wrap(err, "failed to expire caches")
-	}
-	if body.AlterLoadConfig != nil {
-		// TODO: should replaced with calling AlterLoadConfig message ack callback.
-		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  body.AlterLoadConfig.CollectionIds,
-			ReplicaNumber:  body.AlterLoadConfig.ReplicaNumber,
-			ResourceGroups: body.AlterLoadConfig.ResourceGroups,
-		})
-		return merr.CheckRPCCall(resp, err)
 	}
 	return nil
 }

@@ -4,36 +4,30 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-// broadcastAlterCollectionV2ForAddField broadcasts the put collection v2 message for add field.
-func (c *Core) broadcastAlterCollectionV2ForAddField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetCollectionName()),
-	)
+// broadcastAlterCollectionForAddField broadcasts the put collection message for add field.
+func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest) error {
+	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
+	defer broadcaster.Close()
 
 	// check if the collection is created.
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
 		return err
-	}
-	if coll.State != etcdpb.CollectionState_CollectionCreated {
-		return errors.Errorf("collection is not created, can not add field, state: %s", coll.State.String())
 	}
 
 	// check if the field schema is illegal.
@@ -54,7 +48,6 @@ func (c *Core) broadcastAlterCollectionV2ForAddField(ctx context.Context, req *m
 
 	// assign a new field id.
 	fieldSchema.FieldID = nextFieldID(coll)
-
 	// build new collection schema.
 	schema := &schemapb.CollectionSchema{
 		Name:               coll.Name,
@@ -65,6 +58,7 @@ func (c *Core) broadcastAlterCollectionV2ForAddField(ctx context.Context, req *m
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: coll.EnableDynamicField,
 		Properties:         coll.Properties,
+		Version:            coll.SchemaVersion + 1,
 	}
 	schema.Fields = append(schema.Fields, fieldSchema)
 
