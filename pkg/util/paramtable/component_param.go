@@ -3052,6 +3052,7 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache           ParamItem `refreshable:"false"`
 
 	// TODO(tiered storage 2) this should be refreshable?
 	TieredWarmupScalarField         ParamItem `refreshable:"false"`
@@ -3626,6 +3627,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.MultipleChunkedEnable.Init(base.mgr)
+
+	p.EnableGeometryCache = ParamItem{
+		Key:          "queryNode.segcore.enableGeometryCache",
+		Version:      "2.6.5",
+		DefaultValue: "false",
+		Doc:          "Enable geometry cache for geometry data",
+		Export:       true,
+	}
+	p.EnableGeometryCache.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
