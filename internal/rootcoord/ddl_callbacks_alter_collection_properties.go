@@ -3,67 +3,58 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-// broadcastAlterCollectionV2ForAlterCollection broadcasts the put collection v2 message for alter collection.
-func (c *Core) broadcastAlterCollectionV2ForAlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+// broadcastAlterCollectionForAlterCollection broadcasts the put collection message for alter collection.
+func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 	if len(req.GetProperties()) == 0 && len(req.GetDeleteKeys()) == 0 {
-		return errors.New("The collection properties to alter and keys to delete must not be empty at the same time")
+		return errIgnoredAlterCollection
 	}
 
 	if len(req.GetProperties()) > 0 && len(req.GetDeleteKeys()) > 0 {
-		return errors.New("can not provide properties and deletekeys at the same time")
+		return merr.WrapErrParameterInvalidMsg("can not provide properties and deletekeys at the same time")
 	}
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
-		log.Info("skip to alter collection due to cipher properties were detected in the properties")
-		return errors.New("can not alter cipher related properties")
+		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
 
-	ok, targetValue, err := common.IsEnableDynamicSchema(req.GetProperties())
+	isEnableDynamicSchema, targetValue, err := common.IsEnableDynamicSchema(req.GetProperties())
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid dynamic schema property value: %s", req.GetProperties()[0].GetValue())
 	}
-	if ok {
+	if isEnableDynamicSchema {
 		// if there's dynamic schema property, it will add a new dynamic field into the collection.
 		// the property cannot be seen at collection properties, only add a new field into the collection.
-		return c.broadcastAlterCollectionV2ForAlterDynamicField(ctx, req, targetValue)
+		return c.broadcastAlterCollectionForAlterDynamicField(ctx, req, targetValue)
 	}
 
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetCollectionName()),
-	)
+	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
+	defer broadcaster.Close()
 
-	coll, err := c.meta.GetCollectionByName(ctx, req.DbName, req.CollectionName, typeutil.MaxTimestamp)
+	// check if the collection exists
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
 		return err
-	}
-	if coll.State != etcdpb.CollectionState_CollectionCreated {
-		return errors.Errorf("collection is not created, can not alter collection, state: %s", coll.State.String())
 	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
@@ -134,35 +125,30 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollection(ctx context.Context,
 	return nil
 }
 
-// broadcastAlterCollectionV2ForAlterDynamicField broadcasts the put collection v2 message for alter dynamic field.
-func (c *Core) broadcastAlterCollectionV2ForAlterDynamicField(ctx context.Context, req *milvuspb.AlterCollectionRequest, targetValue bool) error {
+// broadcastAlterCollectionForAlterDynamicField broadcasts the put collection message for alter dynamic field.
+func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context, req *milvuspb.AlterCollectionRequest, targetValue bool) error {
 	if len(req.GetProperties()) != 1 {
-		return merr.WrapErrParameterInvalidMsg("cannot alter dynamic schema with other properties")
+		return merr.WrapErrParameterInvalidMsg("cannot alter dynamic schema with other properties at the same time")
 	}
-
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetCollectionName()),
-	)
+	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
+	defer broadcaster.Close()
 
 	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
-		log.Ctx(ctx).Warn("get collection failed during alter dynamic schema",
-			zap.String("collectionName", req.GetCollectionName()))
 		return err
 	}
 
 	// return nil for no-op
 	if coll.EnableDynamicField == targetValue {
-		return nil
+		return errIgnoredAlterCollection
 	}
 
 	// not support disabling since remove field not support yet.
 	if !targetValue {
-		return merr.WrapErrParameterInvalidMsg("dynamic schema cannot supported to be disabled")
+		return merr.WrapErrParameterInvalidMsg("dynamic schema cannot be disabled")
 	}
 
 	// convert to add $meta json field, nullable, default value `{}`
@@ -191,6 +177,7 @@ func (c *Core) broadcastAlterCollectionV2ForAlterDynamicField(ctx context.Contex
 		Functions:          model.MarshalFunctionModels(coll.Functions),
 		EnableDynamicField: targetValue,
 		Properties:         coll.Properties,
+		Version:            coll.SchemaVersion + 1,
 	}
 	schema.Fields = append(schema.Fields, fieldSchema)
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -12,10 +14,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-func (c *Core) broadcastRenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) error {
+func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) error {
 	if req.DbName == "" {
 		req.DbName = util.DefaultDBName
 	}
@@ -30,16 +31,15 @@ func (c *Core) broadcastRenameCollection(ctx context.Context, req *milvuspb.Rena
 	}
 	if req.DbName == req.NewDBName && req.OldName == req.NewName {
 		// no-op here.
-		return nil
+		return errIgnoredAlterCollection
 	}
 
+	// StartBroadcastWithResourceKeys will deduplicate the resource keys itself, so it's safe to add all the resource keys here.
 	rks := []message.ResourceKey{
+		message.NewSharedDBNameResourceKey(req.GetNewDBName()),
 		message.NewSharedDBNameResourceKey(req.GetDbName()),
 		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetOldName()),
 		message.NewExclusiveCollectionNameResourceKey(req.GetNewDBName(), req.GetNewName()),
-	}
-	if req.GetNewDBName() != req.GetDbName() {
-		rks = append(rks, message.NewSharedDBNameResourceKey(req.GetNewDBName()))
 	}
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, rks...)
 	if err != nil {

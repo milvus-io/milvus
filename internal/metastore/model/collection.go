@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
+// TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
 type Collection struct {
 	TenantID             string
 	DBID                 int64
@@ -49,6 +50,7 @@ type Collection struct {
 	State                pb.CollectionState
 	EnableDynamicField   bool
 	UpdateTimestamp      uint64
+	SchemaVersion        int32
 }
 
 func (c *Collection) Available() bool {
@@ -79,6 +81,7 @@ func (c *Collection) ShallowClone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		Functions:            c.Functions,
 		UpdateTimestamp:      c.UpdateTimestamp,
+		SchemaVersion:        c.SchemaVersion,
 	}
 }
 
@@ -106,6 +109,7 @@ func (c *Collection) Clone() *Collection {
 		EnableDynamicField:   c.EnableDynamicField,
 		Functions:            CloneFunctions(c.Functions),
 		UpdateTimestamp:      c.UpdateTimestamp,
+		SchemaVersion:        c.SchemaVersion,
 	}
 }
 
@@ -192,6 +196,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		Properties:           coll.Properties,
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
 		UpdateTimestamp:      coll.UpdateTimestamp,
+		SchemaVersion:        coll.Schema.Version,
 	}
 }
 
@@ -242,6 +247,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		AutoID:             coll.AutoID,
 		EnableDynamicField: coll.EnableDynamicField,
 		DbName:             coll.DBName,
+		Version:            coll.SchemaVersion,
 	}
 
 	if c.withFields {
