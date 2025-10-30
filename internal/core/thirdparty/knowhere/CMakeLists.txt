@@ -37,6 +37,8 @@ endif()
 
 if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_CUVS ON CACHE BOOL "" FORCE )
+    set(raft_DIR "${CMAKE_CURRENT_BINARY_DIR}/../../3rdparty_download/raft-build" CACHE PATH "Path to raft build directory" FORCE)
+    set(rmm_DIR "${CMAKE_CURRENT_BINARY_DIR}/../../3rdparty_download/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
 endif ()
 
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
