@@ -4934,7 +4934,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		highlighter := &commonpb.Highlighter{
 			Type:   commonpb.HighlightType_Lexical,
-			Params: []*commonpb.KeyValuePair{},
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
 		}
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
@@ -4953,7 +4953,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		highlighter := &commonpb.Highlighter{
 			Type:   commonpb.HighlightType_Lexical,
-			Params: []*commonpb.KeyValuePair{{Key: "pre_tags", Value: `["<b>"]`}, {Key: "post_tags", Value: `["</b>"]`}},
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}, {Key: "pre_tags", Value: `["<b>"]`}, {Key: "post_tags", Value: `["</b>"]`}},
 		}
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
@@ -4976,7 +4976,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		highlighter := &commonpb.Highlighter{
 			Type:   commonpb.HighlightType_Lexical,
-			Params: []*commonpb.KeyValuePair{},
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
 		}
 
 		err := task.addHighlightTask(highlighter, metric.L2, 101, placeholderBytes, "")
@@ -4992,7 +4992,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		highlighter := &commonpb.Highlighter{
 			Type:   commonpb.HighlightType_Lexical,
-			Params: []*commonpb.KeyValuePair{{Key: "pre_tags", Value: "not_a_list"}},
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}, {Key: "pre_tags", Value: "not_a_list"}},
 		}
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
@@ -5019,10 +5019,42 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		highlighter := &commonpb.Highlighter{
 			Type:   commonpb.HighlightType_Lexical,
-			Params: []*commonpb.KeyValuePair{},
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
 		}
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 100, placeholderBytes, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("highlight without highlight search text", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "false"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.NoError(t, err)
+	})
+
+	t.Run("highlight with invalid highlight search key", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "invalid"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
 		assert.Error(t, err)
 	})
 
@@ -5035,7 +5067,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		highlighter := &commonpb.Highlighter{
 			Type:   4,
-			Params: []*commonpb.KeyValuePair{},
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
 		}
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
