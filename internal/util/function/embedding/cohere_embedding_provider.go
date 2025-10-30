@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -41,14 +42,15 @@ type CohereEmbeddingProvider struct {
 
 	maxBatch   int
 	timeoutSec int64
+	extraInfo  *models.ModelExtraInfo
 }
 
-func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*CohereEmbeddingProvider, error) {
+func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*CohereEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.CohereAIAKEnvStr)
+	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.CohereAIAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +100,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		outputType: outputType,
 		maxBatch:   96,
 		timeoutSec: 30,
+		extraInfo:  extraInfo,
 	}
 	return &provider, nil
 }
@@ -122,7 +125,7 @@ func (provider *CohereEmbeddingProvider) getInputType(mode models.TextEmbeddingM
 	return "search_query" // Used for embeddings of search queries run against a vector DB to find relevant documents.
 }
 
-func (provider *CohereEmbeddingProvider) CallEmbedding(texts []string, mode models.TextEmbeddingMode) (any, error) {
+func (provider *CohereEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	inputType := provider.getInputType(mode)
 	embRet := models.NewEmbdResult(numRows, provider.embdType)

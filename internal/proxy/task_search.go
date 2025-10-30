@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -398,7 +399,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	var err error
 	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
+		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
 			log.Warn("Failed to create function score", zap.Error(err))
 			return err
 		}
@@ -527,7 +528,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
 		if err != nil {
 			return err
 		}
@@ -573,7 +574,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
+		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
 			log.Warn("Failed to create function score", zap.Error(err))
 			return err
 		}
@@ -647,7 +648,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
 		if err != nil {
 			return err
 		}

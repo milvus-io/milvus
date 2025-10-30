@@ -38,8 +38,8 @@ type siliconflowProvider struct {
 	params            map[string]any
 }
 
-func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
-	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.SiliconflowAKEnvStr)
+func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.SiliconflowAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
 	}

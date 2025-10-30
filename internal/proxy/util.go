@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -852,8 +853,7 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			return err
 		}
 	}
-
-	if err := embedding.ValidateFunctions(coll); err != nil {
+	if err := embedding.ValidateFunctions(coll, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
 		return err
 	}
 	return nil
@@ -2899,7 +2899,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions)
+		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: schema.DbName})
 		if err != nil {
 			return err
 		}
