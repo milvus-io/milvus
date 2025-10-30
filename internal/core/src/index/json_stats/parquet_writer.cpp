@@ -46,8 +46,12 @@ JsonStatsParquetWriter::~JsonStatsParquetWriter() {
 
 void
 JsonStatsParquetWriter::Close() {
-    Flush();
-    packed_writer_->Close();
+    // check packed_writer_ initialized
+    if (packed_writer_) {
+        Flush();
+        // ignore close status here
+        auto _ = packed_writer_->Close();
+    }
 }
 
 void
