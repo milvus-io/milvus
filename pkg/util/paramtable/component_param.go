@@ -2790,6 +2790,7 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"`
+	EnableGeometryCache           ParamItem `refreshable:"false"`
 
 	// delete snapshot dump
 	DeleteDumpBatchSize ParamItem `refreshable:"false"`
@@ -3074,6 +3075,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.MultipleChunkedEnable.Init(base.mgr)
+
+	p.EnableGeometryCache = ParamItem{
+		Key:          "queryNode.segcore.enableGeometryCache",
+		Version:      "2.6.5",
+		DefaultValue: "false",
+		Doc:          "Enable geometry cache for geometry data",
+		Export:       true,
+	}
+	p.EnableGeometryCache.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",

@@ -266,6 +266,12 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitInterminIndexConfig failed")
 }
 
+func InitGeometryCache(params *paramtable.ComponentParam) error {
+	enableGeometryCache := C.bool(params.QueryNodeCfg.EnableGeometryCache.GetAsBool())
+	C.SegcoreSetEnableGeometryCache(enableGeometryCache)
+	return nil
+}
+
 func CleanRemoteChunkManager() {
 	C.CleanRemoteChunkManagerSingleton()
 }
