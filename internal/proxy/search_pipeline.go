@@ -599,11 +599,11 @@ func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs 
 }
 
 const (
-	PreTagsKey       = "pre_tags"
-	PostTagsKey      = "post_tags"
-	highlightTypeKey = "type"
-	DefaultPreTag    = "<em>"
-	DefaultPostTag   = "</em>"
+	PreTagsKey             = "pre_tags"
+	PostTagsKey            = "post_tags"
+	HighlightSearchTextKey = "highlight_search_data"
+	DefaultPreTag          = "<em>"
+	DefaultPostTag         = "</em>"
 )
 
 type highlightTask struct {
@@ -651,8 +651,9 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 		if !ok {
 			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
 		}
-		task.ResultTexts = textFieldDatas.GetScalars().GetStringData().GetData()
-
+		texts := textFieldDatas.GetScalars().GetStringData().GetData()
+		task.Texts = append(task.Texts, texts...)
+		task.CorpusTextNum = int64(len(texts))
 		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
 			return schema.GetFieldID() == task.GetFieldId()
 		})
@@ -665,7 +666,7 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 		helper := typeutil.CreateFieldSchemaHelper(field)
 		if v, ok := helper.GetMultiAnalyzerParams(); ok {
 			params := map[string]any{}
-			err := json.Unmarshal([]byte(v), params)
+			err := json.Unmarshal([]byte(v), &params)
 			if err != nil {
 				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params-: %v", err)
 			}
@@ -678,7 +679,7 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 			if !ok {
 				return nil, errors.Errorf("get highlight failed, analyzer field not in output field")
 			}
-			task.ResultAnalyzerNames = analyzerFieldDatas.GetScalars().GetStringData().GetData()
+			task.AnalyzerNames = append(task.AnalyzerNames, analyzerFieldDatas.GetScalars().GetStringData().GetData()...)
 		}
 	}
 
@@ -718,8 +719,8 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 	return []any{result}, nil
 }
 
-func buildStringFragments(task *highlightTask, i int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
-	bytes := []byte(task.ResultTexts[i])
+func buildStringFragments(task *highlightTask, idx int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
+	bytes := []byte(task.Texts[int(task.GetSearchTextNum())+idx])
 	preTagsNum := len(task.preTags)
 	postTagsNum := len(task.postTags)
 	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
@@ -727,6 +728,7 @@ func buildStringFragments(task *highlightTask, i int, frags []*querypb.Highlight
 		fragBytes := []byte{}
 		cursor := int(frag.GetStartOffset())
 		for i := 0; i < len(frag.GetOffsets())/2; i++ {
+			log.Info("test--", zap.Int64("start", frag.Offsets[i<<1]), zap.Int64("end", frag.Offsets[(i<<1)+1]))
 			startOffset := int(frag.Offsets[i<<1])
 			endOffset := int(frag.Offsets[(i<<1)+1])
 			if cursor < startOffset {
