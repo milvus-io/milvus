@@ -191,9 +191,35 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 		replicas = append(replicas, replica)
 	}
 	if err := m.put(ctx, replicas...); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to put replicas")
+	}
+	if err := m.removeRedundantReplicas(ctx, params); err != nil {
+		return nil, errors.Wrap(err, "failed to remove redundant replicas")
 	}
 	return replicas, nil
+}
+
+// removeRedundantReplicas removes redundant replicas that is not in the new replica config.
+func (m *ReplicaManager) removeRedundantReplicas(ctx context.Context, params SpawnWithReplicaConfigParams) error {
+	existedReplicas, ok := m.coll2Replicas[params.CollectionID]
+	if !ok {
+		return nil
+	}
+	toRemoveReplicas := make([]int64, 0)
+	for _, replica := range existedReplicas.replicas {
+		found := false
+		replicaID := replica.GetID()
+		for _, channel := range params.Configs {
+			if channel.GetReplicaId() == replicaID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			toRemoveReplicas = append(toRemoveReplicas, replicaID)
+		}
+	}
+	return m.removeReplicas(ctx, params.CollectionID, toRemoveReplicas...)
 }
 
 // AllocateReplicaID allocates a replica ID.

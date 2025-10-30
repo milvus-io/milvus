@@ -42,11 +42,6 @@ type AlterLoadConfigRequest struct {
 	Current        CurrentLoadConfig
 }
 
-// CheckIfLoadCollectionExecutable checks if the load collection is executable.
-func (req *AlterLoadConfigRequest) CheckIfLoadCollectionExecutable() error {
-	return req.CheckIfLoadPartitionsExecutable()
-}
-
 // CheckIfLoadPartitionsExecutable checks if the load partitions is executable.
 func (req *AlterLoadConfigRequest) CheckIfLoadPartitionsExecutable() error {
 	if req.Current.Collection == nil {
@@ -118,9 +113,7 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 		return nil
 	}
 	partitionIDs := make([]int64, 0, len(c.Partitions))
-	for _, partition := range c.Partitions {
-		partitionIDs = append(partitionIDs, partition.GetPartitionID())
-	}
+	partitionIDs = append(partitionIDs, c.GetPartitionIDs()...)
 	sort.Slice(partitionIDs, func(i, j int) bool {
 		return partitionIDs[i] < partitionIDs[j]
 	})

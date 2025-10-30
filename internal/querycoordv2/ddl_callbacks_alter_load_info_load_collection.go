@@ -54,14 +54,16 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		return err
 	}
 
-	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, true)
+	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
+	// only check node number when the collection is not loaded
+	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, currentLoadConfig.Collection == nil)
 	if err != nil {
 		return err
 	}
 	alterLoadConfigReq := &job.AlterLoadConfigRequest{
 		Meta:           s.meta,
 		CollectionInfo: coll,
-		Current:        s.getCurrentLoadConfig(ctx, req.GetCollectionID()),
+		Current:        currentLoadConfig,
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
@@ -70,9 +72,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
-	}
-	if err := alterLoadConfigReq.CheckIfLoadCollectionExecutable(); err != nil {
-		return err
 	}
 	msg, err := job.GenerateAlterLoadConfigMessage(ctx, alterLoadConfigReq)
 	if err != nil {
@@ -91,13 +90,8 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 		if err != nil {
 			log.Warn("failed to get pre-defined load info", zap.Error(err))
 		} else {
-			if replicaNumber <= 0 && replicas > 0 {
-				replicaNumber = int32(replicas)
-			}
-
-			if len(resourceGroups) == 0 && len(rgs) > 0 {
-				resourceGroups = rgs
-			}
+			replicaNumber = int32(replicas)
+			resourceGroups = rgs
 		}
 	}
 	// to be compatible with old sdk, which set replica=1 if replica is not specified

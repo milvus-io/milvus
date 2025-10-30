@@ -63,19 +63,6 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionInfo() {
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 	}
 
-	// Test load existed collection with different replica number
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
-			continue
-		}
-		req := &querypb.LoadCollectionRequest{
-			CollectionID:  collection,
-			ReplicaNumber: 3,
-		}
-		resp, err := suite.server.LoadCollection(ctx, req)
-		suite.Require().ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
-	}
-
 	// Test load partition while collection exists
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
@@ -88,6 +75,19 @@ func (suite *ServiceSuite) TestDDLCallbacksLoadCollectionInfo() {
 			ReplicaNumber: 1,
 		}
 		resp, err := suite.server.LoadPartitions(ctx, req)
+		suite.Require().NoError(merr.CheckRPCCall(resp, err))
+	}
+
+	// Test load existed collection with different replica number
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+		req := &querypb.LoadCollectionRequest{
+			CollectionID:  collection,
+			ReplicaNumber: 3,
+		}
+		resp, err := suite.server.LoadCollection(ctx, req)
 		suite.Require().NoError(merr.CheckRPCCall(resp, err))
 	}
 
