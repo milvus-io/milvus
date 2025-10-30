@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage/aliyun"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage/gcp"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage/huawei"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage/tencent"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -36,6 +37,7 @@ const (
 	CloudProviderAliyun    = "aliyun"
 	CloudProviderAzure     = "azure"
 	CloudProviderTencent   = "tencent"
+	CloudProviderHuawei    = "huawei"
 )
 
 var CheckBucketRetryAttempts uint = 20
@@ -70,7 +72,12 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		if !c.UseIAM {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
-
+	case CloudProviderHuawei:
+		bucketLookupType = minio.BucketLookupDNS
+		newMinioFn = huawei.NewMinioClient
+		if !c.UseIAM {
+			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
+		}
 	default: // aws, minio
 		matchedDefault = true
 	}
