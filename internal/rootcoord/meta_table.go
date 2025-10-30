@@ -197,6 +197,8 @@ func (mt *MetaTable) reload() error {
 	metrics.RootCoordNumOfCollections.Reset()
 	metrics.RootCoordNumOfPartitions.Reset()
 	metrics.RootCoordNumOfDatabases.Set(0)
+	metrics.RootCoordNumOfCredentials.Set(0)
+	metrics.RootCoordNumOfRoles.Set(0)
 
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
@@ -281,6 +283,18 @@ func (mt *MetaTable) reload() error {
 		}
 	}
 	channel.RecoverPChannelStatsManager(vchannels)
+
+	credResponse, err := mt.ListCredentialUsernames(mt.ctx)
+	if err != nil {
+		return err
+	}
+	metrics.RootCoordNumOfCredentials.Set(float64(len(credResponse.Usernames)))
+
+	roles, err := mt.SelectRole(mt.ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	metrics.RootCoordNumOfRoles.Set(float64(len(roles)))
 
 	log.Ctx(mt.ctx).Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
