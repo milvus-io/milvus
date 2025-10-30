@@ -601,6 +601,19 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 	task.FieldId = function.InputFieldIds[0]
 	task.FieldName = function.InputFieldNames[0]
 
+	if value, ok := params[HighlightSearchTextKey]; ok {
+		enable, err := strconv.ParseBool(value)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("unmarshal highlight_search_data as bool failed: %v", err)
+		}
+
+		// now only support highlight with search
+		// so skip if highlight search not enable.
+		if !enable {
+			return nil
+		}
+	}
+
 	// set pre_tags and post_tags
 	if value, ok := params[PreTagsKey]; ok {
 		tags := []string{}
@@ -641,9 +654,13 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		return err
 	}
 
-	task.SearchTexts = texts
+	task.Texts = texts
+	task.SearchTextNum = int64(len(texts))
 	if analyzerName != "" {
-		task.SearchAnalyzerNames = []string{analyzerName}
+		task.AnalyzerNames = []string{}
+		for i := 0; i < len(texts); i++ {
+			task.AnalyzerNames = append(task.AnalyzerNames, analyzerName)
+		}
 	}
 
 	t.highlightTasks = append(t.highlightTasks, task)
