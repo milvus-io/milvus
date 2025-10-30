@@ -25,12 +25,14 @@ func TestBroadcastService(t *testing.T) {
 
 	fb := syncutil.NewFuture[broadcaster.Broadcaster]()
 	mba := mock_broadcaster.NewMockBroadcastAPI(t)
+	mba.EXPECT().Close().Return()
 	mb := mock_broadcaster.NewMockBroadcaster(t)
 	fb.Set(mb)
 	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(mba, nil)
 	mb.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
 	mb.EXPECT().LegacyAck(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mb.EXPECT().Close().Return().Maybe()
 	broadcast.Register(mb)
 
 	msg := message.NewCreateCollectionMessageBuilderV1().
