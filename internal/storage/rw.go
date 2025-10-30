@@ -275,7 +275,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		})
 
 		var err error
-		rr, err = NewManifestReaderFromBinlogs(binlogs, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+		rr, err = NewRecordReaderFromBinlogs(binlogs, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 		if err != nil {
 			return nil, err
 		}

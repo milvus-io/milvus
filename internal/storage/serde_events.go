@@ -47,6 +47,32 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func NewRecordReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (RecordReader, error) {
+	// check legacy or import binlog struct
+	for _, fieldBinlog := range fieldBinlogs {
+		if len(fieldBinlog.ChildFields) == 0 {
+			bucketName := storageConfig.BucketName
+			paths := make([][]string, len(fieldBinlogs))
+			for _, binlogs := range fieldBinlogs {
+				for j, binlog := range binlogs.Binlogs {
+					logPath := binlog.GetLogPath()
+					if storageConfig.StorageType != "local" {
+						logPath = path.Join(bucketName, logPath)
+					}
+					paths[j] = append(paths[j], logPath)
+				}
+			}
+			return newIterativePackedRecordReader(paths, schema, bufferSize, storageConfig, storagePluginContext), nil
+		}
+	}
+	return NewManifestReaderFromBinlogs(fieldBinlogs, schema, bufferSize, storageConfig, storagePluginContext)
+}
+
 var _ RecordReader = (*IterativeRecordReader)(nil)
 
 type IterativeRecordReader struct {
