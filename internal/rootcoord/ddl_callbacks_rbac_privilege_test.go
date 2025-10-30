@@ -23,28 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func TestDDLCallbacksRBACPrivilege(t *testing.T) {
-	initStreamingSystem()
-
-	kv, _ := kvfactory.GetEtcdAndPath()
-	path := funcutil.RandomString(10)
-	catalogKV := etcdkv.NewEtcdKV(kv, path)
-
-	core := newTestCore(withHealthyCode(),
-		withMeta(&MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}),
-		withValidProxyManager(),
-	)
-	registry.ResetRegistration()
-	RegisterDDLCallbacks(core)
+	core := initStreamingSystemAndCore(t)
 
 	// Create a new role.
 	targetRoleName := "newRole"
@@ -164,18 +148,7 @@ func TestDDLCallbacksRBACPrivilege(t *testing.T) {
 }
 
 func TestDDLCallbacksRBACPrivilegeGroup(t *testing.T) {
-	initStreamingSystem()
-
-	kv, _ := kvfactory.GetEtcdAndPath()
-	path := funcutil.RandomString(10)
-	catalogKV := etcdkv.NewEtcdKV(kv, path)
-
-	core := newTestCore(withHealthyCode(),
-		withMeta(&MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}),
-		withValidProxyManager(),
-	)
-	registry.ResetRegistration()
-	RegisterDDLCallbacks(core)
+	core := initStreamingSystemAndCore(t)
 
 	groupName := "group1"
 	status, err := core.CreatePrivilegeGroup(context.Background(), &milvuspb.CreatePrivilegeGroupRequest{
