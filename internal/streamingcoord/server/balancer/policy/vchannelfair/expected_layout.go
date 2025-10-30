@@ -45,6 +45,18 @@ type assignmentSnapshot struct {
 	GlobalUnbalancedScore float64
 }
 
+// Clone will clone the assignment snapshot.
+func (s *assignmentSnapshot) Clone() assignmentSnapshot {
+	assignments := make(map[types.ChannelID]types.PChannelInfoAssigned, len(s.Assignments))
+	for channelID, assignment := range s.Assignments {
+		assignments[channelID] = assignment
+	}
+	return assignmentSnapshot{
+		Assignments:           assignments,
+		GlobalUnbalancedScore: s.GlobalUnbalancedScore,
+	}
+}
+
 // streamingNodeInfo is the streaming node info for vchannel fair policy.
 type streamingNodeInfo struct {
 	AssignedVChannelCount int

@@ -416,7 +416,7 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *log.MLogger
 	logger = logger.With(zap.String("state", b.task.State.String()), zap.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.Header().BroadcastID, b.task); err != nil {
 		logger.Warn("save broadcast task failed", zap.Error(err))
-		if ctx.Err() != nil {
+		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
 		return err

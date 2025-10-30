@@ -25,6 +25,16 @@ on:
       # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
       - go.mod
       - go.sum
+  schedule:
+    # Runs at 17:00 UTC every day, for refreshing cache every day
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run the workflow on'
+        required: true
+        default: 'master'
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -34,10 +44,12 @@ jobs:
   mac:
     name: Code Checker MacOS 13
     runs-on: macos-13
-    timeout-minutes: 300
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
       - name: Setup Python environment
         uses: actions/setup-python@v4
         with:
@@ -62,6 +74,7 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: '1.24.6'
+          cache: false
       - name: Download Caches
         uses: ./.github/actions/macos-cache-restore
       - name: Code Check

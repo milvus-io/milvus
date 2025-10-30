@@ -355,6 +355,11 @@ func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
 	return size
 }
 
+// LastConfirmedMessageID returns the last confirmed message id of the txn.
+func (b *ImmutableTxnMessageBuilder) LastConfirmedMessageID() MessageID {
+	return b.begin.LastConfirmedMessageID()
+}
+
 // Messages returns the begin message and body messages.
 func (b *ImmutableTxnMessageBuilder) Messages() (ImmutableBeginTxnMessageV2, []ImmutableMessage) {
 	return b.begin, b.messages

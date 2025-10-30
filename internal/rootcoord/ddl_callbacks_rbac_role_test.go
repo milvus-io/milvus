@@ -24,10 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -36,18 +32,7 @@ import (
 )
 
 func TestDDLCallbacksRBACRole(t *testing.T) {
-	initStreamingSystem()
-
-	kv, _ := kvfactory.GetEtcdAndPath()
-	path := funcutil.RandomString(10)
-	catalogKV := etcdkv.NewEtcdKV(kv, path)
-
-	core := newTestCore(withHealthyCode(),
-		withMeta(&MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}),
-		withValidProxyManager(),
-	)
-	registry.ResetRegistration()
-	RegisterDDLCallbacks(core)
+	core := initStreamingSystemAndCore(t)
 
 	// Test drop builtin role should return error
 	roleDbAdmin := "db_admin"

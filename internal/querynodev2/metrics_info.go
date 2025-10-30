@@ -82,7 +82,11 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
-	for collection := range collections {
+	for collection, name := range collections {
+		coll := node.manager.Collection.Get(collection)
+		if coll == nil {
+			continue
+		}
 		segs := growingGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
@@ -90,18 +94,16 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		totalGrowingSize += size
 		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
 			segments.SegmentTypeGrowing.String()).Set(float64(size))
-	}
 
-	for _, segs := range growingGroupByCollection {
 		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.RowNum()
 		})
-		segment := segs[0]
+
 		metrics.QueryNodeNumEntities.WithLabelValues(
-			segment.DatabaseName(),
-			collections[segment.Collection()],
+			coll.GetDBName(),
+			name,
 			nodeID,
-			fmt.Sprint(segment.Collection()),
+			fmt.Sprint(collection),
 			segments.SegmentTypeGrowing.String(),
 		).Set(float64(numEntities))
 	}
@@ -110,25 +112,26 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
-	for collection := range collections {
+	for collection, name := range collections {
+		coll := node.manager.Collection.Get(collection)
+		if coll == nil {
+			continue
+		}
 		segs := sealedGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
 		})
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
-	}
-
-	for _, segs := range sealedGroupByCollection {
 		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.RowNum()
 		})
-		segment := segs[0]
+
 		metrics.QueryNodeNumEntities.WithLabelValues(
-			segment.DatabaseName(),
-			collections[segment.Collection()],
+			coll.GetDBName(),
+			name,
 			nodeID,
-			fmt.Sprint(segment.Collection()),
+			fmt.Sprint(collection),
 			segments.SegmentTypeSealed.String(),
 		).Set(float64(numEntities))
 	}

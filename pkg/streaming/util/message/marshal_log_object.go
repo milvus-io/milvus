@@ -58,6 +58,14 @@ func (m *immutableMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error
 	}
 	if broadcast := m.BroadcastHeader(); broadcast != nil {
 		enc.AddInt64("broadcastID", int64(broadcast.BroadcastID))
+		enc.AddString("broadcastVChannels", strings.Join(broadcast.VChannels, ","))
+	}
+	if replicate := m.ReplicateHeader(); replicate != nil {
+		enc.AddString("rClusterID", replicate.ClusterID)
+		enc.AddString("rMessageID", replicate.MessageID.String())
+		enc.AddString("rLastConfirmedMessageID", replicate.LastConfirmedMessageID.String())
+		enc.AddUint64("rTimeTick", replicate.TimeTick)
+		enc.AddString("rVchannel", replicate.VChannel)
 	}
 	enc.AddInt("size", len(m.payload))
 	marshalSpecializedHeader(m.MessageType(), m.Version(), m.properties[messageHeader], enc)

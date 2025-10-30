@@ -46,17 +46,15 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return([]*streamingpb.SegmentAssignmentMeta{}, nil)
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return([]*streamingpb.VChannelMeta{}, nil)
 
-	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(
-		&streamingpb.WALCheckpoint{
-			MessageId:     rmq.NewRmqID(1).IntoProto(),
-			TimeTick:      1,
-			RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
-		}, nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
 	channel := types.PChannelInfo{Name: "test_channel"}
 
 	lastConfirmed := message.CreateTestTimeTickSyncMessage(t, 1, 1, rmq.NewRmqID(1))
-	rs := newRecoveryStorage(channel)
+	rs := newRecoveryStorage(channel, utility.NewWALCheckpointFromProto(&streamingpb.WALCheckpoint{
+		MessageId:     rmq.NewRmqID(1).IntoProto(),
+		TimeTick:      1,
+		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
+	}))
 
 	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
@@ -78,7 +76,6 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 		initialedVChannels = m
 		return nil
 	})
-	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
 	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	fc := syncutil.NewFuture[internaltypes.MixCoordClient]()
@@ -135,7 +132,7 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(fc))
 	channel := types.PChannelInfo{Name: "test_channel"}
 	lastConfirmed := message.CreateTestTimeTickSyncMessage(t, 1, 1, rmq.NewRmqID(1))
-	rs := newRecoveryStorage(channel)
+	rs := newRecoveryStorage(channel, nil)
 
 	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)

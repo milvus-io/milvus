@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -218,6 +219,8 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 		assign := hc.watcher.Get(ctx, pchannel)
 		if assign != nil {
 			// Find assignment, try to create producer on this assignment.
+			// pick the target streaming node to serve.
+			ctx = contextutil.WithPickServerID(ctx, assign.Node.ServerID)
 			createResult, err := create(ctx, assign)
 			if err == nil {
 				logger.Info("create handler success", zap.Any("assignment", assign), zap.Bool("isLocal", registry.IsLocal(createResult)))

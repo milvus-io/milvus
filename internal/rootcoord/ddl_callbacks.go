@@ -36,6 +36,9 @@ func RegisterDDLCallbacks(core *Core) {
 	ddlCallback := &DDLCallback{
 		Core: core,
 	}
+
+	ddlCallback.registerCollectionCallbacks()
+	ddlCallback.registerPartitionCallbacks()
 	ddlCallback.registerRBACCallbacks()
 	ddlCallback.registerDatabaseCallbacks()
 	ddlCallback.registerAliasCallbacks()
@@ -67,6 +70,18 @@ func (c *DDLCallback) registerDatabaseCallbacks() {
 func (c *DDLCallback) registerAliasCallbacks() {
 	registry.RegisterAlterAliasV2AckCallback(c.alterAliasV2AckCallback)
 	registry.RegisterDropAliasV2AckCallback(c.dropAliasV2AckCallback)
+}
+
+// registerCollectionCallbacks registers the collection callbacks.
+func (c *DDLCallback) registerCollectionCallbacks() {
+	registry.RegisterCreateCollectionV1AckCallback(c.createCollectionV1AckCallback)
+	registry.RegisterDropCollectionV1AckCallback(c.dropCollectionV1AckCallback)
+}
+
+// registerPartitionCallbacks registers the partition callbacks.
+func (c *DDLCallback) registerPartitionCallbacks() {
+	registry.RegisterCreatePartitionV1AckCallback(c.createPartitionV1AckCallback)
+	registry.RegisterDropPartitionV1AckCallback(c.dropPartitionV1AckCallback)
 }
 
 // DDLCallback is the callback of ddl.
@@ -135,6 +150,18 @@ func startBroadcastWithAlterAliasLock(ctx context.Context, dbName string, collec
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to start broadcast with alter alias lock")
+	}
+	return broadcaster, nil
+}
+
+// startBroadcastWithCollectionLock starts a broadcast with collection lock.
+func startBroadcastWithCollectionLock(ctx context.Context, dbName string, collectionName string) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
 	}
 	return broadcaster, nil
 }

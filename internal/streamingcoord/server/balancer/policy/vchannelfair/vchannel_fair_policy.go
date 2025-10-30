@@ -94,7 +94,7 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 
 	// 4. Do a DFS to make a greatest snapshot.
 	// The DFS will find the unbalance score minimized assignment based on current layout.
-	greatestSnapshot := snapshot
+	greatestSnapshot := snapshot.Clone()
 	p.assignChannels(expectedLayout, reassignChannelIDs, &greatestSnapshot)
 	if greatestSnapshot.GlobalUnbalancedScore < snapshot.GlobalUnbalancedScore-p.cfg.RebalanceTolerance {
 		if p.Logger().Level().Enabled(zap.DebugLevel) {

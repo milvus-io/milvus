@@ -355,7 +355,12 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
-	return m.canCreateIndex(req, isJson)
+	indexID, err := m.canCreateIndex(req, isJson)
+	if err != nil {
+		return 0, err
+	}
+
+	return indexID, nil
 }
 
 func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
@@ -424,37 +429,10 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 	return false, 0
 }
 
-func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest, allocatedIndexID typeutil.UniqueID, isJson bool) (UniqueID, error) {
+func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
 
-	indexID, err := m.canCreateIndex(req, isJson)
-	if err != nil {
-		return indexID, err
-	}
-
-	if indexID == 0 {
-		indexID = allocatedIndexID
-	} else {
-		return indexID, nil
-	}
-
-	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-	if err := ValidateIndexParams(index); err != nil {
-		return indexID, err
-	}
 	log.Ctx(ctx).Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 
@@ -462,13 +440,13 @@ func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReq
 		log.Ctx(ctx).Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
 			zap.String("indexName", index.IndexName), zap.Error(err))
-		return indexID, err
+		return err
 	}
 
 	m.updateCollectionIndex(index)
 	log.Ctx(ctx).Info("meta update: CreateIndex success", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
-	return indexID, nil
+	return nil
 }
 
 func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
@@ -660,6 +638,17 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
+
+	if len(indexIDs) == 0 {
+		// drop all indexes if indexIDs is empty.
+		indexIDs = make([]UniqueID, 0, len(m.indexes[collID]))
+		for indexID, index := range m.indexes[collID] {
+			if index.IsDeleted {
+				continue
+			}
+			indexIDs = append(indexIDs, indexID)
+		}
+	}
 
 	fieldIndexes, ok := m.indexes[collID]
 	if !ok {

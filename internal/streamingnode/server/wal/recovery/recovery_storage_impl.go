@@ -34,9 +34,10 @@ const (
 func RecoverRecoveryStorage(
 	ctx context.Context,
 	recoveryStreamBuilder RecoveryStreamBuilder,
+	cp *utility.WALCheckpoint,
 	lastTimeTickMessage message.ImmutableMessage,
 ) (RecoveryStorage, *RecoverySnapshot, error) {
-	rs := newRecoveryStorage(recoveryStreamBuilder.Channel())
+	rs := newRecoveryStorage(recoveryStreamBuilder.Channel(), cp)
 	if err := rs.recoverRecoveryInfoFromMeta(ctx, recoveryStreamBuilder.Channel(), lastTimeTickMessage); err != nil {
 		rs.Logger().Warn("recovery storage failed", zap.Error(err))
 		return nil, nil, err
@@ -65,7 +66,7 @@ func RecoverRecoveryStorage(
 }
 
 // newRecoveryStorage creates a new recovery storage.
-func newRecoveryStorage(channel types.PChannelInfo) *recoveryStorageImpl {
+func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint) *recoveryStorageImpl {
 	cfg := newConfig()
 	return &recoveryStorageImpl{
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
@@ -73,6 +74,7 @@ func newRecoveryStorage(channel types.PChannelInfo) *recoveryStorageImpl {
 		mu:                     sync.Mutex{},
 		currentClusterID:       paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		channel:                channel,
+		checkpoint:             cp,
 		dirtyCounter:           0,
 		persistNotifier:        make(chan struct{}, 1),
 		gracefulClosed:         false,
@@ -149,11 +151,6 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 			r.Logger().Warn("failed to ack broadcast message", zap.Error(err))
 			return err
 		}
-	}
-	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig {
-		// message on control channel except AlterReplicateConfig message is just used to determine the DDL/DCL order,
-		// will not affect the recovery storage, so skip it.
-		return nil
 	}
 
 	r.mu.Lock()
@@ -292,6 +289,12 @@ func (r *recoveryStorageImpl) updateCheckpoint(msg message.ImmutableMessage) {
 
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
+	if funcutil.IsControlChannel(msg.VChannel()) && msg.MessageType() != message.MessageTypeAlterReplicateConfig {
+		// message on control channel except AlterReplicateConfig message is just used to determine the DDL/DCL order,
+		// will not affect the recovery storage, so skip it.
+		return
+	}
+
 	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
 		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && !funcutil.IsControlChannel(msg.VChannel()) {
 		r.detectInconsistency(msg, "vchannel not found")

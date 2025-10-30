@@ -21,6 +21,18 @@
 using Map = std::map<std::string, std::string>;
 
 CStatus
+set_tokenizer_option(const char* params) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        milvus::tantivy::set_tokenizer_options(params);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 create_tokenizer(const char* params, CTokenizer* tokenizer) {
     SCOPE_CGO_CALL_METRIC();
 

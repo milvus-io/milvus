@@ -134,7 +134,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/dist
 
 function test_rootcoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/rootcoord" -failfast  -ldflags="-r ${RPATH}"
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/rootcoord/..." -failfast  -ldflags="-r ${RPATH}"
 }
 
 function test_datacoord()

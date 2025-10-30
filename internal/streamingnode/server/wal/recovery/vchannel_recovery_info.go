@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
 )
 
 // newVChannelRecoveryInfoFromCreateCollectionMessage creates a new vchannel recovery info from a create collection message.
@@ -31,10 +32,8 @@ func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCre
 			PartitionId: partitionId,
 		})
 	}
-	schema := &schemapb.CollectionSchema{}
-	if err := proto.Unmarshal(msg.MustBody().Schema, schema); err != nil {
-		panic("failed to unmarshal collection schema, err: " + err.Error())
-	}
+	body := msg.MustBody()
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	return &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{
 			Vchannel: msg.VChannel(),

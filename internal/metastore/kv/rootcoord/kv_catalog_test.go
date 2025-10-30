@@ -1058,7 +1058,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		kc := NewCatalog(nil, snapshot).(*Catalog)
 		ctx := context.Background()
 		var collectionID int64 = 1
-		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
+		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, UpdateTimestamp: rand.Uint64()}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
@@ -1077,7 +1077,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		kc := NewCatalog(nil, nil)
 		ctx := context.Background()
 		var collectionID int64 = 1
-		oldC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
+		oldC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		newC := &model.Collection{TenantID: "2", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.Error(t, err)
@@ -1267,7 +1267,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t, withMockSave(errors.New("error mock Save")))
 		kc := NewCatalog(nil, mockSnapshot)
 		ctx := context.Background()
-		coll := &model.Collection{State: pb.CollectionState_CollectionCreating}
+		coll := &model.Collection{State: pb.CollectionState_CollectionCreated}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.Error(t, err)
 	})
@@ -1280,7 +1280,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			State: pb.CollectionState_CollectionCreating,
+			State: pb.CollectionState_CollectionCreated,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.Error(t, err)
@@ -1294,7 +1294,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			State: pb.CollectionState_CollectionCreating,
+			State: pb.CollectionState_CollectionCreated,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
@@ -1349,7 +1349,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 					OutputFieldNames: []string{"sparse"},
 				},
 			},
-			State: pb.CollectionState_CollectionCreating,
+			State: pb.CollectionState_CollectionCreated,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
