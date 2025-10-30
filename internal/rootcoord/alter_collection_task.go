@@ -390,7 +390,7 @@ func ResetFieldProperties(coll *model.Collection, fieldName string, newProps []*
 	}
 	for i, structField := range coll.StructArrayFields {
 		if structField.Name == fieldName {
-			coll.StructArrayFields[i].Properties = newProps
+			coll.StructArrayFields[i].TypeParams = newProps
 			return nil
 		}
 		for j, field := range structField.Fields {
@@ -411,7 +411,7 @@ func GetFieldProperties(coll *model.Collection, fieldName string) ([]*commonpb.K
 	}
 	for _, structField := range coll.StructArrayFields {
 		if structField.Name == fieldName {
-			return structField.Properties, nil
+			return structField.TypeParams, nil
 		}
 		for _, field := range structField.Fields {
 			if field.Name == fieldName {

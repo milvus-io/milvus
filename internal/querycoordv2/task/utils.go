@@ -285,13 +285,13 @@ func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 		}
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		structProperties := structField.GetProperties()
-		structMmapEnabled, structExist := common.IsMmapDataEnabled(structProperties...)
+		structTypeParams := structField.GetTypeParams()
+		structMmapEnabled, structExist := common.IsMmapDataEnabled(structTypeParams...)
 
 		// If struct field itself doesn't have mmap setting, inherit from collection
 		if !structExist && exist &&
 			!common.FieldHasMmapKey(schema, structField.GetFieldID()) {
-			structField.Properties = append(structField.Properties, &commonpb.KeyValuePair{
+			structField.TypeParams = append(structField.TypeParams, &commonpb.KeyValuePair{
 				Key:   common.MmapEnabledKey,
 				Value: strconv.FormatBool(collectionMmapEnabled),
 			})

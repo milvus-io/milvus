@@ -11,7 +11,7 @@ type StructArrayField struct {
 	Name        string
 	Description string
 	Fields      []*Field
-	Properties  []*commonpb.KeyValuePair
+	TypeParams  []*commonpb.KeyValuePair
 }
 
 func (s *StructArrayField) Clone() *StructArrayField {
@@ -20,7 +20,7 @@ func (s *StructArrayField) Clone() *StructArrayField {
 		Name:        s.Name,
 		Description: s.Description,
 		Fields:      CloneFields(s.Fields),
-		Properties:  common.CloneKeyValuePairs(s.Properties),
+		TypeParams:  common.CloneKeyValuePairs(s.TypeParams),
 	}
 }
 
@@ -33,12 +33,12 @@ func CloneStructArrayFields(structArrayFields []*StructArrayField) []*StructArra
 }
 
 func (s *StructArrayField) Equal(other StructArrayField) bool {
-	var propsA common.KeyValuePairs = s.Properties
+	var paramsA common.KeyValuePairs = s.TypeParams
 	return s.FieldID == other.FieldID &&
 		s.Name == other.Name &&
 		s.Description == other.Description &&
 		CheckFieldsEqual(s.Fields, other.Fields) &&
-		propsA.Equal(other.Properties)
+		paramsA.Equal(other.TypeParams)
 }
 
 func CheckStructArrayFieldsEqual(structArrayFieldsA, structArrayFieldsB []*StructArrayField) bool {
@@ -69,7 +69,7 @@ func MarshalStructArrayFieldModel(structArrayField *StructArrayField) *schemapb.
 		Name:        structArrayField.Name,
 		Description: structArrayField.Description,
 		Fields:      MarshalFieldModels(structArrayField.Fields),
-		Properties:  structArrayField.Properties,
+		TypeParams:  structArrayField.TypeParams,
 	}
 }
 
@@ -95,7 +95,7 @@ func UnmarshalStructArrayFieldModel(fieldSchema *schemapb.StructArrayFieldSchema
 		Name:        fieldSchema.Name,
 		Description: fieldSchema.Description,
 		Fields:      UnmarshalFieldModels(fieldSchema.Fields),
-		Properties:  fieldSchema.Properties,
+		TypeParams:  fieldSchema.TypeParams,
 	}
 }
 
