@@ -157,9 +157,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 	}
 
 	partitionIDs := make([]int64, 0, len(req.Expected.ExpectedPartitionIDs))
-	for _, partitionID := range req.Expected.ExpectedPartitionIDs {
-		partitionIDs = append(partitionIDs, partitionID)
-	}
+	partitionIDs = append(partitionIDs, req.Expected.ExpectedPartitionIDs...)
 	sort.Slice(partitionIDs, func(i, j int) bool {
 		return partitionIDs[i] < partitionIDs[j]
 	})
