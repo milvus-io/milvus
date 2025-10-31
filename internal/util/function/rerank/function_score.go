@@ -147,6 +147,10 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
 	case WeightedName:
 		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema)
+	case ExprName:
+		rerankFunc, newRerankErr = newExprFunction(collSchema, funcSchema)
+	case WasmName:
+		rerankFunc, newRerankErr = newWasmFunction(collSchema, funcSchema)
 	case BoostName:
 		return nil, nil
 	default:
