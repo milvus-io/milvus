@@ -29,6 +29,16 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.9.linux-$TARGE
 
 RUN pip3 install conan==1.64.1
 
+# Initialize Conan profile and pre-build libiberty to avoid GCC source download
+RUN conan profile new default --detect && \
+    conan profile update settings.compiler.libcxx=libstdc++11 default && \
+    conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local || true && \
+    export CONAN_REVISIONS_ENABLED=1 && \
+    GCC_VERSION=$(gcc -dumpversion) && \
+    echo "Pre-building libiberty to cache in Docker image..." && \
+    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    echo "libiberty pre-build skipped (will build on first use)"
+
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 

@@ -27,7 +27,18 @@ RUN dnf -y update && \
 
 
 RUN pip3 install conan==1.64.1
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
+
+# Initialize Conan profile and pre-build libiberty to avoid GCC source download
+RUN conan profile new default --detect && \
+    conan profile update settings.compiler.libcxx=libstdc++11 default && \
+    conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local || true && \
+    export CONAN_REVISIONS_ENABLED=1 && \
+    GCC_VERSION=$(gcc -dumpversion) && \
+    echo "Pre-building libiberty to cache in Docker image..." && \
+    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    echo "libiberty pre-build skipped (will build on first use)"
+
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.89 -y
 

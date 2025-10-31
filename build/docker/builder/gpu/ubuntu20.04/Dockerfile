@@ -27,6 +27,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 RUN pip3 install conan==1.64.1
 
+# Initialize Conan profile and pre-build libiberty to avoid GCC source download
+RUN conan profile new default --detect && \
+    conan profile update settings.compiler.libcxx=libstdc++11 default && \
+    conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local || true && \
+    export CONAN_REVISIONS_ENABLED=1 && \
+    GCC_VERSION=$(gcc -dumpversion) && \
+    echo "Pre-building libiberty to cache in Docker image..." && \
+    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    echo "libiberty pre-build skipped (will build on first use)"
+
 # Install openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
 #    tar zxvf v0.3.21.tar.gz && cd OpenBLAS-0.3.21 && \

@@ -31,6 +31,16 @@ RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
 
 RUN pip3 install conan==1.64.1
 
+# Initialize Conan profile and pre-build libiberty to avoid GCC source download
+RUN conan profile new default --detect && \
+    conan profile update settings.compiler.libcxx=libstdc++11 default && \
+    conan profile update settings.compiler.version=12 default && \
+    conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local || true && \
+    export CONAN_REVISIONS_ENABLED=1 && \
+    echo "Pre-building libiberty to cache in Docker image..." && \
+    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=12 -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    echo "libiberty pre-build skipped (will build on first use)"
+
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
