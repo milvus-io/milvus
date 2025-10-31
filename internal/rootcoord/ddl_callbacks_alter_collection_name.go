@@ -31,7 +31,7 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 	}
 	if req.DbName == req.NewDBName && req.OldName == req.NewName {
 		// no-op here.
-		return errIgnoredAlterCollection
+		return merr.WrapErrParameterInvalidMsg("collection name or database name should be different")
 	}
 
 	// StartBroadcastWithResourceKeys will deduplicate the resource keys itself, so it's safe to add all the resource keys here.
@@ -110,12 +110,12 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 func (c *Core) validateEncryption(ctx context.Context, oldDBName string, newDBName string) error {
 	// old and new DB names are filled in Prepare, shouldn't be empty here
 
-	originalDB, err := c.meta.GetDatabaseByName(ctx, oldDBName, 0)
+	originalDB, err := c.meta.GetDatabaseByName(ctx, oldDBName, typeutil.MaxTimestamp)
 	if err != nil {
 		return fmt.Errorf("failed to get original database: %w", err)
 	}
 
-	targetDB, err := c.meta.GetDatabaseByName(ctx, newDBName, 0)
+	targetDB, err := c.meta.GetDatabaseByName(ctx, newDBName, typeutil.MaxTimestamp)
 	if err != nil {
 		return fmt.Errorf("target database %s not found: %w", newDBName, err)
 	}

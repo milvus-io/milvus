@@ -50,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -618,19 +617,6 @@ func withMixCoord(mixc types.MixCoord) Opt {
 	}
 }
 
-func withUnhealthyMixCoord() Opt {
-	mixc := &mocks.MixCoord{}
-	err := errors.New("mock error")
-	mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
-		&milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: merr.Status(err),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
-	)
-
-	return withMixCoord(mixc)
-}
-
 func withInvalidMixCoord() Opt {
 	mixc := &mocks.MixCoord{}
 	mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
@@ -756,6 +742,7 @@ func withValidMixCoord() Opt {
 		merr.Success(), nil,
 	)
 	mixc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mixc.EXPECT().UpdateLoadConfig(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	return withMixCoord(mixc)
 }
 

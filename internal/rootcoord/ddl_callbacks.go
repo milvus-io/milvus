@@ -75,8 +75,8 @@ func (c *DDLCallback) registerAliasCallbacks() {
 // registerCollectionCallbacks registers the collection callbacks.
 func (c *DDLCallback) registerCollectionCallbacks() {
 	registry.RegisterCreateCollectionV1AckCallback(c.createCollectionV1AckCallback)
+	registry.RegisterAlterCollectionV2AckCallback(c.alterCollectionV2AckCallback)
 	registry.RegisterDropCollectionV1AckCallback(c.dropCollectionV1AckCallback)
-	registry.RegisterAlterCollectionV2AckCallback(c.putCollectionV2AckCallback)
 }
 
 // registerPartitionCallbacks registers the partition callbacks.

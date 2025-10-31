@@ -97,7 +97,7 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 	return err
 }
 
-// getAlterLoadConfigOfAlterDatabase gets the put load config of put database.
+// getAlterLoadConfigOfAlterDatabase gets the alter load config of alter database.
 func (c *Core) getAlterLoadConfigOfAlterDatabase(ctx context.Context, dbName string, oldProps []*commonpb.KeyValuePair, newProps []*commonpb.KeyValuePair) (*message.AlterLoadConfigOfAlterDatabase, error) {
 	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldProps)
 	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldProps)
@@ -142,15 +142,12 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 			return errors.Wrap(err, "failed to update load config")
 		}
 	}
-	if err := c.ExpireCaches(ctx, ce.NewBuilder().
+	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(header.DbName),
 			ce.OptLPCMMsgType(commonpb.MsgType_AlterDatabase),
 		),
-		result.GetControlChannelResult().TimeTick); err != nil {
-		return errors.Wrap(err, "failed to expire caches")
-	}
-	return nil
+		result.GetControlChannelResult().TimeTick)
 }
 
 func MergeProperties(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
