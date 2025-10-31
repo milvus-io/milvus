@@ -1062,57 +1062,59 @@ class SkipIndexStatsBuilder {
             }
             return std::make_unique<BooleanFieldChunkMetrics>(
                 info.contains_true_, info.contains_false_);
-        }
-        T min, max;
-        if constexpr (std::is_same_v<T, std::string>) {
-            min = std::string(info.min_);
-            max = std::string(info.max_);
         } else {
-            min = info.min_;
-            max = info.max_;
-        }
-        if constexpr (std::is_floating_point_v<T>) {
-            return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
-        }
-        if (!enable_bloom_filter_) {
+            T min, max;
             if constexpr (std::is_same_v<T, std::string>) {
-                return std::make_unique<StringFieldChunkMetrics>(
-                    min, max, nullptr, nullptr);
+                min = std::string(info.min_);
+                max = std::string(info.max_);
+            } else {
+                min = info.min_;
+                max = info.max_;
             }
-            return std::make_unique<IntFieldChunkMetrics<T>>(min, max, nullptr);
-        }
-        BloomFilterPtr bloom_filter =
-            NewBloomFilterWithType(info.unique_values_.size(),
-                                   DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE,
-                                   BFType::Blocked);
-        if constexpr (std::is_same_v<T, std::string>) {
-            for (const auto& val : info.unique_values_) {
-                bloom_filter->Add(val);
+            if constexpr (std::is_floating_point_v<T>) {
+                return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
             }
-            if (info.ngram_values_.empty()) {
-                return std::make_unique<StringFieldChunkMetrics>(
-                    min, max, std::move(bloom_filter), nullptr);
+            if (!enable_bloom_filter_) {
+                if constexpr (std::is_same_v<T, std::string>) {
+                    return std::make_unique<StringFieldChunkMetrics>(
+                        min, max, nullptr, nullptr);
+                }
+                return std::make_unique<IntFieldChunkMetrics<T>>(
+                    min, max, nullptr);
             }
-            BloomFilterPtr ngram_bloom_filter =
-                NewBloomFilterWithType(info.ngram_values_.size(),
+            BloomFilterPtr bloom_filter =
+                NewBloomFilterWithType(info.unique_values_.size(),
                                        DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE,
                                        BFType::Blocked);
-            for (const auto& ngram : info.ngram_values_) {
-                ngram_bloom_filter->Add(std::string_view(ngram));
+            if constexpr (std::is_same_v<T, std::string>) {
+                for (const auto& val : info.unique_values_) {
+                    bloom_filter->Add(val);
+                }
+                if (info.ngram_values_.empty()) {
+                    return std::make_unique<StringFieldChunkMetrics>(
+                        min, max, std::move(bloom_filter), nullptr);
+                }
+                BloomFilterPtr ngram_bloom_filter = NewBloomFilterWithType(
+                    info.ngram_values_.size(),
+                    DEFAULT_BLOOM_FILTER_FALSE_POSITIVE_RATE,
+                    BFType::Blocked);
+                for (const auto& ngram : info.ngram_values_) {
+                    ngram_bloom_filter->Add(std::string_view(ngram));
+                }
+                return std::make_unique<StringFieldChunkMetrics>(
+                    min,
+                    max,
+                    std::move(bloom_filter),
+                    std::move(ngram_bloom_filter));
             }
-            return std::make_unique<StringFieldChunkMetrics>(
-                min,
-                max,
-                std::move(bloom_filter),
-                std::move(ngram_bloom_filter));
-        }
 
-        for (const auto& val : info.unique_values_) {
-            bloom_filter->Add(reinterpret_cast<const uint8_t*>(&val),
-                              sizeof(val));
+            for (const auto& val : info.unique_values_) {
+                bloom_filter->Add(reinterpret_cast<const uint8_t*>(&val),
+                                  sizeof(val));
+            }
+            return std::make_unique<IntFieldChunkMetrics<T>>(
+                min, max, std::move(bloom_filter));
         }
-        return std::make_unique<IntFieldChunkMetrics<T>>(
-            min, max, std::move(bloom_filter));
     }
 
  private:
