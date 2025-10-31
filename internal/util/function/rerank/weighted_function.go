@@ -122,3 +122,6 @@ func (weighted *WeightedFunction[T]) Process(ctx context.Context, searchParams *
 	}
 	return outputs, nil
 }
+
+// Close releases any long-lived resources held by WeightedFunction
+func (weighted *WeightedFunction[T]) Close() {}

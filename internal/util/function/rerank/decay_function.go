@@ -219,6 +219,9 @@ func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *Sea
 	return outputs, nil
 }
 
+// Close releases any long-lived resources for DecayFunction
+func (decay *DecayFunction[T, R]) Close() {}
+
 type decayReScorer func(float64, float64, float64, float64, float64) float64
 
 func gaussianDecay(origin, scale, decay, offset, distance float64) float64 {

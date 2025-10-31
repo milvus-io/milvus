@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -389,6 +390,10 @@ func DeleteCollection(collection *Collection) {
 	if collection.ccollection == nil {
 		return
 	}
+	// Unregister and close any rerankers tied to this collection so long-lived
+	// caches (e.g., precomputed field arrays) can be released.
+	rerank.UnregisterRerankersForCollection(collection.Schema().GetName())
+
 	collection.ccollection.Release()
 	collection.ccollection = nil
 }

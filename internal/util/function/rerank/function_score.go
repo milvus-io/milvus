@@ -109,6 +109,8 @@ type Reranker interface {
 	GetInputFieldNames() []string
 	GetInputFieldIDs() []int64
 	GetRankName() string
+	// Close releases any long-lived resources held by the reranker
+	Close()
 }
 
 func GetRerankName(funcSchema *schemapb.FunctionSchema) string {

@@ -553,6 +553,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyScannedRemoteMB)
 	registry.MustRegister(ProxyScannedTotalMB)
 	RegisterStreamingServiceClient(registry)
+	// Register generic reranker metrics
+	RegisterRerank(registry)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {

@@ -101,3 +101,6 @@ func (rrf *RRFFunction[T]) Process(ctx context.Context, searchParams *SearchPara
 	}
 	return outputs, nil
 }
+
+// Close releases any long-lived resources for RRFFunction
+func (rrf *RRFFunction[T]) Close() {}

@@ -202,3 +202,9 @@ func (model *ModelFunction[T]) Process(ctx context.Context, searchParams *Search
 	}
 	return outputs, nil
 }
+
+// Close releases any long-lived resources held by ModelFunction
+func (model *ModelFunction[T]) Close() {
+	model.provider = nil
+	model.queries = nil
+}

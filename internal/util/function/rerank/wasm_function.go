@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bytecodealliance/wasmtime-go"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -34,6 +38,8 @@ type WasmFunction[T PKType] struct {
 	instance   *wasmtime.Instance
 	store      *wasmtime.Store
 	entryPoint string
+	// collectionName captured from collection schema at creation time
+	collectionName string
 
 	// Cached WASM function pointer (no lookup per call)
 	rerankFunc *wasmtime.Func
@@ -100,7 +106,7 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 	}
 
 	if base.pkType == schemapb.DataType_Int64 {
-		return &WasmFunction[int64]{
+		wf := &WasmFunction[int64]{
 			RerankBase:  *base,
 			instance:    instance,
 			store:       store,
@@ -115,9 +121,12 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 			locMapPool: &sync.Pool{
 				New: func() interface{} { return make(map[int64]IDLoc) },
 			},
-		}, nil
+			collectionName: collSchema.GetName(),
+		}
+		registerRerankerForCollection(collSchema.GetName(), wf)
+		return wf, nil
 	} else {
-		return &WasmFunction[string]{
+		wf := &WasmFunction[string]{
 			RerankBase:  *base,
 			instance:    instance,
 			store:       store,
@@ -132,7 +141,10 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 			locMapPool: &sync.Pool{
 				New: func() interface{} { return make(map[string]IDLoc) },
 			},
-		}, nil
+			collectionName: collSchema.GetName(),
+		}
+		registerRerankerForCollection(collSchema.GetName(), wf)
+		return wf, nil
 	}
 }
 
@@ -156,11 +168,26 @@ func compileWasmModule(wasmBytes []byte) (*wasmtime.Store, *wasmtime.Instance, e
 func (wf *WasmFunction[T]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
 	outputs := newRerankOutputs(inputs, searchParams)
 
+	nodeIDStr := paramtable.GetStringNodeID()
+	roleName := typeutil.QueryNodeRole
+	collectionNameStr := wf.collectionName
+	rerankerName := wf.GetRankName()
+	startTime := time.Now()
+	totalResults := 0
+
+	defer func() {
+		elapsed := time.Since(startTime).Milliseconds()
+		metrics.RerankLatency.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName).Observe(float64(elapsed))
+		metrics.RerankResultCount.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName).Add(float64(totalResults))
+	}()
+
 	for _, cols := range inputs.data {
 		idScore, err := wf.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
+			metrics.RerankErrors.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName, "evaluation_error").Inc()
 			return nil, err
 		}
+		totalResults += int(idScore.size)
 		appendResult(inputs, outputs, idScore)
 	}
 
@@ -169,20 +196,21 @@ func (wf *WasmFunction[T]) Process(ctx context.Context, searchParams *SearchPara
 
 // processOneSearchData processes a single search result set with field data support
 func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
+	// Determine sort order based on metric type (L2 = ascending, IP/COSINE = descending)
+	_, descendingOrder := classifyMetricsOrder(searchParams.searchMetrics)
 	if len(cols) == 0 {
-		return newIDScores[T](map[T]float32{}, map[T]IDLoc{}, searchParams, true), nil
+		return newIDScores[T](map[T]float32{}, map[T]IDLoc{}, searchParams, descendingOrder), nil
 	}
 
 	rerankFunc := wf.rerankFunc
 
 	col := cols[0]
 	if col.size == 0 {
-		return newIDScores[T](map[T]float32{}, map[T]IDLoc{}, searchParams, true), nil
+		return newIDScores[T](map[T]float32{}, map[T]IDLoc{}, searchParams, descendingOrder), nil
 	}
 
 	ids := col.ids.([]T)
 	scores := col.scores
-	// resultCount := len(ids)
 
 	rerankedScores := wf.scoreMapPool.Get().(map[T]float32)
 	idLocations := wf.locMapPool.Get().(map[T]IDLoc)
@@ -193,6 +221,10 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 	for k := range idLocations {
 		delete(idLocations, k)
 	}
+	defer func() {
+		wf.scoreMapPool.Put(rerankedScores)
+		wf.locMapPool.Put(idLocations)
+	}()
 
 	inputFieldTypes := wf.GetInputFieldTypes()
 
@@ -203,9 +235,6 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 
 			result, err := rerankFunc.Call(wf.store, originalScore, int32(j))
 			if err != nil {
-				// Return maps to pool before error
-				wf.scoreMapPool.Put(rerankedScores)
-				wf.locMapPool.Put(idLocations)
 				return nil, fmt.Errorf("failed to call WASM rerank function: %w", err)
 			}
 
@@ -233,8 +262,6 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 			}
 
 			if err != nil {
-				wf.scoreMapPool.Put(rerankedScores)
-				wf.locMapPool.Put(idLocations)
 				return nil, fmt.Errorf("failed to call WASM rerank function: %w", err)
 			}
 
@@ -249,11 +276,8 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 	if searchParams.isGrouping() {
 		result, err = newGroupingIDScores(rerankedScores, idLocations, searchParams, idGroup)
 	} else {
-		result = newIDScores(rerankedScores, idLocations, searchParams, true)
+		result = newIDScores(rerankedScores, idLocations, searchParams, descendingOrder)
 	}
-
-	wf.scoreMapPool.Put(rerankedScores)
-	wf.locMapPool.Put(idLocations)
 
 	return result, err
 }
@@ -396,4 +420,16 @@ func (wf *WasmFunction[T]) IsSupportGroup() bool {
 
 func (wf *WasmFunction[T]) GetRankName() string {
 	return WasmName
+}
+
+// Close releases long-lived resources held by the WasmFunction
+func (wf *WasmFunction[T]) Close() {
+	// release references to allow GC
+	wf.fieldArrays = nil
+	wf.argBuffer = nil
+	wf.rerankFunc = nil
+	wf.instance = nil
+	wf.store = nil // stores's finalizer will run
+	wf.scoreMapPool = nil
+	wf.locMapPool = nil
 }
