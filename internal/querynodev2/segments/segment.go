@@ -822,6 +822,10 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	req := &segcore.LoadFieldDataRequest{
 		RowCount:       rowCount,
 		StorageVersion: loadInfo.StorageVersion,
+		// Additional metadata
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
+		SegmentID:    s.ID(),
 	}
 	for _, field := range fields {
 		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
@@ -883,6 +887,10 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+		// Additional metadata
+		CollectionID: s.Collection(),
+		PartitionID:  s.Partition(),
+		SegmentID:    s.ID(),
 	}
 
 	if len(warmupPolicy) > 0 {
