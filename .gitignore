@@ -47,6 +47,7 @@ proxy/suvlim/*
 proxy-go/proxy-go
 
 # Compiled source
+target/
 bin/
 lib/
 *.a
