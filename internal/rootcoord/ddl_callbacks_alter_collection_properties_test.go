@@ -105,7 +105,6 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 		DeleteKeys:     []string{common.CollectionReplicaNumber, common.CollectionResourceGroups},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	require.NoError(t, err)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 0)
 	assertResourceGroups(t, ctx, core, dbName, collectionName, []string{})
 

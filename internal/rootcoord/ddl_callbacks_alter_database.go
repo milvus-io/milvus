@@ -40,15 +40,15 @@ import (
 func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.AlterDatabaseRequest) error {
 	req.DbName = strings.TrimSpace(req.DbName)
 	if req.GetProperties() == nil && req.GetDeleteKeys() == nil {
-		return errors.New("alter database with empty properties and delete keys, expected to set either properties or delete keys")
+		return merr.WrapErrParameterInvalidMsg("alter database with empty properties and delete keys, expected to set either properties or delete keys")
 	}
 
 	if len(req.GetProperties()) > 0 && len(req.GetDeleteKeys()) > 0 {
-		return errors.New("alter database cannot modify properties and delete keys at the same time")
+		return merr.WrapErrParameterInvalidMsg("alter database cannot modify properties and delete keys at the same time")
 	}
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
-		return errors.New("can not alter cipher related properties")
+		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
 
 	broadcaster, err := startBroadcastWithDatabaseLock(ctx, req.GetDbName())
