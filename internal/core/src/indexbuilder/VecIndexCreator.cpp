@@ -41,6 +41,9 @@ VecIndexCreator::VecIndexCreator(
         config_[DIM_KEY] = file_manager_context.indexMeta.dim;
     }
 
+    config_["build_id"] =
+        std::to_string(file_manager_context.indexMeta.build_id);
+
     index::CreateIndexInfo index_info;
     index_info.field_type = data_type_;
     index_info.index_type = index::GetIndexTypeFromConfig(config_);
