@@ -60,7 +60,7 @@ func NewRecordReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
 				return fieldBinlog.GetBinlogs()
 			})
 			bucketName := storageConfig.BucketName
-			paths := make([][]string, len(binlogLists))
+			paths := make([][]string, len(binlogLists[0]))
 			for _, binlogs := range binlogLists {
 				for j, binlog := range binlogs {
 					logPath := binlog.GetLogPath()
