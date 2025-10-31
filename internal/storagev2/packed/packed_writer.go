@@ -103,6 +103,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 			requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
 			gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
 			use_custom_part_upload: true,
+			max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
 		}
 		defer C.free(unsafe.Pointer(cStorageConfig.address))
 		defer C.free(unsafe.Pointer(cStorageConfig.bucket_name))

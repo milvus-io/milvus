@@ -36,24 +36,23 @@ get_azure_storage_config() {
         "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/"
         "K1SZFPTOtr/KBHBeksoGMGw==";
 
-    return CStorageConfig{
-        endpoint,
-        bucketName.c_str(),
-        accessKey,
-        accessValue,
-        rootPath.c_str(),
-        "remote",
-        "azure",
-        "",
-        "error",
-        "",
-        false,
-        "",
-        false,
-        false,
-        30000,
-        "",
-    };
+    return CStorageConfig{endpoint,
+                          bucketName.c_str(),
+                          accessKey,
+                          accessValue,
+                          rootPath.c_str(),
+                          "remote",
+                          "azure",
+                          "",
+                          "error",
+                          "",
+                          false,
+                          "",
+                          false,
+                          false,
+                          30000,
+                          "",
+                          100};
 }
 
 class StorageTest : public testing::Test {
