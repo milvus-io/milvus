@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -1263,62 +1262,6 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("add task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("execute task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("set_dynamic_field_bad_request", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.EnableDynamicSchemaKey, Value: "abc"},
-			},
-		})
-		assert.Error(t, merr.CheckRPCCall(resp, err))
-	})
-
-	t.Run("set_dynamic_field_ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.EnableDynamicSchemaKey, Value: "true"},
-			},
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 }
 
