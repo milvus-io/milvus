@@ -430,6 +430,38 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			factor, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			if factor <= 0 || !paramtable.Get().QueryNodeCfg.EnableDisk.GetAsBool() {
+				factor = 1
+			} else if factor > 32 {
+				factor = 32
+			}
+			knowhereThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
+			log.Info("UpdateKnowhereThreadPoolSize", zap.Uint32("knowhereThreadPoolSize", knowhereThreadPoolSize))
+			C.SegcoreSetKnowhereSearchThreadPoolNum(C.uint32_t(knowhereThreadPoolSize))
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.KnowhereFetchThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			factor, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			if factor <= 0 {
+				factor = 1
+			} else if factor > 32 {
+				factor = 32
+			}
+			knowhereFetchThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
+			log.Info("UpdateKnowhereFetchThreadPoolSize", zap.Uint32("knowhereFetchThreadPoolSize", knowhereFetchThreadPoolSize))
+			C.SegcoreSetKnowhereFetchThreadPoolNum(C.uint32_t(knowhereFetchThreadPoolSize))
+			return nil
+		})
+
 		paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			coefficient, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {
