@@ -58,6 +58,8 @@ var (
 	errIgnoerdCreatePartition  = errors.New("ignored create partition")  // partition is already exist, so it can be ignored.
 	errIgnoredDropCollection   = errors.New("ignored drop collection")   // drop collection or database not found, so it can be ignored.
 	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
+
+	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
 )
 
 type MetaTableChecker interface {
@@ -351,6 +353,7 @@ func (mt *MetaTable) CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb
 	defer mt.ddLock.RUnlock()
 
 	if _, ok := mt.dbName2Meta[dbName]; ok || mt.aliases.exist(dbName) || mt.names.exist(dbName) {
+		// TODO: idempotency check here.
 		return fmt.Errorf("database already exist: %s", dbName)
 	}
 
@@ -938,7 +941,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	coll, ok := mt.collID2Meta[header.CollectionId]
 	if !ok {
 		// collection not exists, return directly.
-		return nil
+		return errAlterCollectionNotFound
 	}
 
 	oldColl := coll.Clone()
@@ -970,7 +973,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
 	mt.collID2Meta[header.CollectionId] = newColl
-	log.Ctx(ctx).Info("alter collection finished", zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", newColl.UpdateTimestamp))
+	log.Ctx(ctx).Info("alter collection finished", zap.Bool("dbChanged", dbChanged), zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", newColl.UpdateTimestamp))
 	return nil
 }
 

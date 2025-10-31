@@ -1265,6 +1265,11 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	log.Info("received request to alter collection")
 
 	if err := c.broadcastAlterCollectionForAlterCollection(ctx, in); err != nil {
+		if errors.Is(err, errIgnoredAlterCollection) {
+			log.Info("alter collection make no changes, ignore it")
+			metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
 		log.Warn("failed to alter collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
 		return merr.Status(err), nil

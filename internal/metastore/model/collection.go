@@ -157,6 +157,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.EnableDynamicField = updates.Schema.EnableDynamicField
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
+			c.SchemaVersion = updates.Schema.Version
 		}
 	}
 }

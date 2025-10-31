@@ -49,6 +49,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
@@ -121,6 +122,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 			}
 		}
 		retry.Do(context.Background(), func() error {
+			log.Info("broadcast message", log.FieldMessage(msg))
 			return registry.CallMessageAckCallback(context.Background(), msg, results)
 		}, retry.AttemptAlways())
 		return &types.BroadcastAppendResult{}, nil
@@ -131,6 +133,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().Close().Return().Maybe()
 	broadcast.ResetBroadcaster()
 	broadcast.Register(mb)
@@ -892,36 +895,6 @@ func TestRootCoord_RenameCollection(t *testing.T) {
 		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("add task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("execute task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
 

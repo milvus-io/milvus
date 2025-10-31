@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -24,7 +26,7 @@ import (
 // broadcastAlterCollectionForAlterCollection broadcasts the put collection message for alter collection.
 func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 	if len(req.GetProperties()) == 0 && len(req.GetDeleteKeys()) == 0 {
-		return errIgnoredAlterCollection
+		return merr.WrapErrParameterInvalidMsg("no properties or delete keys provided")
 	}
 
 	if len(req.GetProperties()) > 0 && len(req.GetDeleteKeys()) > 0 {
@@ -101,11 +103,11 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// if there's no change, return nil directly to promise idempotent.
 	if len(header.UpdateMask.Paths) == 0 {
-		return nil
+		return errIgnoredAlterCollection
 	}
 
 	// fill the put load config if rg or replica number is changed.
-	udpates.AlterLoadConfig = c.getPutLoadConfigOfPutCollection(ctx, coll.Properties, udpates.Properties)
+	udpates.AlterLoadConfig = c.getAlterLoadConfigOfAlterCollection(coll.Properties, udpates.Properties)
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
@@ -241,8 +243,8 @@ func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, c
 	return builder.Build(), nil
 }
 
-// getPutLoadConfigOfPutCollection gets the put load config of put collection.
-func (c *Core) getPutLoadConfigOfPutCollection(ctx context.Context, oldProps []*commonpb.KeyValuePair, newProps []*commonpb.KeyValuePair) *message.AlterLoadConfigOfAlterCollection {
+// getAlterLoadConfigOfAlterCollection gets the alter load config of alter collection.
+func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValuePair, newProps []*commonpb.KeyValuePair) *message.AlterLoadConfigOfAlterCollection {
 	oldReplicaNumber, _ := common.CollectionLevelReplicaNumber(oldProps)
 	oldResourceGroups, _ := common.CollectionLevelResourceGroups(oldProps)
 	newReplicaNumber, _ := common.CollectionLevelReplicaNumber(newProps)
@@ -260,23 +262,25 @@ func (c *Core) getPutLoadConfigOfPutCollection(ctx context.Context, oldProps []*
 	}
 }
 
-func (c *DDLCallback) putCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
-		return err
+		if errors.Is(err, errAlterCollectionNotFound) {
+			log.Ctx(ctx).Warn("alter a non-existent collection, ignore it", log.FieldMessage(result.Message))
+			return nil
+		}
+		return errors.Wrap(err, "failed to alter collection")
 	}
-
 	if body.Updates.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 			CollectionIDs:  []int64{header.CollectionId},
 			ReplicaNumber:  body.Updates.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.Updates.AlterLoadConfig.ResourceGroups,
 		})
-		return merr.CheckRPCCall(resp, err)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return errors.Wrap(err, "failed to update load config")
+		}
 	}
-	if err := c.ExpireCaches(ctx, header, result.GetControlChannelResult().TimeTick); err != nil {
-		return err
-	}
-	return nil
+	return c.ExpireCaches(ctx, header, result.GetControlChannelResult().TimeTick)
 }

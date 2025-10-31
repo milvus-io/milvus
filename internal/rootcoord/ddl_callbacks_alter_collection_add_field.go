@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -42,7 +43,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	for _, field := range coll.Fields {
 		if field.Name == fieldSchema.Name {
 			// TODO: idempotency check here.
-			return errors.Errorf("field already exists, name: %s", fieldSchema.Name)
+			return merr.WrapErrParameterInvalidMsg("field already exists, name: %s", fieldSchema.Name)
 		}
 	}
 
