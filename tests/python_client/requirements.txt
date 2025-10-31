@@ -76,3 +76,6 @@ locust==2.25.0
 
 # for supporting higher python version
 typing_extensions==4.12.2
+
+# for geometry
+shapely==2.1.1
