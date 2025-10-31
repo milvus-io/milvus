@@ -114,7 +114,10 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	p.wg.Add(1)
 	defer p.wg.Done()
 	reqMsg := req.ReplicateMessage.GetMessage()
-	msg := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
+	msg, err := message.NewReplicateMessage(req.ReplicateMessage.SourceClusterId, reqMsg)
+	if err != nil {
+		return err
+	}
 	sourceTs := msg.ReplicateHeader().TimeTick
 	log.Debug("recv replicate message from client",
 		zap.String("messageID", reqMsg.GetId().GetId()),
@@ -123,9 +126,9 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 	)
 
 	// Append message to wal.
-	_, err := streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
+	_, err = streaming.WAL().Replicate().Append(p.streamServer.Context(), msg)
 	if err == nil {
-		p.sendReplicateResult(sourceTs)
+		p.sendReplicateResult(sourceTs, msg)
 		return nil
 	}
 	if status.AsStreamingError(err).IsIgnoredOperation() {
@@ -138,7 +141,11 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 }
 
 // sendReplicateResult sends the replicate result to client.
-func (p *ReplicateStreamServer) sendReplicateResult(sourceTimeTick uint64) {
+func (p *ReplicateStreamServer) sendReplicateResult(sourceTimeTick uint64, msg message.ReplicateMutableMessage) {
+	if msg.TxnContext() != nil && msg.MessageType() != message.MessageTypeCommitTxn {
+		// Only confirm the commit message of a transaction.
+		return
+	}
 	resp := &milvuspb.ReplicateResponse{
 		Response: &milvuspb.ReplicateResponse_ReplicateConfirmedMessageInfo{
 			ReplicateConfirmedMessageInfo: &milvuspb.ReplicateConfirmedMessageInfo{

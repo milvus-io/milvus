@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 var singleton WALAccesser = nil
@@ -99,9 +98,6 @@ type ReplicateService interface {
 
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
 	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
-
-	// GetReplicateConfiguration returns the replicate configuration of the milvus cluster.
-	GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error)
 
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.

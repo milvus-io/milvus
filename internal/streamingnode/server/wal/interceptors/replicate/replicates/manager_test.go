@@ -420,7 +420,7 @@ func newReplicateMessage(clusterID string, sourceClusterID string, timetick ...u
 		WithLastConfirmed(walimplstest.NewTestMessageID(1)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
 
-	replicateMsg := message.NewReplicateMessage(
+	replicateMsg := message.MustNewReplicateMessage(
 		sourceClusterID,
 		msg.IntoImmutableMessageProto(),
 	)
@@ -480,7 +480,7 @@ func newReplicateTxnMessage(clusterID string, sourceClusterID string, timetick .
 	immutables := newImmutableTxnMessage(sourceClusterID, timetick...)
 	replicateMsgs := []message.MutableMessage{}
 	for _, immutable := range immutables {
-		replicateMsg := message.NewReplicateMessage(
+		replicateMsg := message.MustNewReplicateMessage(
 			sourceClusterID,
 			immutable.IntoImmutableMessageProto(),
 		)
