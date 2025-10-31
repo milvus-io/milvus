@@ -31,6 +31,9 @@ void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
 void
+SegcoreSetEnableGeometryCache(const bool);
+
+void
 SegcoreSetNlist(const int64_t);
 
 void

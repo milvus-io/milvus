@@ -465,6 +465,7 @@ queryNode:
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
+    enableGeometryCache: false # Enable geometry cache for geometry data
     tieredStorage:
       warmup:
         # options: sync, disable.

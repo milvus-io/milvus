@@ -226,7 +226,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
 
         // Build geometry cache for GEOMETRY fields
-        if (field_meta.get_data_type() == DataType::GEOMETRY) {
+        if (field_meta.get_data_type() == DataType::GEOMETRY &&
+            segcore_config_.get_enable_geometry_cache()) {
             BuildGeometryCacheForInsert(
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
@@ -527,7 +528,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                    num_rows);
             // Build geometry cache for GEOMETRY fields
             if (schema_->operator[](field_id).get_data_type() ==
-                DataType::GEOMETRY) {
+                    DataType::GEOMETRY &&
+                segcore_config_.get_enable_geometry_cache()) {
                 BuildGeometryCacheForLoad(field_id, field_data);
             }
         }
@@ -1383,8 +1385,8 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
     try {
         // Get geometry cache for this segment+field
         auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                get_segment_id(), field_id);
+            milvus::exec::SimpleGeometryCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
 
         // Process geometry data from DataArray
         const auto& geometry_data = data_array->scalars().geometry_data();
@@ -1427,8 +1429,8 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
     try {
         // Get geometry cache for this segment+field
         auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                get_segment_id(), field_id);
+            milvus::exec::SimpleGeometryCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
 
         // Process each field data chunk
         for (const auto& data : field_data) {
