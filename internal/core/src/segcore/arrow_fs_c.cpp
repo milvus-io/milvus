@@ -61,6 +61,7 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
         conf.gcp_credential_json =
             std::string(c_storage_config.gcp_credential_json);
         conf.use_custom_part_upload = c_storage_config.use_custom_part_upload;
+        conf.max_connections = c_storage_config.max_connections;
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
         return milvus::SuccessCStatus();

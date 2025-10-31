@@ -97,6 +97,11 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     keys.emplace_back(PROPERTY_FS_REQUEST_TIMEOUT_MS);
     values.emplace_back(timeout_str.c_str());
 
+    std::string max_connections_str =
+        std::to_string(c_storage_config.max_connections);
+    keys.emplace_back(PROPERTY_FS_MAX_CONNECTIONS);
+    values.emplace_back(max_connections_str.c_str());
+
     // Create Properties using FFI
     auto properties = std::make_shared<Properties>();
     FFIResult result = properties_create(
