@@ -11,9 +11,11 @@ type cipherConfig struct {
 
 	SoPathGo               ParamItem `refreshable:"false"`
 	SoPathCpp              ParamItem `refreshable:"false"`
-	DefaultRootKey         ParamItem `refreshable:"false"`
-	RotationPeriodInHours  ParamItem `refreshable:"false"`
-	UpdatePerieldInMinutes ParamItem `refreshable:"false"`
+	DefaultRootKey         ParamItem `refreshable:"true"`
+	KmsAwsRoleARN          ParamItem `refreshable:"true"`
+	KmsAwsExternalID       ParamItem `refreshable:"true"`
+	RotationPeriodInHours  ParamItem `refreshable:"true"`
+	UpdatePerieldInMinutes ParamItem `refreshable:"true"`
 	EnalbeDiskEncryption   ParamItem `refreshable:"false"`
 }
 
@@ -34,10 +36,23 @@ func (c *cipherConfig) init(base *BaseTable) {
 	c.SoPathCpp.Init(base.mgr)
 
 	c.DefaultRootKey = ParamItem{
-		Key:     "cipherPlugin.defaultKmsKeyArn",
-		Version: "2.6.1",
+		Key:          "cipherPlugin.kms.defaultKey",
+		Version:      "2.6.1",
+		FallbackKeys: []string{"cipherPlugin.defaultKmsKeyArn"},
 	}
 	c.DefaultRootKey.Init(base.mgr)
+
+	c.KmsAwsRoleARN = ParamItem{
+		Key:     "cipherPlugin.kms.credentials.aws.roleARN",
+		Version: "2.6.1",
+	}
+	c.KmsAwsRoleARN.Init(base.mgr)
+
+	c.KmsAwsExternalID = ParamItem{
+		Key:     "cipherPlugin.kms.credentials.aws.externalID",
+		Version: "2.6.1",
+	}
+	c.KmsAwsExternalID.Init(base.mgr)
 
 	c.RotationPeriodInHours = ParamItem{
 		Key:          "cipherPlugin.rotationPeriodInHours",
