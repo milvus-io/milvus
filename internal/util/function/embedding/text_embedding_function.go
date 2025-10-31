@@ -47,6 +47,7 @@ const (
 	voyageAIProvider     string = "voyageai"
 	cohereProvider       string = "cohere"
 	siliconflowProvider  string = "siliconflow"
+	cometapiProvider     string = "cometapi"
 	teiProvider          string = "tei"
 )
 
@@ -132,10 +133,12 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 		embP, newProviderErr = NewCohereEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials)
 	case siliconflowProvider:
 		embP, newProviderErr = NewSiliconflowEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials)
+	case cometapiProvider:
+		embP, newProviderErr = NewCometAPIEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials)
 	case teiProvider:
 		embP, newProviderErr = NewTEIEmbeddingProvider(base.outputFields[0], functionSchema, conf, credentials)
 	default:
-		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, teiProvider)
+		return nil, fmt.Errorf("Unsupported text embedding service provider: [%s] , list of supported [%s, %s, %s, %s, %s, %s, %s, %s, %s, %s]", base.provider, openAIProvider, azureOpenAIProvider, aliDashScopeProvider, bedrockProvider, vertexAIProvider, voyageAIProvider, cohereProvider, siliconflowProvider, cometapiProvider, teiProvider)
 	}
 
 	if newProviderErr != nil {
