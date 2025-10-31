@@ -151,9 +151,9 @@ func (p *producerImpl) Append(ctx context.Context, msg message.MutableMessage) (
 		return nil, ctx.Err()
 	case resp := <-respCh:
 		if resp.err != nil {
-			if s := status.AsStreamingError(resp.err); s.IsFenced() {
+			if s := status.AsStreamingError(resp.err); s.IsFenced() || s.IsOnShutdown() {
 				if p.isFenced.CompareAndSwap(false, true) {
-					p.logger.Warn("producer client is fenced", zap.Error(resp.err))
+					p.logger.Warn("producer client is fenced or on shutdown", zap.Error(resp.err))
 					p.available.Close()
 				}
 			}

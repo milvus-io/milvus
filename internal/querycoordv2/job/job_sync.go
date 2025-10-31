@@ -96,5 +96,5 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 		return errors.Wrap(err, msg)
 	}
 
-	return waitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
+	return WaitCurrentTargetUpdated(job.ctx, job.targetObserver, job.req.GetCollectionID())
 }
