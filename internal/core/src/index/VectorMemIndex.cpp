@@ -306,13 +306,13 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     LOG_INFO("start build memory index with KNOWHERE, build_id: {}",
-             config["build_id"]);
+             config.value("build_id", "unknown"));
     auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
     LOG_INFO("build memory index with KNOWHERE done, build_id: {}",
-             config["build_id"]);
+             config.value("build_id", "unknown"));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
 }
@@ -320,9 +320,11 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
-    LOG_INFO("start build memory index, build_id: {}", config["build_id"]);
+    LOG_INFO("start build memory index, build_id: {}",
+             config.value("build_id", "unknown"));
     auto field_datas = file_manager_->CacheRawDataToMemory(config);
-    LOG_INFO("CacheRawDataToMemory success, build_id: {}", config["build_id"]);
+    LOG_INFO("CacheRawDataToMemory success, build_id: {}",
+             config.value("build_id", "unknown"));
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
     auto is_partition_key_isolation =
@@ -584,7 +586,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),
