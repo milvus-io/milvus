@@ -3078,7 +3078,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 
 	p.EnableGeometryCache = ParamItem{
 		Key:          "queryNode.segcore.enableGeometryCache",
-		Version:      "2.6.5",
+		Version:      "2.5.21",
 		DefaultValue: "false",
 		Doc:          "Enable geometry cache for geometry data",
 		Export:       true,
