@@ -447,7 +447,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     field_data_size = var_column->DataByteSize();
 
                     // Construct GeometryCache for the entire field
-                    LoadGeometryCache(field_id, *var_column);
+                    if (segcore_config_.get_enable_geometry_cache()) {
+                        LoadGeometryCache(field_id, *var_column);
+                    }
 
                     column = std::move(var_column);
                     break;
@@ -623,7 +625,9 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 var_column->Seal(std::move(indices));
 
                 // Construct GeometryCache for the entire field (mmap mode)
-                LoadGeometryCache(field_id, *var_column);
+                if (segcore_config_.get_enable_geometry_cache()) {
+                    LoadGeometryCache(field_id, *var_column);
+                }
 
                 column = std::move(var_column);
                 break;
@@ -2275,8 +2279,8 @@ SegmentSealedImpl::LoadGeometryCache(
     try {
         // Get geometry cache for this segment+field
         auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                get_segment_id(), field_id);
+            milvus::exec::SimpleGeometryCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
 
         // Get all string views from the single chunk
         auto [string_views, valid_data] = var_column.StringViews();
