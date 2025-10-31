@@ -27,9 +27,12 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) error {
@@ -54,7 +57,10 @@ func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.Create
 	if err != nil {
 		return errors.Wrap(err, "failed to tidy database cipher properties")
 	}
-
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, properties)
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
 	msg := message.NewCreateDatabaseMessageBuilderV2().
 		WithHeader(&message.CreateDatabaseMessageHeader{
 			DbName: req.GetDbName(),

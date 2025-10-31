@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/cockroachdb/errors"
@@ -173,6 +172,11 @@ func getTargetType(lDataType, rDataType schemapb.DataType) (schemapb.DataType, e
 			return schemapb.DataType_Geometry, nil
 		}
 	}
+	if typeutil.IsTimestamptzType(lDataType) {
+		if typeutil.IsTimestamptzType(rDataType) {
+			return schemapb.DataType_Timestamptz, nil
+		}
+	}
 	if typeutil.IsFloatingType(lDataType) {
 		if typeutil.IsJSONType(rDataType) || typeutil.IsArithmetic(rDataType) {
 			return schemapb.DataType_Double, nil
@@ -239,6 +243,9 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 		return value, nil
 	}
 	if typeutil.IsStringType(dataType) && IsString(value) {
+		return value, nil
+	}
+	if typeutil.IsTimestamptzType(dataType) {
 		return value, nil
 	}
 
@@ -630,7 +637,8 @@ func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, rev
 
 func canConvertToIntegerType(dataType, elementType schemapb.DataType) bool {
 	return typeutil.IsIntegerType(dataType) || typeutil.IsJSONType(dataType) ||
-		(typeutil.IsArrayType(dataType) && typeutil.IsIntegerType(elementType))
+		(typeutil.IsArrayType(dataType) && typeutil.IsIntegerType(elementType)) ||
+		typeutil.IsTimestamptzType(dataType)
 }
 
 func isIntegerColumn(col *planpb.ColumnInfo) bool {
@@ -863,32 +871,4 @@ func parseISODuration(durationStr string) (*planpb.Interval, error) {
 	}
 
 	return interval, nil
-}
-
-func parseISOWithTimezone(isoString string, preferredZones []string) (int64, error) {
-	timeZoneOffsetRegex := regexp.MustCompile(`([+-]\d{2}:\d{2}|Z)$`)
-	// layout for timestamp string without timezone
-	const layoutForNaiveTime = "2025-01-02T15:04:05.999999999"
-	if timeZoneOffsetRegex.MatchString(isoString) { // has timezone
-		t, err := time.Parse(time.RFC3339Nano, isoString)
-		if err != nil {
-			return 0, fmt.Errorf("failed to parse timezone-aware string '%s': %w", isoString, err)
-		}
-		return t.UnixMicro(), nil
-	}
-	for _, zoneName := range preferredZones {
-		loc, err := time.LoadLocation(zoneName)
-		if err != nil {
-			continue
-		}
-		t, err := time.ParseInLocation(layoutForNaiveTime, isoString, loc)
-		if err == nil {
-			return t.UnixMicro(), nil
-		}
-	}
-	t, err := time.ParseInLocation(layoutForNaiveTime, isoString, time.UTC)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse naive time string '%s' even with UTC fallback: %w", isoString, err)
-	}
-	return t.UnixMicro(), nil
 }

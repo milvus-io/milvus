@@ -215,7 +215,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		vectors := lo.Flatten(arrayData.([][]int8))
 		return vectors, nil, nil
 	case schemapb.DataType_Array:
-		// array has not support default_value
+		// array has not supported default_value
 		if c.field.GetNullable() {
 			return ReadNullableArrayData(c, count)
 		}
