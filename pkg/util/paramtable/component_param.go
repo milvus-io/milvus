@@ -3512,7 +3512,7 @@ If set to 0, time based eviction is disabled.`,
 	p.KnowhereFetchThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereFetchThreadPoolNumRatio",
 		Version:      "2.6.0",
-		DefaultValue: "4",
+		DefaultValue: "8",
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor <= 0 {
