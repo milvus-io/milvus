@@ -95,6 +95,8 @@ const (
 	CurrentScalarIndexEngineVersion = int32(2)
 )
 
+const DefaultTimezone = "UTC"
+
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
 var Endian = binary.LittleEndian
@@ -246,6 +248,7 @@ const (
 	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
+	TimezoneKey               = "timezone"
 	DatabaseDefaultTimezone   = "database.timezone"
 	CollectionDefaultTimezone = "collection.timezone"
 	AllowInsertAutoIDKey      = "allow_insert_auto_id"
