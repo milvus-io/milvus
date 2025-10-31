@@ -2654,7 +2654,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             column->ManualEvictCache();
         }
     }
-    if (data_type == DataType::GEOMETRY) {
+    if (data_type == DataType::GEOMETRY &&
+        segcore_config_.get_enable_geometry_cache()) {
         // Construct GeometryCache for the entire field
         LoadGeometryCache(field_id, column);
     }
@@ -2787,8 +2788,8 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
     try {
         // Get geometry cache for this segment+field
         auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                get_segment_id(), field_id);
+            milvus::exec::SimpleGeometryCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
 
         // Iterate through all chunks and collect WKB data
         auto num_chunks = column->num_chunks();
