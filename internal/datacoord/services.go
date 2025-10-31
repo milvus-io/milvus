@@ -2040,7 +2040,6 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		ID:   id,
 		Name: req.GetName(),
 		Path: req.GetPath(),
-		Type: req.GetType(),
 	}
 
 	err = s.meta.AddFileResource(ctx, resource)
