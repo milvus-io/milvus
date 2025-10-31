@@ -14,31 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+package querycoordv2
 
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/job"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
-type MsgHandler interface {
-	HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error
-
-	HandleFlush(flushMsg message.ImmutableFlushMessageV2) error
-
-	HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error
-
-	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
-
-	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error
-}
-
-func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-	return &internalpb.ImportFile{
-		Id:    file.GetId(),
-		Paths: file.GetPaths(),
+// alterLoadConfigV2AckCallback is called when the put load config message is acknowledged
+func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error {
+	// currently, we only sent the put load config message to the control channel
+	// TODO: after we support query view in 3.0, we should broadcast the put load config message to all vchannels.
+	job := job.NewLoadCollectionJob(ctx, result, s.dist, s.meta, s.broker, s.targetMgr, s.targetObserver, s.collectionObserver, s.nodeMgr)
+	if err := job.Execute(); err != nil {
+		return err
 	}
+	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
+	return nil
 }

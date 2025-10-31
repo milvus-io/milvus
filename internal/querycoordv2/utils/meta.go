@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -109,8 +108,7 @@ func RecoverAllCollection(m *meta.Meta) {
 
 func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
-		return nil, errors.Errorf(
-			"replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
+		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
@@ -156,6 +154,19 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		}
 	}
 	return replicaNumInRG, nil
+}
+
+// SpawnReplicasWithReplicaConfig spawns replicas with replica config.
+func SpawnReplicasWithReplicaConfig(ctx context.Context, m *meta.Meta, params meta.SpawnWithReplicaConfigParams) ([]*meta.Replica, error) {
+	replicas, err := m.ReplicaManager.SpawnWithReplicaConfig(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	RecoverReplicaOfCollection(ctx, m, params.CollectionID)
+	if streamingutil.IsStreamingServiceEnabled() {
+		m.RecoverSQNodesInCollection(ctx, params.CollectionID, snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs())
+	}
+	return replicas, nil
 }
 
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.

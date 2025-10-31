@@ -114,7 +114,7 @@ func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPrio
 }
 
 func (replica *Replica) LoadPriority() commonpb.LoadPriority {
-	return replica.loadPriority
+	return replica.loadPriority // TODO: the load priority doesn't persisted into the replica recovery info.
 }
 
 // GetID returns the id of the replica.

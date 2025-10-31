@@ -139,6 +139,26 @@ func (info *vchannelRecoveryInfo) ObserveSchemaChange(msg message.ImmutableSchem
 	info.dirty = true
 }
 
+// ObservePutCollection is called when a put collection message is observed.
+func (info *vchannelRecoveryInfo) ObserveAlterCollection(msg message.ImmutableAlterCollectionMessageV2) {
+	if msg.TimeTick() < info.meta.CheckpointTimeTick {
+		// the txn message will share the same time tick.
+		// (although the flush operation is not a txn message)
+		// so we only filter the time tick is less than the checkpoint time tick.
+		// Consistent state is guaranteed by the recovery storage's mutex.
+		return
+	}
+	if messageutil.IsSchemaChange(msg.Header()) {
+		info.meta.CollectionInfo.Schemas = append(info.meta.CollectionInfo.Schemas, &streamingpb.CollectionSchemaOfVChannel{
+			Schema:             msg.MustBody().Updates.Schema,
+			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+			CheckpointTimeTick: msg.TimeTick(),
+		})
+	}
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+}
+
 // ObserveDropCollection is called when a drop collection message is observed.
 func (info *vchannelRecoveryInfo) ObserveDropCollection(msg message.ImmutableDropCollectionMessageV1) {
 	if msg.TimeTick() < info.meta.CheckpointTimeTick {

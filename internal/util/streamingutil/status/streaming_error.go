@@ -81,6 +81,11 @@ func (e *StreamingError) IsResourceAcquired() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED
 }
 
+// IsOnShutdown returns true if the error is caused by on shutdown.
+func (e *StreamingError) IsOnShutdown() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN
+}
+
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, format, args...)

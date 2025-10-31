@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -114,6 +115,42 @@ func (suite *ReplicaManagerSuite) SetupTest() {
 
 func (suite *ReplicaManagerSuite) TearDownTest() {
 	suite.kv.Close()
+}
+
+func (suite *ReplicaManagerSuite) TestSpawnWithReplicaConfig() {
+	mgr := suite.mgr
+	ctx := suite.ctx
+
+	replicas, err := mgr.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+		CollectionID: 100,
+		Channels:     []string{"channel1", "channel2"},
+		Configs: []*messagespb.LoadReplicaConfig{
+			{ReplicaId: 1000, ResourceGroupName: "RG1", Priority: commonpb.LoadPriority_HIGH},
+		},
+	})
+	suite.NoError(err)
+	suite.Len(replicas, 1)
+
+	replicas, err = mgr.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+		CollectionID: 100,
+		Channels:     []string{"channel1", "channel2"},
+		Configs: []*messagespb.LoadReplicaConfig{
+			{ReplicaId: 1000, ResourceGroupName: "RG1", Priority: commonpb.LoadPriority_HIGH},
+			{ReplicaId: 1001, ResourceGroupName: "RG1", Priority: commonpb.LoadPriority_HIGH},
+		},
+	})
+	suite.NoError(err)
+	suite.Len(replicas, 2)
+
+	replicas, err = mgr.SpawnWithReplicaConfig(ctx, SpawnWithReplicaConfigParams{
+		CollectionID: 100,
+		Channels:     []string{"channel1", "channel2"},
+		Configs: []*messagespb.LoadReplicaConfig{
+			{ReplicaId: 1000, ResourceGroupName: "RG1", Priority: commonpb.LoadPriority_HIGH},
+		},
+	})
+	suite.NoError(err)
+	suite.Len(replicas, 1)
 }
 
 func (suite *ReplicaManagerSuite) TestSpawn() {
