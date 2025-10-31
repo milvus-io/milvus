@@ -23,6 +23,9 @@ func newStatsConfig() statsConfig {
 	l1MinSizeFromIdleTime := paramtable.Get().DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsInt64() * 1024 * 1024
 
 	l0MaxLifetime := params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse()
+	l0MaxBlockBinaryBytes := paramtable.Get().DataCoordCfg.BlockingL0SizeInMB.GetAsInt64() * 1024 * 1024 // MB to bytes
+	l0MaxBlockRowNum := paramtable.Get().DataCoordCfg.BlockingL0EntryNum.GetAsInt64()
+
 	return statsConfig{
 		maxBinlogFileNum:      segmentMaxBinlogFileNum,
 		memoryThreshold:       memoryTheshold,
@@ -32,6 +35,8 @@ func newStatsConfig() statsConfig {
 		l1MaxIdleTime:         l1MaxIdleTime,
 		l1MinSizeFromIdleTime: l1MinSizeFromIdleTime,
 		l0MaxLifetime:         l0MaxLifetime,
+		l0MaxBlockRowNum:      l0MaxBlockRowNum,
+		l0MaxBlockBinaryBytes: l0MaxBlockBinaryBytes,
 	}
 }
 
@@ -45,6 +50,8 @@ type statsConfig struct {
 	l1MaxIdleTime         time.Duration
 	l1MinSizeFromIdleTime int64
 	l0MaxLifetime         time.Duration
+	l0MaxBlockRowNum      int64
+	l0MaxBlockBinaryBytes int64
 }
 
 // Validate checks if the config is valid.
@@ -57,7 +64,9 @@ func (c statsConfig) Validate() error {
 		c.l1MaxIdleTime <= 0 ||
 		c.l1MinSizeFromIdleTime <= 0 ||
 		c.maxBinlogFileNum <= 0 ||
-		c.l0MaxLifetime <= 0 {
+		c.l0MaxLifetime <= 0 ||
+		c.l0MaxBlockRowNum <= 0 ||
+		c.l0MaxBlockBinaryBytes <= 0 {
 		return errors.Errorf("invalid stats config, cfg: %+v", c)
 	}
 	return nil
