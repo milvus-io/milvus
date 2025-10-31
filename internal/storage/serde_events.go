@@ -56,10 +56,13 @@ func NewRecordReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
 	// check legacy or import binlog struct
 	for _, fieldBinlog := range fieldBinlogs {
 		if len(fieldBinlog.ChildFields) == 0 {
+			binlogLists := lo.Map(fieldBinlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
+				return fieldBinlog.GetBinlogs()
+			})
 			bucketName := storageConfig.BucketName
-			paths := make([][]string, len(fieldBinlogs))
-			for _, binlogs := range fieldBinlogs {
-				for j, binlog := range binlogs.Binlogs {
+			paths := make([][]string, len(binlogLists))
+			for _, binlogs := range binlogLists {
+				for j, binlog := range binlogs {
 					logPath := binlog.GetLogPath()
 					if storageConfig.StorageType != "local" {
 						logPath = path.Join(bucketName, logPath)
