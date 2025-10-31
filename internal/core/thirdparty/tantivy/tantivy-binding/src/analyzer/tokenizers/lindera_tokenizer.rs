@@ -6,7 +6,6 @@ use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::token::Token as LToken;
 use lindera::tokenizer::Tokenizer as LTokenizer;
-use log::warn;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 use lindera::token_filter::japanese_compound_word::JapaneseCompoundWordTokenFilter;
@@ -17,9 +16,7 @@ use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
-use crate::analyzer::runtime_option::{
-    get_lindera_download_url, get_options, DEFAULT_DICT_PATH_KEY,
-};
+use crate::analyzer::options::{get_lindera_download_url, get_options, DEFAULT_DICT_PATH_KEY};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 
