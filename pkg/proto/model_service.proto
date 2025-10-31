@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package milvus.proto.modelservice;
+option go_package="github.com/milvus-io/milvus/pkg/v2/proto/modelservicepb";
+
+service TextEmbeddingService {
+    rpc Embedding(TextEmbeddingRequest) returns (TextEmbeddingResponse);
+}
+
+service RerankService {
+    rpc Rerank(TextRerankRequest) returns (TextRerankResponse);
+}
+
+message Status {
+    int32 code = 1;
+    string msg = 2;
+}
+
+message DenseVector {
+    enum DType {
+	DTYPE_UNSPECIFIED = 0;
+	DTYPE_FLOAT = 1;
+	DTYPE_INT8 = 2;
+    }
+
+    DType dtype = 1;
+    bytes data = 2;
+    int32 dim = 3; // Optional
+}
+
+message SparseVector {
+    repeated int32 indices = 1;
+    repeated float values = 2;
+}
+
+message MultiVector {
+    repeated DenseVector token_vectors = 1;
+    int32 dim = 2; // Optional
+}
+
+message TextEmbeddingRequest {
+    string model = 1;
+    repeated string texts = 2;
+    map<string, string> params = 3;
+}
+
+message EmbeddingResult {
+    DenseVector dense = 1;
+    SparseVector sparse = 2;
+    MultiVector multi_vector = 3;
+}
+
+message TextEmbeddingResponse {
+    Status status = 1;
+    map<string, string> extra_info = 2;
+    repeated EmbeddingResult results = 3;
+}
+
+message TextRerankRequest {
+    string model = 1;
+    string query = 2;
+    repeated string documents = 3;
+    map<string, string> params = 4;
+}
+
+message TextRerankResponse {
+    Status status = 1;
+    map<string, string> extra_info = 2;
+    repeated float scores = 3;
+}

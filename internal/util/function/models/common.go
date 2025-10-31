@@ -61,6 +61,8 @@ const (
 	CredentialParamKey         string = "credential"
 	TruncateParamKey           string = "truncate"
 	MaxClientBatchSizeParamKey string = "max_client_batch_size"
+	IntegrationIDKey           string = "integration_id"
+	ClusterIDKey               string = "cluster_id"
 )
 
 // ali text embedding
@@ -136,7 +138,14 @@ const (
 	TeiTruncateParamName string = "truncate"
 )
 
-func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {
+// zilliz
+
+const (
+	ModelDeploymentIDKey string = "model_deployment_id"
+	TruncationKey        string = "truncation"
+)
+
+func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string, clusterID string) (string, string, error) {
 	// function param > yaml > env
 	var err error
 	var apiKey, url string
@@ -148,6 +157,8 @@ func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyV
 			if apiKey, err = credentials.GetAPIKeyCredential(credentialName); err != nil {
 				return "", "", err
 			}
+		case IntegrationIDKey:
+			apiKey = param.Value + "|" + clusterID
 		}
 	}
 
