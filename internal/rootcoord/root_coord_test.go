@@ -1343,6 +1343,126 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 	})
 }
 
+func TestRootCoord_AddCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("add task failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("execute task failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_DropCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("drop task failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("execute task failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+
+		ctx := context.Background()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AlterCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("drop task failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("execute task failed", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
 func TestRootCoord_CheckHealth(t *testing.T) {
 	// getQueryCoordMetricsFunc := func(tt typeutil.Timestamp) (*milvuspb.GetMetricsResponse, error) {
 	// 	clusterTopology := metricsinfo.QueryClusterTopology{
