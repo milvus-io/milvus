@@ -53,7 +53,7 @@ func (s *Server) serverID() int64 {
 	return 0
 }
 
-func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
+func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
 	for _, field := range schema.GetFields() {
 		if field.FieldID == fieldID {
 			return field.Name, nil
@@ -62,7 +62,13 @@ func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, subField := range structField.GetFields() {
 			if subField.FieldID == fieldID {
-				return subField.Name, nil
+				// struct sub-field name is in the format of structName[fieldName] but we dont support "[]" in index name
+				// so we dont use field name directly as index name
+				extracedFieldName, err := typeutil.ExtractStructFieldName(subField.Name)
+				if err != nil {
+					return "", err
+				}
+				return typeutil.ConcatStructFieldDefaultIndexName(structField.Name, extracedFieldName), nil
 			}
 		}
 	}
@@ -174,7 +180,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		fieldName, err := s.getFieldNameByID(schema, req.GetFieldID())
+		fieldName, err := s.defaultIndexNameByID(schema, req.GetFieldID())
 		if err != nil {
 			log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 			return merr.Status(err), nil
