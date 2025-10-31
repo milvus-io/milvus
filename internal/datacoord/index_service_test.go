@@ -2998,3 +2998,31 @@ func TestJsonIndex(t *testing.T) {
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
 }
+
+func TestDefaultIndexNameByID(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 102,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     103,
+						Name:        "float_vector",
+						DataType:    schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}}}
+	defaultIndexName, err := s.defaultIndexNameByID(schema, 103)
+	assert.NoError(t, err)
+	assert.Equal(t, "struct_array_float_vector", defaultIndexName)
+}
