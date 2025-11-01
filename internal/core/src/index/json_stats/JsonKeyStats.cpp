@@ -221,6 +221,10 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
         break;
     }
 
+    if (num_tokens == 0) {
+        return;
+    }
+
     int index = 0;
     std::vector<std::string> paths;
     TraverseJsonForStats(json_str, tokens.data(), index, paths, infos);
@@ -505,6 +509,10 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
         break;
     }
 
+    if (num_tokens == 0) {
+        return;
+    }
+
     int index = 0;
     std::vector<std::string> paths;
     std::map<JsonKey, std::string> values;
@@ -576,6 +584,14 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                     static_cast<const milvus::Json*>(data->RawValue(i))
                         ->data()
                         .data();
+
+                // some situations, such as empty json string,
+                // should be handled as null row
+                if (strlen(json_str) == 0) {
+                    BuildKeyStatsForNullRow();
+                    continue;
+                }
+
                 BuildKeyStatsForRow(json_str, row_id);
             }
             row_id++;
