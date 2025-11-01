@@ -684,9 +684,13 @@ def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc,
 def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
 
+def gen_geometry_field(name="geo", description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
+
+
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
-    return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary, 
+    return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary,
                     element_type=element_type, max_capacity=max_capacity, **kwargs)
 
 
