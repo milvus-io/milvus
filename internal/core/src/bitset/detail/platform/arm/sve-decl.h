@@ -30,6 +30,14 @@ namespace arm {
 namespace sve {
 
 ///////////////////////////////////////////////////////////////////////////
+
+// bitset_batch_set sve implementation
+template <typename ElementType>
+void
+bitset_batch_set_sve(ElementType* data, const uint32_t* idxs, const size_t n);
+
+///////////////////////////////////////////////////////////////////////////
+
 // a facility to run through all acceptable data types
 #define ALL_DATATYPES_1(FUNC) \
     FUNC(int8_t);             \

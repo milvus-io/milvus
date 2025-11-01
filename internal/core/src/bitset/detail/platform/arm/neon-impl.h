@@ -446,6 +446,57 @@ struct CmpHelper<CompareOpType::NE> {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template <typename ElementType>
+void
+bitset_batch_set_neon(ElementType* data, const uint32_t* idxs, const size_t n) {
+    constexpr size_t data_bits = sizeof(ElementType) * 8;
+    constexpr int shift_bits = __builtin_ctz(data_bits);
+    constexpr uint32_t mask = (data_bits - 1);
+    constexpr size_t batch_size = 16;
+
+    if (n == 0) {
+        return;
+    }
+
+    const uint32x4_t mask_vec = vdupq_n_u32(mask);
+    alignas(64) uint32_t elems[batch_size];
+    alignas(64) uint32_t bits[batch_size];
+    auto num_batches = n / batch_size;
+
+    for (size_t batch = 0; batch < num_batches; batch++) {
+        size_t base_idx = batch * batch_size;
+
+        for (size_t j = 0; j < batch_size; j += 4) {
+            const uint32x4_t v = vld1q_u32(idxs + base_idx + j);
+            const uint32x4_t e = vshrq_n_u32(v, shift_bits);
+            const uint32x4_t b = vandq_u32(v, mask_vec);
+            vst1q_u32(elems + j, e);
+            vst1q_u32(bits + j, b);
+        }
+
+        ElementType cur_mask = 0;
+        uint32_t cur_elem = elems[0];
+        for (size_t j = 0; j < batch_size; j++) {
+            if (elems[j] == cur_elem) {
+                cur_mask |= (static_cast<ElementType>(1) << bits[j]);
+            } else {
+                __builtin_prefetch(&data[elems[j]], 0, 3);
+                data[cur_elem] |= cur_mask;
+                cur_elem = elems[j];
+                cur_mask = (static_cast<ElementType>(1) << bits[j]);
+            }
+        }
+        data[cur_elem] |= cur_mask;
+    }
+
+    for (size_t i = num_batches * batch_size; i < n; i++) {
+        data[idxs[i] >> shift_bits] |=
+            (static_cast<ElementType>(1) << (idxs[i] & mask));
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 //
 template <CompareOpType Op>
 bool

@@ -22,7 +22,9 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <algorithm>
 
+#include "common/CustomBitset.h"
 #include "bitset/bitset.h"
 #include "bitset/detail/bit_wise.h"
 #include "bitset/detail/element_wise.h"
@@ -46,6 +48,63 @@
 #endif
 
 using namespace milvus::bitset;
+
+//////////////////////////////////////////////////////////////////////////////////////////
+static std::vector<uint32_t>
+GenerateSortedIndices(size_t num_bits, size_t num_set) {
+    std::vector<uint32_t> idxs;
+    idxs.reserve(num_set);
+    if (num_set == 0) {
+        return idxs;
+    }
+    const size_t step = std::max<size_t>(1, num_bits / (num_set + 1));
+    size_t cur = step;
+    for (size_t i = 0; i < num_set; ++i) {
+        if (cur >= num_bits) {
+            cur = num_bits - 1;
+        }
+        idxs.emplace_back(cur);
+        cur += step;
+    }
+    std::sort(idxs.begin(), idxs.end());
+    idxs.erase(std::unique(idxs.begin(), idxs.end()), idxs.end());
+    return idxs;
+}
+
+TEST(BitsetSetBatchTest, ComparePerformanceAndCorrectness) {
+    const size_t num_bits = 1000000;
+    const size_t num_set = num_bits;
+
+    auto idxs = GenerateSortedIndices(num_bits, num_set);
+    ASSERT_FALSE(idxs.empty());
+    ASSERT_LT(idxs.back(), num_bits);
+
+    milvus::CustomBitset bitset1(num_bits, false);
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto index = 0;
+    for (size_t j = 0; j < 1000; j++) {
+        for (size_t i = 0; i < idxs.size(); ++i) {
+            bitset1.set(idxs[i], true);
+        }
+    }
+    auto t2 = std::chrono::high_resolution_clock::now();
+    auto cost1 =
+        std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+    std::cout << "bitset single set(): " << cost1 << " us\n";
+
+    milvus::CustomBitset bitset2(num_bits, false);
+    auto t3 = std::chrono::high_resolution_clock::now();
+    for (size_t j = 0; j < 1000; j++) {
+        milvus::bitset::detail::dynamic::bitset_batch_set<uint64_t>(
+            bitset2.data(), idxs.data(), idxs.size());
+    }
+    auto t4 = std::chrono::high_resolution_clock::now();
+    auto cost2 =
+        std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count();
+    std::cout << "bitset batch set(): " << cost2 << " us\n";
+
+    EXPECT_TRUE(bitset1 == bitset2);
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
