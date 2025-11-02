@@ -3512,7 +3512,7 @@ If set to 0, time based eviction is disabled.`,
 	p.KnowhereFetchThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereFetchThreadPoolNumRatio",
 		Version:      "2.6.0",
-		DefaultValue: "8",
+		DefaultValue: "16",
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor <= 0 {
@@ -3521,6 +3521,10 @@ If set to 0, time based eviction is disabled.`,
 				factor = 32
 			}
 			knowhereFetchThreadPoolSize := uint32(float64(hardware.GetCPUNum()) * factor)
+			// avoid too many threads
+			if knowhereFetchThreadPoolSize > 100 {
+				knowhereFetchThreadPoolSize = 100
+			}
 			return strconv.FormatUint(uint64(knowhereFetchThreadPoolSize), 10)
 		},
 		Doc:    "The number of threads in knowhere's fetch thread pool for object storage. The pool size will multiply with knowhereThreadPoolNumRatio([1, 32])",
