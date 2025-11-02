@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -101,6 +102,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 		return nil
 	})
+	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
+		return nil
+	})
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
@@ -116,7 +120,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
-		registry.CallMessageAckCallback(context.Background(), msg, results)
+		retry.Do(context.Background(), func() error {
+			return registry.CallMessageAckCallback(context.Background(), msg, results)
+		}, retry.AttemptAlways())
 		return &types.BroadcastAppendResult{}, nil
 	}).Maybe()
 	bapi.EXPECT().Close().Return().Maybe()
