@@ -159,8 +159,9 @@ func TestCluster_QuerySlot(t *testing.T) {
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
 
 		mockClient.EXPECT().QuerySlot(mock.Anything, mock.Anything).Return(&datapb.QuerySlotResponse{
-			Status:         merr.Success(),
-			AvailableSlots: 5,
+			Status:               merr.Success(),
+			AvailableCpuSlots:    2,
+			AvailableMemorySlots: 5,
 		}, nil)
 
 		// Test
@@ -168,7 +169,8 @@ func TestCluster_QuerySlot(t *testing.T) {
 		assert.NotNil(t, result)
 		assert.Len(t, result, 2)
 		for _, slots := range result {
-			assert.Equal(t, int64(5), slots.AvailableSlots)
+			assert.Equal(t, float64(2), slots.AvailableCpuSlot)
+			assert.Equal(t, float64(5), slots.AvailableMemorySlot)
 		}
 	})
 
@@ -265,7 +267,7 @@ func TestCluster_Import(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{}, 1)
+		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{})
 		assert.NoError(t, err)
 	})
 
@@ -279,7 +281,7 @@ func TestCluster_Import(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateImport(1, &datapb.ImportRequest{}, 1)
+		err := cluster.CreateImport(1, &datapb.ImportRequest{})
 		assert.NoError(t, err)
 	})
 
@@ -660,6 +662,10 @@ func TestCluster_CreateProperties(t *testing.T) {
 		assert.NoError(t, err)
 		_, err = props.GetTaskSlot()
 		assert.NoError(t, err)
+		_, err = props.GetTaskCPUSlot()
+		assert.NoError(t, err)
+		_, err = props.GetTaskMemorySlot()
+		assert.NoError(t, err)
 
 		// Verify basic properties
 		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), clusterID)
@@ -700,8 +706,10 @@ func TestCluster_CreateProperties(t *testing.T) {
 
 	t.Run("CreateCompaction", func(t *testing.T) {
 		req := &datapb.CompactionPlan{
-			PlanID:    1,
-			SlotUsage: 1,
+			PlanID:     1,
+			SlotUsage:  1,
+			CpuSlot:    1,
+			MemorySlot: 1,
 		}
 		err := cluster.CreateCompaction(1, req)
 		assert.NoError(t, err)
@@ -709,17 +717,23 @@ func TestCluster_CreateProperties(t *testing.T) {
 
 	t.Run("CreatePreImport", func(t *testing.T) {
 		req := &datapb.PreImportRequest{
-			TaskID: 1,
+			TaskID:     1,
+			TaskSlot:   1,
+			CpuSlot:    1,
+			MemorySlot: 1,
 		}
-		err := cluster.CreatePreImport(1, req, 1)
+		err := cluster.CreatePreImport(1, req)
 		assert.NoError(t, err)
 	})
 
 	t.Run("CreateImport", func(t *testing.T) {
 		req := &datapb.ImportRequest{
-			TaskID: 1,
+			TaskID:     1,
+			TaskSlot:   1,
+			CpuSlot:    1,
+			MemorySlot: 1,
 		}
-		err := cluster.CreateImport(1, req, 1)
+		err := cluster.CreateImport(1, req)
 		assert.NoError(t, err)
 	})
 
@@ -729,6 +743,8 @@ func TestCluster_CreateProperties(t *testing.T) {
 			TaskSlot:     1,
 			NumRows:      1000,
 			IndexVersion: 1,
+			CpuSlot:      1,
+			MemorySlot:   1,
 		}
 		err := cluster.CreateIndex(1, req)
 		assert.NoError(t, err)
@@ -741,6 +757,8 @@ func TestCluster_CreateProperties(t *testing.T) {
 			NumRows:     1000,
 			TaskVersion: 1,
 			SubJobType:  indexpb.StatsSubJob_Sort,
+			CpuSlot:     1,
+			MemorySlot:  1,
 		}
 		err := cluster.CreateStats(1, req)
 		assert.NoError(t, err)
@@ -748,9 +766,11 @@ func TestCluster_CreateProperties(t *testing.T) {
 
 	t.Run("CreateAnalyze", func(t *testing.T) {
 		req := &workerpb.AnalyzeRequest{
-			TaskID:   1,
-			TaskSlot: 1,
-			Version:  1,
+			TaskID:     1,
+			TaskSlot:   1,
+			Version:    1,
+			CpuSlot:    1,
+			MemorySlot: 1,
 		}
 		err := cluster.CreateAnalyze(1, req)
 		assert.NoError(t, err)

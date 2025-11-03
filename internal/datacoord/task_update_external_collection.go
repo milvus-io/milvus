@@ -61,9 +61,9 @@ func (t *updateExternalCollectionTask) GetTaskState() taskcommon.State {
 	return t.GetState()
 }
 
-func (t *updateExternalCollectionTask) GetTaskSlot() int64 {
+func (t *updateExternalCollectionTask) GetTaskSlot() (float64, float64) {
 	// External collection tasks are lightweight, use 1 slot
-	return 1
+	return 1, 1
 }
 
 func (t *updateExternalCollectionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {

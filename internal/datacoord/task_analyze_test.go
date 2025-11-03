@@ -95,7 +95,9 @@ func (s *analyzeTaskSuite) TestBasicTaskOperations() {
 	s.Run("task type and state", func() {
 		s.Equal(taskcommon.Analyze, at.GetTaskType())
 		s.Equal(at.GetState(), at.GetTaskState())
-		s.Equal(Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64(), at.GetTaskSlot())
+		cpuSlot, memorySlot := at.GetTaskSlot()
+		s.Equal(Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat(), cpuSlot)
+		s.Equal(Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat(), memorySlot)
 	})
 
 	s.Run("time management", func() {

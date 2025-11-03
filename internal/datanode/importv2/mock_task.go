@@ -469,6 +469,61 @@ func (_c *MockTask_GetSlots_Call) RunAndReturn(run func() int64) *MockTask_GetSl
 	return _c
 }
 
+// GetSlotsV2 provides a mock function with no fields
+func (_m *MockTask) GetSlotsV2() (float64, float64) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSlotsV2")
+	}
+
+	var r0 float64
+	var r1 float64
+	if rf, ok := ret.Get(0).(func() (float64, float64)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() float64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(float64)
+	}
+
+	if rf, ok := ret.Get(1).(func() float64); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(float64)
+	}
+
+	return r0, r1
+}
+
+// MockTask_GetSlotsV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSlotsV2'
+type MockTask_GetSlotsV2_Call struct {
+	*mock.Call
+}
+
+// GetSlotsV2 is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetSlotsV2() *MockTask_GetSlotsV2_Call {
+	return &MockTask_GetSlotsV2_Call{Call: _e.mock.On("GetSlotsV2")}
+}
+
+func (_c *MockTask_GetSlotsV2_Call) Run(run func()) *MockTask_GetSlotsV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetSlotsV2_Call) Return(_a0 float64, _a1 float64) *MockTask_GetSlotsV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockTask_GetSlotsV2_Call) RunAndReturn(run func() (float64, float64)) *MockTask_GetSlotsV2_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetState provides a mock function with no fields
 func (_m *MockTask) GetState() datapb.ImportTaskStateV2 {
 	ret := _m.Called()

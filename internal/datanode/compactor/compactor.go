@@ -31,4 +31,5 @@ type Compactor interface {
 	GetChannelName() string
 	GetCompactionType() datapb.CompactionType
 	GetSlotUsage() int64
+	GetSlotUsageV2() (float64, float64)
 }
