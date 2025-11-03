@@ -2238,8 +2238,8 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
     try {
         // Get geometry cache for this segment+field
         auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                get_segment_id(), field_id);
+            milvus::exec::SimpleGeometryCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
 
         // Iterate through all chunks and collect WKB data
         auto num_chunks = var_column.num_chunks();

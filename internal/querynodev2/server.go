@@ -351,6 +351,11 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
+	err = initcore.InitGeometryCache(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
 	return nil
