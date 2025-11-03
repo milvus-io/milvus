@@ -65,7 +65,7 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 			SegmentId: 2,
 		},
 	}
-	info.ObserveInsert(ts, assign)
+	info.ObserveModified(ts, assign.Rows, assign.BinarySize)
 	assert.True(t, info.dirty)
 	snapshot, shouldBeRemoved := info.ConsumeDirtyAndGetSnapshot()
 	assert.NotNil(t, snapshot)
@@ -78,7 +78,7 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	assert.False(t, shouldBeRemoved)
 
 	// insert may came from same txn with same txn.
-	info.ObserveInsert(ts, assign)
+	info.ObserveModified(ts, assign.Rows, assign.BinarySize)
 	assert.True(t, info.dirty)
 
 	ts += 1
