@@ -70,9 +70,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	for _, vchannel := range coll.VirtualChannelNames {
-		channels = append(channels, vchannel)
-	}
+	channels = append(channels, coll.VirtualChannelNames...)
 	// broadcast the put collection v2 message.
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{

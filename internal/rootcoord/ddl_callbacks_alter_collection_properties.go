@@ -111,9 +111,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	for _, vchannel := range coll.VirtualChannelNames {
-		channels = append(channels, vchannel)
-	}
+	channels = append(channels, coll.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
@@ -185,9 +183,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	for _, vchannel := range coll.VirtualChannelNames {
-		channels = append(channels, vchannel)
-	}
+	channels = append(channels, coll.VirtualChannelNames...)
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err

@@ -81,11 +81,7 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
-	for _, vchannel := range coll.VirtualChannelNames {
-		channels = append(channels, vchannel)
-	}
-
-	// TODO: add cache expirations for new name.
+	channels = append(channels, coll.VirtualChannelNames...)
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetOldName())
 	if err != nil {
 		return err
