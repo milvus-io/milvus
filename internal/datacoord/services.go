@@ -687,8 +687,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
-	// save binlogs, start positions and checkpoints
+	// save manifest, start positions and checkpoints
 	operators = append(operators,
+		UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
@@ -1395,6 +1396,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 }
 
 // WatchChannels notifies DataCoord to watch vchannels of a collection.
+// Deprecated: Redundant design by now, remove it in future.
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -1412,6 +1414,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
+		// TODO: redundant channel mark by now, remove it in future.
 		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			log.Error("failed to mark channel added", zap.Error(err))

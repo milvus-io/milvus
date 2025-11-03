@@ -13,65 +13,20 @@
 
 #include <cstdint>
 #include <memory>
-#include <unordered_map>
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
-#include "common/Chunk.h"
+#include "common/FieldDataInterface.h"
 #include "common/Types.h"
-#include "common/type_c.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "parquet/statistics.h"
-#include "parquet/types.h"
+#include "index/skipindex_stats/SkipIndexStats.h"
+
 namespace milvus {
-
-using Metrics =
-    std::variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
-
-// MetricsDataType is used to avoid copy when get min/max value from FieldChunkMetrics
-template <typename T>
-using MetricsDataType =
-    std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
-
-// ReverseMetricsDataType is used to avoid copy when get min/max value from FieldChunkMetrics
-template <typename T>
-using ReverseMetricsDataType =
-    std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
-
-struct FieldChunkMetrics {
-    Metrics min_;
-    Metrics max_;
-    bool hasValue_;
-    int64_t null_count_;
-
-    FieldChunkMetrics() : hasValue_(false){};
-
-    template <typename T>
-    std::pair<MetricsDataType<T>, MetricsDataType<T>>
-    GetMinMax() const {
-        AssertInfo(hasValue_,
-                   "GetMinMax should never be called when hasValue_ is false");
-        MetricsDataType<T> lower_bound;
-        MetricsDataType<T> upper_bound;
-        try {
-            lower_bound = std::get<ReverseMetricsDataType<T>>(min_);
-            upper_bound = std::get<ReverseMetricsDataType<T>>(max_);
-        } catch (const std::bad_variant_access& e) {
-            return {};
-        }
-        return {lower_bound, upper_bound};
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const {
-        return {0, 0};
-    }
-};
-
 class FieldChunkMetricsTranslatorFromStatistics
-    : public cachinglayer::Translator<FieldChunkMetrics> {
+    : public cachinglayer::Translator<index::FieldChunkMetrics> {
  public:
     FieldChunkMetricsTranslatorFromStatistics(
         int64_t segment_id,
@@ -86,51 +41,8 @@ class FieldChunkMetricsTranslatorFromStatistics
                 CacheWarmupPolicy::CacheWarmupPolicy_Disable,
                 false) {
         for (auto& statistic : statistics) {
-            auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
-            switch (data_type) {
-                case milvus::DataType::INT8: {
-                    SetMinMaxFromStatistics<parquet::Int32Type, int8_t>(
-                        statistic, chunk_metrics.get());
-                    break;
-                }
-                case milvus::DataType::INT16: {
-                    SetMinMaxFromStatistics<parquet::Int32Type, int16_t>(
-                        statistic, chunk_metrics.get());
-                    break;
-                }
-                case milvus::DataType::INT32: {
-                    SetMinMaxFromStatistics<parquet::Int32Type, int32_t>(
-                        statistic, chunk_metrics.get());
-                    break;
-                }
-                case milvus::DataType::INT64: {
-                    SetMinMaxFromStatistics<parquet::Int64Type, int64_t>(
-                        statistic, chunk_metrics.get());
-                    break;
-                }
-                case milvus::DataType::FLOAT: {
-                    SetMinMaxFromStatistics<parquet::FloatType, float>(
-                        statistic, chunk_metrics.get());
-                    break;
-                }
-                case milvus::DataType::DOUBLE: {
-                    SetMinMaxFromStatistics<parquet::DoubleType, double>(
-                        statistic, chunk_metrics.get());
-                    break;
-                }
-                case milvus::DataType::VARCHAR: {
-                    SetMinMaxFromStatistics<parquet::ByteArrayType,
-                                            std::string>(statistic,
-                                                         chunk_metrics.get());
-                    break;
-                }
-                default: {
-                    ThrowInfo(
-                        ErrorCode::UnexpectedError,
-                        fmt::format("Unsupported data type: {}", data_type));
-                }
-            }
-            cells_.emplace_back(std::move(chunk_metrics));
+            cells_.emplace_back(
+                std::move(builder_.Build(data_type_, statistic)));
         }
     }
 
@@ -158,19 +70,14 @@ class FieldChunkMetricsTranslatorFromStatistics
     }
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<FieldChunkMetrics>>>
+                          std::unique_ptr<index::FieldChunkMetrics>>>
     get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override {
         std::vector<std::pair<milvus::cachinglayer::cid_t,
-                              std::unique_ptr<FieldChunkMetrics>>>
+                              std::unique_ptr<index::FieldChunkMetrics>>>
             cells;
         cells.reserve(cids.size());
         for (auto cid : cids) {
-            auto chunk_metrics = std::make_unique<FieldChunkMetrics>();
-            chunk_metrics->min_ = cells_[cid]->min_;
-            chunk_metrics->max_ = cells_[cid]->max_;
-            chunk_metrics->null_count_ = cells_[cid]->null_count_;
-            chunk_metrics->hasValue_ = cells_[cid]->hasValue_;
-            cells.emplace_back(cid, std::move(chunk_metrics));
+            cells.emplace_back(cid, cells_[cid]->Clone());
         }
         return cells;
     }
@@ -187,51 +94,15 @@ class FieldChunkMetricsTranslatorFromStatistics
     }
 
  private:
-    template <typename ParquetType,
-              typename OutType,
-              typename std::enable_if<
-                  !std::is_same<ParquetType, parquet::ByteArrayType>::value,
-                  int>::type = 0>
-    static void
-    SetMinMaxFromStatistics(
-        const std::shared_ptr<parquet::Statistics>& statistic,
-        FieldChunkMetrics* chunk_metrics) {
-        auto typed_statistics =
-            std::dynamic_pointer_cast<parquet::TypedStatistics<ParquetType>>(
-                statistic);
-        chunk_metrics->min_ = static_cast<OutType>(typed_statistics->min());
-        chunk_metrics->max_ = static_cast<OutType>(typed_statistics->max());
-        chunk_metrics->null_count_ = typed_statistics->null_count();
-        chunk_metrics->hasValue_ = true;
-    }
-
-    template <typename ParquetType,
-              typename OutType,
-              typename std::enable_if<
-                  std::is_same<ParquetType, parquet::ByteArrayType>::value,
-                  int>::type = 0>
-    static void
-    SetMinMaxFromStatistics(
-        const std::shared_ptr<parquet::Statistics>& statistic,
-        FieldChunkMetrics* chunk_metrics) {
-        auto typed_statistics = std::dynamic_pointer_cast<
-            parquet::TypedStatistics<parquet::ByteArrayType>>(statistic);
-        chunk_metrics->min_ =
-            std::string(std::string_view(typed_statistics->min()));
-        chunk_metrics->max_ =
-            std::string(std::string_view(typed_statistics->max()));
-        chunk_metrics->null_count_ = typed_statistics->null_count();
-        chunk_metrics->hasValue_ = true;
-    }
-
     std::string key_;
     milvus::DataType data_type_;
+    index::SkipIndexStatsBuilder builder_;
     cachinglayer::Meta meta_;
-    std::vector<std::unique_ptr<FieldChunkMetrics>> cells_;
+    std::vector<std::unique_ptr<index::FieldChunkMetrics>> cells_;
 };
 
 class FieldChunkMetricsTranslator
-    : public cachinglayer::Translator<FieldChunkMetrics> {
+    : public cachinglayer::Translator<index::FieldChunkMetrics> {
  public:
     FieldChunkMetricsTranslator(int64_t segment_id,
                                 FieldId field_id,
@@ -267,7 +138,7 @@ class FieldChunkMetricsTranslator
         return key_;
     }
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<FieldChunkMetrics>>>
+                          std::unique_ptr<index::FieldChunkMetrics>>>
     get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     milvus::cachinglayer::Meta*
@@ -282,112 +153,60 @@ class FieldChunkMetricsTranslator
     }
 
  private:
-    // todo: support some null_count_ skip
-
-    template <typename T>
-    struct metricInfo {
-        T min_;
-        T max_;
-        int64_t null_count_;
-    };
-
-    metricInfo<std::string>
-    ProcessStringFieldMetrics(const StringChunk* chunk) {
-        // all captured by reference
-        bool has_first_valid = false;
-        std::string_view min_string;
-        std::string_view max_string;
-        int64_t null_count = 0;
-
-        auto row_count = chunk->RowNums();
-
-        for (int64_t i = 0; i < row_count; ++i) {
-            bool is_valid = chunk->isValid(i);
-            if (!is_valid) {
-                null_count++;
-                continue;
-            }
-            auto value = chunk->operator[](i);
-            if (!has_first_valid) {
-                min_string = value;
-                max_string = value;
-                has_first_valid = true;
-            } else {
-                if (value < min_string) {
-                    min_string = value;
-                }
-                if (value > max_string) {
-                    max_string = value;
-                }
-            }
-        }
-        // The field data may later be released, so we need to copy the string to avoid invalid memory access.
-        return {std::string(min_string), std::string(max_string), null_count};
-    }
-
-    template <typename T>
-    metricInfo<T>
-    ProcessFieldMetrics(const T* data, const bool* valid_data, int64_t count) {
-        //double check to avoid crash
-        if (data == nullptr || count == 0) {
-            return {T(), T()};
-        }
-        // find first not null value
-        int64_t start = 0;
-        for (int64_t i = start; i < count; i++) {
-            if (valid_data != nullptr && !valid_data[i]) {
-                start++;
-                continue;
-            }
-            break;
-        }
-        if (start > count - 1) {
-            return {T(), T(), count};
-        }
-        T minValue = data[start];
-        T maxValue = data[start];
-        int64_t null_count = start;
-        for (int64_t i = start; i < count; i++) {
-            T value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
-                null_count++;
-                continue;
-            }
-            if (value < minValue) {
-                minValue = value;
-            }
-            if (value > maxValue) {
-                maxValue = value;
-            }
-        }
-        return {minValue, maxValue, null_count};
-    }
-
     std::string key_;
     milvus::DataType data_type_;
     cachinglayer::Meta meta_;
     std::shared_ptr<ChunkedColumnInterface> column_;
+    index::SkipIndexStatsBuilder builder_;
 };
 
 class SkipIndex {
+ private:
+    template <typename T>
+    struct IsAllowedType {
+        static constexpr bool isAllowedType =
+            std::is_integral<T>::value || std::is_floating_point<T>::value ||
+            std::is_same<T, std::string>::value ||
+            std::is_same<T, std::string_view>::value;
+        static constexpr bool isDisabledType =
+            std::is_same<T, milvus::Json>::value ||
+            std::is_same<T, bool>::value;
+        static constexpr bool value = isAllowedType && !isDisabledType;
+        static constexpr bool arith_value =
+            std::is_integral<T>::value && !std::is_same<T, bool>::value;
+        static constexpr bool in_value = isAllowedType;
+    };
+
+    template <typename T>
+    using HighPrecisionType =
+        std::conditional_t<std::is_integral_v<T> && !std::is_same_v<bool, T>,
+                           int64_t,
+                           T>;
+
  public:
     template <typename T>
-    bool
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
     CanSkipUnaryRange(FieldId field_id,
                       int64_t chunk_id,
                       OpType op_type,
                       const T& val) const {
         auto pw = GetFieldChunkMetrics(field_id, chunk_id);
         auto field_chunk_metrics = pw.get();
-        if (MinMaxUnaryFilter<T>(field_chunk_metrics, op_type, val)) {
-            return true;
-        }
-        //further more filters for skip, like ngram filter, bf and so on
+        return field_chunk_metrics->CanSkipUnaryRange(op_type,
+                                                      index::Metrics{val});
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
+    CanSkipUnaryRange(FieldId field_id,
+                      int64_t chunk_id,
+                      OpType op_type,
+                      const T& val) const {
         return false;
     }
 
     template <typename T>
-    bool
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
     CanSkipBinaryRange(FieldId field_id,
                        int64_t chunk_id,
                        const T& lower_val,
@@ -396,13 +215,116 @@ class SkipIndex {
                        bool upper_inclusive) const {
         auto pw = GetFieldChunkMetrics(field_id, chunk_id);
         auto field_chunk_metrics = pw.get();
-        if (MinMaxBinaryFilter<T>(field_chunk_metrics,
-                                  lower_val,
-                                  upper_val,
-                                  lower_inclusive,
-                                  upper_inclusive)) {
-            return true;
+        return field_chunk_metrics->CanSkipBinaryRange(
+            index::Metrics{lower_val},
+            index::Metrics{upper_val},
+            lower_inclusive,
+            upper_inclusive);
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
+    CanSkipBinaryRange(FieldId field_id,
+                       int64_t chunk_id,
+                       const T& lower_val,
+                       const T& upper_val,
+                       bool lower_inclusive,
+                       bool upper_inclusive) const {
+        return false;
+    }
+
+    template <typename T>
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::arith_value, bool>
+    CanSkipBinaryArithRange(FieldId field_id,
+                            int64_t chunk_id,
+                            OpType op_type,
+                            ArithOpType arith_type,
+                            const HighPrecisionType<T> value,
+                            const HighPrecisionType<T> right_operand) const {
+        auto check_and_skip = [&](HighPrecisionType<T> new_value_hp,
+                                  OpType new_op_type) {
+            if constexpr (std::is_integral_v<T>) {
+                if (new_value_hp > std::numeric_limits<T>::max() ||
+                    new_value_hp < std::numeric_limits<T>::min()) {
+                    // Overflow detected. The transformed value cannot be represented by T.
+                    // We cannot make a safe comparison with the chunk's min/max.
+                    return false;
+                }
+            }
+            return CanSkipUnaryRange<T>(
+                field_id, chunk_id, new_op_type, static_cast<T>(new_value_hp));
+        };
+        switch (arith_type) {
+            case ArithOpType::Add: {
+                // field + C > V  =>  field > V - C
+                return check_and_skip(value - right_operand, op_type);
+            }
+            case ArithOpType::Sub: {
+                // field - C > V  =>  field > V + C
+                return check_and_skip(value + right_operand, op_type);
+            }
+            case ArithOpType::Mul: {
+                // field * C > V
+                if (right_operand == 0) {
+                    // field * 0 > V => 0 > V. This doesn't depend on the field's range.
+                    return false;
+                }
+
+                OpType new_op_type = op_type;
+                if (right_operand < 0) {
+                    new_op_type = FlipComparisonOperator(op_type);
+                }
+                return check_and_skip(value / right_operand, new_op_type);
+            }
+            case ArithOpType::Div: {
+                // field / C > V
+                if (right_operand == 0) {
+                    // Division by zero. Cannot evaluate, so cannot skip.
+                    return false;
+                }
+
+                OpType new_op_type = op_type;
+                if (right_operand < 0) {
+                    new_op_type = FlipComparisonOperator(op_type);
+                }
+                return check_and_skip(value * right_operand, new_op_type);
+            }
+            default:
+                return false;
         }
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::arith_value, bool>
+    CanSkipBinaryArithRange(FieldId field_id,
+                            int64_t chunk_id,
+                            OpType op_type,
+                            ArithOpType arith_type,
+                            const HighPrecisionType<T> value,
+                            const HighPrecisionType<T> right_operand) const {
+        return false;
+    }
+
+    template <typename T>
+    std::enable_if_t<SkipIndex::IsAllowedType<T>::in_value, bool>
+    CanSkipInQuery(FieldId field_id,
+                   int64_t chunk_id,
+                   const std::vector<T>& values) const {
+        auto pw = GetFieldChunkMetrics(field_id, chunk_id);
+        auto field_chunk_metrics = pw.get();
+        auto vals = std::vector<index::Metrics>{};
+        vals.reserve(values.size());
+        for (const auto& v : values) {
+            vals.emplace_back(v);
+        }
+        return field_chunk_metrics->CanSkipIn(vals);
+    }
+
+    template <typename T>
+    std::enable_if_t<!SkipIndex::IsAllowedType<T>::in_value, bool>
+    CanSkipInQuery(FieldId field_id,
+                   int64_t chunk_id,
+                   const std::vector<T>& values) const {
         return false;
     }
 
@@ -413,9 +335,9 @@ class SkipIndex {
              std::shared_ptr<ChunkedColumnInterface> column) {
         auto translator = std::make_unique<FieldChunkMetricsTranslator>(
             segment_id, field_id, data_type, column);
-        auto cache_slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<FieldChunkMetrics>(std::move(translator));
+        auto cache_slot = cachinglayer::Manager::GetInstance()
+                              .CreateCacheSlot<index::FieldChunkMetrics>(
+                                  std::move(translator));
 
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
@@ -430,137 +352,39 @@ class SkipIndex {
         auto translator =
             std::make_unique<FieldChunkMetricsTranslatorFromStatistics>(
                 segment_id, field_id, data_type, statistics);
-        auto cache_slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<FieldChunkMetrics>(std::move(translator));
+        auto cache_slot = cachinglayer::Manager::GetInstance()
+                              .CreateCacheSlot<index::FieldChunkMetrics>(
+                                  std::move(translator));
 
         std::unique_lock lck(mutex_);
         fieldChunkMetrics_[field_id] = std::move(cache_slot);
     }
 
  private:
-    const cachinglayer::PinWrapper<const FieldChunkMetrics*>
+    OpType
+    FlipComparisonOperator(OpType op) const {
+        switch (op) {
+            case OpType::GreaterThan:
+                return OpType::LessThan;
+            case OpType::GreaterEqual:
+                return OpType::LessEqual;
+            case OpType::LessThan:
+                return OpType::GreaterThan;
+            case OpType::LessEqual:
+                return OpType::GreaterEqual;
+            // OpType::Equal and OpType::NotEqual do not flip
+            default:
+                return op;
+        }
+    }
+
+    const cachinglayer::PinWrapper<const index::FieldChunkMetrics*>
     GetFieldChunkMetrics(FieldId field_id, int chunk_id) const;
 
-    template <typename T>
-    struct IsAllowedType {
-        static constexpr bool isAllowedType =
-            std::is_integral<T>::value || std::is_floating_point<T>::value ||
-            std::is_same<T, std::string>::value ||
-            std::is_same<T, std::string_view>::value;
-        static constexpr bool isDisabledType =
-            std::is_same<T, milvus::Json>::value ||
-            std::is_same<T, bool>::value;
-        static constexpr bool value = isAllowedType && !isDisabledType;
-    };
-
-    template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
-    MinMaxUnaryFilter(const FieldChunkMetrics* field_chunk_metrics,
-                      OpType op_type,
-                      const T& val) const {
-        if (!field_chunk_metrics->hasValue_) {
-            return false;
-        }
-        auto [lower_bound, upper_bound] = field_chunk_metrics->GetMinMax<T>();
-        if (lower_bound == MetricsDataType<T>() ||
-            upper_bound == MetricsDataType<T>()) {
-            return false;
-        }
-        return RangeShouldSkip<T>(val, lower_bound, upper_bound, op_type);
-    }
-
-    template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
-    MinMaxUnaryFilter(const FieldChunkMetrics* field_chunk_metrics,
-                      OpType op_type,
-                      const T& val) const {
-        return false;
-    }
-
-    template <typename T>
-    std::enable_if_t<SkipIndex::IsAllowedType<T>::value, bool>
-    MinMaxBinaryFilter(const FieldChunkMetrics* field_chunk_metrics,
-                       const T& lower_val,
-                       const T& upper_val,
-                       bool lower_inclusive,
-                       bool upper_inclusive) const {
-        if (!field_chunk_metrics->hasValue_) {
-            return false;
-        }
-        auto [lower_bound, upper_bound] = field_chunk_metrics->GetMinMax<T>();
-        if (lower_bound == MetricsDataType<T>() ||
-            upper_bound == MetricsDataType<T>()) {
-            return false;
-        }
-        bool should_skip = false;
-        if (lower_inclusive && upper_inclusive) {
-            should_skip =
-                (lower_val > upper_bound) || (upper_val < lower_bound);
-        } else if (lower_inclusive && !upper_inclusive) {
-            should_skip =
-                (lower_val > upper_bound) || (upper_val <= lower_bound);
-        } else if (!lower_inclusive && upper_inclusive) {
-            should_skip =
-                (lower_val >= upper_bound) || (upper_val < lower_bound);
-        } else {
-            should_skip =
-                (lower_val >= upper_bound) || (upper_val <= lower_bound);
-        }
-        return should_skip;
-    }
-
-    template <typename T>
-    std::enable_if_t<!SkipIndex::IsAllowedType<T>::value, bool>
-    MinMaxBinaryFilter(const FieldChunkMetrics* field_chunk_metrics,
-                       const T& lower_val,
-                       const T& upper_val,
-                       bool lower_inclusive,
-                       bool upper_inclusive) const {
-        return false;
-    }
-
-    template <typename T>
-    bool
-    RangeShouldSkip(const T& value,
-                    const MetricsDataType<T> lower_bound,
-                    const MetricsDataType<T> upper_bound,
-                    OpType op_type) const {
-        bool should_skip = false;
-        switch (op_type) {
-            case OpType::Equal: {
-                should_skip = value > upper_bound || value < lower_bound;
-                break;
-            }
-            case OpType::LessThan: {
-                should_skip = value <= lower_bound;
-                break;
-            }
-            case OpType::LessEqual: {
-                should_skip = value < lower_bound;
-                break;
-            }
-            case OpType::GreaterThan: {
-                should_skip = value >= upper_bound;
-                break;
-            }
-            case OpType::GreaterEqual: {
-                should_skip = value > upper_bound;
-                break;
-            }
-            default: {
-                should_skip = false;
-            }
-        }
-        return should_skip;
-    }
-
- private:
     std::unordered_map<
         FieldId,
-        std::shared_ptr<cachinglayer::CacheSlot<FieldChunkMetrics>>>
+        std::shared_ptr<cachinglayer::CacheSlot<index::FieldChunkMetrics>>>
         fieldChunkMetrics_;
-
     mutable std::shared_mutex mutex_;
 };
 }  // namespace milvus

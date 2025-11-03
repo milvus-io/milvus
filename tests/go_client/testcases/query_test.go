@@ -1218,7 +1218,7 @@ func TestRunAnalyzer(t *testing.T) {
 
 	// run analyzer with invalid params
 	_, err = mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption("text doc").WithAnalyzerParamsStr("invalid params}"))
-	common.CheckErr(t, err, false, "json error")
+	common.CheckErr(t, err, false, "JsonError")
 
 	// run analyzer with custom analyzer
 	tokens, err = mc.RunAnalyzer(ctx, client.NewRunAnalyzerOption("test doc").

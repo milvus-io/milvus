@@ -104,6 +104,7 @@ type DataCoordClient interface {
 	ManualCompaction(ctx context.Context, in *milvuspb.ManualCompactionRequest, opts ...grpc.CallOption) (*milvuspb.ManualCompactionResponse, error)
 	GetCompactionState(ctx context.Context, in *milvuspb.GetCompactionStateRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionStateResponse, error)
 	GetCompactionStateWithPlans(ctx context.Context, in *milvuspb.GetCompactionPlansRequest, opts ...grpc.CallOption) (*milvuspb.GetCompactionPlansResponse, error)
+	// Deprecated: Do not use.
 	WatchChannels(ctx context.Context, in *WatchChannelsRequest, opts ...grpc.CallOption) (*WatchChannelsResponse, error)
 	GetFlushState(ctx context.Context, in *GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error)
 	DropVirtualChannel(ctx context.Context, in *DropVirtualChannelRequest, opts ...grpc.CallOption) (*DropVirtualChannelResponse, error)
@@ -346,6 +347,7 @@ func (c *dataCoordClient) GetCompactionStateWithPlans(ctx context.Context, in *m
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *dataCoordClient) WatchChannels(ctx context.Context, in *WatchChannelsRequest, opts ...grpc.CallOption) (*WatchChannelsResponse, error) {
 	out := new(WatchChannelsResponse)
 	err := c.cc.Invoke(ctx, DataCoord_WatchChannels_FullMethodName, in, out, opts...)
@@ -627,6 +629,7 @@ type DataCoordServer interface {
 	ManualCompaction(context.Context, *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
 	GetCompactionState(context.Context, *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
 	GetCompactionStateWithPlans(context.Context, *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
+	// Deprecated: Do not use.
 	WatchChannels(context.Context, *WatchChannelsRequest) (*WatchChannelsResponse, error)
 	GetFlushState(context.Context, *GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
 	DropVirtualChannel(context.Context, *DropVirtualChannelRequest) (*DropVirtualChannelResponse, error)

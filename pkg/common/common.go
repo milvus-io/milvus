@@ -25,6 +25,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -606,4 +609,12 @@ func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error 
 		return fmt.Errorf("namespace data is not set but namespace enabled")
 	}
 	return nil
+}
+
+func ConvertWKTToWKB(wktStr string) ([]byte, error) {
+	geomT, err := wkt.Unmarshal(wktStr)
+	if err != nil {
+		return nil, err
+	}
+	return wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
 }

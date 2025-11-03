@@ -2980,8 +2980,8 @@ type hybridSearchRequestExprLogger struct {
 	*milvuspb.HybridSearchRequest
 }
 
-// String implements Stringer interface for lazy logging.
-func (l *hybridSearchRequestExprLogger) String() string {
+// Key implements Stringer interface for lazy logging.
+func (l *hybridSearchRequestExprLogger) Key() string {
 	builder := &strings.Builder{}
 
 	for idx, subReq := range l.Requests {

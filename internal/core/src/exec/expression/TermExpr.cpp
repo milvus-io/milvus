@@ -951,17 +951,25 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
         }
         processed_cursor += size;
     };
+
+    auto set = std::static_pointer_cast<SetElement<T>>(arg_set_);
+    auto skip_index_func =
+        [set](const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
+            return skip_index.CanSkipInQuery<T>(
+                field_id, chunk_id, set->GetElements());
+        };
+
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 std::nullptr_t{},
+                                                 skip_index_func,
                                                  input,
                                                  res,
                                                  valid_res,
                                                  arg_set_);
     } else {
         processed_size = ProcessDataChunks<T>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, arg_set_);
+            execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
