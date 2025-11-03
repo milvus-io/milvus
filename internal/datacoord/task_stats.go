@@ -39,7 +39,8 @@ import (
 type statsTask struct {
 	*indexpb.StatsTask
 
-	taskSlot int64
+	cpuSlot    float64
+	memorySlot float64
 
 	times *taskcommon.Times
 
@@ -52,20 +53,22 @@ type statsTask struct {
 var _ globalTask.Task = (*statsTask)(nil)
 
 func newStatsTask(t *indexpb.StatsTask,
-	taskSlot int64,
+	cpuSlot float64,
+	memorySlot float64,
 	mt *meta,
 	handler Handler,
 	allocator allocator.Allocator,
 	ievm IndexEngineVersionManager,
 ) *statsTask {
 	return &statsTask{
-		StatsTask: t,
-		taskSlot:  taskSlot,
-		times:     taskcommon.NewTimes(),
-		meta:      mt,
-		handler:   handler,
-		allocator: allocator,
-		ievm:      ievm,
+		StatsTask:  t,
+		cpuSlot:    cpuSlot,
+		memorySlot: memorySlot,
+		times:      taskcommon.NewTimes(),
+		meta:       mt,
+		handler:    handler,
+		allocator:  allocator,
+		ievm:       ievm,
 	}
 }
 
@@ -81,8 +84,8 @@ func (st *statsTask) GetTaskState() taskcommon.State {
 	return st.GetState()
 }
 
-func (st *statsTask) GetTaskSlot() int64 {
-	return st.taskSlot
+func (st *statsTask) GetTaskSlot() (float64, float64) {
+	return st.cpuSlot, st.memorySlot
 }
 
 func (st *statsTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -334,12 +337,13 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		TaskVersion:                      st.GetVersion(),
 		EnableJsonKeyStats:               Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsDataFormat:           common.JSONStatsDataFormatVersion,
-		TaskSlot:                         st.taskSlot,
 		StorageVersion:                   segment.StorageVersion,
 		CurrentScalarIndexVersion:        st.ievm.GetCurrentScalarIndexEngineVersion(),
 		JsonStatsMaxShreddingColumns:     Params.DataCoordCfg.JSONStatsMaxShreddingColumns.GetAsInt64(),
 		JsonStatsShreddingRatioThreshold: Params.DataCoordCfg.JSONStatsShreddingRatioThreshold.GetAsFloat(),
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
+		CpuSlot:                          st.cpuSlot,
+		MemorySlot:                       st.memorySlot,
 	}
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 
