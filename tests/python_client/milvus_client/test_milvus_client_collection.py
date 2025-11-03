@@ -4552,8 +4552,6 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         # Add ARRAY field separately with required parameters
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10)
         # Create collection
-        from pprint import pprint
-        pprint(f"schema: {schema}")
         self.create_collection(client, collection_name, schema=schema, shards_num=shards_num)
         # Verify collection properties
         expected_field_count = len([name for name in supported_types]) + 5
