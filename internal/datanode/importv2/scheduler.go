@@ -32,6 +32,7 @@ import (
 type Scheduler interface {
 	Start()
 	Slots() int64
+	SlotsV2() (float64, float64)
 	Close()
 }
 
@@ -112,6 +113,19 @@ func (s *scheduler) Slots() int64 {
 		return t.GetSlots()
 	})
 	return used
+}
+
+// SlotsV2 returns the used cpu slots and memory slots for import
+func (s *scheduler) SlotsV2() (float64, float64) {
+	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
+
+	cpuSlot, memorySlot := float64(0), float64(0)
+	for _, t := range tasks {
+		taskCpuSlot, taskMemorySlot := t.GetSlotsV2()
+		cpuSlot += taskCpuSlot
+		memorySlot += taskMemorySlot
+	}
+	return cpuSlot, memorySlot
 }
 
 func (s *scheduler) Close() {
