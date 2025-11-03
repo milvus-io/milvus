@@ -26,6 +26,7 @@ import (
 
 const (
 	versionChecker260 = "<2.6.0-dev"
+	versionChecker265 = "<2.6.5-dev"
 )
 
 // RecoverBalancer recover the balancer working.
@@ -108,6 +109,20 @@ func (b *balancerImpl) GetAllStreamingNodes(ctx context.Context) (map[int64]*typ
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string) (int64, bool) {
 	return b.channelMetaManager.GetLatestWALLocated(ctx, pchannel)
+}
+
+// WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
+func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
+	if b.channelMetaManager.IsWALBasedDDLEnabled() {
+		return nil
+	}
+	if err := b.channelMetaManager.WaitUntilStreamingEnabled(ctx); err != nil {
+		return err
+	}
+	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.StreamingNodeRole, versionChecker265); err != nil {
+		return err
+	}
+	return b.channelMetaManager.MarkWALBasedDDLEnabled(ctx)
 }
 
 // WatchChannelAssignments watches the balance result.
@@ -335,20 +350,20 @@ func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role strin
 func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260AtBackground(ctx context.Context) error {
 	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole, typeutil.QueryNodeRole}
 	for _, role := range expectedRoles {
-		if err := b.blockUntilRoleGreaterThan260AtBackground(ctx, role); err != nil {
+		if err := b.blockUntilRoleGreaterThanVersion(ctx, role, versionChecker260); err != nil {
 			return err
 		}
 	}
 	return b.channelMetaManager.MarkStreamingHasEnabled(ctx)
 }
 
-// blockUntilRoleGreaterThan260AtBackground block until the role is greater than 2.6.0 at background.
-func (b *balancerImpl) blockUntilRoleGreaterThan260AtBackground(ctx context.Context, role string) error {
+// blockUntilRoleGreaterThanVersion block until the role is greater than 2.6.0 at background.
+func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
 	doneErr := errors.New("done")
 	logger := b.Logger().With(zap.String("role", role))
-	logger.Info("start to wait that the nodes is greater than 2.6.0")
+	logger.Info("start to wait that the nodes is greater than version", zap.String("version", versionChecker))
 	// Check if there's any proxy or data node with version < 2.6.0.
-	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker)
 	defer rb.Close()
 
 	r := rb.Resolver()
@@ -360,10 +375,10 @@ func (b *balancerImpl) blockUntilRoleGreaterThan260AtBackground(ctx context.Cont
 		return nil
 	})
 	if err != nil && !errors.Is(err, doneErr) {
-		logger.Info("fail to wait that the nodes is greater than 2.6.0", zap.Error(err))
+		logger.Info("fail to wait that the nodes is greater than version", zap.String("version", versionChecker), zap.Error(err))
 		return err
 	}
-	logger.Info("all nodes is greater than 2.6.0 when watching")
+	logger.Info("all nodes is greater than version when watching", zap.String("version", versionChecker))
 	return nil
 }
 
