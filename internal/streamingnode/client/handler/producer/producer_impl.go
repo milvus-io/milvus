@@ -32,7 +32,9 @@ func CreateProducer(
 	opts *ProducerOptions,
 	handler streamingpb.StreamingNodeHandlerServiceClient,
 ) (Producer, error) {
-	ctx = createProduceRequest(ctx, opts)
+	ctx = contextutil.WithCreateProducer(ctx, &streamingpb.CreateProducerRequest{
+		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
+	})
 	streamClient, err := handler.Produce(ctx)
 	if err != nil {
 		return nil, err
@@ -78,16 +80,6 @@ func CreateProducer(
 	// Start the producer client.
 	go cli.execute()
 	return cli, nil
-}
-
-// createProduceRequest creates the produce request.
-func createProduceRequest(ctx context.Context, opts *ProducerOptions) context.Context {
-	// select server to consume.
-	ctx = contextutil.WithPickServerID(ctx, opts.Assignment.Node.ServerID)
-	// select channel to consume.
-	return contextutil.WithCreateProducer(ctx, &streamingpb.CreateProducerRequest{
-		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
-	})
 }
 
 // Expected message sequence:
@@ -159,9 +151,9 @@ func (p *producerImpl) Append(ctx context.Context, msg message.MutableMessage) (
 		return nil, ctx.Err()
 	case resp := <-respCh:
 		if resp.err != nil {
-			if s := status.AsStreamingError(resp.err); s.IsFenced() {
+			if s := status.AsStreamingError(resp.err); s.IsFenced() || s.IsOnShutdown() {
 				if p.isFenced.CompareAndSwap(false, true) {
-					p.logger.Warn("producer client is fenced", zap.Error(resp.err))
+					p.logger.Warn("producer client is fenced or on shutdown", zap.Error(resp.err))
 					p.available.Close()
 				}
 			}

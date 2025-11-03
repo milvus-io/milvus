@@ -40,6 +40,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	catalog.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListAliases(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().CreateDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	allocator := mocktso.NewAllocator(t)
 	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
@@ -64,7 +65,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	assert.NoError(t, err)
 	err = meta.AddCollection(ctx, &model.Collection{
 		CollectionID: 1,
-		State:        pb.CollectionState_CollectionCreating,
+		State:        pb.CollectionState_CollectionCreated,
 		ShardsNum:    256,
 		Partitions: []*model.Partition{
 			{PartitionID: 100, State: pb.PartitionState_PartitionCreated},
@@ -73,19 +74,11 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	assert.Equal(t, 0, meta.GetGeneralCount(ctx))
-	err = checkGeneralCapacity(ctx, 1, 2, 256, core)
-	assert.NoError(t, err)
-
-	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionCreated, typeutil.MaxTimestamp)
-	assert.NoError(t, err)
-
 	assert.Equal(t, 512, meta.GetGeneralCount(ctx))
 	err = checkGeneralCapacity(ctx, 1, 1, 1, core)
 	assert.Error(t, err)
 
-	err = meta.ChangeCollectionState(ctx, 1, pb.CollectionState_CollectionDropping, typeutil.MaxTimestamp)
+	err = meta.DropCollection(ctx, 1, typeutil.MaxTimestamp)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 0, meta.GetGeneralCount(ctx))

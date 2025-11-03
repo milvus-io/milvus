@@ -78,6 +78,15 @@ func (s *StreamingNodeManager) GetBalancer() balancer.Balancer {
 	return b
 }
 
+// AllocVirtualChannels allocates virtual channels for a collection.
+func (s *StreamingNodeManager) AllocVirtualChannels(ctx context.Context, param balancer.AllocVChannelParam) ([]string, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return balancer.AllocVirtualChannels(ctx, param)
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 // Return -1 and error if the vchannel is not found or context is canceled.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {

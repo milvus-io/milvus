@@ -10,6 +10,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -120,7 +121,12 @@ func TestRecoveryStorage(t *testing.T) {
 			// make sure the checkpoint is saved.
 			paramtable.Get().Save(paramtable.Get().StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "1000s")
 		}
-		rsInterface, snapshot, err := RecoverRecoveryStorage(context.Background(), b, msg)
+		cpProto, err := resource.Resource().StreamingNodeCatalog().GetConsumeCheckpoint(context.Background(), b.Channel().Name)
+		if err != nil {
+			require.NoError(t, err)
+		}
+		cp := utility.NewWALCheckpointFromProto(cpProto)
+		rsInterface, snapshot, err := RecoverRecoveryStorage(context.Background(), b, cp, msg)
 		rs := rsInterface.(*recoveryStorageImpl)
 		assert.NoError(t, err)
 		assert.NotNil(t, rs)

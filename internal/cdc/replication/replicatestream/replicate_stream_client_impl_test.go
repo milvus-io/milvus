@@ -19,6 +19,7 @@ package replicatestream
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,6 +104,7 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return replicateClient.(*replicateStreamClient).pendingMessages.Len() == 0
 	}, time.Second, 100*time.Millisecond)
+	mockStreamClient.Close()
 }
 
 func TestReplicateStreamClient_Replicate_ContextCanceled(t *testing.T) {
@@ -218,6 +220,7 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return replicateClient.(*replicateStreamClient).pendingMessages.Len() == 0
 	}, time.Second, 100*time.Millisecond)
+	mockStreamClient.Close()
 }
 
 // mockReplicateStreamClient implements the milvuspb.MilvusService_CreateReplicateStreamClient interface
@@ -232,7 +235,8 @@ type mockReplicateStreamClient struct {
 	t       *testing.T
 	timeout time.Duration
 
-	closeCh chan struct{}
+	closeOnce sync.Once
+	closeCh   chan struct{}
 }
 
 func newMockReplicateStreamClient(t *testing.T) *mockReplicateStreamClient {
@@ -242,6 +246,7 @@ func newMockReplicateStreamClient(t *testing.T) *mockReplicateStreamClient {
 		t:            t,
 		timeout:      10 * time.Second,
 		closeCh:      make(chan struct{}, 1),
+		closeOnce:    sync.Once{},
 	}
 }
 
@@ -311,10 +316,18 @@ func (m *mockReplicateStreamClient) Trailer() metadata.MD {
 }
 
 func (m *mockReplicateStreamClient) CloseSend() error {
-	close(m.closeCh)
+	m.closeOnce.Do(func() {
+		close(m.closeCh)
+	})
 	return nil
 }
 
 func (m *mockReplicateStreamClient) Context() context.Context {
 	return context.Background()
+}
+
+func (m *mockReplicateStreamClient) Close() {
+	m.closeOnce.Do(func() {
+		close(m.closeCh)
+	})
 }
