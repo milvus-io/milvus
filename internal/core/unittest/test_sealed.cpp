@@ -151,7 +151,12 @@ TEST(Sealed, without_predicate) {
 
     sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100);
+    sr = sealed_segment->Search(plan.get(),
+                                ph_group.get(),
+                                timestamp,
+                                folly::CancellationToken(),
+                                0,
+                                100);
     EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
@@ -989,7 +994,12 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100000);
+    auto sr = segment->Search(plan.get(),
+                              ph_group.get(),
+                              timestamp,
+                              folly::CancellationToken(),
+                              0,
+                              100000);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }
@@ -1505,7 +1515,7 @@ TEST(Sealed, LoadArrayFieldData) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-    segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
     auto ids_ds = GenRandomIds(N);
     auto s = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
@@ -1563,7 +1573,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     segment = CreateSealedWithFieldDataLoaded(schema, dataset, true);
-    segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 }
 
 TEST(Sealed, SkipIndexSkipUnaryRange) {

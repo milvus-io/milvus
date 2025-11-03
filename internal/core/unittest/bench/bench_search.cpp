@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <benchmark/benchmark.h>
 #include <string>
+#include <folly/CancellationToken.h>
 #include "common/type_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/SegmentGrowing.h"
@@ -95,9 +96,11 @@ Search_GrowingIndex(benchmark::State& state) {
                     dataset_.raw_);
 
     Timestamp ts = 10000000;
+    folly::CancellationToken token;
 
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts, 0);
+        auto qr =
+            segment->Search(search_plan.get(), ph_group.get(), ts, token, 0, 0);
     }
 }
 
@@ -137,9 +140,11 @@ Search_Sealed(benchmark::State& state) {
     }
 
     Timestamp ts = 10000000;
+    folly::CancellationToken token;
 
     for (auto _ : state) {
-        auto qr = segment->Search(search_plan.get(), ph_group.get(), ts, 0);
+        auto qr =
+            segment->Search(search_plan.get(), ph_group.get(), ts, token, 0, 0);
     }
 }
 
