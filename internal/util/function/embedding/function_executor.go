@@ -67,6 +67,8 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 			return nil, err
 		}
 		return f, nil
+	case schemapb.FunctionType_MinHash:
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
 	}

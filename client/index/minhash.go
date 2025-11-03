@@ -87,32 +87,32 @@ func NewMinHashLSHIndex(metricType entity.MetricType, lshBand int) *minhashLSHIn
 	return idx
 }
 
-type minHashLSHAnnParam struct {
+type minhashLSHAnnParam struct {
 	baseAnnParam
 }
 
-func (ap *minHashLSHAnnParam) WithSearchWithJACCARD(searchWithJACCARD bool) *minHashLSHAnnParam {
+func (ap *minhashLSHAnnParam) WithSearchWithJACCARD(searchWithJACCARD bool) *minhashLSHAnnParam {
 	ap.params[minhashSearchWithJaccardKey] = strconv.FormatBool(searchWithJACCARD)
 	return ap
 }
 
-func (ap *minHashLSHAnnParam) WithRefineK(refineK int) *minHashLSHAnnParam {
+func (ap *minhashLSHAnnParam) WithRefineK(refineK int) *minhashLSHAnnParam {
 	ap.params[minhashRefineK] = strconv.Itoa(refineK)
 	return ap
 }
 
-func (ap *minHashLSHAnnParam) WithBatchSearch(batchSearch bool) *minHashLSHAnnParam {
+func (ap *minhashLSHAnnParam) WithBatchSearch(batchSearch bool) *minhashLSHAnnParam {
 	ap.params[minhashLSHBatchSearchKey] = strconv.FormatBool(batchSearch)
 	return ap
 }
 
-func (ap *minHashLSHAnnParam) Params() map[string]any {
+func (ap *minhashLSHAnnParam) Params() map[string]any {
 	result := ap.baseAnnParam.Params()
 	return result
 }
 
-func NewMinHashLSHAnnParam() *minHashLSHAnnParam {
-	return &minHashLSHAnnParam{
+func NewMinHashLSHAnnParam() *minhashLSHAnnParam {
+	return &minhashLSHAnnParam{
 		baseAnnParam: baseAnnParam{
 			params: make(map[string]any),
 		},

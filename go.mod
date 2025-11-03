@@ -21,7 +21,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.4-0.20251013093953-f3e0a710c654
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.4-0.20251030070556-49b59a1ac117
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81 // indirect
@@ -65,7 +65,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.23.0
 	github.com/bits-and-blooms/bitset v1.10.0
 	github.com/bytedance/mockey v1.2.14
-	github.com/bytedance/sonic v1.13.2
+	github.com/bytedance/sonic v1.14.2
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/redact v1.1.3
 	github.com/google/uuid v1.6.0
@@ -136,11 +136,12 @@ require (
 	github.com/aws/smithy-go v1.22.2 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bytedance/sonic/loader v0.2.4 // indirect
+	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/bytedance/sonic/loader v0.4.0 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
-	github.com/cloudwego/base64x v0.1.5 // indirect
+	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cncf/xds/go v0.0.0-20241223141626-cff3c89139a3 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/confluentinc/confluent-kafka-go v1.9.1 // indirect
@@ -196,7 +197,7 @@ require (
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -313,6 +314,7 @@ replace (
 	github.com/golang-jwt/jwt => github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/greatroar/blobloom => github.com/milvus-io/blobloom v0.0.0-20240603110411-471ae49f3b93
 	github.com/ianlancetaylor/cgosymbolizer => github.com/milvus-io/cgosymbolizer v0.0.0-20250318084424-114f4050c3a6
+	github.com/milvus-io/milvus-proto/go-api/v2 => ../milvus-proto/go-api
 	github.com/milvus-io/milvus/pkg/v2 => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect

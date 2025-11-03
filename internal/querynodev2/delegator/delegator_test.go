@@ -1779,7 +1779,7 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		isBM25Field: map[int64]bool{101: true},
+		functionFieldType: map[int64]schemapb.FunctionType{101: schemapb.FunctionType_BM25},
 	}
 
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -859,6 +860,15 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func injectFunctionInternalParams(coll *schemapb.CollectionSchema) error {
+	for _, tf := range coll.GetFunctions() {
+		if err := function.InjectFunctionInternalParams(tf); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schemapb.FieldSchema) error {
 	switch fSchema.GetType() {
 	case schemapb.FunctionType_BM25:
@@ -872,6 +882,13 @@ func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 	case schemapb.FunctionType_TextEmbedding:
 		if err := embedding.TextEmbeddingOutputsCheck(fields); err != nil {
 			return err
+		}
+	case schemapb.FunctionType_MinHash:
+		if len(fields) != 1 {
+			return fmt.Errorf("MinHash function only need 1 output field, but got %d", len(fields))
+		}
+		if fields[0].GetDataType() != schemapb.DataType_BinaryVector {
+			return fmt.Errorf("MinHash function output field must be a BinaryVector field, but got %s", fields[0].DataType.String())
 		}
 	default:
 		return errors.New("check output field for unknown function type")
@@ -893,6 +910,11 @@ func checkFunctionInputField(function *schemapb.FunctionSchema, fields []*schema
 	case schemapb.FunctionType_TextEmbedding:
 		if err := embedding.TextEmbeddingInputsCheck(function.GetName(), fields); err != nil {
 			return err
+		}
+	case schemapb.FunctionType_MinHash:
+		if len(fields) != 1 || (fields[0].DataType != schemapb.DataType_VarChar && fields[0].DataType != schemapb.DataType_Text) {
+			return fmt.Errorf("MinHash function input field must be a VARCHAR/TEXT field, got %d field with type %s",
+				len(fields), fields[0].DataType.String())
 		}
 	default:
 		return errors.New("check input field with unknown function type")
@@ -939,6 +961,9 @@ func checkFunctionBasicParams(function *schemapb.FunctionSchema) error {
 		if len(function.GetParams()) == 0 {
 			return errors.New("TextEmbedding function accepts no params")
 		}
+	case schemapb.FunctionType_MinHash:
+		// MinHash function can accept optional params
+		return nil
 	default:
 		return errors.New("check function params with unknown function type")
 	}
@@ -1112,7 +1137,7 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 	expectColumnNum := 0
 	for _, field := range schema.GetFields() {
 		fieldName2Schema[field.Name] = field
-		if !typeutil.IsBM25FunctionOutputField(field, schema) {
+		if !(typeutil.IsBM25FunctionOutputField(field, schema) || typeutil.IsMinHashFunctionOutputField(field, schema)) {
 			expectColumnNum++
 		}
 	}
@@ -1718,12 +1743,12 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) {
 				// autoGenField
 				continue
 			}
@@ -1934,7 +1959,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 
 		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
 			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
-				typeutil.IsBM25FunctionOutputField(fieldSchema, schema) ||
+				typeutil.IsBM25FunctionOutputField(fieldSchema, schema) || typeutil.IsMinHashFunctionOutputField(fieldSchema, schema) ||
 				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
 				// autoGenField
 				continue
@@ -2615,6 +2640,16 @@ func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string
 	return fields
 }
 
+func GetMinHashFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_MinHash {
+			fields = append(fields, fSchema.OutputFieldNames...)
+		}
+	}
+	return fields
+}
+
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	properties := make(map[string]string)
 	for _, pair := range pairs {
@@ -2993,7 +3028,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 		return err
 	}
 
-	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
+	if embedding.HasNonPostProcessingFunctions(schema.CollectionSchema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions)

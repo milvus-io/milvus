@@ -509,7 +509,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
 
-	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
+	if embedding.HasNonPostProcessingFunctions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
@@ -629,7 +629,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+	if embedding.HasNonPostProcessingFunctions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)

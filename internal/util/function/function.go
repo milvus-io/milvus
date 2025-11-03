@@ -38,9 +38,20 @@ func NewFunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Functio
 	switch schema.GetType() {
 	case schemapb.FunctionType_BM25:
 		return NewBM25FunctionRunner(coll, schema)
+	case schemapb.FunctionType_MinHash:
+		return NewMinHashFunctionRunner(coll, schema)
 	case schemapb.FunctionType_TextEmbedding:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
+		return nil, fmt.Errorf("unknown functionRunner type %s %s", schema.GetType().String(), schemapb.FunctionType_MinHash)
+	}
+}
+
+func InjectFunctionInternalParams(schema *schemapb.FunctionSchema) error {
+	switch schema.GetType() {
+	case schemapb.FunctionType_MinHash:
+		return InjectMinHashFunctionInternalParams(schema)
+	default:
+		return nil
 	}
 }

@@ -4830,3 +4830,178 @@ func TestGetStorageCost(t *testing.T) {
 		assert.True(t, ok)
 	})
 }
+
+func TestInjectMinHashPermutations(t *testing.T) {
+	t.Run("MinHash function without permutations - should inject", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, Dim: 4096}, // 128 * 32 bits
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "128"},
+						{Key: "shingle_size", Value: "3"},
+						{Key: "hash_function", Value: "xxhash64"},
+						{Key: "seed", Value: "42"},
+					},
+				},
+			},
+		}
+
+		// Call validateFunction which should inject permutations
+		err := validateFunction(schema)
+		assert.NoError(t, err)
+
+		// Verify permutations were injected
+		funSchema := schema.Functions[0]
+		hasPermutations := false
+		var permutationsValue string
+		for _, param := range funSchema.Params {
+			if param.Key == "permutations" {
+				hasPermutations = true
+				permutationsValue = param.Value
+				break
+			}
+		}
+
+		assert.True(t, hasPermutations, "Permutations should be injected")
+		assert.NotEmpty(t, permutationsValue, "Permutations value should not be empty")
+
+		// Verify permutations can be deserialized
+		permA, permB, err := function.DeserializePermutations(permutationsValue)
+		assert.NoError(t, err)
+		assert.Equal(t, 128, len(permA), "Should have 128 permutations")
+		assert.Equal(t, 128, len(permB), "Should have 128 permutations")
+
+		// Verify permutations are valid (a is odd, both within range)
+		for i := 0; i < 128; i++ {
+			assert.Equal(t, uint64(1), permA[i]%2, "permA[%d] should be odd", i)
+			assert.True(t, permA[i] > 0 && permA[i] < (1<<61-1), "permA[%d] should be in valid range", i)
+			assert.True(t, permB[i] >= 0 && permB[i] < (1<<61-1), "permB[%d] should be in valid range", i)
+		}
+	})
+
+	t.Run("MinHash function with existing permutations - should not inject", func(t *testing.T) {
+		// Pre-generate permutations
+		permA, permB := function.InitPermutations(64, 100)
+		existingPerms := function.SerializePermutations(permA, permB)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, Dim: 2048}, // 64 * 32 bits
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "64"},
+						{Key: "permutations", Value: existingPerms},
+					},
+				},
+			},
+		}
+
+		// Call validateFunction which should NOT inject new permutations
+		err := validateFunction(schema)
+		assert.NoError(t, err)
+
+		// Verify permutations were not changed
+		funSchema := schema.Functions[0]
+		var permutationsValue string
+		for _, param := range funSchema.Params {
+			if param.Key == "permutations" {
+				permutationsValue = param.Value
+				break
+			}
+		}
+
+		assert.Equal(t, existingPerms, permutationsValue, "Existing permutations should not be modified")
+	})
+
+	t.Run("Non-MinHash function - should not inject", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
+				},
+			},
+		}
+
+		// Call validateFunction
+		err := validateFunction(schema)
+		assert.NoError(t, err)
+
+		// Verify no permutations were added to BM25 function
+		funSchema := schema.Functions[0]
+		for _, param := range funSchema.Params {
+			assert.NotEqual(t, "permutations", param.Key, "BM25 function should not have permutations")
+		}
+	})
+
+	t.Run("Deterministic permutations with same seed", func(t *testing.T) {
+		createSchema := func() *schemapb.CollectionSchema {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "text_field", DataType: schemapb.DataType_VarChar},
+					{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, Dim: 4096},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Name:             "text_to_minhash",
+						Type:             schemapb.FunctionType_MinHash,
+						InputFieldNames:  []string{"text_field"},
+						OutputFieldNames: []string{"minhash_output"},
+						Params: []*commonpb.KeyValuePair{
+							{Key: "num_hashes", Value: "128"},
+							{Key: "seed", Value: "999"},
+						},
+					},
+				},
+			}
+		}
+
+		schema1 := createSchema()
+		schema2 := createSchema()
+
+		// Inject permutations in both schemas
+		err1 := validateFunction(schema1)
+		err2 := validateFunction(schema2)
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
+
+		// Extract permutations from both schemas
+		var perms1, perms2 string
+		for _, param := range schema1.Functions[0].Params {
+			if param.Key == "permutations" {
+				perms1 = param.Value
+				break
+			}
+		}
+		for _, param := range schema2.Functions[0].Params {
+			if param.Key == "permutations" {
+				perms2 = param.Value
+				break
+			}
+		}
+
+		// Same seed should produce identical permutations
+		assert.Equal(t, perms1, perms2, "Same seed should produce identical permutations")
+	})
+}

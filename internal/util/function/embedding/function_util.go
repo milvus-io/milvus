@@ -22,22 +22,21 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-// Determine whether the column corresponding to outputIDs contains functions, except bm25 function,
-// if outputIDs is empty, check all cols
-func HasNonBM25Functions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
+// Determine whether the column corresponding to outputIDs except post-processing functions
+// (excluding BM25 and MinHash functions). If outputIDs is empty, check all cols.
+func HasNonPostProcessingFunctions(functions []*schemapb.FunctionSchema, outputIDs []int64) bool {
 	for _, fSchema := range functions {
 		switch fSchema.GetType() {
-		case schemapb.FunctionType_BM25:
-		case schemapb.FunctionType_Unknown:
+		case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash, schemapb.FunctionType_Unknown:
+			// Skip BM25, MinHash, and Unknown functions
 		default:
 			if len(outputIDs) == 0 {
 				return true
-			} else {
-				for _, id := range outputIDs {
-					for _, fOutputID := range fSchema.GetOutputFieldIds() {
-						if fOutputID == id {
-							return true
-						}
+			}
+			for _, id := range outputIDs {
+				for _, fOutputID := range fSchema.GetOutputFieldIds() {
+					if fOutputID == id {
+						return true
 					}
 				}
 			}

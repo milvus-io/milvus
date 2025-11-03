@@ -364,6 +364,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if err := injectFunctionInternalParams(t.schema); err != nil {
+		return err
+	}
+
 	if t.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
 		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
