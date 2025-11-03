@@ -35,7 +35,6 @@ type CompactionTask interface {
 	// Clean performs clean logic for a fail/timeout task
 	Clean() bool
 	BuildCompactionRequest() (*datapb.CompactionPlan, error)
-	GetSlotUsage() int64
 	GetLabel() string
 
 	SetTask(*datapb.CompactionTask)
