@@ -52,9 +52,8 @@ type MultiSegmentWriter struct {
 
 	maxRows     int64
 	segmentSize int64
-	// segmentSize in Bytes
-	// segmentSize might be changed dynamicly. To make sure a compaction plan is static,
-	// The target segmentSize is defined when creating the compaction plan.
+	// segmentSize in Bytes, it might change dynamicly.
+	// To make sure a compaction plan is static, it's defined when the plan is created
 
 	schema        *schemapb.CollectionSchema
 	partitionID   int64
