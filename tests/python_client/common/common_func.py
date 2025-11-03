@@ -689,7 +689,6 @@ def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT6
     return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary, 
                     element_type=element_type, max_capacity=max_capacity, **kwargs)
 
-
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.INT8, name=name, description=description, is_primary=is_primary, **kwargs)
 
