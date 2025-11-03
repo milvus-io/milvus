@@ -395,14 +395,26 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	var err error
 	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
+		log.Info("EXPR_RERANK: Creating function score from request",
+			zap.Int("num_functions", len(t.request.FunctionScore.Functions)),
+		)
 		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
-			log.Warn("Failed to create function score", zap.Error(err))
+			log.Warn("EXPR_RERANK: Failed to create function score", zap.Error(err))
 			return err
 		}
+		log.Info("EXPR_RERANK: Function score created successfully",
+			zap.Strings("all_input_field_names", t.functionScore.GetAllInputFieldNames()),
+			zap.Int("num_input_field_ids", len(t.functionScore.GetAllInputFieldIDs())),
+		)
 	} else {
 		if t.functionScore, err = rerank.NewFunctionScoreWithlegacy(t.schema.CollectionSchema, t.request.GetSearchParams()); err != nil {
-			log.Warn("Failed to create function by legacy info", zap.Error(err))
+			log.Warn("EXPR_RERANK: Failed to create function by legacy info", zap.Error(err))
 			return err
+		}
+		if t.functionScore != nil {
+			log.Info("EXPR_RERANK: Function score created from legacy info",
+				zap.Strings("all_input_field_names", t.functionScore.GetAllInputFieldNames()),
+			)
 		}
 	}
 
@@ -569,13 +581,79 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 
 	if t.request.FunctionScore != nil {
+		log.Info("EXPR_RERANK: Creating function score from request (regular search)",
+			zap.Int("num_functions", len(t.request.FunctionScore.Functions)),
+		)
 		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
-			log.Warn("Failed to create function score", zap.Error(err))
+			log.Warn("EXPR_RERANK: Failed to create function score", zap.Error(err))
 			return err
 		}
+		log.Info("EXPR_RERANK: Function score created successfully (regular search)",
+			zap.Strings("all_input_field_names", t.functionScore.GetAllInputFieldNames()),
+			zap.Int("num_input_field_ids", len(t.functionScore.GetAllInputFieldIDs())),
+		)
 
 		if !t.functionScore.IsSupportGroup() && queryInfo.GetGroupByFieldId() > 0 {
 			return merr.WrapErrParameterInvalidMsg("Rerank %s does not support grouping search", t.functionScore.RerankName())
+		}
+
+		// Ensure QueryNode-level rerankers have necessary scalar fields in search results
+		// so reducer-side rerank can read them without a requery.
+		// We do this by injecting the required field IDs into the plan's OutputFieldIds.
+		// Note: t.functionScore excludes QueryNode-only rerankers by design; inspect the request directly.
+		nameToID := make(map[string]int64)
+		for _, f := range t.schema.CollectionSchema.GetFields() {
+			nameToID[f.GetName()] = f.GetFieldID()
+		}
+		// collect required field IDs for any QueryNode ranker present
+		requiredIDsSet := typeutil.NewSet[int64]()
+		for _, fn := range t.request.FunctionScore.Functions {
+			if rerank.IsQueryNodeRanker(fn) {
+				for _, fieldName := range fn.GetInputFieldNames() {
+					if id, ok := nameToID[fieldName]; ok {
+						requiredIDsSet.Insert(id)
+					}
+				}
+				// Additionally, for expression-based rerankers, infer required
+				// fields directly from the expression code to avoid relying on
+				// callers to enumerate InputFieldNames.
+				// This is a best-effort hint and will be intersected with schema fields.
+				var exprCode string
+				for _, p := range fn.GetParams() {
+					if strings.EqualFold(p.GetKey(), "expr_code") {
+						exprCode = p.GetValue()
+						break
+					}
+				}
+				if exprCode != "" {
+					// Build available scalar field name list from schema
+					available := make([]string, 0, len(t.schema.CollectionSchema.GetFields()))
+					for _, f := range t.schema.CollectionSchema.GetFields() {
+						if !typeutil.IsVectorType(f.GetDataType()) {
+							available = append(available, f.GetName())
+						}
+					}
+					if usedNames, err := rerank.AnalyzeExprRequiredFields(exprCode, available); err == nil {
+						for _, name := range usedNames {
+							if id, ok := nameToID[name]; ok {
+								requiredIDsSet.Insert(id)
+							}
+						}
+					}
+				}
+			}
+		}
+		if requiredIDsSet.Len() > 0 {
+			// merge with any existing output fields that plan may already include
+			existing := typeutil.NewSet[int64](plan.GetOutputFieldIds()...)
+			for _, id := range requiredIDsSet.Collect() {
+				existing.Insert(id)
+			}
+			plan.OutputFieldIds = existing.Collect()
+			log.Info("EXPR_RERANK: Injected required field IDs into search plan for QueryNode rerank",
+				zap.Int("output_field_count", len(plan.OutputFieldIds)),
+				zap.Int("added_field_count", requiredIDsSet.Len()),
+			)
 		}
 	}
 
@@ -914,12 +992,46 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	searchReq := typeutil.Clone(t.SearchRequest)
 	searchReq.GetBase().TargetID = nodeID
 
+	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
+		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
+		zap.Int64("nodeID", nodeID),
+		zap.String("channel", channel))
+
 	// Add query node reranker to be executed at QueryNode level
-	if t.functionScore != nil && t.request.FunctionScore != nil && len(t.request.FunctionScore.Functions) > 0 {
-		for _, funcSchema := range t.request.FunctionScore.Functions {
-			if rerank.IsQueryNodeRanker(funcSchema) {
+	numFuncs := 0
+	if t.request.FunctionScore != nil {
+		numFuncs = len(t.request.FunctionScore.Functions)
+	}
+	log.Debug("EXPR_RERANK: Checking reranker attachment conditions",
+		zap.Bool("has_functionScore", t.functionScore != nil),
+		zap.Bool("has_request_FunctionScore", t.request.FunctionScore != nil),
+		zap.Int("num_functions", numFuncs),
+	)
+
+	if t.request.FunctionScore != nil && len(t.request.FunctionScore.Functions) > 0 {
+		for idx, funcSchema := range t.request.FunctionScore.Functions {
+			rerankerName := rerank.GetRerankName(funcSchema)
+			isQNRanker := rerank.IsQueryNodeRanker(funcSchema)
+			log.Info("EXPR_RERANK: Examining function for QueryNode attachment",
+				zap.Int("function_idx", idx),
+				zap.String("function_name", funcSchema.GetName()),
+				zap.String("reranker_name", rerankerName),
+				zap.Bool("is_query_node_ranker", isQNRanker),
+			)
+
+			if isQNRanker {
 				searchReq.RerankFunction = funcSchema
+				log.Info("EXPR_RERANK: Attaching reranker function to QueryNode search request",
+					zap.String("reranker_name", rerankerName),
+					zap.String("function_name", funcSchema.GetName()),
+					zap.Int32("reranker_type", int32(funcSchema.GetType())),
+					zap.Strings("reranker_input_fields", funcSchema.GetInputFieldNames()),
+				)
 				break // Only one reranker supported
+			} else {
+				log.Info("EXPR_RERANK: Function is not a QueryNode ranker, skipping",
+					zap.String("reranker_name", rerankerName),
+				)
 			}
 		}
 	}
@@ -930,11 +1042,6 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		Scope:           querypb.DataScope_All,
 		TotalChannelNum: int32(1),
 	}
-
-	log := log.Ctx(ctx).With(zap.Int64("collection", t.GetCollectionID()),
-		zap.Int64s("partitionIDs", t.GetPartitionIDs()),
-		zap.Int64("nodeID", nodeID),
-		zap.String("channel", channel))
 
 	var result *internalpb.SearchResults
 	var err error

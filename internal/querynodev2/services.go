@@ -837,6 +837,15 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()))
 
+	// Log reranker function if present
+	if req.GetReq().GetRerankFunction() != nil {
+		log.Info("EXPR_RERANK: QueryNode received search request with reranker function",
+			zap.String("reranker_name", req.GetReq().GetRerankFunction().GetName()),
+			zap.Int32("reranker_type", int32(req.GetReq().GetRerankFunction().GetType())),
+			zap.Strings("reranker_input_fields", req.GetReq().GetRerankFunction().GetInputFieldNames()),
+		)
+	}
+
 	tr := timerecord.NewTimeRecorderWithTrace(ctx, "SearchRequest")
 
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {

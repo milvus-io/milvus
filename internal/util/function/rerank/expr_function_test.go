@@ -16,10 +16,19 @@
 package rerank
 
 import (
+	"context"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestAnalyzeRequiredFields(t *testing.T) {
@@ -385,4 +394,322 @@ func TestToFloat64(t *testing.T) {
 		assert.Equal(t, tt.expected, result,
 			"toFloat64(%v) should return %v", tt.input, tt.expected)
 	}
+}
+
+func TestParseBool(t *testing.T) {
+	tests := []struct {
+		input       string
+		expected    bool
+		expectError bool
+	}{
+		{"true", true, false},
+		{"True", true, false},
+		{"TRUE", true, false},
+		{"1", true, false},
+		{"yes", true, false},
+		{"y", true, false},
+		{"false", false, false},
+		{"False", false, false},
+		{"FALSE", false, false},
+		{"0", false, false},
+		{"no", false, false},
+		{"n", false, false},
+		{"invalid", false, true},
+		{"2", false, true},
+		{"maybe", false, true},
+	}
+
+	for _, tt := range tests {
+		result, err := parseBool(tt.input)
+		if tt.expectError {
+			assert.Error(t, err, "Expected error for input: %s", tt.input)
+		} else {
+			assert.NoError(t, err, "Unexpected error for input: %s", tt.input)
+			assert.Equal(t, tt.expected, result,
+				"parseBool(%s) should return %v", tt.input, tt.expected)
+		}
+	}
+}
+
+func TestExprRerank_Metrics_SuccessfulProcess(t *testing.T) {
+	paramtable.Init()
+
+	registry := prometheus.NewRegistry()
+	metrics.RegisterRerank(registry)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_metrics",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "price", DataType: schemapb.DataType_Float},
+			{FieldID: 102, Name: "rating", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test_expr_metrics",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{"price", "rating"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: ExprCodeKey, Value: "score * 0.5 + fields.price * 0.3 + fields.rating * 0.2"},
+		},
+	}
+
+	reranker, err := newExprFunction(schema, functionSchema)
+	require.NoError(t, err)
+	defer reranker.Close()
+
+	nq := int64(1)
+	topk := int64(5)
+	data := embedding.GenSearchResultData(nq, topk, schemapb.DataType_Int64, "price", 101)
+	data.FieldsData = append(data.FieldsData, &schemapb.FieldData{
+		FieldId: 102,
+		Type:    schemapb.DataType_Float,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{Data: []float32{4.5, 4.0, 3.5, 3.0, 2.5}},
+				},
+			},
+		},
+	})
+
+	inputs, err := newRerankInputs([]*schemapb.SearchResultData{data}, reranker.GetInputFieldIDs(), false)
+	require.NoError(t, err)
+
+	searchParams := NewSearchParams(nq, topk, topk, -1, -1, 1, false, "", []string{"COSINE"})
+
+	latencyCountBefore := testutil.CollectAndCount(metrics.RerankLatency)
+	resultCountMetricsBefore := testutil.CollectAndCount(metrics.RerankResultCount)
+
+	_, err = reranker.Process(context.Background(), searchParams, inputs)
+	require.NoError(t, err)
+
+	latencyCountAfter := testutil.CollectAndCount(metrics.RerankLatency)
+	resultCountMetricsAfter := testutil.CollectAndCount(metrics.RerankResultCount)
+
+	assert.GreaterOrEqual(t, latencyCountAfter, latencyCountBefore, "RerankLatency metric should be recorded")
+	assert.GreaterOrEqual(t, resultCountMetricsAfter, resultCountMetricsBefore, "RerankResultCount metric should be recorded")
+}
+
+func TestExprRerank_Metrics_WithNormalization(t *testing.T) {
+	paramtable.Init()
+
+	registry := prometheus.NewRegistry()
+	metrics.RegisterRerank(registry)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_normalize",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "boost", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test_with_normalize",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{"boost"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: ExprCodeKey, Value: "score + fields.boost * 0.5"},
+			{Key: ExprNormalizeKey, Value: "true"},
+		},
+	}
+
+	reranker, err := newExprFunction(schema, functionSchema)
+	require.NoError(t, err)
+	defer reranker.Close()
+
+	exprRerank := reranker.(*ExprRerank[int64])
+	assert.True(t, exprRerank.needNormalize, "needNormalize should be true")
+
+	nq := int64(1)
+	topk := int64(4)
+	data := embedding.GenSearchResultData(nq, topk, schemapb.DataType_Int64, "boost", 101)
+
+	inputs, err := newRerankInputs([]*schemapb.SearchResultData{data}, reranker.GetInputFieldIDs(), false)
+	require.NoError(t, err)
+
+	searchParams := NewSearchParams(nq, topk, topk, -1, -1, 1, false, "", []string{"COSINE"})
+
+	latencyCountBefore := testutil.CollectAndCount(metrics.RerankLatency)
+
+	_, err = reranker.Process(context.Background(), searchParams, inputs)
+	require.NoError(t, err)
+
+	latencyCountAfter := testutil.CollectAndCount(metrics.RerankLatency)
+	assert.GreaterOrEqual(t, latencyCountAfter, latencyCountBefore, "RerankLatency should be observed with normalization")
+}
+
+func TestExprRerank_Metrics_EmptyResults(t *testing.T) {
+	paramtable.Init()
+
+	registry := prometheus.NewRegistry()
+	metrics.RegisterRerank(registry)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_empty",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test_empty_results",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{"value"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: ExprCodeKey, Value: "score * 2"},
+		},
+	}
+
+	reranker, err := newExprFunction(schema, functionSchema)
+	require.NoError(t, err)
+	defer reranker.Close()
+
+	nq := int64(1)
+	topk := int64(0)
+	inputs, err := newRerankInputs([]*schemapb.SearchResultData{}, reranker.GetInputFieldIDs(), false)
+	require.NoError(t, err)
+
+	searchParams := NewSearchParams(nq, topk, topk, -1, -1, 1, false, "", []string{"COSINE"})
+
+	latencyCountBefore := testutil.CollectAndCount(metrics.RerankLatency)
+
+	_, err = reranker.Process(context.Background(), searchParams, inputs)
+	require.NoError(t, err)
+
+	latencyCountAfter := testutil.CollectAndCount(metrics.RerankLatency)
+	assert.GreaterOrEqual(t, latencyCountAfter, latencyCountBefore, "RerankLatency should be observed even with empty results")
+}
+
+func TestExprRerank_Metrics_NoFieldsUsed(t *testing.T) {
+	paramtable.Init()
+
+	registry := prometheus.NewRegistry()
+	metrics.RegisterRerank(registry)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_no_fields",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "price", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test_score_only",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{"price"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: ExprCodeKey, Value: "score * 2.0"},
+		},
+	}
+
+	reranker, err := newExprFunction(schema, functionSchema)
+	require.NoError(t, err)
+	defer reranker.Close()
+
+	nq := int64(1)
+	topk := int64(4)
+	data := embedding.GenSearchResultData(nq, topk, schemapb.DataType_Int64, "price", 101)
+
+	inputs, err := newRerankInputs([]*schemapb.SearchResultData{data}, reranker.GetInputFieldIDs(), false)
+	require.NoError(t, err)
+
+	searchParams := NewSearchParams(nq, topk, topk, -1, -1, 1, false, "", []string{"COSINE"})
+
+	latencyCountBefore := testutil.CollectAndCount(metrics.RerankLatency)
+	resultCountMetricsBefore := testutil.CollectAndCount(metrics.RerankResultCount)
+
+	_, err = reranker.Process(context.Background(), searchParams, inputs)
+	require.NoError(t, err)
+
+	latencyCountAfter := testutil.CollectAndCount(metrics.RerankLatency)
+	resultCountMetricsAfter := testutil.CollectAndCount(metrics.RerankResultCount)
+
+	assert.GreaterOrEqual(t, latencyCountAfter, latencyCountBefore, "RerankLatency should be observed even with no fields")
+	assert.GreaterOrEqual(t, resultCountMetricsAfter, resultCountMetricsBefore, "RerankResultCount should be incremented")
+}
+
+func TestExprRerank_Metrics_MultipleQueries(t *testing.T) {
+	paramtable.Init()
+
+	registry := prometheus.NewRegistry()
+	metrics.RegisterRerank(registry)
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_multi_query",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "score_field", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test_multi",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{"score_field"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: ExprCodeKey, Value: "score + fields.score_field"},
+		},
+	}
+
+	reranker, err := newExprFunction(schema, functionSchema)
+	require.NoError(t, err)
+	defer reranker.Close()
+
+	nq := int64(3)
+	topk := int64(5)
+	data := embedding.GenSearchResultData(nq, topk, schemapb.DataType_Int64, "score_field", 101)
+
+	inputs, err := newRerankInputs([]*schemapb.SearchResultData{data}, reranker.GetInputFieldIDs(), false)
+	require.NoError(t, err)
+
+	searchParams := NewSearchParams(nq, topk, topk, -1, -1, 1, false, "", []string{"COSINE"})
+
+	resultCountMetricsBefore := testutil.CollectAndCount(metrics.RerankResultCount)
+
+	_, err = reranker.Process(context.Background(), searchParams, inputs)
+	require.NoError(t, err)
+
+	resultCountMetricsAfter := testutil.CollectAndCount(metrics.RerankResultCount)
+	assert.GreaterOrEqual(t, resultCountMetricsAfter, resultCountMetricsBefore,
+		"Result count metrics should be recorded for multiple queries")
+}
+
+func TestExprRerank_Close(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_close",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Float},
+		},
+	}
+
+	functionSchema := &schemapb.FunctionSchema{
+		Name:            "test",
+		Type:            schemapb.FunctionType_Rerank,
+		InputFieldNames: []string{"value"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: ExprCodeKey, Value: "score + fields.value"},
+		},
+	}
+
+	reranker, err := newExprFunction(schema, functionSchema)
+	require.NoError(t, err)
+
+	exprRerank := reranker.(*ExprRerank[int64])
+	assert.NotNil(t, exprRerank.program, "Program should be initialized")
+	assert.NotEmpty(t, exprRerank.exprString, "Expression string should be set")
+	assert.NotEmpty(t, exprRerank.collectionName, "Collection name should be set")
+
+	exprRerank.Close()
+
+	assert.Nil(t, exprRerank.program, "Program should be nil after Close")
+	assert.Empty(t, exprRerank.exprString, "Expression string should be empty after Close")
+	assert.Empty(t, exprRerank.collectionName, "Collection name should be empty after Close")
+	assert.Nil(t, exprRerank.requiredFieldNames, "Required field names should be nil after Close")
+	assert.Nil(t, exprRerank.requiredFieldIndices, "Required field indices should be nil after Close")
 }

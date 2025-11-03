@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/bytecodealliance/wasmtime-go"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -85,6 +87,13 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 		entryPoint = "rerank" // default
 	}
 
+	log.Info("EXPR_RERANK: Creating wasm reranker",
+		zap.String("collection", collSchema.GetName()),
+		zap.Int("input_field_count", len(base.inputFieldNames)),
+		zap.Strings("input_fields", base.inputFieldNames),
+		zap.String("entry_point", entryPoint),
+	)
+
 	store, instance, err := compileWasmModule(wasmBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile WASM module: %w", err)
@@ -123,6 +132,12 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 			},
 			collectionName: collSchema.GetName(),
 		}
+		log.Info("EXPR_RERANK: Wasm reranker created",
+			zap.String("collection", collSchema.GetName()),
+			zap.String("entry_point", entryPoint),
+			zap.Int("max_args", maxArgs),
+			zap.Int("max_fields", maxFields),
+		)
 		registerRerankerForCollection(collSchema.GetName(), wf)
 		return wf, nil
 	} else {
@@ -143,6 +158,12 @@ func newWasmFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 			},
 			collectionName: collSchema.GetName(),
 		}
+		log.Info("EXPR_RERANK: Wasm reranker created",
+			zap.String("collection", collSchema.GetName()),
+			zap.String("entry_point", entryPoint),
+			zap.Int("max_args", maxArgs),
+			zap.Int("max_fields", maxFields),
+		)
 		registerRerankerForCollection(collSchema.GetName(), wf)
 		return wf, nil
 	}
@@ -175,13 +196,30 @@ func (wf *WasmFunction[T]) Process(ctx context.Context, searchParams *SearchPara
 	startTime := time.Now()
 	totalResults := 0
 
+	log.Ctx(ctx).Info("EXPR_RERANK: Wasm reranker processing start",
+		zap.String("collection", collectionNameStr),
+		zap.String("reranker", rerankerName),
+		zap.Int64("nq", searchParams.nq),
+		zap.Int64("topk", searchParams.limit),
+		zap.Bool("grouping", searchParams.isGrouping()),
+		zap.Strings("metrics", searchParams.searchMetrics),
+	)
+
 	defer func() {
 		elapsed := time.Since(startTime).Milliseconds()
 		metrics.RerankLatency.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName).Observe(float64(elapsed))
 		metrics.RerankResultCount.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName).Add(float64(totalResults))
+		log.Ctx(ctx).Info("EXPR_RERANK: Wasm reranker processing done",
+			zap.Int64("elapsed_ms", elapsed),
+			zap.Int("total_results", totalResults),
+		)
 	}()
 
 	for _, cols := range inputs.data {
+		log.Ctx(ctx).Debug("EXPR_RERANK: Wasm reranker processing batch",
+			zap.Int("num_columns", len(cols)),
+			zap.Int("required_fields", len(wf.inputFieldNames)),
+		)
 		idScore, err := wf.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
 			metrics.RerankErrors.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName, "evaluation_error").Inc()
@@ -230,6 +268,9 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 
 	// Fast path: No input fields -the most common case - inline everything
 	if len(inputFieldTypes) == 0 {
+		log.Ctx(ctx).Debug("EXPR_RERANK: Wasm fast path (no input fields)",
+			zap.Int("doc_count", len(ids)),
+		)
 		for j, id := range ids {
 			originalScore := scores[j]
 
@@ -243,6 +284,10 @@ func (wf *WasmFunction[T]) processOneSearchData(ctx context.Context, searchParam
 			rerankedScores[id] = newScore
 		}
 	} else {
+		log.Ctx(ctx).Debug("EXPR_RERANK: Wasm field path (with input fields)",
+			zap.Int("doc_count", len(ids)),
+			zap.Int("field_count", len(inputFieldTypes)),
+		)
 		wf.precomputeFieldArrays(col, inputFieldTypes)
 
 		for j, id := range ids {

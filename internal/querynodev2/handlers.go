@@ -438,14 +438,29 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		WithGroupSize(req.GetReq().GetGroupSize()).
 		WithAdvance(req.GetReq().GetIsAdvanced())
 	if req.GetReq().GetRerankFunction() != nil {
+		log.Info("EXPR_RERANK: Processing reranker function in searchChannel",
+			zap.String("channel", channel),
+			zap.String("reranker_name", req.GetReq().GetRerankFunction().GetName()),
+			zap.Int32("reranker_type", int32(req.GetReq().GetRerankFunction().GetType())),
+		)
 		if node.manager.Collection.Ref(req.Req.GetCollectionID(), 1) {
 			coll := node.manager.Collection.Get(req.Req.GetCollectionID())
 			if coll != nil {
 				reduceInfo = reduceInfo.WithRerank(coll.Schema(), req.GetReq().GetRerankFunction())
+				log.Info("EXPR_RERANK: Reranker function attached to reduce info",
+					zap.String("channel", channel),
+				)
 			}
 			node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 		}
 	}
+	log.Info("EXPR_RERANK: Calling ReduceSearchOnQueryNode",
+		zap.Bool("is_advanced", reduceInfo.GetIsAdvance()),
+		zap.Bool("has_rerank_function", reduceInfo.GetRerankFunction() != nil),
+		zap.Bool("has_collection_schema", reduceInfo.GetCollectionSchema() != nil),
+		zap.Int64("nq", reduceInfo.GetNq()),
+		zap.Int64("topk", reduceInfo.GetTopK()),
+	)
 	resp, err := segments.ReduceSearchOnQueryNode(ctx, results, reduceInfo)
 	if err != nil {
 		return nil, err

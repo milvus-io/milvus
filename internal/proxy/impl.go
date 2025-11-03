@@ -2811,6 +2811,21 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
+	// Log function score details if present
+	if request.FunctionScore != nil {
+		log.Info("EXPR_RERANK: Search request received with function score",
+			zap.Int("num_functions", len(request.FunctionScore.Functions)),
+		)
+		for i, fn := range request.FunctionScore.Functions {
+			log.Info("EXPR_RERANK: Function score details",
+				zap.Int("function_index", i),
+				zap.String("function_name", fn.GetName()),
+				zap.Int32("function_type", int32(fn.GetType())),
+				zap.Strings("input_fields", fn.GetInputFieldNames()),
+			)
+		}
+	}
+
 	defer func() {
 		span := tr.ElapseSpan()
 		spanPerNq := span

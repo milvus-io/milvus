@@ -49,6 +49,15 @@ type ExprRerank[T PKType] struct {
 	requiredFieldIndices map[string]int // Map from field name to index in inputFieldNames
 	// collectionName captured from collection schema at creation time (best-effort)
 	collectionName string
+
+	// When input field list is not provided by the request, fall back to
+	// analyzing against the full collection schema. These maps help resolve
+	// field IDs/types for required fields in that case.
+	fieldNameToID   map[string]int64
+	fieldNameToType map[string]schemapb.DataType
+	// Indicates that analysis used full collection schema rather than the
+	// function's provided input field list.
+	analyzedFromAllSchema bool
 }
 
 const (
@@ -127,6 +136,8 @@ var mathFunctions = map[string]interface{}{
 	"min": func(x, y interface{}) float64 { return math.Min(toFloat64(x), toFloat64(y)) },
 	"max": func(x, y interface{}) float64 { return math.Max(toFloat64(x), toFloat64(y)) },
 
+	"float64": func(x interface{}) float64 { return toFloat64(x) },
+
 	// Utility functions with type conversion
 	"mod":       func(x, y interface{}) float64 { return math.Mod(toFloat64(x), toFloat64(y)) },
 	"remainder": func(x, y interface{}) float64 { return math.Remainder(toFloat64(x), toFloat64(y)) },
@@ -177,6 +188,15 @@ func newExprFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 		return nil, fmt.Errorf("expr rerank requires %s parameter", ExprCodeKey)
 	}
 
+	// Log creation intent
+	log.Info("EXPR_RERANK: Creating expr reranker",
+		zap.String("collection", collSchema.GetName()),
+		zap.Int("input_field_count", len(base.inputFieldNames)),
+		zap.Strings("input_fields", base.inputFieldNames),
+		zap.Bool("normalize", needNormalize),
+		zap.Int("expr_len", len(exprCode)),
+	)
+
 	// Create environment with mathematical functions
 	env := make(map[string]interface{}, 3+len(mathFunctions))
 
@@ -193,8 +213,29 @@ func newExprFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 		return nil, fmt.Errorf("failed to compile expression: %w", err)
 	}
 
+	// Build name->(id,type) maps from collection schema for fallback resolution
+	nameToID := make(map[string]int64)
+	nameToType := make(map[string]schemapb.DataType)
+	availableFromSchema := make([]string, 0, len(collSchema.GetFields()))
+	for _, f := range collSchema.GetFields() {
+		// Skip vector types; rerank only needs scalar/context fields
+		if typeutil.IsVectorType(f.GetDataType()) {
+			continue
+		}
+		nameToID[f.GetName()] = f.GetFieldID()
+		nameToType[f.GetName()] = f.GetDataType()
+		availableFromSchema = append(availableFromSchema, f.GetName())
+	}
+
 	// AST Field Pruning: Analyze expression to determine which fields are actually used
-	requiredFieldNames, requiredFieldIndices, err := analyzeRequiredFields(exprCode, base.inputFieldNames)
+	availableForAnalysis := base.inputFieldNames
+	analyzedFromAllSchema := false
+	if len(availableForAnalysis) == 0 {
+		// If no inputs are specified in the request, fall back to all scalar fields in schema
+		availableForAnalysis = availableFromSchema
+		analyzedFromAllSchema = true
+	}
+	requiredFieldNames, requiredFieldIndices, err := analyzeRequiredFields(exprCode, availableForAnalysis)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze required fields: %w", err)
 	}
@@ -204,42 +245,48 @@ func newExprFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb
 	requiredFields := len(requiredFieldNames)
 	if requiredFields < totalFields {
 		reductionPct := float64(totalFields-requiredFields) / float64(totalFields) * 100
-		log.Info("Expression reranker AST field pruning enabled",
+		log.Info("EXPR_RERANK: Expr AST field pruning enabled",
 			zap.String("expression", exprCode),
 			zap.Int("total_available_fields", totalFields),
 			zap.Int("required_fields", requiredFields),
 			zap.Strings("pruned_fields", requiredFieldNames),
 			zap.Float64("reduction_percentage", reductionPct))
 	} else if requiredFields == 0 {
-		log.Info("Expression reranker uses no fields (score/rank only)",
+		log.Info("EXPR_RERANK: Expr uses no fields (score/rank only)",
 			zap.String("expression", exprCode))
 	} else {
-		log.Info("Expression reranker uses all available fields",
+		log.Info("EXPR_RERANK: Expr uses all available fields",
 			zap.String("expression", exprCode),
 			zap.Int("field_count", totalFields))
 	}
 
 	if base.pkType == schemapb.DataType_Int64 {
 		er := &ExprRerank[int64]{
-			RerankBase:           *base,
-			program:              program,
-			exprString:           exprCode,
-			needNormalize:        needNormalize,
-			requiredFieldNames:   requiredFieldNames,
-			requiredFieldIndices: requiredFieldIndices,
-			collectionName:       collSchema.GetName(),
+			RerankBase:            *base,
+			program:               program,
+			exprString:            exprCode,
+			needNormalize:         needNormalize,
+			requiredFieldNames:    requiredFieldNames,
+			requiredFieldIndices:  requiredFieldIndices,
+			collectionName:        collSchema.GetName(),
+			fieldNameToID:         nameToID,
+			fieldNameToType:       nameToType,
+			analyzedFromAllSchema: analyzedFromAllSchema,
 		}
 		registerRerankerForCollection(collSchema.GetName(), er)
 		return er, nil
 	}
 	er := &ExprRerank[string]{
-		RerankBase:           *base,
-		program:              program,
-		exprString:           exprCode,
-		needNormalize:        needNormalize,
-		requiredFieldNames:   requiredFieldNames,
-		requiredFieldIndices: requiredFieldIndices,
-		collectionName:       collSchema.GetName(),
+		RerankBase:            *base,
+		program:               program,
+		exprString:            exprCode,
+		needNormalize:         needNormalize,
+		requiredFieldNames:    requiredFieldNames,
+		requiredFieldIndices:  requiredFieldIndices,
+		collectionName:        collSchema.GetName(),
+		fieldNameToID:         nameToID,
+		fieldNameToType:       nameToType,
+		analyzedFromAllSchema: analyzedFromAllSchema,
 	}
 	registerRerankerForCollection(collSchema.GetName(), er)
 	return er, nil
@@ -262,6 +309,11 @@ func (e *ExprRerank[T]) processOneSearchData(ctx context.Context, searchParams *
 		if col.size == 0 {
 			continue
 		}
+		log.Ctx(ctx).Debug("EXPR_RERANK: Expr reranker processing column",
+			zap.Int("col_idx", colIdx),
+			zap.Int("col_size", int(col.size)),
+			zap.Int("required_fields", len(e.requiredFieldNames)),
+		)
 
 		ids := col.ids.([]T)
 		scores := col.scores
@@ -305,6 +357,34 @@ func (e *ExprRerank[T]) processOneSearchData(ctx context.Context, searchParams *
 					fieldsLoaded++
 				}
 				// NULL fields are omitted from the fields map, expression must handle missing keys
+			}
+
+			// Ensure any required fields that were not present are defaulted to zero-like values
+			if len(e.requiredFieldNames) > 0 {
+				for _, fname := range e.requiredFieldNames {
+					if _, ok := fields[fname]; ok {
+						continue
+					}
+					// prefer schema type when available, fall back to float64(0)
+					if dt, ok := e.fieldNameToType[fname]; ok {
+						switch dt {
+						case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+							fields[fname] = int32(0)
+						case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+							fields[fname] = int64(0)
+						case schemapb.DataType_Float:
+							fields[fname] = float32(0)
+						case schemapb.DataType_Double:
+							fields[fname] = float64(0)
+						case schemapb.DataType_Bool:
+							fields[fname] = false
+						default:
+							fields[fname] = float64(0)
+						}
+					} else {
+						fields[fname] = float64(0)
+					}
+				}
 			}
 
 			env["fields"] = fields
@@ -371,13 +451,30 @@ func (e *ExprRerank[T]) Process(ctx context.Context, searchParams *SearchParams,
 	startTime := time.Now()
 	totalResults := 0
 
+	log.Ctx(ctx).Info("EXPR_RERANK: Expr reranker processing start",
+		zap.String("collection", collectionNameStr),
+		zap.String("reranker", rerankerName),
+		zap.Int64("nq", searchParams.nq),
+		zap.Int64("topk", searchParams.limit),
+		zap.Bool("grouping", searchParams.isGrouping()),
+		zap.Strings("metrics", searchParams.searchMetrics),
+	)
+
 	defer func() {
 		elapsed := time.Since(startTime).Milliseconds()
 		metrics.RerankLatency.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName).Observe(float64(elapsed))
 		metrics.RerankResultCount.WithLabelValues(roleName, nodeIDStr, collectionNameStr, rerankerName).Add(float64(totalResults))
+		log.Ctx(ctx).Info("EXPR_RERANK: Expr reranker processing done",
+			zap.Int64("elapsed_ms", elapsed),
+			zap.Int("total_results", totalResults),
+		)
 	}()
 
 	for _, cols := range inputs.data {
+		log.Ctx(ctx).Debug("EXPR_RERANK: Expr reranker processing batch",
+			zap.Int("num_columns", len(cols)),
+			zap.Int("required_fields", len(e.requiredFieldNames)),
+		)
 		idScore, err := e.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
 		if err != nil {
 			return nil, err
@@ -408,13 +505,27 @@ func (e *ExprRerank[T]) GetInputFieldIDs() []int64 {
 		return []int64{}
 	}
 
-	// Build pruned field ID list based on required fields
+	// Preferred path: use indices resolved against provided input fields (if present)
+	if len(e.inputFieldIDs) > 0 && len(e.requiredFieldIndices) > 0 {
+		requiredFieldIDs := make([]int64, 0, len(e.requiredFieldNames))
+		for _, fieldName := range e.requiredFieldNames {
+			if fieldIdx, ok := e.requiredFieldIndices[fieldName]; ok {
+				if fieldIdx < len(e.inputFieldIDs) {
+					requiredFieldIDs = append(requiredFieldIDs, e.inputFieldIDs[fieldIdx])
+				}
+			}
+		}
+		if len(requiredFieldIDs) > 0 {
+			return requiredFieldIDs
+		}
+	}
+
+	// Fallback path: resolve IDs directly from collection schema map when the
+	// function didn't declare its inputs in the request.
 	requiredFieldIDs := make([]int64, 0, len(e.requiredFieldNames))
 	for _, fieldName := range e.requiredFieldNames {
-		if fieldIdx, ok := e.requiredFieldIndices[fieldName]; ok {
-			if fieldIdx < len(e.inputFieldIDs) {
-				requiredFieldIDs = append(requiredFieldIDs, e.inputFieldIDs[fieldIdx])
-			}
+		if id, ok := e.fieldNameToID[fieldName]; ok {
+			requiredFieldIDs = append(requiredFieldIDs, id)
 		}
 	}
 	return requiredFieldIDs

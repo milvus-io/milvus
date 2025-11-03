@@ -46,6 +46,15 @@ var _ typeutil.ResultWithID = &internalpb.RetrieveResults{}
 var _ typeutil.ResultWithID = &segcorepb.RetrieveResults{}
 
 func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
+	log := log.Ctx(ctx)
+	log.Info("EXPR_RERANK: Enter ReduceSearchOnQueryNode",
+		zap.Bool("is_advanced", info.GetIsAdvance()),
+		zap.Bool("has_rerank_function", info.GetRerankFunction() != nil),
+		zap.Bool("has_collection_schema", info.GetCollectionSchema() != nil),
+		zap.String("metric", info.GetMetricType()),
+		zap.Int64("nq", info.GetNq()),
+		zap.Int64("topk", info.GetTopK()),
+	)
 	if info.GetIsAdvance() {
 		return ReduceAdvancedSearchResults(ctx, results)
 	}
@@ -57,10 +66,14 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return result != nil && result.GetSlicedBlob() != nil
 	})
 
-	if len(results) == 1 {
-		log.Debug("Shortcut return ReduceSearchResults", zap.Any("result info", info))
-		return results[0], nil
-	}
+	// if len(results) == 1 {
+	//     // Do not shortcut if rerank is requested; we need to decode and apply rerank even for single result
+	//     if info.GetRerankFunction() == nil || info.GetCollectionSchema() == nil {
+	//         log.Debug("Shortcut return ReduceSearchResults (no rerank)", zap.Any("result info", info))
+	//         return results[0], nil
+	//     }
+	//     log.Info("EXPR_RERANK: Single-result reduce path with rerank present; proceeding to decode and rerank")
+	// }
 
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResults")
 	defer sp.End()
@@ -109,10 +122,18 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	}
 	// Apply in-reducer rerank if provided and supported
 	if info.GetRerankFunction() != nil && info.GetCollectionSchema() != nil {
+		log.Info("EXPR_RERANK: Applying segment-level reranking in QueryNode reducer",
+			zap.String("reranker_name", info.GetRerankFunction().GetName()),
+			zap.Int32("reranker_type", int32(info.GetRerankFunction().GetType())),
+			zap.Int64("nq", info.GetNq()),
+			zap.Int64("topk", info.GetTopK()),
+			zap.Int("num_results_before_rerank", len(searchResultData)),
+		)
 		reranked, rerr := rerank.ApplyRerankOnSearchResultData(ctx, reducedResultData, info.GetCollectionSchema(), info.GetRerankFunction(), info.GetMetricType(), info.GetNq(), info.GetTopK())
 		if rerr != nil {
-			log.Warn("failed to apply segment-level reranking in reducer", zap.Error(rerr))
+			log.Warn("EXPR_RERANK: Failed to apply segment-level reranking in reducer", zap.Error(rerr))
 		} else {
+			log.Info("EXPR_RERANK: Segment-level reranking completed successfully in QueryNode")
 			reducedResultData = reranked
 		}
 	}
@@ -152,6 +173,9 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceAdvancedSearchResults")
 	defer sp.End()
+
+	log := log.Ctx(ctx)
+	log.Info("EXPR_RERANK: Advanced reduce path - rerank will not run on QueryNode (deferred to proxy)")
 
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)

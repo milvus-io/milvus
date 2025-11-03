@@ -302,12 +302,24 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		rankInputs = append(rankInputs, ret)
 		rankMetrics = append(rankMetrics, metrics[idx])
 	}
+
+	log.Ctx(ctx).Info("EXPR_RERANK: Applying proxy-level reranking",
+		zap.Int64("nq", op.nq),
+		zap.Int64("topk", op.topK),
+		zap.Int64("offset", op.offset),
+		zap.Int("num_search_results", len(reducedResults)),
+		zap.Strings("metrics", rankMetrics),
+	)
+
 	params := rerank.NewSearchParams(op.nq, op.topK, op.offset, op.roundDecimal, op.groupByFieldId,
 		op.groupSize, op.strictGroupSize, op.groupScorerStr, rankMetrics)
 	ret, err := op.functionScore.Process(ctx, params, rankInputs)
 	if err != nil {
+		log.Ctx(ctx).Warn("EXPR_RERANK: Proxy-level reranking failed", zap.Error(err))
 		return nil, err
 	}
+
+	log.Ctx(ctx).Info("EXPR_RERANK: Proxy-level reranking completed successfully")
 	return []any{ret}, nil
 }
 

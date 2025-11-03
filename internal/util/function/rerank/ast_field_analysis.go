@@ -54,3 +54,14 @@ func analyzeRequiredFields(exprString string, allAvailableFields []string) ([]st
 	}
 	return requiredFields, fieldIndices, nil
 }
+
+// AnalyzeExprRequiredFields is an exported helper to extract field names referenced
+// in an expression. The returned names are intersected with availableFields to
+// avoid returning unknown or unsupported names in the current context.
+func AnalyzeExprRequiredFields(exprString string, availableFields []string) ([]string, error) {
+	fields, _, err := analyzeRequiredFields(exprString, availableFields)
+	if err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
