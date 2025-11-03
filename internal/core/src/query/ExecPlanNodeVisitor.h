@@ -17,6 +17,7 @@
 #include "PlanNodeVisitor.h"
 #include "plan/PlanNode.h"
 #include "exec/QueryContext.h"
+#include "futures/Future.h"
 
 namespace milvus::query {
 
@@ -34,23 +35,30 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup* placeholder_group,
-                        int32_t consystency_level = 0,
+                        const folly::CancellationToken& cancel_token =
+                            folly::CancellationToken(),
+                        int32_t consistency_level = 0,
                         Timestamp collection_ttl = 0)
         : segment_(segment),
           timestamp_(timestamp),
-          collection_ttl_timestamp_(collection_ttl),
           placeholder_group_(placeholder_group),
-          consystency_level_(consystency_level) {
+          cancel_token_(cancel_token),
+          consistency_level_(consistency_level),
+          collection_ttl_timestamp_(collection_ttl) {
     }
 
+    // Only used for test
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
-                        int32_t consystency_level = 0,
+                        const folly::CancellationToken& cancel_token =
+                            folly::CancellationToken(),
+                        int32_t consistency_level = 0,
                         Timestamp collection_ttl = 0)
         : segment_(segment),
           timestamp_(timestamp),
-          collection_ttl_timestamp_(collection_ttl),
-          consystency_level_(consystency_level) {
+          cancel_token_(cancel_token),
+          consistency_level_(consistency_level),
+          collection_ttl_timestamp_(collection_ttl) {
         placeholder_group_ = nullptr;
     }
 
@@ -94,13 +102,15 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
  private:
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
-    Timestamp collection_ttl_timestamp_;
     const PlaceholderGroup* placeholder_group_;
+    folly::CancellationToken cancel_token_;
+    int32_t consistency_level_ = 0;
+    Timestamp collection_ttl_timestamp_;
 
     SearchResultOpt search_result_opt_;
     RetrieveResultOpt retrieve_result_opt_;
+
     bool expr_use_pk_index_ = false;
-    int32_t consystency_level_ = 0;
 };
 
 // for test use only

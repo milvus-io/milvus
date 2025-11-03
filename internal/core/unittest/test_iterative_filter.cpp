@@ -124,7 +124,7 @@ TEST(IterativeFilter, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         const char* raw_plan2 = R"(vector_anns: <
                                         field_id: 100
@@ -155,7 +155,7 @@ TEST(IterativeFilter, SealedIndex) {
                                                                  &plan_node2);
         auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
         auto search_result2 =
-            segment->Search(plan2.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
@@ -190,7 +190,7 @@ TEST(IterativeFilter, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         const char* raw_plan2 = R"(vector_anns: <
                                         field_id: 100
@@ -214,7 +214,7 @@ TEST(IterativeFilter, SealedIndex) {
                                                                  &plan_node2);
         auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
         auto search_result2 =
-            segment->Search(plan2.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
@@ -240,7 +240,7 @@ TEST(IterativeFilter, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         const char* raw_plan2 = R"(vector_anns: <
                                         field_id: 100
@@ -255,7 +255,7 @@ TEST(IterativeFilter, SealedIndex) {
                                                                  &plan_node2);
         auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
         auto search_result2 =
-            segment->Search(plan2.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
@@ -322,7 +322,7 @@ TEST(IterativeFilter, SealedData) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         const char* raw_plan2 = R"(vector_anns: <
                                         field_id: 100
@@ -353,7 +353,7 @@ TEST(IterativeFilter, SealedData) {
                                                                  &plan_node2);
         auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
         auto search_result2 =
-            segment->Search(plan2.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
@@ -428,8 +428,8 @@ TEST(IterativeFilter, GrowingRawData) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment_growing_impl->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = segment_growing_impl->Search(
+            plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         const char* raw_plan2 = R"(vector_anns: <
                                         field_id: 102
@@ -459,8 +459,8 @@ TEST(IterativeFilter, GrowingRawData) {
         auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
                                                                  &plan_node2);
         auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
-        auto search_result2 =
-            segment_growing_impl->Search(plan2.get(), ph_group.get(), 1L << 63);
+        auto search_result2 = segment_growing_impl->Search(
+            plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
@@ -548,8 +548,8 @@ TEST(IterativeFilter, GrowingIndex) {
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment_growing_impl->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto search_result = segment_growing_impl->Search(
+            plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         const char* raw_plan2 = R"(vector_anns: <
                                         field_id: 102
@@ -579,8 +579,8 @@ TEST(IterativeFilter, GrowingIndex) {
         auto ok2 = google::protobuf::TextFormat::ParseFromString(raw_plan2,
                                                                  &plan_node2);
         auto plan2 = CreateSearchPlanFromPlanNode(schema, plan_node2);
-        auto search_result2 =
-            segment_growing_impl->Search(plan2.get(), ph_group.get(), 1L << 63);
+        auto search_result2 = segment_growing_impl->Search(
+            plan2.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }

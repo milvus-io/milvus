@@ -122,11 +122,11 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                                      active_count,
                                                      timestamp_,
                                                      collection_ttl_timestamp_,
-                                                     consystency_level_,
+                                                     consistency_level_,
                                                      node.plan_options_);
 
     // Set op context to query context
-    auto op_context = milvus::OpContext();
+    auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
 
     // Do task execution
@@ -179,14 +179,14 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                                      active_count,
                                                      timestamp_,
                                                      collection_ttl_timestamp_,
-                                                     consystency_level_,
+                                                     consistency_level_,
                                                      node.plan_options_);
 
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
 
     // Set op context to query context
-    auto op_context = milvus::OpContext();
+    auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
 
     // Do plan fragment task work

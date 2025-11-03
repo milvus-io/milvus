@@ -180,7 +180,7 @@ DeleteSearchResult(CSearchResult search_result) {
     delete res;
 }
 
-CFuture*  // Future<milvus::SearchResult*>
+CFuture*  // Future<milvus::SearchResult>
 AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
             CSearchPlan c_plan,
@@ -188,8 +188,8 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t timestamp,
             int32_t consistency_level,
             uint64_t collection_ttl) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
 
@@ -202,7 +202,7 @@ AsyncSearch(CTraceContext c_trace,
          phg_ptr,
          timestamp,
          consistency_level,
-         collection_ttl](milvus::futures::CancellationToken cancel_token) {
+         collection_ttl](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -214,8 +214,12 @@ AsyncSearch(CTraceContext c_trace,
 
             segment->LazyCheckSchema(plan->schema_);
 
-            auto search_result = segment->Search(
-                plan, phg_ptr, timestamp, consistency_level, collection_ttl);
+            auto search_result = segment->Search(plan,
+                                                 phg_ptr,
+                                                 timestamp,
+                                                 cancel_token,
+                                                 consistency_level,
+                                                 collection_ttl);
             if (!milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
                 for (auto& dis : search_result->distances_) {
@@ -278,7 +282,7 @@ AsyncRetrieve(CTraceContext c_trace,
          limit_size,
          ignore_non_pk,
          consistency_level,
-         collection_ttl](milvus::futures::CancellationToken cancel_token) {
+         collection_ttl](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
@@ -290,6 +294,7 @@ AsyncRetrieve(CTraceContext c_trace,
                                                      timestamp,
                                                      limit_size,
                                                      ignore_non_pk,
+                                                     cancel_token,
                                                      consistency_level,
                                                      collection_ttl);
 
@@ -313,7 +318,7 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
         [c_trace, segment, plan, offsets, len](
-            milvus::futures::CancellationToken cancel_token) {
+            folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span(

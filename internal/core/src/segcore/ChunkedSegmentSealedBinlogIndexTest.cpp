@@ -256,7 +256,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         ph_group.get()};
     auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
-        segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
+        segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
     EXPECT_EQ(binlog_index_sr->unity_topK_, topk);
     EXPECT_EQ(binlog_index_sr->distances_.size(), num_queries * topk);
@@ -288,7 +288,8 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
-        auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
+        auto ivf_sr =
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
                                            topk,
@@ -352,7 +353,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         ph_group.get()};
     auto nlist = segcore_config.get_nlist();
     auto binlog_index_sr =
-        segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
+        segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     ASSERT_EQ(binlog_index_sr->total_nq_, num_queries);
     EXPECT_EQ(binlog_index_sr->unity_topK_, topk);
     EXPECT_EQ(binlog_index_sr->distances_.size(), num_queries * topk);
@@ -384,7 +385,8 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
-        auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+        auto ivf_sr =
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
                                            topk,
