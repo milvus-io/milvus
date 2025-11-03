@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 )
 
 var expectErr = make(chan error, 10)
@@ -63,10 +62,6 @@ func (n *noopReplicateService) Append(ctx context.Context, msg message.Replicate
 
 func (n *noopReplicateService) UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error {
 	return nil
-}
-
-func (n *noopReplicateService) GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
-	return nil, nil
 }
 
 func (n *noopReplicateService) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {

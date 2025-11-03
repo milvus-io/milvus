@@ -16,6 +16,10 @@ var (
 	resourceGroupTransferBoost         = 10000
 )
 
+func NewResourceGroupConfig(request int32, limit int32) *rgpb.ResourceGroupConfig {
+	return newResourceGroupConfig(request, limit)
+}
+
 // newResourceGroupConfig create a new resource group config.
 func newResourceGroupConfig(request int32, limit int32) *rgpb.ResourceGroupConfig {
 	return &rgpb.ResourceGroupConfig{

@@ -18,74 +18,103 @@ package replicatemanager
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // replicateManager is the implementation of ReplicateManagerClient.
 type replicateManager struct {
 	ctx context.Context
+	mu  sync.Mutex
 
 	// replicators is a map of replicate pchannel name to ChannelReplicator.
-	replicators         map[string]Replicator
-	replicatorPChannels map[string]*streamingpb.ReplicatePChannelMeta
+	replicators        map[string]Replicator
+	replicatorChannels map[string]*meta.ReplicateChannel
 }
 
 func NewReplicateManager() *replicateManager {
 	return &replicateManager{
-		ctx:                 context.Background(),
-		replicators:         make(map[string]Replicator),
-		replicatorPChannels: make(map[string]*streamingpb.ReplicatePChannelMeta),
+		ctx:                context.Background(),
+		replicators:        make(map[string]Replicator),
+		replicatorChannels: make(map[string]*meta.ReplicateChannel),
 	}
 }
 
-func (r *replicateManager) CreateReplicator(replicateInfo *streamingpb.ReplicatePChannelMeta) {
-	logger := log.With(
-		zap.String("sourceChannel", replicateInfo.GetSourceChannelName()),
-		zap.String("targetChannel", replicateInfo.GetTargetChannelName()),
-	)
+func buildReplicatorKey(metaKey string, modRevision int64) string {
+	return fmt.Sprintf("%s/_v%d", metaKey, modRevision)
+}
+
+func (r *replicateManager) CreateReplicator(channel *meta.ReplicateChannel) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	logger := log.With(zap.String("key", channel.Key), zap.Int64("modRevision", channel.ModRevision))
+	repKey := buildReplicatorKey(channel.Key, channel.ModRevision)
 	currentClusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
-	if !strings.Contains(replicateInfo.GetSourceChannelName(), currentClusterID) {
-		// current cluster is not source cluster, skip create replicator
+	if !strings.Contains(channel.Value.GetSourceChannelName(), currentClusterID) {
 		return
 	}
-	replicatorKey := streamingcoord.BuildReplicatePChannelMetaKey(replicateInfo)
-	_, ok := r.replicators[replicatorKey]
+	_, ok := r.replicators[repKey]
 	if ok {
 		logger.Debug("replicator already exists, skip create replicator")
 		return
 	}
-	replicator := NewChannelReplicator(replicateInfo)
-	replicator.StartReplicate()
-	r.replicators[replicatorKey] = replicator
-	r.replicatorPChannels[replicatorKey] = replicateInfo
+	replicator := NewChannelReplicator(channel)
+	replicator.StartReplication()
+	r.replicators[repKey] = replicator
+	r.replicatorChannels[repKey] = channel
 	logger.Info("created replicator for replicate pchannel")
 }
 
-func (r *replicateManager) RemoveOutOfTargetReplicators(targetReplicatePChannels []*streamingpb.ReplicatePChannelMeta) {
-	targets := lo.KeyBy(targetReplicatePChannels, streamingcoord.BuildReplicatePChannelMetaKey)
-	for replicatorKey, replicator := range r.replicators {
-		if pchannelMeta, ok := targets[replicatorKey]; !ok {
-			replicator.StopReplicate()
-			delete(r.replicators, replicatorKey)
-			delete(r.replicatorPChannels, replicatorKey)
-			log.Info("removed replicator due to out of target",
-				zap.String("sourceChannel", pchannelMeta.GetSourceChannelName()),
-				zap.String("targetChannel", pchannelMeta.GetTargetChannelName()),
-			)
+func (r *replicateManager) RemoveReplicator(key string, modRevision int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.removeReplicatorInternal(key, modRevision)
+}
+
+func (r *replicateManager) removeReplicatorInternal(key string, modRevision int64) {
+	logger := log.With(zap.String("key", key), zap.Int64("modRevision", modRevision))
+	repKey := buildReplicatorKey(key, modRevision)
+	replicator, ok := r.replicators[repKey]
+	if !ok {
+		logger.Info("replicator not found, skip remove")
+		return
+	}
+	replicator.StopReplication()
+	delete(r.replicators, repKey)
+	delete(r.replicatorChannels, repKey)
+	logger.Info("removed replicator for replicate pchannel")
+}
+
+func (r *replicateManager) RemoveOutdatedReplicators(aliveChannels []*meta.ReplicateChannel) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	alivesMap := make(map[string]struct{})
+	for _, channel := range aliveChannels {
+		repKey := buildReplicatorKey(channel.Key, channel.ModRevision)
+		alivesMap[repKey] = struct{}{}
+	}
+	for repKey := range r.replicators {
+		if _, ok := alivesMap[repKey]; !ok {
+			channel := r.replicatorChannels[repKey]
+			r.removeReplicatorInternal(channel.Key, channel.ModRevision)
 		}
 	}
 }
 
 func (r *replicateManager) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, replicator := range r.replicators {
-		replicator.StopReplicate()
+		replicator.StopReplication()
 	}
+	r.replicators = make(map[string]Replicator)
+	r.replicatorChannels = make(map[string]*meta.ReplicateChannel)
 }

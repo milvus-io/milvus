@@ -118,7 +118,7 @@ func createReplicateCreateCollectionMessages() []message.ReplicateMutableMessage
 		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
 			pulsar.NewMessageID(1, 2, 3, 4),
 		))
-		replicateMsgs = append(replicateMsgs, message.NewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+		replicateMsgs = append(replicateMsgs, message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
 	}
 	return replicateMsgs
 }

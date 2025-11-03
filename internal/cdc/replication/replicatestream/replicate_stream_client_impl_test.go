@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	mock_message "github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
@@ -55,23 +55,22 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	mockMilvusClient := cluster.NewMockMilvusClient(t)
 	mockMilvusClient.EXPECT().CreateReplicateStream(mock.Anything).Return(mockStreamClient, nil)
 
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil)
-
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
-
 	wal := mock_streaming.NewMockWALAccesser(t)
 	streaming.SetWALForTest(wal)
 
-	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+	repMeta := &streamingpb.ReplicatePChannelMeta{
 		SourceChannelName: "test-source-channel",
 		TargetChannelName: "test-target-channel",
 		TargetCluster:     targetCluster,
 	}
-	replicateClient := NewReplicateStreamClient(ctx, replicateInfo)
+	key := "test-replicate-key"
+	channel := &meta.ReplicateChannel{
+		Key:         key,
+		Value:       repMeta,
+		ModRevision: 0,
+	}
+	replicateClient := NewReplicateStreamClient(ctx, mockMilvusClient, channel)
+	defer replicateClient.Close()
 
 	// Test Replicate method
 	const msgCount = pendingMessageQueueLength * 10
@@ -104,7 +103,6 @@ func TestReplicateStreamClient_Replicate(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return replicateClient.(*replicateStreamClient).pendingMessages.Len() == 0
 	}, time.Second, 100*time.Millisecond)
-	replicateClient.Close()
 }
 
 func TestReplicateStreamClient_Replicate_ContextCanceled(t *testing.T) {
@@ -123,23 +121,21 @@ func TestReplicateStreamClient_Replicate_ContextCanceled(t *testing.T) {
 	mockMilvusClient.EXPECT().CreateReplicateStream(mock.Anything).Return(mockStreamClient, nil).Maybe()
 	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil).Maybe()
 
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil).Maybe()
-
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
-
 	wal := mock_streaming.NewMockWALAccesser(t)
 	streaming.SetWALForTest(wal)
 
-	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+	key := "test-replicate-key"
+	repMeta := &streamingpb.ReplicatePChannelMeta{
 		SourceChannelName: "test-source-channel",
 		TargetChannelName: "test-target-channel",
 		TargetCluster:     targetCluster,
 	}
-	client := NewReplicateStreamClient(ctx, replicateInfo)
+	channel := &meta.ReplicateChannel{
+		Key:         key,
+		Value:       repMeta,
+		ModRevision: 0,
+	}
+	client := NewReplicateStreamClient(ctx, mockMilvusClient, channel)
 	defer client.Close()
 
 	// Cancel context
@@ -174,24 +170,23 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 		return mockStreamClient, nil
 	}).Times(reconnectTimes) // expect to be called reconnectTimes times
 
-	mockClusterClient := cluster.NewMockClusterClient(t)
-	mockClusterClient.EXPECT().CreateMilvusClient(mock.Anything, mock.Anything).
-		Return(mockMilvusClient, nil)
-
-	resource.InitForTest(t,
-		resource.OptClusterClient(mockClusterClient),
-	)
-
 	wal := mock_streaming.NewMockWALAccesser(t)
 	streaming.SetWALForTest(wal)
 
 	// Create client which will start internal retry loop
-	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+	key := "test-replicate-key"
+	repMeta := &streamingpb.ReplicatePChannelMeta{
 		SourceChannelName: "test-source-channel",
 		TargetChannelName: "test-target-channel",
 		TargetCluster:     targetCluster,
 	}
-	replicateClient := NewReplicateStreamClient(ctx, replicateInfo)
+	channel := &meta.ReplicateChannel{
+		Key:         key,
+		Value:       repMeta,
+		ModRevision: 0,
+	}
+	replicateClient := NewReplicateStreamClient(ctx, mockMilvusClient, channel)
+	defer replicateClient.Close()
 
 	// Replicate after reconnected
 	const msgCount = 100
@@ -223,7 +218,6 @@ func TestReplicateStreamClient_Reconnect(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return replicateClient.(*replicateStreamClient).pendingMessages.Len() == 0
 	}, time.Second, 100*time.Millisecond)
-	replicateClient.Close()
 }
 
 // mockReplicateStreamClient implements the milvuspb.MilvusService_CreateReplicateStreamClient interface

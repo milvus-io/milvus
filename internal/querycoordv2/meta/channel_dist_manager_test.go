@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -81,6 +82,8 @@ func (suite *ChannelDistManagerSuite) SetupSuite() {
 }
 
 func (suite *ChannelDistManagerSuite) SetupTest() {
+	snmanager.ResetDoNothingStreamingNodeManager(suite.T())
+
 	suite.dist = NewChannelDistManager(session.NewNodeManager())
 	// Distribution:
 	// node 0 contains channel dmc0

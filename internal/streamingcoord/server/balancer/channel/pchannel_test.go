@@ -39,7 +39,7 @@ func TestPChannel(t *testing.T) {
 		},
 	}, pchannel.CurrentAssignment())
 
-	pchannel = newPChannelMeta("test-channel", types.AccessModeRW)
+	pchannel = NewPChannelMeta("test-channel", types.AccessModeRW)
 	assert.Equal(t, "test-channel", pchannel.Name())
 	assert.Equal(t, int64(1), pchannel.CurrentTerm())
 	assert.Empty(t, pchannel.AssignHistories())

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -47,21 +49,14 @@ func TestResourceKeyLocker(t *testing.T) {
 					n := rand.Intn(10)
 					if n < 3 {
 						// Lock the keys
-						guards, err := locker.Lock(keysToLock...)
-						if err != nil {
-							t.Errorf("Failed to lock keys: %v", err)
-							return
-						}
+						guards := locker.Lock(keysToLock...)
 						// Hold lock briefly
 						time.Sleep(time.Millisecond)
-
 						// Unlock the keys
 						guards.Unlock()
 					} else {
-						guards, err := locker.Lock(keysToLock...)
-						if err == nil {
-							guards.Unlock()
-						}
+						guards := locker.Lock(keysToLock...)
+						guards.Unlock()
 					}
 				}
 				done <- true
@@ -84,11 +79,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		go func() {
 			for i := 0; i < 100; i++ {
 				// Lock key1 then key2
-				guards, err := locker.Lock(key1, key2)
-				if err != nil {
-					t.Errorf("Failed to lock keys in order 1->2: %v", err)
-					return
-				}
+				guards := locker.Lock(key1, key2)
 				time.Sleep(time.Millisecond)
 				guards.Unlock()
 			}
@@ -98,11 +89,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		go func() {
 			for i := 0; i < 100; i++ {
 				// Lock key2 then key1
-				guards, err := locker.Lock(key2, key1)
-				if err != nil {
-					t.Errorf("Failed to lock keys in order 2->1: %v", err)
-					return
-				}
+				guards := locker.Lock(key2, key1)
 				time.Sleep(time.Millisecond)
 				guards.Unlock()
 			}
@@ -125,7 +112,7 @@ func TestResourceKeyLocker(t *testing.T) {
 		key := message.NewCollectionNameResourceKey("test_collection")
 
 		// First fast lock should succeed
-		guards1, err := locker.FastLock(key)
+		guards1, err := locker.FastLock(key, key)
 		if err != nil {
 			t.Fatalf("First FastLock failed: %v", err)
 		}
@@ -144,4 +131,36 @@ func TestResourceKeyLocker(t *testing.T) {
 		}
 		guards2.Unlock()
 	})
+}
+
+func TestUniqueSortResourceKeys(t *testing.T) {
+	keys := []message.ResourceKey{
+		message.NewSharedDBNameResourceKey("test_db_1"),
+		message.NewSharedDBNameResourceKey("test_db_1"),
+		message.NewSharedDBNameResourceKey("test_db_2"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_11"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_11"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_12"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_13"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_21"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_21"),
+		message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_22"),
+		message.NewSharedClusterResourceKey(),
+	}
+	for i := 0; i < 10; i++ {
+		rand.Shuffle(len(keys), func(i, j int) {
+			keys[i], keys[j] = keys[j], keys[i]
+		})
+		keys2 := uniqueSortResourceKeys(keys)
+		assert.Equal(t, keys2, []message.ResourceKey{
+			message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_11"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_12"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_1", "test_collection_13"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_21"),
+			message.NewExclusiveCollectionNameResourceKey("test_db_2", "test_collection_22"),
+			message.NewSharedDBNameResourceKey("test_db_1"),
+			message.NewSharedDBNameResourceKey("test_db_2"),
+			message.NewSharedClusterResourceKey(),
+		})
+	}
 }

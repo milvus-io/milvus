@@ -60,13 +60,14 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 				// if there's some pending messages that is not appended, it should be continued to be appended.
 				pendingTasks = append(pendingTasks, newPending)
 			} else {
-				// if there's no pending messages, it should be added to the pending ack callback tasks.
+				// if there's no pending messages, it should be added to the pending ack callback tasks
+				// to call the ack callback function.
 				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED:
 			// The task is recovered from the remote cluster, so it doesn't hold the resource lock.
 			// but the task execution order should be protected by the order of broadcastID (by ackCallbackScheduler)
-			if isAllDone(task.task) {
+			if task.isControlChannelAcked() || isAllDone(task.task) {
 				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE:
@@ -98,7 +99,6 @@ type broadcastTaskManager struct {
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	tombstoneTasks     []uint64                  // the broadcastID of the tombstone tasks
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
 	broadcastScheduler *broadcasterScheduler // the scheduler of the broadcast task
@@ -113,10 +113,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	}
 
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
-	guards, err := bm.resourceKeyLocker.Lock(resourceKeys...)
-	if err != nil {
-		return nil, err
-	}
+	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
 
 	if err := bm.checkClusterRole(ctx); err != nil {
 		// unlock the guards if the cluster role is not primary.
@@ -138,7 +135,8 @@ func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
 		return err
 	}
 	if b.ReplicateRole() != replicateutil.RolePrimary {
-		return status.NewReplicateViolation("cluster is not primary, cannot do any DDL/DCL")
+		// a non-primary cluster cannot do any broadcast operation.
+		return ErrNotPrimary
 	}
 	return nil
 }
