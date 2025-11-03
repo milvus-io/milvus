@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == '2.5' ? '50 23 * * 1,4' : ''
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
 
-def milvus_helm_chart_version = '5.0.6'
+def milvus_helm_chart_version = '4.2.58'
 
 pipeline {
     triggers {
