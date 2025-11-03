@@ -12,6 +12,7 @@
 FROM ubuntu:jammy-20240530
 
 ARG TARGETARCH
+ARG LIBIBERTY_RREV=3060045a116b0fff6d4937b0fc9cfc0e
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
@@ -38,7 +39,7 @@ RUN conan profile new default --detect && \
     conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local || true && \
     export CONAN_REVISIONS_ENABLED=1 && \
     echo "Pre-building libiberty to cache in Docker image..." && \
-    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=12 -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    conan install "libiberty/9.1.0@#${LIBIBERTY_RREV}" --build=libiberty -s build_type=Release -s compiler.version=12 -s compiler.libcxx=libstdc++11 -r default-conan-local || \
     echo "libiberty pre-build skipped (will build on first use)"
 
 RUN echo "target arch $TARGETARCH"

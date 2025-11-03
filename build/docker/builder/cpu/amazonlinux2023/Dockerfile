@@ -12,6 +12,7 @@
 FROM amazonlinux:2023
 
 ARG TARGETARCH
+ARG LIBIBERTY_RREV=3060045a116b0fff6d4937b0fc9cfc0e
 
 RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
     autoconf automake python3 python3-pip perl-FindBin texinfo \
@@ -36,7 +37,7 @@ RUN conan profile new default --detect && \
     export CONAN_REVISIONS_ENABLED=1 && \
     GCC_VERSION=$(gcc -dumpversion) && \
     echo "Pre-building libiberty to cache in Docker image..." && \
-    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    conan install "libiberty/9.1.0@#${LIBIBERTY_RREV}" --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
     echo "libiberty pre-build skipped (will build on first use)"
 
 RUN echo "target arch $TARGETARCH"

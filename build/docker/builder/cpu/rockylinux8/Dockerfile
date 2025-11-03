@@ -14,6 +14,7 @@ RUN dnf -y update && \
 FROM rockylinux/rockylinux:8
 
 ARG TARGETARCH
+ARG LIBIBERTY_RREV=3060045a116b0fff6d4937b0fc9cfc0e
 
 RUN dnf install -y make cmake automake gcc gcc-c++ curl zip unzip tar git which \
     libaio libuuid-devel wget python3 python3-pip \
@@ -35,7 +36,7 @@ RUN conan profile new default --detect && \
     export CONAN_REVISIONS_ENABLED=1 && \
     GCC_VERSION=$(gcc -dumpversion) && \
     echo "Pre-building libiberty to cache in Docker image..." && \
-    conan install libiberty/9.1.0@ --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
+    conan install "libiberty/9.1.0@#${LIBIBERTY_RREV}" --build=libiberty -s build_type=Release -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local || \
     echo "libiberty pre-build skipped (will build on first use)"
 
 RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
