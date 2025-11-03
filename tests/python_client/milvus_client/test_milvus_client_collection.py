@@ -4538,6 +4538,15 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
             ):
                 supported_types.append((member.name.lower(), member.value))
         for field_name, data_type in supported_types:
+            if field_name.lower().startswith("_"):
+                # skip private fields           
+                continue
+            if data_type == DataType.STRUCT:
+                # add struct field
+                struct_schema = client.create_struct_field_schema()
+                struct_schema.add_field("struct_scalar_field", DataType.INT64)
+                schema.add_field(field_name, DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct_schema, max_capacity=10)
+                continue
             # Skip INT64 and VARCHAR as they're already added as primary key  
             if data_type != DataType.INT64 and data_type != DataType.VARCHAR: 
                 schema.add_field(field_name, data_type)
