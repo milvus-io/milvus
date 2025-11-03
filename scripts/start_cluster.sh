@@ -40,8 +40,5 @@ nohup ./bin/milvus run querynode --run-with-subprocess >/tmp/querynode.log 2>&1 
 echo "Starting streamingnode..."
 nohup ./bin/milvus run streamingnode --run-with-subprocess >/tmp/streamingnode.log 2>&1 &
 
-echo "Starting cdc..."
-nohup ./bin/milvus run cdc --run-with-subprocess >/tmp/cdc.log 2>&1 &
-
 echo "Starting proxy..."
 nohup ./bin/milvus run proxy --run-with-subprocess >/tmp/proxy.log 2>&1 &
