@@ -112,6 +112,7 @@ type IMetaTable interface {
 	DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error)
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 
+	// TODO: should be removed in future.
 	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
