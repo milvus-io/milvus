@@ -638,6 +638,9 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
     std::chrono::duration<double> load_duration_sum;
     std::chrono::duration<double> write_disk_duration_sum;
+    // load files in two parts:
+    // 1. EMB_LIST_META: Written separately to embedding_list_meta_writer_ptr (if embedding list type)
+    // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere
     if (!slice_meta_filepath
              .empty()) {  // load with the slice meta info, then we can load batch by batch
         std::string index_file_prefix = slice_meta_filepath.substr(
@@ -696,7 +699,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                 HandleBatch(slice_num - 1);
             }
         }
-    } else {
+    }
+    if (!pending_index_files.empty()) {
         //1. load files into memory
         auto start_load_files2_mem = std::chrono::system_clock::now();
         auto result = file_manager_->LoadIndexToMemory(

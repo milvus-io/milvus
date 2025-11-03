@@ -22,11 +22,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 )
 
 func restoreConfirmGCInterval() {
@@ -78,42 +73,4 @@ func Test_confirmGCStep_Execute(t *testing.T) {
 		_, err := s.Execute(context.TODO())
 		assert.NoError(t, err)
 	})
-}
-
-func TestSkip(t *testing.T) {
-	{
-		s := &unwatchChannelsStep{isSkip: true}
-		_, err := s.Execute(context.Background())
-		assert.NoError(t, err)
-	}
-
-	{
-		s := &deleteCollectionDataStep{isSkip: true}
-		_, err := s.Execute(context.Background())
-		assert.NoError(t, err)
-	}
-
-	{
-		s := &deletePartitionDataStep{isSkip: true}
-		_, err := s.Execute(context.Background())
-		assert.NoError(t, err)
-	}
-}
-
-func TestBroadcastCreatePartitionMsgStep(t *testing.T) {
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().AppendMessagesWithOption(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
-	streaming.SetWALForTest(wal)
-
-	step := &broadcastCreatePartitionMsgStep{
-		baseStep:  baseStep{core: nil},
-		vchannels: []string{"ch-0", "ch-1"},
-		partition: &model.Partition{
-			CollectionID: 1,
-			PartitionID:  2,
-		},
-	}
-	t.Logf("%v\n", step.Desc())
-	_, err := step.Execute(context.Background())
-	assert.NoError(t, err)
 }

@@ -55,15 +55,22 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
+	partitionKeySortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
 		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
 			log.Warn("fail to trigger collection clustering compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
-		views = append(views, collectionViews...)
+		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Properties)
+		if isPartitionKeySorted {
+			partitionKeySortViews = append(partitionKeySortViews, collectionViews...)
+		} else {
+			views = append(views, collectionViews...)
+		}
 	}
 	events[TriggerTypeClustering] = views
+	events[TriggerTypeClusteringPartitionKeySort] = partitionKeySortViews
 	return events, nil
 }
 
@@ -120,12 +127,14 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	}
 
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		isPartitionKeySorted := IsPartitionKeySortCompactionEnabled(collection.Properties)
 		return isSegmentHealthy(segment) &&
 			isFlushed(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
-			!segment.GetIsInvisible()
+			!segment.GetIsInvisible() &&
+			(!isPartitionKeySorted || segment.IsPartitionKeySorted)
 	}))
 
 	views := make([]CompactionView, 0)

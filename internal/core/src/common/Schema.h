@@ -126,6 +126,31 @@ class Schema {
         return field_id;
     }
 
+    // string type
+    FieldId
+    AddDebugVarcharField(const FieldName& name,
+                         DataType data_type,
+                         int64_t max_length,
+                         bool nullable,
+                         bool enable_match,
+                         bool enable_analyzer,
+                         std::map<std::string, std::string>& params,
+                         std::optional<DefaultValueType> default_value) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        auto field_meta = FieldMeta(name,
+                                    field_id,
+                                    data_type,
+                                    max_length,
+                                    nullable,
+                                    enable_match,
+                                    enable_analyzer,
+                                    params,
+                                    std::move(default_value));
+        this->AddField(std::move(field_meta));
+        return field_id;
+    }
+
     // scalar type
     void
     AddField(const FieldName& name,
@@ -214,8 +239,18 @@ class Schema {
     }
 
     void
+    set_namespace_field_id(FieldId field_id) {
+        this->namespace_field_id_opt_ = field_id;
+    }
+
+    void
     set_schema_version(uint64_t version) {
         this->schema_version_ = version;
+    }
+
+    std::optional<FieldId>
+    get_namespace_field_id() const {
+        return this->namespace_field_id_opt_;
     }
 
     uint64_t
@@ -293,6 +328,9 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToArrowSchema() const;
 
+    proto::schema::CollectionSchema
+    ToProto() const;
+
     void
     UpdateLoadFields(const std::vector<int64_t>& field_ids) {
         load_fields_.clear();
@@ -348,6 +386,7 @@ class Schema {
 
     std::optional<FieldId> primary_field_id_opt_;
     std::optional<FieldId> dynamic_field_id_opt_;
+    std::optional<FieldId> namespace_field_id_opt_;
 
     // field partial load list
     // work as hint now

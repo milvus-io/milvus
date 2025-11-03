@@ -42,6 +42,7 @@ func TestAssignmentService(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	})
+	b.EXPECT().Close().Return().Maybe()
 	balance.Register(b)
 
 	// Set up the broadcaster
@@ -54,6 +55,7 @@ func TestAssignmentService(t *testing.T) {
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(mba, nil).Maybe()
 	mb.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mb.EXPECT().LegacyAck(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
 	broadcast.Register(mb)
 
 	// Test assignment discover

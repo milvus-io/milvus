@@ -681,6 +681,8 @@ def gen_string_field(name=ct.default_string_field_name, description=ct.default_d
 def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.JSON, name=name, description=description, is_primary=is_primary, **kwargs)
 
+def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
 
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
@@ -843,6 +845,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_string_field(name="text", max_length=2000, enable_analyzer=True, enable_match=True,
                          analyzer_params=analyzer_params),
         gen_json_field(nullable=nullable),
+        gen_geometry_field(nullable=nullable),
         gen_array_field(name="array_int", element_type=DataType.INT64),
         gen_array_field(name="array_float", element_type=DataType.FLOAT),
         gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
@@ -1332,6 +1335,8 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
 def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json_embedded_object"):
     """
     Method: gen json data for different json types. Refer to RFC7159
+    Note: String values should be passed as json.dumps(str) to ensure they are treated as strings,
+          not as serialized JSON results.
     """
     if json_type == "json_embedded_object":                 # a json object with an embedd json object
         return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i), "level2_array": [i for i in range(i, i + 10)]},
@@ -1348,7 +1353,7 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     if json_type == "json_float":                           # single float as json value
         return [i*1.0 for i in range(start, start + nb)]
     if json_type == "json_string":                          # single string as json value
-        return [str(i) for i in range(start, start + nb)]
+        return [json.dumps(str(i)) for i in range(start, start + nb)]
     if json_type == "json_bool":                            # single bool as json value
         return [bool(i) for i in range(start, start + nb)]
     else:
@@ -1987,6 +1992,15 @@ def get_json_field_name_list(schema=None):
             json_fields.append(field.name)
     return json_fields
 
+def get_geometry_field_name_list(schema=None):
+    geometry_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype == DataType.GEOMETRY:
+            geometry_fields.append(field.name)
+    return geometry_fields
 
 def get_binary_vec_field_name(schema=None):
     if schema is None:
@@ -2182,6 +2196,17 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         else:
             # gen 20% none data for nullable field
             return [None if i % 2 == 0 and random.random() < 0.4 else {"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
+    elif data_type == DataType.GEOMETRY:
+        if nb is None:
+            lon = random.uniform(-180, 180)
+            lat = random.uniform(-90, 90)
+            return f"POINT({lon} {lat})" if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})" for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else f"POINT({random.uniform(-180, 180)} {random.uniform(-90, 90)})" for i in range(nb)]
+
     elif data_type in ct.all_vector_types:
         if isinstance(field, dict):
             dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.get('params')['dim']

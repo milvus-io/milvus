@@ -611,12 +611,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
 			}
 			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
-			geomT, err := wkt.Unmarshal(defaultValue)
-			if err != nil {
-				log.Warn("invalid default value for geometry field", zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
-			}
-			defaultValueWkbBytes, err := wkb.Marshal(geomT, wkb.NDR)
+			defaultValueWkbBytes, err := common.ConvertWKTToWKB(defaultValue)
 			if err != nil {
 				log.Warn("invalid default value for geometry field", zap.Error(err))
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
@@ -1210,13 +1205,4 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 
 func ValidateAutoIndexMmapConfig(isVectorField bool, indexParams map[string]string) error {
 	return common.ValidateAutoIndexMmapConfig(paramtable.Get().AutoIndexConfig.Enable.GetAsBool(), isVectorField, indexParams)
-}
-
-func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
-	for _, fun := range coll.GetFunctions() {
-		if fun.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fun.GetInputFieldNames()[0] {
-			return true
-		}
-	}
-	return false
 }

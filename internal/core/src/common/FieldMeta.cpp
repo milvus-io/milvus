@@ -68,6 +68,65 @@ FieldMeta::get_analyzer_params() const {
     return ParseTokenizerParams(params);
 }
 
+milvus::proto::schema::FieldSchema
+FieldMeta::ToProto() const {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(id_.get());
+    proto.set_name(name_.get());
+    proto.set_data_type(ToProtoDataType(type_));
+    proto.set_nullable(nullable_);
+
+    if (has_default_value()) {
+        *proto.mutable_default_value() = *default_value_;
+    }
+
+    if (element_type_ != DataType::NONE) {
+        proto.set_element_type(ToProtoDataType(element_type_));
+    }
+
+    auto add_type_param = [&proto](const std::string& key,
+                                   const std::string& value) {
+        auto* param = proto.add_type_params();
+        param->set_key(key);
+        param->set_value(value);
+    };
+    auto add_index_param = [&proto](const std::string& key,
+                                    const std::string& value) {
+        auto* param = proto.add_index_params();
+        param->set_key(key);
+        param->set_value(value);
+    };
+
+    if (type_ == DataType::VECTOR_ARRAY) {
+        add_type_param("dim", std::to_string(get_dim()));
+        if (auto metric = get_metric_type(); metric.has_value()) {
+            add_index_param("metric_type", metric.value());
+        }
+    } else if (IsVectorDataType(type_)) {
+        if (!IsSparseFloatVectorDataType(type_)) {
+            add_type_param("dim", std::to_string(get_dim()));
+        }
+        if (auto metric = get_metric_type(); metric.has_value()) {
+            add_index_param("metric_type", metric.value());
+        }
+    } else if (IsStringDataType(type_)) {
+        std::map<std::string, std::string> params;
+        if (string_info_.has_value()) {
+            params = string_info_->params;
+        }
+        params[MAX_LENGTH] = std::to_string(get_max_len());
+        params["enable_match"] = enable_match() ? "true" : "false";
+        params["enable_analyzer"] = enable_analyzer() ? "true" : "false";
+        for (const auto& [key, value] : params) {
+            add_type_param(key, value);
+        }
+    } else if (IsArrayDataType(type_)) {
+        // element_type already populated above
+    }
+
+    return proto;
+}
+
 FieldMeta
 FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     auto field_id = FieldId(schema_proto.fieldid());

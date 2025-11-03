@@ -193,3 +193,11 @@ func (m *GrpcQueryCoordClient) UpdateLoadConfig(ctx context.Context, req *queryp
 func (m *GrpcQueryCoordClient) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
 	return &querypb.ListLoadedSegmentsResponse{}, m.Err
 }
+
+func (m *GrpcQueryCoordClient) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
+	return &milvuspb.RunAnalyzerResponse{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

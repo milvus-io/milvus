@@ -32,7 +32,7 @@
 namespace milvus {
 
 using std::string;
-
+const std::string namespace_field_name = "$namespace_id";
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
@@ -57,6 +57,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             AssertInfo(!schema->get_dynamic_field_id().has_value(),
                        "repetitive dynamic field");
             schema->set_dynamic_field_id(field_id);
+        }
+        if (child.name() == namespace_field_name) {
+            schema->set_namespace_field_id(field_id);
         }
     };
 
@@ -109,6 +112,29 @@ Schema::ConvertToArrowSchema() const {
         arrow_fields.push_back(arrow_field);
     }
     return arrow::schema(arrow_fields);
+}
+
+proto::schema::CollectionSchema
+Schema::ToProto() const {
+    proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_enable_dynamic_field(dynamic_field_id_opt_.has_value());
+
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
+        auto* field_proto = schema_proto.add_fields();
+        *field_proto = meta.ToProto();
+
+        if (primary_field_id_opt_.has_value() &&
+            field_id == primary_field_id_opt_.value()) {
+            field_proto->set_is_primary_key(true);
+        }
+        if (dynamic_field_id_opt_.has_value() &&
+            field_id == dynamic_field_id_opt_.value()) {
+            field_proto->set_is_dynamic(true);
+        }
+    }
+
+    return schema_proto;
 }
 
 std::unique_ptr<std::vector<FieldMeta>>

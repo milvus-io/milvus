@@ -1873,13 +1873,13 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Version:      "2.4.0",
 		DefaultValue: "4",
 		PanicIfEmpty: true,
-		Doc:          "The maximum number of vector fields that can be specified in a collection. Value range: [1, 10].",
+		Doc:          "The maximum number of vector fields that can be specified in a collection",
 		Export:       true,
 	}
 	p.MaxVectorFieldNum.Init(base.mgr)
 
-	if p.MaxVectorFieldNum.GetAsInt() > 10 || p.MaxVectorFieldNum.GetAsInt() <= 0 {
-		panic(fmt.Sprintf("Maximum number of vector fields in a collection should be in (0, 10], not %d", p.MaxVectorFieldNum.GetAsInt()))
+	if p.MaxVectorFieldNum.GetAsInt() <= 0 {
+		panic("Maximum number of vector fields in a collection can't be negative")
 	}
 
 	p.MaxShardNum = ParamItem{
@@ -6335,8 +6335,8 @@ it also determine the depth of depth first search method that is used to find th
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",
 		Version:      "2.5.4",
-		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
-		DefaultValue: "1",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.`,
+		DefaultValue: "4",
 		Export:       true,
 	}
 	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)

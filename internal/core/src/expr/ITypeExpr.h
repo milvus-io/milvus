@@ -431,6 +431,11 @@ class UnaryRangeFilterExpr : public ITypeFilterExpr {
         }
     }
 
+    const proto::plan::GenericValue
+    GetValue() const {
+        return val_;
+    }
+
  public:
     const ColumnInfo column_;
     const proto::plan::OpType op_type_;

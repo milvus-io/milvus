@@ -25,9 +25,6 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
-	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -35,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -47,6 +45,9 @@ type FieldReader struct {
 	dim            int
 	field          *schemapb.FieldSchema
 	sparseIsString bool
+
+	// structReader is non-nil when Struct Array field exists
+	structReader *StructFieldReader
 }
 
 func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*FieldReader, error) {
@@ -81,6 +82,11 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 }
 
 func (c *FieldReader) Next(count int64) (any, any, error) {
+	// Check if this FieldReader wraps a StructFieldReader
+	if c.structReader != nil {
+		return c.structReader.Next(count)
+	}
+
 	switch c.field.GetDataType() {
 	case schemapb.DataType_Bool:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
@@ -593,7 +599,7 @@ func ReadNullableStringData(pcr *FieldReader, count int64, isVarcharField bool) 
 	if len(data) == 0 {
 		return nil, nil, nil
 	}
-	if isVarcharField && pcr.field.GetDefaultValue() != nil {
+	if pcr.field.GetDefaultValue() != nil {
 		defaultValue := pcr.field.GetDefaultValue().GetStringData()
 		return fillWithDefaultValueImpl(data, defaultValue, validData, pcr.field)
 	}
@@ -675,11 +681,7 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 			wkbValues = append(wkbValues, []byte(nil))
 			continue
 		}
-		geomT, err := wkt.Unmarshal(wktValue)
-		if err != nil {
-			return nil, nil, err
-		}
-		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -700,11 +702,7 @@ func ReadGeometryData(pcr *FieldReader, count int64) (any, error) {
 
 	wkbValues := make([][]byte, 0)
 	for _, wktValue := range data.([]string) {
-		geomT, err := wkt.Unmarshal(wktValue)
-		if err != nil {
-			return nil, err
-		}
-		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, err
 		}

@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 
+#include "common/common_type_c.h"
 #include "segcore/token_stream_c.h"
 #include "common/type_c.h"
 
@@ -21,6 +22,9 @@ extern "C" {
 #endif
 
 typedef void* CTokenizer;
+
+CStatus
+set_tokenizer_option(const char* params);
 
 CStatus
 create_tokenizer(const char* params, CTokenizer* tokenizer);

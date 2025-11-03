@@ -34,17 +34,14 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	))
 
 	catalog := resource.Resource().StreamingNodeCatalog()
-	cpProto, err := catalog.GetConsumeCheckpoint(ctx, channelInfo.Name)
-	if err != nil {
-		return errors.Wrap(err, "failed to get checkpoint from catalog")
-	}
-	if cpProto == nil {
+	if r.checkpoint == nil {
 		// There's no checkpoint for current pchannel, so we need to initialize the recover info.
-		if cpProto, err = r.initializeRecoverInfo(ctx, channelInfo, lastTimeTickMessage); err != nil {
+		cpProto, err := r.initializeRecoverInfo(ctx, channelInfo, lastTimeTickMessage)
+		if err != nil {
 			return errors.Wrap(err, "failed to initialize checkpoint")
 		}
+		r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	}
-	r.checkpoint = utility.NewWALCheckpointFromProto(cpProto)
 	r.Logger().Info("recover checkpoint done",
 		zap.String("checkpoint", r.checkpoint.MessageID.String()),
 		zap.Uint64("timetick", r.checkpoint.TimeTick),
@@ -72,7 +69,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		r.Logger().Info("recover segment info done", zap.Int("segments", len(r.segments)))
 		return struct{}{}, nil
 	})
-	if err = conc.BlockOnAll(fVChannel, fSegment); err != nil {
+	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
 		return err
 	}
 	return conc.BlockOnAll(fVChannel, fSegment)

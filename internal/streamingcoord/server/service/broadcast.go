@@ -28,6 +28,8 @@ func (s *broadcastServceImpl) Broadcast(ctx context.Context, req *streamingpb.Br
 	if err != nil {
 		return nil, err
 	}
+	defer api.Close()
+
 	results, err := api.Broadcast(ctx, msg)
 	if err != nil {
 		return nil, err
@@ -52,6 +54,8 @@ func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.Broadcas
 	if err != nil {
 		return nil, err
 	}
+	// Once the ack is reached at streamingcoord, the ack operation should not be cancelable.
+	ctx = context.WithoutCancel(ctx)
 	if req.Message == nil {
 		// before 2.6.1, the request don't have the message field, only have the broadcast id and vchannel.
 		// so we need to use the legacy ack interface.
