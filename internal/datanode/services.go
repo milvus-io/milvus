@@ -495,6 +495,11 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
 		importUsed     = node.importScheduler.Slots()
+
+		totalCpuSlot, totalMemorySlot             = node.cpuSlot, node.memorySlot
+		indexStatsUsedCpu, indexedStatsUsedMemory = node.taskScheduler.TaskQueue.GetUsingSlotV2()
+		compactionUsedCpu, compactionUsedMemory   = node.compactionExecutor.SlotsV2()
+		importUsedCpu, importUsedMemory           = node.importScheduler.SlotsV2()
 	)
 
 	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
@@ -502,12 +507,25 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		availableSlots = 0
 	}
 
+	availableCpuSlots := totalCpuSlot - indexStatsUsedCpu - compactionUsedCpu - importUsedCpu
+	availableMemorySlots := totalMemorySlot - indexedStatsUsedMemory - compactionUsedMemory - importUsedMemory
+
 	log.Ctx(ctx).Info("query slots done",
 		zap.Int64("totalSlots", totalSlots),
 		zap.Int64("availableSlots", availableSlots),
 		zap.Int64("indexStatsUsed", indexStatsUsed),
 		zap.Int64("compactionUsed", compactionUsed),
 		zap.Int64("importUsed", importUsed),
+		zap.Float64("totalCpuSlots", totalCpuSlot),
+		zap.Float64("totalMemorySlots", totalMemorySlot),
+		zap.Float64("availableCpuSlots", availableCpuSlots),
+		zap.Float64("availableMemorySlots", availableMemorySlots),
+		zap.Float64("indexStatsUsedCpu", indexStatsUsedCpu),
+		zap.Float64("indexedStatsUsedMemory", indexedStatsUsedMemory),
+		zap.Float64("compactionUsedCpu", compactionUsedCpu),
+		zap.Float64("compactionUsedMemory", compactionUsedMemory),
+		zap.Float64("importUsedCpu", importUsedCpu),
+		zap.Float64("importUsedMemory", importUsedMemory),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
@@ -516,9 +534,24 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
 
+	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(availableCpuSlots)
+	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(availableMemorySlots)
+	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(totalCpuSlot)
+	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(totalMemorySlot)
+	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(indexStatsUsedCpu)
+	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(indexedStatsUsedMemory)
+	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsedCpu").Set(compactionUsedCpu)
+	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsedMemory").Set(compactionUsedMemory)
+	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(importUsedCpu)
+	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(importUsedMemory)
+
 	return &datapb.QuerySlotResponse{
-		Status:         merr.Success(),
-		AvailableSlots: availableSlots,
+		Status:               merr.Success(),
+		AvailableSlots:       availableSlots,
+		AvailableCpuSlots:    availableCpuSlots,
+		AvailableMemorySlots: availableMemorySlots,
+		TotalCpuSlots:        totalCpuSlot,
+		TotalMemorySlots:     totalMemorySlot,
 	}, nil
 }
 

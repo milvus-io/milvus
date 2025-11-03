@@ -96,12 +96,14 @@ func (s *indexTaskSuite) TestBasicTaskOperations() {
 		IndexState:   commonpb.IndexState_Unissued,
 		NumRows:      65535,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, s.mt, nil, nil, nil)
 
 	s.Run("task type and state", func() {
 		s.Equal(taskcommon.Index, it.GetTaskType())
 		s.Equal(taskcommon.State(it.IndexState), it.GetTaskState())
-		s.Equal(int64(1), it.GetTaskSlot())
+		cpuSlot, memorySlot := it.GetTaskSlot()
+		s.Equal(1.0, cpuSlot)
+		s.Equal(1.0, memorySlot)
 	})
 
 	s.Run("time management", func() {
@@ -153,7 +155,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 	}, nil)
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().RootPath().Return("root")
-	it := newIndexBuildTask(t, 1, s.mt, handler, cm, newIndexEngineVersionManager())
+	it := newIndexBuildTask(t, 1, 1, s.mt, handler, cm, newIndexEngineVersionManager())
 
 	s.Run("task not exist in meta", func() {
 		s.mt.indexMeta.segmentBuildInfo.buildID2SegmentIndex.Remove(s.taskID)
@@ -248,7 +250,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_InProgress,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, s.mt, nil, nil, nil)
 	it.NodeID = 1
 	s.Run("worker not found", func() {
 		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
@@ -352,7 +354,7 @@ func (s *indexTaskSuite) TestDropTaskOnWorker() {
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_Unissued,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, s.mt, nil, nil, nil)
 	it.NodeID = 1
 
 	s.Run("worker not found", func() {
@@ -383,7 +385,7 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		BuildID:      s.taskID,
 		IndexState:   commonpb.IndexState_Unissued,
 	}
-	it := newIndexBuildTask(t, 1, s.mt, nil, nil, nil)
+	it := newIndexBuildTask(t, 1, 1, s.mt, nil, nil, nil)
 	result := &workerpb.IndexTaskInfo{
 		BuildID: s.taskID,
 		State:   commonpb.IndexState_Finished,

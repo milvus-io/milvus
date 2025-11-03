@@ -39,6 +39,7 @@ type Executor interface {
 	Start(ctx context.Context)
 	Enqueue(task Compactor) (bool, error)
 	Slots() int64
+	SlotsV2() (float64, float64)
 	RemoveTask(planID int64)                                // Deprecated in 2.6
 	GetResults(planID int64) []*datapb.CompactionPlanResult // Deprecated in 2.6
 }
@@ -64,7 +65,9 @@ type executor struct {
 	taskCh chan Compactor
 
 	// Slot tracking for resource management
-	usingSlots int64
+	usingSlots       int64
+	usingCpuSlots    float64
+	usingMemorySlots float64
 
 	// Slots(Slots Cap for DataCoord), ExecPool(MaxCompactionConcurrency) are all trying to control concurrency and resource usage,
 	// which creates unnecessary complexity. We should use a single resource pool instead.
@@ -72,9 +75,11 @@ type executor struct {
 
 func NewExecutor() *executor {
 	return &executor{
-		tasks:      make(map[int64]*taskState),
-		taskCh:     make(chan Compactor, maxTaskQueueNum),
-		usingSlots: 0,
+		tasks:            make(map[int64]*taskState),
+		taskCh:           make(chan Compactor, maxTaskQueueNum),
+		usingSlots:       0,
+		usingCpuSlots:    0,
+		usingMemorySlots: 0,
 	}
 }
 
@@ -100,14 +105,38 @@ func getTaskSlotUsage(task Compactor) int64 {
 	return taskSlotUsage
 }
 
-func (e *executor) Enqueue(task Compactor) (bool, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+func getTaskSlotUsageV2(task Compactor) (float64, float64) {
+	// Calculate slot usage
+	taskCpuSlotUsage, taskMemorySlotUsage := task.GetSlotUsageV2()
+	// compatible for old datacoord or unexpected request
+	if taskCpuSlotUsage <= 0 || taskMemorySlotUsage <= 0 {
+		switch task.GetCompactionType() {
+		case datapb.CompactionType_ClusteringCompaction:
+			taskCpuSlotUsage, taskMemorySlotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsFloat(), paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsFloat()
+		case datapb.CompactionType_MixCompaction:
+			taskCpuSlotUsage, taskMemorySlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsFloat(), paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsFloat()
+		case datapb.CompactionType_Level0DeleteCompaction:
+			taskCpuSlotUsage, taskMemorySlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsFloat(), paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsFloat()
+		}
+		illegalCpuSlot, illegalMemorySlot := task.GetSlotUsageV2()
+		log.Warn("illegal task slot usage, change it to a default value",
+			zap.Float64("illegalCpuSlotUsage", illegalCpuSlot),
+			zap.Float64("illegalMemorySlotUsage", illegalMemorySlot),
+			zap.Float64("defaultCpuSlotUsage", taskCpuSlotUsage),
+			zap.Float64("defaultMemorySlotUsage", taskMemorySlotUsage),
+			zap.String("type", task.GetCompactionType().String()))
+	}
 
+	return taskCpuSlotUsage, taskMemorySlotUsage
+}
+
+func (e *executor) Enqueue(task Compactor) (bool, error) {
 	planID := task.GetPlanID()
 
+	e.mu.Lock()
 	// Check for duplicate task
 	if _, exists := e.tasks[planID]; exists {
+		e.mu.Unlock()
 		log.Warn("duplicated compaction task",
 			zap.Int64("planID", planID),
 			zap.String("channel", task.GetChannelName()))
@@ -116,12 +145,18 @@ func (e *executor) Enqueue(task Compactor) (bool, error) {
 
 	// Update slots and add task
 	e.usingSlots += getTaskSlotUsage(task)
+	cpuSlot, memorySlot := getTaskSlotUsageV2(task)
+	e.usingCpuSlots += cpuSlot
+	e.usingMemorySlots += memorySlot
 	e.tasks[planID] = &taskState{
 		compactor: task,
 		state:     datapb.CompactionTaskState_executing,
 		result:    nil,
 	}
+	e.mu.Unlock()
 
+	// Send to channel after releasing lock to avoid deadlock
+	// when channel is full and completeTask needs to acquire lock
 	e.taskCh <- task
 	return true, nil
 }
@@ -131,6 +166,13 @@ func (e *executor) Slots() int64 {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.usingSlots
+}
+
+// Slots returns the used slots for compaction
+func (e *executor) SlotsV2() (float64, float64) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.usingCpuSlots, e.usingMemorySlots
 }
 
 // completeTask updates task state to completed and adjusts slot usage
@@ -153,6 +195,16 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		e.usingSlots -= getTaskSlotUsage(task.compactor)
 		if e.usingSlots < 0 {
 			e.usingSlots = 0
+		}
+
+		cpuSlot, memorySlot := getTaskSlotUsageV2(task.compactor)
+		e.usingCpuSlots -= cpuSlot
+		e.usingMemorySlots -= memorySlot
+		if e.usingCpuSlots < 0 {
+			e.usingCpuSlots = 0
+		}
+		if e.usingMemorySlots < 0 {
+			e.usingMemorySlots = 0
 		}
 	}
 }

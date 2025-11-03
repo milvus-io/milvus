@@ -151,12 +151,14 @@ func (s *statsTaskSuite) TestBasicTaskOperations() {
 		TargetSegmentID: s.targetID,
 		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:           indexpb.JobState_JobStateInit,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	s.Run("task type and state", func() {
 		s.Equal(taskcommon.Stats, st.GetTaskType())
 		s.Equal(st.GetState(), st.GetTaskState())
-		s.Equal(int64(1), st.GetTaskSlot())
+		cpuSlot, memorySlot := st.GetTaskSlot()
+		s.Equal(1.0, cpuSlot)
+		s.Equal(1.0, memorySlot)
 	})
 
 	s.Run("time management", func() {
@@ -187,7 +189,7 @@ func (s *statsTaskSuite) TestUpdateStateAndVersion() {
 		State:      indexpb.JobState_JobStateInit,
 		Version:    1,
 		NodeID:     0,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	s.Run("update state success", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -237,7 +239,7 @@ func (s *statsTaskSuite) TestResetTask() {
 		SegmentID:  s.segID,
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:      indexpb.JobState_JobStateInProgress,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	s.Run("reset success", func() {
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
@@ -264,7 +266,7 @@ func (s *statsTaskSuite) TestHandleEmptySegment() {
 		SegmentID:  s.segID,
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:      indexpb.JobState_JobStateInit,
-	}, 1, s.mt, handler, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, handler, nil, newIndexEngineVersionManager())
 
 	s.Run("handle empty segment success", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -293,7 +295,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		TargetSegmentID: s.targetID,
 		SubJobType:      indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:           indexpb.JobState_JobStateInit,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	s.Run("segment not healthy", func() {
 		// Set up a temporary nil segment return
@@ -428,7 +430,7 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:      indexpb.JobState_JobStateInProgress,
 		NodeID:     100,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -483,7 +485,7 @@ func (s *statsTaskSuite) TestDropTaskOnWorker() {
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:      indexpb.JobState_JobStateInProgress,
 		NodeID:     100,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	s.Run("drop task success", func() {
 		cluster := session.NewMockCluster(s.T())
@@ -508,7 +510,7 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		SegmentID:  s.segID,
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:      indexpb.JobState_JobStateInProgress,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	result := &workerpb.StatsResult{
 		TaskID:       s.taskID,
@@ -569,7 +571,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		SegmentID:  s.segID,
 		SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
 		State:      indexpb.JobState_JobStateInit,
-	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+	}, 1, 1, s.mt, nil, nil, newIndexEngineVersionManager())
 
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{

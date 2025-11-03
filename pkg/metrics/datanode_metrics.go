@@ -335,6 +335,22 @@ var (
 			Name:      "slot",
 			Help:      "number of available and used slot",
 		}, []string{nodeIDLabelName, "type"})
+
+	DataNodeCPUSlot = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "cpu_slot",
+			Help:      "number of available and used cpu slot",
+		}, []string{nodeIDLabelName, "type"})
+
+	DataNodeMemorySlot = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "memory_slot",
+			Help:      "number of available and used memory slot",
+		}, []string{nodeIDLabelName, "type"})
 )
 
 var registerDNOnce sync.Once
@@ -385,6 +401,8 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildIndexLatency)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
+	registry.MustRegister(DataNodeCPUSlot)
+	registry.MustRegister(DataNodeMemorySlot)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {

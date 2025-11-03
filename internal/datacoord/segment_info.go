@@ -532,6 +532,30 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 	return s.size.Load()
 }
 
+func (s *SegmentInfo) getFieldSize(fieldID int64) int64 {
+	var size int64
+	containsField := func(fieldBinlog *datapb.FieldBinlog, targetFieldID int64) bool {
+		if fieldBinlog.GetFieldID() == targetFieldID {
+			return true
+		}
+		for _, childFieldID := range fieldBinlog.GetChildFields() {
+			if childFieldID == fieldID {
+				return true
+			}
+		}
+		return false
+	}
+	for _, binlogs := range s.GetBinlogs() {
+		if containsField(binlogs, fieldID) {
+			for _, l := range binlogs.GetBinlogs() {
+				size += l.GetMemorySize()
+			}
+		}
+	}
+	// skip delta log and stats log, no need it.
+	return size
+}
+
 // Any edits on deltalogs of flushed segments will reset deltaRowcount to -1
 func (s *SegmentInfo) getDeltaCount() int64 {
 	if s.deltaRowcount.Load() < 0 || s.GetState() != commonpb.SegmentState_Flushed {

@@ -36,8 +36,11 @@ import (
 
 // WorkerSlots represents the slot information for a worker node
 type WorkerSlots struct {
-	NodeID         int64
-	AvailableSlots int64
+	NodeID              int64
+	AvailableCpuSlot    float64
+	TotalCpuSlot        float64
+	AvailableMemorySlot float64
+	TotalMemorySlot     float64
 }
 
 // Cluster defines the interface for tasks
@@ -53,9 +56,9 @@ type Cluster interface {
 	DropCompaction(nodeID int64, planID int64) error
 
 	// CreatePreImport creates a pre-import task
-	CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error
+	CreatePreImport(nodeID int64, in *datapb.PreImportRequest) error
 	// CreateImport creates an import task
-	CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error
+	CreateImport(nodeID int64, in *datapb.ImportRequest) error
 	// QueryPreImport queries the status of a pre-import task
 	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
 	// QueryImport queries the status of an import task
@@ -185,8 +188,11 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			mu.Lock()
 			defer mu.Unlock()
 			availableNodeSlots[nodeID] = &WorkerSlots{
-				NodeID:         nodeID,
-				AvailableSlots: resp.GetAvailableSlots(),
+				NodeID:              nodeID,
+				AvailableCpuSlot:    resp.GetAvailableCpuSlots(),
+				AvailableMemorySlot: resp.GetAvailableMemorySlots(),
+				TotalCpuSlot:        resp.GetTotalCpuSlots(),
+				TotalMemorySlot:     resp.GetTotalMemorySlots(),
 			}
 		}()
 	}
@@ -201,6 +207,8 @@ func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan) erro
 	properties.AppendTaskID(in.GetPlanID())
 	properties.AppendType(taskcommon.Compaction)
 	properties.AppendTaskSlot(in.GetSlotUsage())
+	properties.AppendCPUSlot(in.GetCpuSlot())
+	properties.AppendMemorySlot(in.GetMemorySlot())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -268,22 +276,25 @@ func (c *cluster) DropCompaction(nodeID int64, planID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
-func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
-	// TODO: sheep, use taskSlot in request
+func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.PreImport)
-	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendCPUSlot(in.GetCpuSlot())
+	properties.AppendMemorySlot(in.GetMemorySlot())
 	return c.createTask(nodeID, in, properties)
 }
 
-func (c *cluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error {
+func (c *cluster) CreateImport(nodeID int64, in *datapb.ImportRequest) error {
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Import)
-	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskSlot(in.GetTaskSlot())
+	properties.AppendCPUSlot(in.GetCpuSlot())
+	properties.AppendMemorySlot(in.GetMemorySlot())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -397,6 +408,8 @@ func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetIndexVersion())
+	properties.AppendCPUSlot(in.GetCpuSlot())
+	properties.AppendMemorySlot(in.GetMemorySlot())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -473,6 +486,8 @@ func (c *cluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) err
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetTaskVersion())
+	properties.AppendCPUSlot(in.GetCpuSlot())
+	properties.AppendMemorySlot(in.GetMemorySlot())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -547,6 +562,8 @@ func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error
 	properties.AppendType(taskcommon.Analyze)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendTaskVersion(in.GetVersion())
+	properties.AppendCPUSlot(in.GetCpuSlot())
+	properties.AppendMemorySlot(in.GetMemorySlot())
 	return c.createTask(nodeID, in, properties)
 }
 

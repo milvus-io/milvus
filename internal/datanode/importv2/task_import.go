@@ -109,6 +109,10 @@ func (t *ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
 }
 
+func (t *ImportTask) GetSlotsV2() (float64, float64) {
+	return t.req.GetCpuSlot(), t.req.GetMemorySlot()
+}
+
 func (t *ImportTask) GetBufferSize() int64 {
 	// Calculate the task buffer size based on the number of vchannels and partitions
 	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
@@ -163,9 +167,12 @@ func (t *ImportTask) Clone() Task {
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := t.GetBufferSize()
+	cpuSlot, memorySlot := t.GetSlotsV2()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int64("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
+		zap.Float64("cpuSlot", cpuSlot),
+		zap.Float64("memorySlot", memorySlot),
 		zap.Any("files", t.req.GetFiles()),
 		zap.Any("schema", t.GetSchema()),
 	)...)

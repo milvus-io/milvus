@@ -19,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var _ CompactionTask = (*mixCompactionTask)(nil)
@@ -33,8 +32,6 @@ type mixCompactionTask struct {
 	ievm IndexEngineVersionManager
 
 	times *taskcommon.Times
-
-	slotUsage atomic.Int64
 }
 
 func (t *mixCompactionTask) GetTaskID() int64 {
@@ -49,19 +46,16 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *mixCompactionTask) GetTaskSlot() int64 {
-	slotUsage := t.slotUsage.Load()
-	if slotUsage == 0 {
-		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
-			segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
-			if segment != nil {
-				slotUsage = calculateStatsTaskSlot(segment.getSegmentSize())
-			}
+func (t *mixCompactionTask) GetTaskSlot() (float64, float64) {
+	cpuSlot := Params.DataCoordCfg.MixCompactionCPUFactor.GetAsFloat()
+	memorySlot := float64(t.GetTaskProto().GetMaxSize()) / 1024 / 1024 / 1024 * Params.DataCoordCfg.MixCompactionMemoryFactor.GetAsFloat()
+	if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
+		segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
+		if segment != nil {
+			cpuSlot, memorySlot = calculateStatsTaskSlot(segment.getSegmentSize())
 		}
-		t.slotUsage.Store(slotUsage)
 	}
-	return slotUsage
+	return cpuSlot, memorySlot
 }
 
 func (t *mixCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -379,11 +373,11 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		TotalRows:                 taskProto.GetTotalRows(),
 		Schema:                    taskProto.GetSchema(),
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
-		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
 	}
+	plan.CpuSlot, plan.MemorySlot = t.GetTaskSlot()
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {
@@ -420,8 +414,4 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Int64("maxSize", plan.GetMaxSize()),
 		zap.Any("PreAllocatedLogIDs", logIDRange), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
-}
-
-func (t *mixCompactionTask) GetSlotUsage() int64 {
-	return t.GetTaskSlot()
 }

@@ -62,14 +62,10 @@ func (t *l0CompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *l0CompactionTask) GetTaskSlot() int64 {
+func (t *l0CompactionTask) GetTaskSlot() (float64, float64) {
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-	factor := paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
-	slot := factor * t.GetTaskProto().GetTotalRows() / int64(batchSize)
-	if slot < 1 {
-		return 1
-	}
-	return slot
+	slot := float64(t.GetTaskProto().GetTotalRows() / int64(batchSize))
+	return slot, slot
 }
 
 func (t *l0CompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -322,9 +318,9 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		CollectionTtl: taskProto.GetCollectionTtl(),
 		TotalRows:     taskProto.GetTotalRows(),
 		Schema:        taskProto.GetSchema(),
-		SlotUsage:     t.GetSlotUsage(),
 		JsonParams:    compactionParams,
 	}
+	plan.CpuSlot, plan.MemorySlot = t.GetTaskSlot()
 
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 	segments := make([]*SegmentInfo, 0)
@@ -429,8 +425,4 @@ func (t *l0CompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) 
 	)
 
 	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
-}
-
-func (t *l0CompactionTask) GetSlotUsage() int64 {
-	return t.GetTaskSlot()
 }

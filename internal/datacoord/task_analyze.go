@@ -76,8 +76,8 @@ func (at *analyzeTask) GetTaskState() taskcommon.State {
 	return at.State
 }
 
-func (at *analyzeTask) GetTaskSlot() int64 {
-	return Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
+func (at *analyzeTask) GetTaskSlot() (float64, float64) {
+	return Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat(), Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat()
 }
 
 func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
@@ -149,6 +149,8 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
 		Version:       task.Version + 1,
 		StorageConfig: createStorageConfig(),
+		CpuSlot:       Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat(),
+		MemorySlot:    Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsFloat(),
 	}
 	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 

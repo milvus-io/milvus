@@ -1038,3 +1038,7 @@ func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{
 func (t *clusteringCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }
+
+func (t *clusteringCompactionTask) GetSlotUsageV2() (float64, float64) {
+	return t.plan.GetCpuSlot(), t.plan.GetMemorySlot()
+}
