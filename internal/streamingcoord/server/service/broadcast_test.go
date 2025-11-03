@@ -10,7 +10,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -22,6 +25,12 @@ import (
 
 func TestBroadcastService(t *testing.T) {
 	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+	// Set up the balancer
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	balance.Register(b)
 
 	fb := syncutil.NewFuture[broadcaster.Broadcaster]()
 	mba := mock_broadcaster.NewMockBroadcastAPI(t)
