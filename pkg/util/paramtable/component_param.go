@@ -1209,28 +1209,31 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.EnabledOptimizeExpr.Init(base.mgr)
 
 	p.UsingJSONStatsForQuery = ParamItem{
-		Key:          "common.UsingJSONStatsForQuery",
-		Version:      "2.5.6",
+		Key:          "common.usingJSONShreddingForQuery",
+		Version:      "2.6.5",
 		DefaultValue: "true",
 		Doc:          "Indicates whether to use json stats when query",
+		FallbackKeys: []string{"common.UsingJSONStatsForQuery"},
 		Export:       true,
 	}
 	p.UsingJSONStatsForQuery.Init(base.mgr)
 
 	p.EnabledJSONKeyStats = ParamItem{
-		Key:          "common.enabledJSONKeyStats",
-		Version:      "2.5.5",
+		Key:          "common.enabledJSONShredding",
+		Version:      "2.6.5",
 		DefaultValue: "true",
 		Doc:          "Indicates sealedsegment whether to enable JSON key stats",
+		FallbackKeys: []string{"common.enabledJSONKeyStats"},
 		Export:       true,
 	}
 	p.EnabledJSONKeyStats.Init(base.mgr)
 
 	p.EnabledGrowingSegmentJSONKeyStats = ParamItem{
-		Key:          "common.enabledGrowingSegmentJSONKeyStats",
-		Version:      "2.5.5",
+		Key:          "common.enabledGrowingSegmentJSONShredding",
+		Version:      "2.6.5",
 		DefaultValue: "false",
 		Doc:          "Indicates growingsegment whether to enable JSON key stats",
+		FallbackKeys: []string{"common.enabledGrowingSegmentJSONKeyStats"},
 		Export:       true,
 	}
 	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
@@ -3803,10 +3806,11 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarIndex.Init(base.mgr)
 
 	p.MmapJSONStats = ParamItem{
-		Key:          "queryNode.mmap.jsonStats",
-		Version:      "2.6.1",
+		Key:          "queryNode.mmap.jsonShredding",
+		Version:      "2.6.5",
 		DefaultValue: "true",
 		Doc:          "Enable mmap for loading json stats",
+		FallbackKeys: []string{"queryNode.mmap.jsonStats"},
 		Export:       true,
 	}
 	p.MmapJSONStats.Init(base.mgr)
@@ -5539,20 +5543,22 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.SortCompactionTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerCount = ParamItem{
-		Key:          "dataCoord.jsonStatsTriggerCount",
-		Version:      "2.5.5",
+		Key:          "dataCoord.jsonShreddingTriggerCount",
+		Version:      "2.6.5",
 		Doc:          "jsonkey stats task count per trigger",
 		DefaultValue: "10",
+		FallbackKeys: []string{"dataCoord.jsonStatsTriggerCount"},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
 	p.JSONStatsTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerInterval = ParamItem{
-		Key:          "dataCoord.jsonStatsTriggerInterval",
-		Version:      "2.5.5",
+		Key:          "dataCoord.jsonShreddingTriggerInterval",
+		Version:      "2.6.5",
 		Doc:          "jsonkey task interval per trigger",
 		DefaultValue: "10",
+		FallbackKeys: []string{"dataCoord.jsonStatsTriggerInterval"},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -5569,11 +5575,12 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.RequestTimeoutSeconds.Init(base.mgr)
 
 	p.JSONStatsMaxShreddingColumns = ParamItem{
-		Key:          "dataCoord.jsonStatsMaxShreddingColumns",
-		Version:      "2.6.1",
+		Key:          "dataCoord.jsonShreddingMaxColumns",
+		Version:      "2.6.5",
 		DefaultValue: "1024",
 		Doc:          "the max number of columns to shred",
 		Export:       true,
+		FallbackKeys: []string{"dataCoord.jsonStatsMaxShreddingColumns"},
 		Formatter: func(value string) string {
 			v := getAsInt(value)
 			if v > 10000 {
@@ -5585,19 +5592,21 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.JSONStatsMaxShreddingColumns.Init(base.mgr)
 
 	p.JSONStatsShreddingRatioThreshold = ParamItem{
-		Key:          "dataCoord.jsonStatsShreddingRatioThreshold",
-		Version:      "2.6.1",
+		Key:          "dataCoord.jsonShreddingRatioThreshold",
+		Version:      "2.6.5",
 		DefaultValue: "0.3",
 		Doc:          "the ratio threshold to shred",
+		FallbackKeys: []string{"dataCoord.jsonStatsShreddingRatioThreshold"},
 		Export:       true,
 	}
 	p.JSONStatsShreddingRatioThreshold.Init(base.mgr)
 
 	p.JSONStatsWriteBatchSize = ParamItem{
-		Key:          "dataCoord.jsonStatsWriteBatchSize",
-		Version:      "2.6.1",
+		Key:          "dataCoord.jsonShreddingWriteBatchSize",
+		Version:      "2.6.5",
 		DefaultValue: "81920",
 		Doc:          "the batch size to write",
+		FallbackKeys: []string{"dataCoord.jsonStatsWriteBatchSize"},
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
