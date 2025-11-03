@@ -486,7 +486,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         local_data_path, write_offset, &dim, sizeof(dim));
 
     // Write offsets file for VECTOR_ARRAY
-    if (is_vector_array && offsets.size() > 1) {
+    if (is_vector_array) {
+        AssertInfo(offsets.size() == num_rows + 1,
+                   "offsets size is not equal to num_rows + 1: offset size {}, "
+                   "num_rows {}",
+                   offsets.size(),
+                   num_rows);
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
@@ -673,7 +678,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         local_data_path, write_offset, &var_dim, sizeof(var_dim));
 
     // Write offsets file for VECTOR_ARRAY
-    if (is_vector_array && offsets.size() > 1) {
+    if (is_vector_array) {
+        AssertInfo(offsets.size() == num_rows + 1,
+                   "offsets size is not equal to num_rows + 1: offset size {}, "
+                   "num_rows {}",
+                   offsets.size(),
+                   num_rows);
         // Get offsets path from config if provided, otherwise use default
         auto offsets_path = index::GetValueFromConfig<std::string>(
                                 config, index::EMB_LIST_OFFSETS_PATH)
