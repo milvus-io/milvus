@@ -77,6 +77,7 @@ type VecIndexMgr interface {
 	IsNoTrainIndex(indexType IndexType) bool
 	IsVecIndex(indexType IndexType) bool
 	IsDiskANN(indexType IndexType) bool
+	IsAISAQ(indexType IndexType) bool
 	IsGPUVecIndex(indexType IndexType) bool
 	IsDiskVecIndex(indexType IndexType) bool
 	IsMMapSupported(indexType IndexType) bool
@@ -106,6 +107,10 @@ func (mgr *vecIndexMgrImpl) IsNoTrainIndex(indexType IndexType) bool {
 
 func (mgr *vecIndexMgrImpl) IsDiskANN(indexType IndexType) bool {
 	return indexType == "DISKANN"
+}
+
+func (mgr *vecIndexMgrImpl) IsAISAQ(indexType IndexType) bool {
+	return indexType == "AISAQ"
 }
 
 func (mgr *vecIndexMgrImpl) init() {
