@@ -1272,8 +1272,6 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         expected: Step 3 should success
         """
         # step 1: create collection
-        default_nb = 3
-        default_dim = 3
         client = self._client()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
@@ -1293,6 +1291,15 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         dup_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
         self.insert(client, collection_name, dup_rows)
 
+        # verify the duplicate pk is inserted and can be queried
+        for row in dup_rows:
+            row[default_int32_field_name] = None
+        res = self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: dup_rows,
+                                "pk_name": default_primary_key_field_name})[0]
+        assert len(res) == default_nb
+
         # step 3: Upsert the rows with duplicate pk
         new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
                                             desired_field_names=[default_primary_key_field_name, default_string_field_name])
@@ -1300,7 +1307,6 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, new_rows, partial_update=True)
         for i, row in enumerate(dup_rows):
             row[default_string_field_name] = new_rows[i][default_string_field_name]
-            row[default_int32_field_name] = None
 
         res = self.query(client, collection_name, filter=default_search_exp,
                    check_task=CheckTasks.check_query_results,
