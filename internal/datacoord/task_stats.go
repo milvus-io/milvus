@@ -143,8 +143,10 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
 			log.Warn("segment is not exist or is compacting, skip stats",
 				zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-			// Fail stats task if segment is compacting, it's ok because the segment will be dropped after the compaction.
-			st.SetState(indexpb.JobState_JobStateFailed, "segment is not healthy")
+			// Discard this stats task because the segment is either unhealthy or undergoing compaction.
+			// To prevent the task from incorrectly setting the compacting state.
+			// Setting it to None will clear the meta tag.
+			st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
 			st.SetStartTime(time.Now())
 			return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
 		}
@@ -184,7 +186,7 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 	// set segment compacting
 	segment := dependency.meta.GetHealthySegment(ctx, st.segmentID)
 	if segment == nil {
-		log.Warn("segment is node healthy, skip stats")
+		log.Warn("segment is not healthy, skip stats")
 		st.SetState(indexpb.JobState_JobStateNone, "segment is not healthy")
 		return false
 	}
