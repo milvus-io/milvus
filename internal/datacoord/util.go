@@ -369,30 +369,41 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
-func calculateIndexTaskSlot(segmentSize int64) int64 {
-	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if segmentSize > 512*1024*1024 {
-		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
-		return max(taskSlot, 1)
-	} else if segmentSize > 100*1024*1024 {
-		return max(defaultSlots/4, 1)
-	} else if segmentSize > 10*1024*1024 {
-		return max(defaultSlots/16, 1)
-	}
-	return max(defaultSlots/64, 1)
+func calculateStatsTaskSlot(segmentSize int64) (float64, float64) {
+	cpuSlot := Params.DataCoordCfg.StatsTaskCPUFactor.GetAsFloat()
+	memorySlot := float64(segmentSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.StatsTaskMemoryFactor.GetAsFloat()
+	return cpuSlot, memorySlot
 }
 
-func calculateStatsTaskSlot(segmentSize int64) int64 {
-	defaultSlots := Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
-	if segmentSize > 512*1024*1024 {
-		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
-		return max(taskSlot, 1)
-	} else if segmentSize > 100*1024*1024 {
-		return max(defaultSlots/2, 1)
-	} else if segmentSize > 10*1024*1024 {
-		return max(defaultSlots/4, 1)
+func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) (float64, float64) {
+	if isVectorIndex {
+		cpuSlot := Params.DataCoordCfg.VectorIndexTaskCPUFactor.GetAsFloat()
+		memorySlot := float64(fieldSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.VectorIndexTaskMemoryFactor.GetAsFloat()
+		if fieldSize > 512*1024*1024 {
+			return cpuSlot, memorySlot
+		} else if fieldSize > 100*1024*1024 {
+			return cpuSlot / 2, memorySlot
+		} else if fieldSize > 10*1024*1024 {
+			return cpuSlot / 4, memorySlot
+		}
+		return cpuSlot / 8, memorySlot
 	}
-	return max(defaultSlots/8, 1)
+	memorySlot := float64(fieldSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.ScalarIndexTaskMemoryFactor.GetAsFloat()
+	cpuSlot := Params.DataCoordCfg.ScalarIndexTaskCPUFactor.GetAsFloat()
+	if fieldSize < 100*1024*1024 {
+		return cpuSlot / 2, memorySlot
+	}
+	return cpuSlot, memorySlot
+}
+
+func IsVectorField(meta *meta, collID, fieldID int64) bool {
+	coll := meta.GetCollection(collID)
+	for _, field := range coll.Schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			return typeutil.IsVectorType(field.GetDataType())
+		}
+	}
+	return false
 }
 
 func enableSortCompaction() bool {

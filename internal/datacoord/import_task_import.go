@@ -124,8 +124,8 @@ func (t *importTask) GetTaskNodeID() int64 {
 	return t.GetNodeID()
 }
 
-func (t *importTask) GetTaskSlot() int64 {
-	return int64(CalculateTaskSlot(t, t.importMeta))
+func (t *importTask) GetTaskSlot() (float64, float64) {
+	return CalculateTaskSlot(t, t.importMeta)
 }
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -136,7 +136,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		log.Warn("assemble import request failed", WrapTaskLog(t, zap.Error(err))...)
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	err = cluster.CreateImport(nodeID, req)
 	if err != nil {
 		log.Warn("import failed", WrapTaskLog(t, zap.Error(err))...)
 		t.retryTimes++

@@ -90,8 +90,8 @@ func (p *preImportTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(p.GetState())
 }
 
-func (p *preImportTask) GetTaskSlot() int64 {
-	return int64(CalculateTaskSlot(p, p.importMeta))
+func (p *preImportTask) GetTaskSlot() (float64, float64) {
+	return CalculateTaskSlot(p, p.importMeta)
 }
 
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -111,7 +111,7 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req := AssemblePreImportRequest(p, job)
 
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	err := cluster.CreatePreImport(nodeID, req)
 	if err != nil {
 		log.Warn("preimport failed", WrapTaskLog(p, zap.Error(err))...)
 		p.retryTimes++
