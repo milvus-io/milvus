@@ -5322,7 +5322,6 @@ class TestQueryCount(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #44982")
     def test_milvus_client_json_expr_on_search_n_query(self):
         """
         target: verify more expressions of json object, json array and json texts are supported in search and query
