@@ -2416,10 +2416,6 @@ func ConcatStructFieldName(structName string, fieldName string) string {
 	return fmt.Sprintf("%s[%s]", structName, fieldName)
 }
 
-func ConcatStructFieldDefaultIndexName(structName string, fieldName string) string {
-	return fmt.Sprintf("%s_%s", structName, fieldName)
-}
-
 func ExtractStructFieldName(fieldName string) (string, error) {
 	parts := strings.Split(fieldName, "[")
 	if len(parts) == 1 {

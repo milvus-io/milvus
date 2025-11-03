@@ -62,13 +62,7 @@ func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, subField := range structField.GetFields() {
 			if subField.FieldID == fieldID {
-				// struct sub-field name is in the format of structName[fieldName] but we dont support "[]" in index name
-				// so we dont use field name directly as index name
-				extracedFieldName, err := typeutil.ExtractStructFieldName(subField.Name)
-				if err != nil {
-					return "", err
-				}
-				return typeutil.ConcatStructFieldDefaultIndexName(structField.Name, extracedFieldName), nil
+				return subField.Name, nil
 			}
 		}
 	}
