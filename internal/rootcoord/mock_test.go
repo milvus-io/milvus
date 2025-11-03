@@ -895,7 +895,7 @@ type mockBroker struct {
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
-	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollectionFunc func(ctx context.Context, collectionID UniqueID) error
 
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
 }
@@ -912,6 +912,9 @@ func newValidMockBroker() *mockBroker {
 		return nil
 	}
 	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+		return nil
+	}
+	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 		return nil
 	}
 	return broker
@@ -949,8 +952,8 @@ func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, i
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 
-func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	return b.BroadcastAlteredCollectionFunc(ctx, req)
+func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
+	return b.BroadcastAlteredCollectionFunc(ctx, collectionID)
 }
 
 func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
