@@ -150,7 +150,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 
 	// not support disabling since remove field not support yet.
 	if !targetValue {
-		return merr.WrapErrParameterInvalidMsg("dynamic schema cannot be disabled")
+		return merr.WrapErrParameterInvalidMsg("dynamic schema cannot supported to be disabled")
 	}
 
 	// convert to add $meta json field, nullable, default value `{}`
@@ -281,6 +281,9 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			return errors.Wrap(err, "failed to update load config")
 		}
+	}
+	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
+		return errors.Wrap(err, "failed to broadcast altered collection")
 	}
 	return c.ExpireCaches(ctx, header, result.GetControlChannelResult().TimeTick)
 }
