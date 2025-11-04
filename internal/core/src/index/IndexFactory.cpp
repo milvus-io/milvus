@@ -577,31 +577,98 @@ IndexFactory::CreateVectorIndex(
         switch (data_type) {
             case DataType::VECTOR_FLOAT: {
                 return std::make_unique<VectorDiskAnnIndex<float>>(
-                    index_type, metric_type, version, file_manager_context);
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    file_manager_context);
             }
             case DataType::VECTOR_FLOAT16: {
                 return std::make_unique<VectorDiskAnnIndex<float16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    file_manager_context);
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
-                    index_type, metric_type, version, file_manager_context);
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    file_manager_context);
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
-                    index_type, metric_type, version, file_manager_context);
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    file_manager_context);
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
                 return std::make_unique<VectorDiskAnnIndex<sparse_u32_f32>>(
-                    index_type, metric_type, version, file_manager_context);
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    file_manager_context);
             }
             case DataType::VECTOR_ARRAY: {
-                ThrowInfo(Unsupported,
-                          "VECTOR_ARRAY for DiskAnnIndex is not supported");
+                auto element_type =
+                    static_cast<DataType>(file_manager_context.fieldDataMeta
+                                              .field_schema.element_type());
+                switch (element_type) {
+                    case DataType::VECTOR_FLOAT:
+                        return std::make_unique<VectorDiskAnnIndex<float>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            file_manager_context);
+                    case DataType::VECTOR_FLOAT16:
+                        return std::make_unique<VectorDiskAnnIndex<float16>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            file_manager_context);
+                    case DataType::VECTOR_BFLOAT16:
+                        return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            file_manager_context);
+                    case DataType::VECTOR_BINARY:
+                        return std::make_unique<VectorDiskAnnIndex<bin1>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            file_manager_context);
+                    case DataType::VECTOR_INT8:
+                        return std::make_unique<VectorDiskAnnIndex<int8>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            file_manager_context);
+                    default:
+                        ThrowInfo(NotImplemented,
+                                  fmt::format("not implemented data type to "
+                                              "build disk index: {}",
+                                              element_type));
+                }
             }
             case DataType::VECTOR_INT8: {
                 return std::make_unique<VectorDiskAnnIndex<int8>>(
-                    index_type, metric_type, version, file_manager_context);
+                    DataType::NONE,
+                    index_type,
+                    metric_type,
+                    version,
+                    file_manager_context);
             }
             default:
                 ThrowInfo(

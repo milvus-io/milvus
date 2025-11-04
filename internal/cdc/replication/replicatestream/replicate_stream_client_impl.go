@@ -86,12 +86,12 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 }
 
 func (r *replicateStreamClient) startInternal() {
-	logger := log.With(zap.String("key", r.channel.Key), zap.Int64("revision", r.channel.ModRevision))
-
 	defer func() {
 		r.metrics.OnClose()
 		close(r.finishedCh)
-		logger.Info("replicate stream client closed")
+		log.Info("replicate stream client closed",
+			zap.String("key", r.channel.Key),
+			zap.Int64("revision", r.channel.ModRevision))
 	}()
 
 	backoff := backoff.NewExponentialBackOff()
@@ -348,6 +348,10 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 	}
 	logger.Info("target channel found, skip handle AlterReplicateConfigMessage")
 	return false
+}
+
+func (r *replicateStreamClient) BlockUntilFinish() {
+	<-r.finishedCh
 }
 
 func (r *replicateStreamClient) Close() {
