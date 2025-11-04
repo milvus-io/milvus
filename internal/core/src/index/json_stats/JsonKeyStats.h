@@ -18,6 +18,7 @@
 
 // Forward declaration of test accessor in global namespace for friend declaration
 class TraverseJsonForBuildStatsAccessor;
+class CollectSingleJsonStatsInfoAccessor;
 
 #include <string>
 #include <boost/filesystem.hpp>
@@ -707,6 +708,7 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
+    friend class ::CollectSingleJsonStatsInfoAccessor;
 };
 
 using CacheJsonKeyStatsPtr =
