@@ -264,7 +264,7 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
             }
             ThrowInfo(FileReadFailed,
                       fmt::format("get status of {} failed, error: {}",
-                                  it->path(),
+                                  it->path().string(),
                                   status_ec.message()));
         }
 
@@ -280,7 +280,7 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
                 }
                 ThrowInfo(FileReadFailed,
                           fmt::format("get size of file {} failed, error: {}",
-                                      it->path(),
+                                      it->path().string(),
                                       file_size_ec.message()));
             }
             total_file_size += file_size;
