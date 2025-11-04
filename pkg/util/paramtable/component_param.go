@@ -3052,6 +3052,7 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
+	EnableGeometryCache           ParamItem `refreshable:"false"`
 
 	// TODO(tiered storage 2) this should be refreshable?
 	TieredWarmupScalarField         ParamItem `refreshable:"false"`
@@ -3626,6 +3627,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.MultipleChunkedEnable.Init(base.mgr)
+
+	p.EnableGeometryCache = ParamItem{
+		Key:          "queryNode.segcore.enableGeometryCache",
+		Version:      "2.6.5",
+		DefaultValue: "false",
+		Doc:          "Enable geometry cache for geometry data",
+		Export:       true,
+	}
+	p.EnableGeometryCache.Init(base.mgr)
 
 	p.InterimIndexNProbe = ParamItem{
 		Key:     "queryNode.segcore.interimIndex.nprobe",
@@ -6335,8 +6345,8 @@ it also determine the depth of depth first search method that is used to find th
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",
 		Version:      "2.5.4",
-		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.`,
-		DefaultValue: "1",
+		Doc:          `The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.`,
+		DefaultValue: "4",
 		Export:       true,
 	}
 	p.WALBroadcasterConcurrencyRatio.Init(base.mgr)

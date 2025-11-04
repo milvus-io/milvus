@@ -126,6 +126,7 @@ type DataCoordCatalog interface {
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
+	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error
 	MarkChannelDeleted(ctx context.Context, channel string) error
 	ShouldDropChannel(ctx context.Context, channel string) bool

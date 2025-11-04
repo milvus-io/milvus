@@ -243,7 +243,11 @@ CreateIndex(CIndex* res_index,
             index_non_encoding};
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
+        LOG_INFO("create chunk manager success, build_id: {}",
+                 build_index_info->buildid());
         auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+        LOG_INFO("init arrow file system success, build_id: {}",
+                 build_index_info->buildid());
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
@@ -268,7 +272,10 @@ CreateIndex(CIndex* res_index,
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
                 field_type, config, fileManagerContext);
+        LOG_INFO("create index instance success, build_id: {}",
+                 build_index_info->buildid());
         index->Build();
+        LOG_INFO("build index done, build_id: {}", build_index_info->buildid());
         *res_index = index.release();
         auto status = CStatus();
         status.error_code = Success;

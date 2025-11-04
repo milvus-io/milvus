@@ -171,6 +171,11 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	err = InitGeometryCache(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
 

@@ -16,13 +16,23 @@
 
 package querycoordv2
 
-import "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+)
 
 // RegisterDDLCallbacks registers the ddl callbacks.
 func RegisterDDLCallbacks(s *Server) {
 	ddlCallback := &DDLCallbacks{
 		Server: s,
 	}
+	ddlCallback.registerLoadConfigCallbacks()
 	ddlCallback.registerResourceGroupCallbacks()
 }
 
@@ -30,11 +40,29 @@ type DDLCallbacks struct {
 	*Server
 }
 
+// registerLoadConfigCallbacks registers the load config callbacks.
+func (c *DDLCallbacks) registerLoadConfigCallbacks() {
+	registry.RegisterAlterLoadConfigV2AckCallback(c.alterLoadConfigV2AckCallback)
+	registry.RegisterDropLoadConfigV2AckCallback(c.dropLoadConfigV2AckCallback)
+}
+
 func (c *DDLCallbacks) registerResourceGroupCallbacks() {
 	registry.RegisterAlterResourceGroupV2AckCallback(c.alterResourceGroupV2AckCallback)
 	registry.RegisterDropResourceGroupV2AckCallback(c.dropResourceGroupV2AckCallback)
 }
 
-func (c *DDLCallbacks) RegisterDDLCallbacks() {
-	c.registerResourceGroupCallbacks()
+// startBroadcastWithCollectionIDLock starts a broadcast with collection id lock.
+func (c *Server) startBroadcastWithCollectionIDLock(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
+	coll, err := c.broker.DescribeCollection(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(coll.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
+	}
+	return broadcaster, nil
 }

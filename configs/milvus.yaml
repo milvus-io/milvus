@@ -465,6 +465,7 @@ queryNode:
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
+    enableGeometryCache: false # Enable geometry cache for geometry data
     tieredStorage:
       warmup:
         # options: sync, disable.
@@ -1312,7 +1313,7 @@ streaming:
         # it also determine the depth of depth first search method that is used to find the best balance result, 3 by default
         rebalanceMaxStep: 3
   walBroadcaster:
-    concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
+    concurrencyRatio: 4 # The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
   walWriteAheadBuffer:
