@@ -243,7 +243,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         try {
             auto vec_index =
                 std::make_unique<milvus::index::VectorDiskAnnIndex<float>>(
-                    index_type, metric_type, 6, ctx);
+                    milvus::DataType::NONE, index_type, metric_type, 6, ctx);
             vec_index->Build(config);
         } catch (const std::exception& e) {
             std::cout << "Exception: " << e.what() << std::endl;
