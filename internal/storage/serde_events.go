@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path"
 	"sort"
 	"strconv"
 
@@ -34,13 +35,48 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func NewRecordReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (RecordReader, error) {
+	// check legacy or import binlog struct
+	for _, fieldBinlog := range fieldBinlogs {
+		if len(fieldBinlog.ChildFields) == 0 {
+			binlogLists := lo.Map(fieldBinlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
+				return fieldBinlog.GetBinlogs()
+			})
+			bucketName := storageConfig.BucketName
+			paths := make([][]string, len(binlogLists[0]))
+			for _, binlogs := range binlogLists {
+				for j, binlog := range binlogs {
+					logPath := binlog.GetLogPath()
+					if storageConfig.StorageType != "local" {
+						logPath = path.Join(bucketName, logPath)
+					}
+					paths[j] = append(paths[j], logPath)
+				}
+			}
+			return newIterativePackedRecordReader(paths, schema, bufferSize, storageConfig, storagePluginContext), nil
+		}
+	}
+	return NewManifestReaderFromBinlogs(fieldBinlogs, schema, bufferSize, storageConfig, storagePluginContext)
+}
+
+var _ RecordReader = (*IterativeRecordReader)(nil)
 
 type IterativeRecordReader struct {
 	cur     RecordReader
@@ -54,8 +90,6 @@ func (ir *IterativeRecordReader) Close() error {
 	}
 	return nil
 }
-
-var _ RecordReader = (*IterativeRecordReader)(nil)
 
 func (ir *IterativeRecordReader) Next() (Record, error) {
 	if ir.cur == nil {
@@ -78,6 +112,133 @@ func (ir *IterativeRecordReader) Next() (Record, error) {
 		rec, err = ir.cur.Next()
 	}
 	return rec, err
+}
+
+type Manifest struct {
+	Version      int            `json:"version"`
+	ColumnGroups []*ColumnGroup `json:"column_groups"`
+}
+
+type ColumnGroup struct {
+	Columns []string `json:"columns"`
+	Format  string   `json:"format"`
+	Paths   []string `json:"paths"`
+}
+
+type ManifestReader struct {
+	fieldBinlogs []*datapb.FieldBinlog
+	reader       *packed.FFIPackedReader
+
+	bufferSize           int64
+	arrowSchema          *arrow.Schema
+	schema               *schemapb.CollectionSchema
+	schemaHelper         *typeutil.SchemaHelper
+	field2Col            map[FieldID]int
+	storageConfig        *indexpb.StorageConfig
+	storagePluginContext *indexcgopb.StoragePluginContext
+
+	neededColumns []string
+}
+
+// NewManifestReaderFromBinlogs creates a ManifestReader from binlogs
+func NewManifestReaderFromBinlogs(fieldBinlogs []*datapb.FieldBinlog,
+	schema *schemapb.CollectionSchema,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) (*ManifestReader, error) {
+	arrowSchema, err := ConvertToArrowSchema(schema)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return nil, err
+	}
+	field2Col := make(map[FieldID]int)
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	neededColumns := make([]string, 0, len(allFields))
+	for i, field := range allFields {
+		field2Col[field.FieldID] = i
+		neededColumns = append(neededColumns, field.Name)
+	}
+	prr := &ManifestReader{
+		fieldBinlogs:         fieldBinlogs,
+		bufferSize:           bufferSize,
+		arrowSchema:          arrowSchema,
+		schema:               schema,
+		schemaHelper:         schemaHelper,
+		field2Col:            field2Col,
+		storageConfig:        storageConfig,
+		storagePluginContext: storagePluginContext,
+
+		neededColumns: neededColumns,
+	}
+
+	err = prr.init()
+	if err != nil {
+		return nil, err
+	}
+
+	return prr, nil
+}
+
+func (mr *ManifestReader) generateManifest() (string, error) {
+	m := &Manifest{
+		Version: 0,
+		ColumnGroups: lo.Map(mr.fieldBinlogs, func(binlog *datapb.FieldBinlog, _ int) *ColumnGroup {
+			return &ColumnGroup{
+				Columns: lo.Map(binlog.ChildFields, func(fieldID int64, _ int) string {
+					field, err := mr.schemaHelper.GetFieldFromID(fieldID)
+					if err != nil {
+						// return empty string if field not found
+						return ""
+					}
+					return field.GetName()
+				}),
+				Format: "parquet",
+				Paths: lo.Map(binlog.Binlogs, func(binlog *datapb.Binlog, _ int) string {
+					p := binlog.GetLogPath()
+					if mr.storageConfig.StorageType != "local" {
+						p = path.Join(mr.storageConfig.BucketName, p)
+					}
+					return p
+				}),
+			}
+		}),
+	}
+	bs, err := json.Marshal(m)
+	return string(bs), err
+}
+
+func (mr *ManifestReader) init() error {
+	manifest, err := mr.generateManifest()
+	if err != nil {
+		return err
+	}
+	// TODO add needed column option
+
+	reader, err := packed.NewFFIPackedReader(manifest, mr.arrowSchema, mr.neededColumns, mr.bufferSize, mr.storageConfig, mr.storagePluginContext)
+	if err != nil {
+		return err
+	}
+	mr.reader = reader
+	return nil
+}
+
+func (mr ManifestReader) Next() (Record, error) {
+	rec, err := mr.reader.ReadNext()
+	if err != nil {
+		return nil, err
+	}
+	return NewSimpleArrowRecord(rec, mr.field2Col), nil
+}
+
+func (mr ManifestReader) Close() error {
+	if mr.reader != nil {
+		return mr.reader.Close()
+	}
+	return nil
 }
 
 // ChunkedBlobsReader returns a chunk composed of blobs, or io.EOF if no more data
