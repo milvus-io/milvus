@@ -340,11 +340,13 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		// for compatibility with old version coord, which doesn't have delete checkpoint in VchannelInfo
 		log.Info("no delete checkpoint found, use seek position to seek",
 			zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
+			zap.Stringer("WALName", channelCheckpoint.WALName),
 		)
 		position = &msgpb.MsgPosition{
 			ChannelName: channelCheckpoint.GetChannelName(),
 			MsgID:       channelCheckpoint.GetMsgID(),
 			Timestamp:   channelCheckpoint.GetTimestamp(),
+			WALName:     channelCheckpoint.WALName,
 		}
 	} else {
 		if channelCheckpoint.GetTimestamp() > deleteCheckpoint.GetTimestamp() {
@@ -352,22 +354,26 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			log.Info(msg,
 				zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
 				zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(deleteCheckpoint.GetTimestamp())),
+				zap.Stringer("WALName", deleteCheckpoint.WALName),
 			)
 			position = &msgpb.MsgPosition{
 				ChannelName: deleteCheckpoint.GetChannelName(),
 				MsgID:       deleteCheckpoint.GetMsgID(),
 				Timestamp:   deleteCheckpoint.GetTimestamp(),
+				WALName:     deleteCheckpoint.WALName,
 			}
 		} else {
 			msg := "channel seek position is smaller than delete checkpoint, use seek position to seek"
 			log.Info(msg,
 				zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
 				zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(deleteCheckpoint.GetTimestamp())),
+				zap.Stringer("WALName", channelCheckpoint.WALName),
 			)
 			position = &msgpb.MsgPosition{
 				ChannelName: channelCheckpoint.GetChannelName(),
 				MsgID:       channelCheckpoint.GetMsgID(),
 				Timestamp:   channelCheckpoint.GetTimestamp(),
+				WALName:     channelCheckpoint.WALName,
 			}
 		}
 	}

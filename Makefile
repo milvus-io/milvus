@@ -519,8 +519,12 @@ generate-mockery-flushcommon: getdeps
 	$(INSTALL_PATH)/mockery --name=Task --dir=$(PWD)/internal/flushcommon/syncmgr --output=$(PWD)/internal/flushcommon/syncmgr --filename=mock_task.go --with-expecter --structname=MockTask --outpkg=syncmgr --inpackage
 	$(INSTALL_PATH)/mockery --name=WriteBuffer --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_write_buffer.go --with-expecter --structname=MockWriteBuffer --outpkg=writebuffer --inpackage
 	$(INSTALL_PATH)/mockery --name=BufferManager --dir=$(PWD)/internal/flushcommon/writebuffer --output=$(PWD)/internal/flushcommon/writebuffer --filename=mock_manager.go --with-expecter --structname=MockBufferManager --outpkg=writebuffer --inpackage
+	$(INSTALL_PATH)/mockery --name=MsgHandler --dir=$(PWD)/internal/flushcommon/util --output=$(PWD)/internal/mocks/flushcommon/mock_util --filename=mock_MsgHandler.go --with-expecter --structname=MockMsgHandler --outpkg=mock_util --inpackage=false
 	$(INSTALL_PATH)/mockery --name=BinlogIO --dir=$(PWD)/internal/flushcommon/io --output=$(PWD)/internal/mocks/flushcommon/mock_util --filename=mock_binlogio.go --with-expecter --structname=MockBinlogIO --outpkg=mock_util --inpackage=false
 	$(INSTALL_PATH)/mockery --name=FlowgraphManager --dir=$(PWD)/internal/flushcommon/pipeline --output=$(PWD)/internal/flushcommon/pipeline --filename=mock_fgmanager.go --with-expecter --structname=MockFlowgraphManager --outpkg=pipeline --inpackage
+
+generate-mockery-streamingnode: getdeps
+	$(INSTALL_PATH)/mockery --name=RecoveryStorage --dir=$(PWD)/internal/streamingnode/server/wal/recovery --output=$(PWD)/internal/mocks/streamingnode/server/wal/mock_recovery --filename=mock_RecoveryStorage.go --with-expecter --structname=MockRecoveryStorage --outpkg=mock_recovery --inpackage=false
 
 generate-mockery-metastore: getdeps
 	$(INSTALL_PATH)/mockery --name=RootCoordCatalog --dir=$(PWD)/internal/metastore --output=$(PWD)/internal/metastore/mocks --filename=mock_rootcoord_catalog.go --with-expecter --structname=RootCoordCatalog --outpkg=mocks
@@ -560,7 +564,7 @@ generate-mockery-internal: getdeps
 generate-mockery-cdc: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/cdc/.mockery.yaml
 
-generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal
+generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal generate-mockery-streamingnode
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"

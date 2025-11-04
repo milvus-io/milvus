@@ -411,6 +411,11 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(mr.ServerType)
 	}
 
+	// Persist immutable configurations at startup, such as mqType paramItem
+	if err := paramtable.GetBaseTable().Manager().ProcessImmutableConfigs(); err != nil {
+		log.Error("failed to process immutable configs", zap.Error(err))
+	}
+
 	internalmetrics.InitHolmes()
 	defer internalmetrics.CloseHolmes()
 
