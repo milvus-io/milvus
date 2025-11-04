@@ -21,9 +21,9 @@ import (
 	sio "io"
 	"strings"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"go.uber.org/zap"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
