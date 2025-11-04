@@ -1620,6 +1620,10 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
 }
 
+func validCharInIndexName(c byte) bool {
+	return c == '_' || c == '[' || c == ']' || isAlpha(c) || isNumber(c)
+}
+
 func validateIndexName(indexName string) error {
 	indexName = strings.TrimSpace(indexName)
 
@@ -1641,7 +1645,7 @@ func validateIndexName(indexName string) error {
 	indexNameSize := len(indexName)
 	for i := 1; i < indexNameSize; i++ {
 		c := indexName[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
+		if !validCharInIndexName(c) {
 			msg := invalidMsg + "Index name can only contain numbers, letters, and underscores."
 			return errors.New(msg)
 		}
