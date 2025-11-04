@@ -83,14 +83,27 @@ func (s *ackCallbackScheduler) background() {
 	}()
 	s.Logger().Info("ack scheduler background start")
 
+	// it's weired to find that FastLock may be failure even if there's no resource-key locked,
+	// also see: #45285
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var triggerTicker <-chan time.Time
 	for {
 		s.triggerAckCallback()
+		if len(s.pendingAckedTasks) > 0 {
+			// if there's pending tasks, trigger the ack callback after a delay.
+			triggerTicker = ticker.C
+		} else {
+			triggerTicker = nil
+		}
 		select {
 		case <-s.notifier.Context().Done():
 			return
 		case task := <-s.pending:
 			s.addBroadcastTask(task)
 		case <-s.triggerChan:
+		case <-triggerTicker:
 		}
 	}
 }
