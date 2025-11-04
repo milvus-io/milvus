@@ -260,7 +260,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
         std::string& local_data_path,
         bool& file_created,
         uint32_t& dim,
-        int64_t& write_offset);
+        int64_t& write_offset,
+        std::vector<size_t>* offsets = nullptr);
 
  private:
     // local file path (abs path)
