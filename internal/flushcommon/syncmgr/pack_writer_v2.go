@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -110,6 +111,23 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	return
 }
 
+// getRootPath returns the rootPath current task shall use.
+// when storageConfig is set, use the rootPath in it.
+// otherwise, use chunkManager.RootPath() instead.
+func (bw *BulkPackWriterV2) getRootPath() string {
+	if bw.storageConfig != nil {
+		return bw.storageConfig.RootPath
+	}
+	return bw.chunkManager.RootPath()
+}
+
+func (bw *BulkPackWriterV2) getBucketName() string {
+	if bw.storageConfig != nil {
+		return bw.storageConfig.BucketName
+	}
+	return paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+}
+
 func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
@@ -125,7 +143,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	logs := make(map[int64]*datapb.FieldBinlog)
 	paths := make([]string, 0)
 	for _, columnGroup := range columnGroups {
-		path := metautil.BuildInsertLogPath(bw.storageConfig.GetRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
+		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
 		paths = append(paths, path)
 	}
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
@@ -141,6 +159,8 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			tsTo = ts
 		}
 	}
+
+	bucketName := bw.getBucketName()
 
 	var pluginContextPtr *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
@@ -158,7 +178,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 
-	w, err := storage.NewPackedRecordWriter(bw.storageConfig.GetBucketName(), paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, err
 	}
