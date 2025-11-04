@@ -236,12 +236,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Validate and set field ID to insert field data
-	err = validateFieldDataColumns(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
+	err = validateFieldDataColumns(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
 		log.Info("validate field data columns failed", zap.Error(err))
 		return err
 	}
-	err = fillFieldPropertiesOnly(it.insertMsg.GetFieldsData(), schema.CollectionSchema)
+	err = fillFieldPropertiesOnly(it.insertMsg.GetFieldsData(), schema)
 	if err != nil {
 		log.Info("fill field properties failed", zap.Error(err))
 		return err

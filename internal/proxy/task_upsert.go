@@ -900,12 +900,12 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	// Validate and set field ID to insert field data
-	err = validateFieldDataColumns(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
+	err = validateFieldDataColumns(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
 		log.Warn("validate field data columns failed when upsert", zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
-	err = fillFieldPropertiesOnly(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
+	err = fillFieldPropertiesOnly(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
 		log.Warn("fill field properties failed when upsert", zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
@@ -1072,6 +1072,26 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// deduplicate upsert data to handle duplicate primary keys in the same batch
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	if err != nil {
+		log.Warn("fail to get primary field schema", zap.Error(err))
+		return err
+	}
+	deduplicatedFieldsData, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, it.req.GetFieldsData(), schema)
+	if err != nil {
+		log.Warn("fail to deduplicate upsert data", zap.Error(err))
+	}
+
+	// dedup won't decrease numOfRows to 0
+	if newNumRows > 0 && newNumRows != it.req.NumRows {
+		log.Info("upsert data deduplicated",
+			zap.Uint32("original_num_rows", it.req.NumRows),
+			zap.Uint32("deduplicated_num_rows", newNumRows))
+		it.req.FieldsData = deduplicatedFieldsData
+		it.req.NumRows = newNumRows
+	}
+
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{
@@ -1107,25 +1127,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	// check if num_rows is valid
 	if it.req.NumRows <= 0 {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
-	}
-
-	// deduplicate upsert data to handle duplicate primary keys in the same batch
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
-	if err != nil {
-		log.Warn("fail to get primary field schema", zap.Error(err))
-		return err
-	}
-	deduplicatedFieldsData, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, it.req.GetFieldsData(), schema.CollectionSchema)
-	if err != nil {
-		log.Warn("fail to deduplicate upsert data", zap.Error(err))
-		return err
-	}
-	if newNumRows != it.req.NumRows {
-		log.Info("upsert data deduplicated",
-			zap.Uint32("original_num_rows", it.req.NumRows),
-			zap.Uint32("deduplicated_num_rows", newNumRows))
-		it.req.FieldsData = deduplicatedFieldsData
-		it.req.NumRows = newNumRows
 	}
 
 	if err := genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, it.req.GetPartialUpdate()); err != nil {

@@ -1051,6 +1051,7 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 		}, nil).Build()
 
 		task := createTestUpdateTask()
+		task.req.FieldsData = []*schemapb.FieldData{}
 		task.req.NumRows = 0 // Invalid num_rows
 
 		err := task.PreExecute(context.Background())
@@ -1544,7 +1545,7 @@ func TestUpsertTask_Deduplicate_Int64PK(t *testing.T) {
 		IsPrimaryKey: true,
 	}
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			primaryFieldSchema,
 			{
@@ -1554,6 +1555,7 @@ func TestUpsertTask_Deduplicate_Int64PK(t *testing.T) {
 			},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	// Create field data with duplicate IDs: [1, 2, 3, 2, 1]
 	// Expected to keep last occurrence of each: [3, 2, 1] (indices 2, 3, 4)
@@ -1613,7 +1615,7 @@ func TestUpsertTask_Deduplicate_VarCharPK(t *testing.T) {
 		IsPrimaryKey: true,
 	}
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			primaryFieldSchema,
 			{
@@ -1623,6 +1625,7 @@ func TestUpsertTask_Deduplicate_VarCharPK(t *testing.T) {
 			},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	// Create field data with duplicate IDs: ["a", "b", "c", "b", "a"]
 	// Expected to keep last occurrence of each: ["c", "b", "a"] (indices 2, 3, 4)
@@ -1682,11 +1685,12 @@ func TestUpsertTask_Deduplicate_NoDuplicates(t *testing.T) {
 		IsPrimaryKey: true,
 	}
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			primaryFieldSchema,
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	fieldsData := []*schemapb.FieldData{
 		{
@@ -1724,7 +1728,7 @@ func TestUpsertTask_Deduplicate_WithVector(t *testing.T) {
 		IsPrimaryKey: true,
 	}
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			primaryFieldSchema,
 			{
@@ -1734,6 +1738,7 @@ func TestUpsertTask_Deduplicate_WithVector(t *testing.T) {
 			},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	dim := 4
 	// Create field data with duplicate IDs: [1, 2, 1]
@@ -1803,11 +1808,12 @@ func TestUpsertTask_Deduplicate_EmptyData(t *testing.T) {
 		IsPrimaryKey: true,
 	}
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			primaryFieldSchema,
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	fieldsData := []*schemapb.FieldData{}
 
@@ -1826,7 +1832,7 @@ func TestUpsertTask_Deduplicate_MissingPrimaryKey(t *testing.T) {
 		IsPrimaryKey: true,
 	}
 
-	schema := &schemapb.CollectionSchema{
+	collSchema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			primaryFieldSchema,
 			{
@@ -1836,6 +1842,7 @@ func TestUpsertTask_Deduplicate_MissingPrimaryKey(t *testing.T) {
 			},
 		},
 	}
+	schema := newSchemaInfo(collSchema)
 
 	fieldsData := []*schemapb.FieldData{
 		{

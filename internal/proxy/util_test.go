@@ -607,7 +607,8 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 
 func TestFillFieldIDBySchema(t *testing.T) {
 	t.Run("column count mismatch", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{}
+		collSchema := &schemapb.CollectionSchema{}
+		schema := newSchemaInfo(collSchema)
 		columns := []*schemapb.FieldData{
 			{
 				FieldName: "TestFillFieldIDBySchema",
@@ -618,7 +619,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 	})
 
 	t.Run("successful validation and fill", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{
+		collSchema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:     "TestFillFieldIDBySchema",
@@ -627,6 +628,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 				},
 			},
 		}
+		schema := newSchemaInfo(collSchema)
 		columns := []*schemapb.FieldData{
 			{
 				FieldName: "TestFillFieldIDBySchema",
@@ -642,7 +644,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 	})
 
 	t.Run("field not in schema", func(t *testing.T) {
-		schema := &schemapb.CollectionSchema{
+		collSchema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:     "FieldA",
@@ -651,6 +653,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 				},
 			},
 		}
+		schema := newSchemaInfo(collSchema)
 		columns := []*schemapb.FieldData{
 			{
 				FieldName: "FieldB",
@@ -659,7 +662,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 		// Validation should fail because FieldB is not in schema
 		err := validateFieldDataColumns(columns, schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "does not exist in collection schema")
+		assert.Contains(t, err.Error(), "not exist in collection schema")
 	})
 }
 

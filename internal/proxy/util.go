@@ -1046,9 +1046,25 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 	return primaryData, nil
 }
 
+// findLastOccurrenceIndices finds indices of last occurrences for each unique ID
+func findLastOccurrenceIndices[T comparable](ids []T) []int {
+	lastOccurrence := make(map[T]int, len(ids))
+	for idx, id := range ids {
+		lastOccurrence[id] = idx
+	}
+
+	keepIndices := make([]int, 0, len(lastOccurrence))
+	for idx, id := range ids {
+		if lastOccurrence[id] == idx {
+			keepIndices = append(keepIndices, idx)
+		}
+	}
+	return keepIndices
+}
+
 // DeduplicateFieldData removes duplicate primary keys from field data,
 // keeping the last occurrence of each ID
-func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema) ([]*schemapb.FieldData, uint32, error) {
+func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData []*schemapb.FieldData, schema *schemaInfo) ([]*schemapb.FieldData, uint32, error) {
 	if len(fieldsData) == 0 {
 		return fieldsData, 0, nil
 	}
@@ -1100,36 +1116,12 @@ func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData [
 		case *schemapb.ScalarField_LongData:
 			// for Int64 primary keys
 			intIDs := scalarField.GetLongData().GetData()
-			lastOccurrence := make(map[int64]int)
-			for idx, id := range intIDs {
-				lastOccurrence[id] = idx
-			}
-			// collect indices to keep (in order)
-			keepIndices = make([]int, 0, len(lastOccurrence))
-			seen := make(map[int64]bool)
-			for idx, id := range intIDs {
-				if lastOccurrence[id] == idx && !seen[id] {
-					keepIndices = append(keepIndices, idx)
-					seen[id] = true
-				}
-			}
+			keepIndices = findLastOccurrenceIndices(intIDs)
 
 		case *schemapb.ScalarField_StringData:
 			// for VarChar primary keys
 			strIDs := scalarField.GetStringData().GetData()
-			lastOccurrence := make(map[string]int)
-			for idx, id := range strIDs {
-				lastOccurrence[id] = idx
-			}
-			// collect indices to keep (in order)
-			keepIndices = make([]int, 0, len(lastOccurrence))
-			seen := make(map[string]bool)
-			for idx, id := range strIDs {
-				if lastOccurrence[id] == idx && !seen[id] {
-					keepIndices = append(keepIndices, idx)
-					seen[id] = true
-				}
-			}
+			keepIndices = findLastOccurrenceIndices(strIDs)
 		}
 	}
 
@@ -1215,43 +1207,30 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 // 1. The number of columns matches the expected count (excluding BM25 output fields)
 // 2. All field names exist in the schema
 // Returns detailed error message listing expected and provided fields if validation fails.
-func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
+func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	expectColumnNum := 0
 
-	// Build field name to schema map and count expected columns
+	// Count expected columns
 	for _, field := range schema.GetFields() {
-		fieldName2Schema[field.Name] = field
-		if !typeutil.IsBM25FunctionOutputField(field, schema) {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-
 	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			fieldName2Schema[field.Name] = field
-			expectColumnNum++
-		}
+		expectColumnNum += len(structField.GetFields())
 	}
 
 	// Validate column count
 	if len(columns) != expectColumnNum {
-		providedFields := make([]string, 0, len(columns))
-		for _, col := range columns {
-			providedFields = append(providedFields, col.FieldName)
-		}
-		expectedFields := make([]string, 0, expectColumnNum)
-		for name := range fieldName2Schema {
-			expectedFields = append(expectedFields, name)
-		}
-		return fmt.Errorf("field count mismatch: expected %d fields %v, got %d fields %v",
-			expectColumnNum, expectedFields, len(columns), providedFields)
+		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
+			expectColumnNum, len(columns))
 	}
 
-	// Validate field existence
+	// Validate field existence using schemaHelper
 	for _, fieldData := range columns {
-		if _, ok := fieldName2Schema[fieldData.FieldName]; !ok {
-			return fmt.Errorf("field %v does not exist in collection schema", fieldData.FieldName)
+		_, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		if err != nil {
+			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
 	}
 
@@ -1261,30 +1240,14 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemapb.Co
 // fillFieldPropertiesOnly fills field properties (FieldId, Type, ElementType) from schema.
 // It assumes that columns have been validated and does not perform validation.
 // Use validateFieldDataColumns before calling this function if validation is needed.
-func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
-
-	for _, field := range schema.GetFields() {
-		fieldName2Schema[field.Name] = field
-	}
-
-	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			fieldName2Schema[field.Name] = field
-		}
-	}
-
+func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	for _, fieldData := range columns {
-		var fieldSchema *schemapb.FieldSchema
-		if fieldData.GetIsDynamic() {
-			fieldSchema = fieldName2Schema[common.MetaFieldName]
-		} else {
-			fieldSchema = fieldName2Schema[fieldData.FieldName]
+		// Use schemaHelper to get field schema, automatically handles dynamic fields
+		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		if err != nil {
+			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
 
-		if fieldSchema == nil {
-			return fmt.Errorf("field %s does not exist in collection schema", fieldData.FieldName)
-		}
 		fieldData.FieldId = fieldSchema.FieldID
 		fieldData.Type = fieldSchema.DataType
 
