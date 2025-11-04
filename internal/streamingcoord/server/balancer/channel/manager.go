@@ -457,7 +457,7 @@ func (cm *ChannelManager) GetLatestWALLocated(ctx context.Context, pchannel stri
 	if !ok {
 		return 0, false
 	}
-	if pChannelMeta.IsAssigned() {
+	if pChannelMeta.IsAssignedOrAssigning() {
 		return pChannelMeta.CurrentServerID(), true
 	}
 	return 0, false

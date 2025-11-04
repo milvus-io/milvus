@@ -225,3 +225,20 @@ func NewTruncateCollectionMessageBody(msg message.ImmutableMessage) (msgstream.T
 		TruncateCollectionMessage: truncateCollMsg,
 	}, nil
 }
+
+type AlterWALMessageBody struct {
+	*tsMsgImpl
+	AlterWALMessage message.ImmutableAlterWALMessageV2
+}
+
+func (p *AlterWALMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewAlterWALMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	alterWALMsg := message.MustAsImmutableAlterWALMessageV2(msg)
+	return &AlterWALMessageBody{
+		msgType:         commonpb.MsgType_AlterWAL,
+		AlterWALMessage: alterWALMsg,
+	}, nil
+}

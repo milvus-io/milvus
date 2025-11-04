@@ -20,6 +20,7 @@ var defaultCollectionNotFoundTolerance = 10
 
 var broadcastToAllMessageType = map[message.MessageType]struct{}{
 	message.MessageTypeFlushAll: {},
+	message.MessageTypeAlterWAL: {},
 }
 
 // isBroadcastToAllMessage checks if the message need to be broadcast to all data sync services.
@@ -54,7 +55,7 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 
 	var checkpoint message.MessageID
 	for _, info := range recoveryInfos {
-		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(info.GetInfo().GetSeekPosition().GetMsgID())
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytesWithWALName(impl.wal.Get().WALName(), info.GetInfo().GetSeekPosition().GetMsgID())
 		if checkpoint == nil || messageID.LT(checkpoint) {
 			checkpoint = messageID
 		}

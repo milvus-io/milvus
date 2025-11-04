@@ -110,7 +110,8 @@ func NewDispatcher(
 	if err != nil {
 		return nil, err
 	}
-	if position != nil && len(position.MsgID) != 0 {
+	// Note: Only the earliest msgId of WP can be empty bytes
+	if position != nil && (len(position.MsgID) != 0 || position.WALName == commonpb.WALName_WoodPecker) {
 		position = typeutil.Clone(position)
 		position.ChannelName = funcutil.ToPhysicalChannel(position.ChannelName)
 		err = stream.AsConsumer(ctx, []string{pchannel}, subName, common.SubscriptionPositionUnknown)

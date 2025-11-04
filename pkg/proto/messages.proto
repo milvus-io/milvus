@@ -64,6 +64,9 @@ enum MessageType {
     CreateSnapshot       = 40;
     DropSnapshot         = 41;
 
+    // AlterWAL is used to alter the wal configuration to the current cluster.
+    AlterWAL             = 700;
+
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
     // Maybe some cluster give up the leader role, no any other message will be received from this cluster.
@@ -590,6 +593,13 @@ message RestoreSnapshotMessageHeader {
 // RestoreSnapshotMessageBody is the body of restore snapshot message.
 // Empty - all info is read from snapshot by snapshot_name.
 message RestoreSnapshotMessageBody {}
+
+message AlterWALMessageHeader {
+    common.WALName target_wal_name = 1; // Specifies the target WALName for the alter operation.
+    map<string, string> config = 2; // Contains additional configuration parameters for the WAL alter operation.
+}
+
+message AlterWALMessageBody {}
 
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {
