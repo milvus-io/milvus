@@ -55,7 +55,7 @@ func (s *Server) serverID() int64 {
 	return 0
 }
 
-func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
+func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
 	for _, field := range schema.GetFields() {
 		if field.FieldID == fieldID {
 			return field.Name, nil
@@ -184,7 +184,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		fieldName, err := s.getFieldNameByID(schema, req.GetFieldID())
+		fieldName, err := s.defaultIndexNameByID(schema, req.GetFieldID())
 		if err != nil {
 			log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 			return merr.Status(err), nil
