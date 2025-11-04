@@ -67,7 +67,7 @@ import (
 
 const (
 	UsedDiskMemoryRatio      = 4
-	UsedDiskMemoryRatioAisaq = 1024
+	UsedDiskMemoryRatioAisaq = 64
 )
 
 var errRetryTimerNotified = errors.New("retry timer notified")

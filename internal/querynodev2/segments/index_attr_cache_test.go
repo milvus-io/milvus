@@ -93,7 +93,7 @@ func (s *IndexAttrCacheSuite) TestAISAQ() {
 	_, has := s.c.loadWithDisk.Get(typeutil.NewPair[string, int32]("AISAQ", 0))
 	s.False(has, "AISAQ shall never be checked load with disk")
 
-	s.EqualValues(1, memory)
+	s.EqualValues(16, memory)
 	s.EqualValues(1024, disk)
 }
 
