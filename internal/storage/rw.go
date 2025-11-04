@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	sio "io"
 	"sort"
 
 	"github.com/samber/lo"
@@ -177,7 +176,7 @@ func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}, nil
 	}
 	sort.Slice(binlogs, func(i, j int) bool {
@@ -226,7 +225,7 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 	chunkPos := 0
 	return func() ([]*Blob, error) {
 		if chunkPos >= nChunks {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}
 
 		vals, err := downloader(ctx, chunks[chunkPos])
@@ -280,7 +279,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
 	case StorageV2:
 		if len(binlogs) <= 0 {
-			return nil, sio.EOF
+			return nil, io.EOF
 		}
 		sort.Slice(binlogs, func(i, j int) bool {
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
@@ -348,7 +347,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum)
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,

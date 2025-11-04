@@ -231,7 +231,7 @@ func generateTestDeltalogData(size int) (*Blob, error) {
 }
 
 // writeDeltalogNewFormat writes deltalog data in the new multi-field format
-func writeDeltalogNewFormat(size int, pkType schemapb.DataType, batchSize int) (*Blob, error) {
+func writeDeltalogNewFormat(size int, pkType schemapb.DataType) (*Blob, error) {
 	blob := &Blob{}
 	path := "test.bin"
 	writer, err := NewLegacyDeltalogWriter(0, 0, 0, 0, pkType, func(ctx context.Context, kvs map[string][]byte) error {
@@ -239,9 +239,11 @@ func writeDeltalogNewFormat(size int, pkType schemapb.DataType, batchSize int) (
 		blob.Key = path
 		return nil
 	}, path)
-	record := createTestRecord(pkType, size)
-	err = writer.Write(record)
 	if err != nil {
+		return nil, err
+	}
+	record := createTestRecord(pkType, size)
+	if err = writer.Write(record); err != nil {
 		return nil, err
 	}
 	if err = writer.Close(); err != nil {
@@ -286,7 +288,7 @@ func BenchmarkDeltalogReader(b *testing.B) {
 		}
 	})
 
-	blob, err = writeDeltalogNewFormat(size, schemapb.DataType_Int64, size)
+	blob, err = writeDeltalogNewFormat(size, schemapb.DataType_Int64)
 	assert.NoError(b, err)
 
 	b.Run("pk ts separate format reader", func(b *testing.B) {
@@ -323,7 +325,7 @@ func BenchmarkDeltalogFormatWriter(b *testing.B) {
 	b.Run("pk and ts separate format writer", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writeDeltalogNewFormat(size, schemapb.DataType_Int64, size)
+			writeDeltalogNewFormat(size, schemapb.DataType_Int64)
 		}
 		b.ReportAllocs()
 	})
