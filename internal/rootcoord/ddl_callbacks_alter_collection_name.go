@@ -104,8 +104,12 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 }
 
 func (c *Core) validateEncryption(ctx context.Context, oldDBName string, newDBName string) error {
-	// old and new DB names are filled in Prepare, shouldn't be empty here
+	if oldDBName == newDBName {
+		return nil
+	}
+	// Check if renaming across databases with encryption enabled
 
+	// old and new DB names are filled in Prepare, shouldn't be empty here
 	originalDB, err := c.meta.GetDatabaseByName(ctx, oldDBName, typeutil.MaxTimestamp)
 	if err != nil {
 		return fmt.Errorf("failed to get original database: %w", err)

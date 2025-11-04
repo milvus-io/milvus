@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -39,7 +38,9 @@ import (
 )
 
 func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.AlterDatabaseRequest) error {
-	req.DbName = strings.TrimSpace(req.DbName)
+	if req.GetDbName() == "" {
+		return merr.WrapErrParameterInvalidMsg("alter database failed, database name does not exists")
+	}
 	if req.GetProperties() == nil && req.GetDeleteKeys() == nil {
 		return merr.WrapErrParameterInvalidMsg("alter database with empty properties and delete keys, expected to set either properties or delete keys")
 	}
