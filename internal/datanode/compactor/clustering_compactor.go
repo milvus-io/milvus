@@ -572,7 +572,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 			deltaPaths = append(deltaPaths, l.GetLogPath())
 		}
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
+	options := []storage.RwOption{
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+	}
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField, deltaPaths, options...)
 	if err != nil {
 		return err
 	}

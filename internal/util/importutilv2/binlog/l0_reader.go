@@ -24,11 +24,14 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type L0Reader interface {
@@ -111,16 +114,12 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 		}
 		path := r.deltaLogs[r.readIdx]
 
-		bytes, err := r.cm.Read(r.ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		blobs := []*storage.Blob{{
-			Key:   path,
-			Value: bytes,
-		}}
 		// TODO: support multiple delta logs
-		reader, err := storage.CreateDeltalogReader(blobs)
+		reader, err := storage.NewDeltalogReader(r.pkField, []string{path}, storage.WithDownloader(
+			func(ctx context.Context, paths []string) ([][]byte, error) {
+				return r.cm.MultiRead(ctx, paths)
+			},
+		))
 		if err != nil {
 			log.Error("malformed delta file", zap.Error(err))
 			return nil, err
@@ -128,7 +127,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 		defer reader.Close()
 
 		for {
-			dl, err := reader.NextValue()
+			rec, err := reader.Next()
 			if err != nil {
 				if err == io.EOF {
 					break
@@ -137,12 +136,24 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				return nil, err
 			}
 
-			// Apply filters
-			if !r.filter(*dl) {
-				continue
-			}
+			for i := 0; i < rec.Len(); i++ {
+				var pk storage.PrimaryKey
+				switch r.pkField.DataType {
+				case schemapb.DataType_Int64:
+					pk = storage.NewInt64PrimaryKey(rec.Column(r.pkField.FieldID).(*array.Int64).Value(i))
+				case schemapb.DataType_VarChar:
+					pk = storage.NewVarCharPrimaryKey(rec.Column(r.pkField.FieldID).(*array.String).Value(i))
+				}
+				ts := typeutil.Timestamp(rec.Column(common.TimeStampField).(*array.Int64).Value(i))
+				dl := storage.NewDeleteLog(pk, ts)
 
-			deleteData.Append((*dl).Pk, (*dl).Ts)
+				// Apply filters
+				if !r.filter(dl) {
+					continue
+				}
+
+				deleteData.Append(pk, ts)
+			}
 		}
 
 		r.readIdx++

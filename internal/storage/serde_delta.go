@@ -37,35 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// newDeltalogOneFieldReader creates a reader for the old single-field deltalog format
-func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
-	reader := newIterativeCompositeBinlogRecordReader(
-		&schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					DataType: schemapb.DataType_VarChar,
-				},
-			},
-		},
-		nil,
-		MakeBlobsReader(blobs))
-	return NewDeserializeReader(reader, func(r Record, v []*DeleteLog) error {
-		for i := 0; i < r.Len(); i++ {
-			if v[i] == nil {
-				v[i] = &DeleteLog{}
-			}
-			// retrieve the only field
-			a := r.(*compositeRecord).recs[0].(*array.String)
-			strVal := a.Value(i)
-			if err := v[i].Parse(strVal); err != nil {
-				return err
-			}
-		}
-		return nil
-	}), nil
-}
-
-// DeltalogStreamWriter writes deltalog in the old JSON format
 type DeltalogStreamWriter struct {
 	collectionID UniqueID
 	partitionID  UniqueID
@@ -473,36 +444,6 @@ func newDeltalogMultiFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteL
 	}), nil
 }
 
-// newDeltalogDeserializeReader is the entry point for the delta log reader.
-// It includes newDeltalogOneFieldReader, which uses the existing log format with only one column in a log file,
-// and newDeltalogMultiFieldReader, which uses the new format and supports multiple fields in a log file.
-func newDeltalogDeserializeReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
-	if supportMultiFieldFormat(blobs) {
-		return newDeltalogMultiFieldReader(blobs)
-	}
-	return newDeltalogOneFieldReader(blobs)
-}
-
-// supportMultiFieldFormat checks delta log description data to see if it is the format with
-// pk and ts column separately
-func supportMultiFieldFormat(blobs []*Blob) bool {
-	if len(blobs) > 0 {
-		reader, err := NewBinlogReader(blobs[0].Value)
-		if err != nil {
-			return false
-		}
-		defer reader.Close()
-		version := reader.descriptorEventData.Extras[version]
-		return version != nil && version.(string) == MultiField
-	}
-	return false
-}
-
-// CreateDeltalogReader creates a deltalog reader based on the format version
-func CreateDeltalogReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
-	return newDeltalogDeserializeReader(blobs)
-}
-
 // createDeltalogWriter creates a deltalog writer based on the configured format
 func createDeltalogWriter(collectionID, partitionID, segmentID UniqueID, pkType schemapb.DataType, batchSize int,
 ) (*SerializeWriterImpl[*DeleteLog], func() (*Blob, error), error) {
@@ -589,39 +530,106 @@ func (w *LegacyDeltalogWriter) Close() error {
 		return err
 	}
 
-	return w.uploader(context.Background(), map[string][]byte{blob.Key: blob.Value})
+	// TODO: make path consistent with the one in the blob
+	return w.uploader(context.Background(), map[string][]byte{w.path: blob.Value})
 }
 
 func (w *LegacyDeltalogWriter) GetWrittenUncompressed() uint64 {
 	return w.writtenUncompressed
 }
 
-func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			pkField,
-			{
-				FieldID:  common.TimeStampField,
-				DataType: schemapb.DataType_Int64,
-			},
-		},
-	}
+type LegacyDeltalogReader struct {
+	RecordReader
+	pkField *schemapb.FieldSchema
+}
 
+var _ RecordReader = (*LegacyDeltalogReader)(nil)
+
+func (r *LegacyDeltalogReader) Next() (Record, error) {
+	rec, err := r.RecordReader.Next()
+	if err != nil {
+		return nil, err
+	}
+	return r.deserialize(rec)
+}
+
+func (r *LegacyDeltalogReader) deserialize(rec Record) (Record, error) {
+	aRec := rec.(*simpleArrowRecord).r
+	switch len(aRec.Columns()) {
+	case 1:
+		arr, ok := aRec.Column(0).(*array.String)
+		if !ok {
+			return nil, fmt.Errorf("unexpected column type %T", aRec.Column(0))
+		}
+		arrowType := serdeMap[r.pkField.DataType].arrowType(0, schemapb.DataType_None)
+		pkBuilder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+		defer pkBuilder.Release()
+		tsBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+		defer tsBuilder.Release()
+		v := &DeleteLog{}
+		for i := 0; i < arr.Len(); i++ {
+			strVal := arr.Value(i)
+			if err := v.Parse(strVal); err != nil {
+				return nil, err
+			}
+			switch r.pkField.DataType {
+			case schemapb.DataType_Int64:
+				pkBuilder.(*array.Int64Builder).Append(v.Pk.GetValue().(int64))
+			case schemapb.DataType_VarChar:
+				pkBuilder.(*array.StringBuilder).Append(v.Pk.GetValue().(string))
+			default:
+				return nil, fmt.Errorf("unexpected pk type %v", r.pkField.DataType)
+			}
+			tsBuilder.Append(int64(v.Ts))
+		}
+		pkArray := pkBuilder.NewArray()
+		tsArray := tsBuilder.NewArray()
+		return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{
+			{Name: "pk", Type: arrowType},
+			{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+		}, nil), []arrow.Array{pkArray, tsArray}, int64(arr.Len())), map[FieldID]int{
+			r.pkField.FieldID:     0,
+			common.TimeStampField: 1,
+		}), nil
+	case 2:
+		return rec, nil
+	default:
+		return nil, fmt.Errorf("unexpected number of columns %d", len(aRec.Columns()))
+	}
+}
+
+func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
 	chunkPos := 0
-	blobsReader := func() ([]*Blob, error) {
+	blobsReader := func() (*Blob, error) {
+		if chunkPos >= len(paths) {
+			return nil, io.EOF
+		}
 		path := paths[chunkPos]
 		chunkPos++
 		blobs, err := downloader(context.Background(), []string{path})
 		if err != nil {
 			return nil, err
 		}
-		return []*Blob{{Key: path, Value: blobs[0]}}, nil
+		if len(blobs) != 1 {
+			return nil, fmt.Errorf("unexpected number of blobs %d, expected 1", len(blobs))
+		}
+		return &Blob{Key: path, Value: blobs[0]}, nil
 	}
 
-	return newIterativeCompositeBinlogRecordReader(
-		schema,
-		nil,
-		blobsReader,
-		nil,
-	), nil
+	return &IterativeRecordReader{
+		iterate: func() (RecordReader, error) {
+			blob, err := blobsReader()
+			if err != nil {
+				return nil, err
+			}
+			reader, err := newBinlogRecordReader(blob, pkField.FieldID, common.TimeStampField)
+			if err != nil {
+				return nil, err
+			}
+			return &LegacyDeltalogReader{
+				RecordReader: reader,
+				pkField:      pkField,
+			}, nil
+		},
+	}, nil
 }

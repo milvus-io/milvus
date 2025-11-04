@@ -210,7 +210,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			deltaPaths = append(deltaPaths, binlog.GetLogPath())
 		}
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltaPaths,
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return

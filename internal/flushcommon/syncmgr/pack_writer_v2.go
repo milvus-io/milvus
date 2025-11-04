@@ -93,7 +93,11 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
+	if deltas, err = bw.writeDelta(ctx, pack,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(bw.storageConfig),
+		storage.WithColumnGroups(bw.columnGroups),
+	); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}

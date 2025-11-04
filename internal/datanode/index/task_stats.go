@@ -68,7 +68,6 @@ type statsTask struct {
 	manager  *TaskManager
 	binlogIO io.BinlogIO
 
-	deltaLogs   []string
 	logIDOffset int64
 	currentTime time.Time
 }
@@ -156,12 +155,6 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	for _, d := range st.req.GetDeltaLogs() {
-		for _, l := range d.GetBinlogs() {
-			st.deltaLogs = append(st.deltaLogs, l.GetLogPath())
-		}
-	}
-
 	preExecuteRecordSpan := st.tr.RecordSpan()
 
 	log.Ctx(ctx).Info("successfully PreExecute stats task",
@@ -213,7 +206,15 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, st.binlogIO, st.deltaLogs)
+	deltalogPaths := make([]string, 0)
+	for _, fieldBinlog := range st.req.GetDeltaLogs() {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			deltalogPaths = append(deltalogPaths, binlog.GetLogPath())
+		}
+	}
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltalogPaths,
+		storage.WithDownloader(st.binlogIO.Download),
+		storage.WithStorageConfig(st.req.GetStorageConfig()))
 	if err != nil {
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err

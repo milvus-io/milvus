@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -143,7 +144,11 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+		BucketName:  paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(),
+		StorageType: "local",
+		RootPath:    s.rootPath,
+	}, s.currentSplit)
 
 	gotInserts, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)
