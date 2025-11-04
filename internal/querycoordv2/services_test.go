@@ -34,12 +34,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -51,6 +53,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	sbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -115,6 +119,16 @@ func initStreamingSystem() {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0"))
 	streaming.SetWALForTest(wal)
+
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	sbalance.Register(b)
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
