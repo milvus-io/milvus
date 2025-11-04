@@ -18,6 +18,7 @@
 package datacoord
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -2005,7 +2006,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 	defer m.channelCPs.Unlock()
 
 	oldPosition, ok := m.channelCPs.checkpoints[vChannel]
-	if !ok || oldPosition.Timestamp < pos.Timestamp {
+	if !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID)) {
 		err := m.catalog.SaveChannelCheckpoint(ctx, vChannel, pos)
 		if err != nil {
 			return err
@@ -2016,6 +2017,7 @@ func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos
 			zap.String("vChannel", vChannel),
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.ByteString("msgID", pos.GetMsgID()),
+			zap.Stringer("walName", pos.WALName),
 			zap.Time("time", ts))
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 			Set(float64(ts.Unix()))
@@ -2051,13 +2053,13 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 	toUpdates := lo.Filter(positions, func(pos *msgpb.MsgPosition, _ int) bool {
-		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
+		if pos == nil || (pos.GetMsgID() == nil && pos.GetWALName() != commonpb.WALName_WoodPecker) || pos.GetChannelName() == "" {
 			log.Warn("illegal channel cp", zap.Any("pos", pos))
 			return false
 		}
 		vChannel := pos.GetChannelName()
 		oldPosition, ok := m.channelCPs.checkpoints[vChannel]
-		return !ok || oldPosition.Timestamp < pos.Timestamp
+		return !ok || oldPosition.Timestamp < pos.Timestamp || (oldPosition.Timestamp == pos.Timestamp && !bytes.Equal(oldPosition.MsgID, pos.MsgID))
 	})
 	err := m.catalog.SaveChannelCheckpoints(ctx, toUpdates)
 	if err != nil {
@@ -2067,6 +2069,7 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
 		log.Info("UpdateChannelCheckpoint done", zap.String("channel", channel),
+			zap.Stringer("walName", pos.WALName),
 			zap.Uint64("ts", pos.GetTimestamp()),
 			zap.Time("time", tsoutil.PhysicalTime(pos.GetTimestamp())))
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)

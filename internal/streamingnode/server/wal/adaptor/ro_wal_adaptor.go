@@ -6,10 +6,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
@@ -29,6 +31,7 @@ type roWALAdaptorImpl struct {
 	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
 	cleanup         func()
 	scanMetrics     *metricsutil.ScanMetrics
+	forceRecovery   bool
 }
 
 func (w *roWALAdaptorImpl) WALName() message.WALName {
@@ -65,12 +68,22 @@ func (w *roWALAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableM
 	panic("we cannot append message into a read only wal")
 }
 
+// ForceRecovery force recovery wal, currently only used for Alter WAL
+func (w *roWALAdaptorImpl) ForceRecovery(forceRecovery bool) {
+	w.forceRecovery = forceRecovery
+}
+
 // Read returns a scanner for reading records from the wal.
 func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
+
+	// Validate DeliverPolicy: if it's StartFrom or StartAfter, check that the message ID's WALName matches the current WAL name
+	if mismatchWALNameErr := w.checkReadOptWALName(opts); mismatchWALNameErr != nil {
+		return nil, mismatchWALNameErr
+	}
 
 	name, err := w.scannerRegistry.AllocateScannerName()
 	if err != nil {
@@ -83,9 +96,33 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 		w.roWALImpls,
 		opts,
 		w.scanMetrics.NewScannerMetrics(),
-		func() { w.scanners.Remove(id) })
+		func() { w.scanners.Remove(id) },
+		w.forceRecovery)
 	w.scanners.Insert(id, s)
 	return s, nil
+}
+
+func (w *roWALAdaptorImpl) checkReadOptWALName(opts wal.ReadOption) error {
+	if opts.DeliverPolicy != nil {
+		currentWALName := w.WALName()
+		var msgID *commonpb.MessageID
+
+		switch t := opts.DeliverPolicy.GetPolicy().(type) {
+		case *streamingpb.DeliverPolicy_StartFrom:
+			msgID = t.StartFrom
+		case *streamingpb.DeliverPolicy_StartAfter:
+			msgID = t.StartAfter
+		}
+
+		if msgID != nil {
+			msgWALName := message.WALName(msgID.WALName)
+			if msgWALName != currentWALName {
+				w.Logger().Info("WAL name mismatch", zap.String("msgIDWALName", msgWALName.String()), zap.String("currentWALName", currentWALName.String()))
+				return status.NewWALNameMismatchError(currentWALName.String(), msgWALName.String())
+			}
+		}
+	}
+	return nil
 }
 
 // IsAvailable returns whether the wal is available.

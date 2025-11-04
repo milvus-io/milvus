@@ -93,6 +93,11 @@ func (c *PChannelMeta) IsAssigned() bool {
 	return c.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
 }
 
+// IsAssignedOrAssigning returns if the channel is assigned or assigning to a server.
+func (c *PChannelMeta) IsAssignedOrAssigning() bool {
+	return c.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED || c.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING
+}
+
 // LastAssignTimestamp returns the last assigned timestamp.
 func (c *PChannelMeta) LastAssignTimestamp() time.Time {
 	return time.Unix(int64(c.inner.LastAssignTimestampSeconds), 0)
