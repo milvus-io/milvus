@@ -1177,10 +1177,6 @@ class SegmentExpr : public Expr {
                         return ProcessChunksForValidByOffsets<std::string>(
                             use_index, input);
                     }
-                    case DataType::GEOMETRY: {
-                        return ProcessChunksForValidByOffsets<std::string>(
-                            use_index, input);
-                    }
                     default:
                         ThrowInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
@@ -1297,7 +1293,11 @@ class SegmentExpr : public Expr {
         auto size = std::min(
             std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
             int64_t(chunk_valid_res.size()));
-
+        if (field_type_ == DataType::GEOMETRY &&
+            segment_->type() == SegmentType::Growing) {
+            size = std::min(batch_size_ - processed_rows,
+                            int64_t(chunk_valid_res.size()) - data_pos);
+        }
         valid_result.append(chunk_valid_res, data_pos, size);
         return size;
     }
