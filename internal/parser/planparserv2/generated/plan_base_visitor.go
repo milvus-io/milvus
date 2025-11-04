@@ -71,11 +71,19 @@ func (v *BasePlanVisitor) VisitBoolean(ctx *BooleanContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitSTDWithin(ctx *STDWithinContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
 func (v *BasePlanVisitor) VisitShift(ctx *ShiftContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitTimestamptzCompareForward(ctx *TimestamptzCompareForwardContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -144,10 +152,6 @@ func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitUnary(ctx *UnaryContext) interface{} {
-	return v.VisitChildren(ctx)
-}
-
-func (v *BasePlanVisitor) VisitTimestamptzCompare(ctx *TimestamptzCompareContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

@@ -397,6 +397,7 @@ IsPrimitiveType(proto::schema::DataType type) {
         case proto::schema::DataType::Double:
         case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar:
+        case proto::schema::DataType::Timestamptz:
             return true;
         default:
             return false;
@@ -980,6 +981,9 @@ struct fmt::formatter<milvus::proto::schema::DataType>
                 break;
             case milvus::proto::schema::DataType::Geometry:
                 name = "Geometry";
+                break;
+            case milvus::proto::schema::DataType::Timestamptz:
+                name = "Timestamptz";
                 break;
             case milvus::proto::schema::DataType::Text:
                 name = "Text";

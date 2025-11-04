@@ -998,17 +998,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// trans timestamptz data
-	_, colTimezone := getColTimezone(colInfo)
-	err = timestamptzIsoStr2Utc(it.insertFieldData, colTimezone)
-	if err != nil {
-		return err
-	}
-	err = timestamptzIsoStr2Utc(it.req.GetFieldsData(), colTimezone)
-	if err != nil {
-		return err
-	}
-
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
 			InsertRequest: &msgpb.InsertRequest{

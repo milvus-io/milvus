@@ -471,7 +471,7 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 			if field.DataType == entity.FieldTypeBool ||
 				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				require.ErrorContains(t, err, "STL_SORT are only supported on numeric or varchar field")
+				require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				common.CheckErr(t, err, true)
@@ -623,7 +623,7 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric or varchar field"},
+		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 	for _, idxErr := range inxError {
@@ -649,7 +649,7 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric or varchar field"},
+		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 

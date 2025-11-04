@@ -81,6 +81,9 @@ DefaultValueChunkTranslator::estimated_byte_size_of_cell(
         case milvus::DataType::INT64:
             value_size = sizeof(int64_t);
             break;
+        case milvus::DataType::TIMESTAMPTZ:
+            value_size = sizeof(int64_t);
+            break;
         case milvus::DataType::FLOAT:
             value_size = sizeof(float);
             break;
