@@ -901,9 +901,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 
-    RegisterStreamingServiceClient(registry)
-    // Register generic reranker metrics
-    RegisterRerank(registry)
+	RegisterStreamingServiceClient(registry)
+	// Register generic reranker metrics
+	RegisterRerank(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
