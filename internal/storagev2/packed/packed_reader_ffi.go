@@ -39,23 +39,23 @@ import (
 
 // Property keys - matching milvus-storage/properties.h
 const (
-	PROPERTY_FS_ADDRESS                = "fs.address"
-	PROPERTY_FS_BUCKET_NAME            = "fs.bucket_name"
-	PROPERTY_FS_ACCESS_KEY_ID          = "fs.access_key_id"
-	PROPERTY_FS_ACCESS_KEY_VALUE       = "fs.access_key_value"
-	PROPERTY_FS_ROOT_PATH              = "fs.root_path"
-	PROPERTY_FS_STORAGE_TYPE           = "fs.storage_type"
-	PROPERTY_FS_CLOUD_PROVIDER         = "fs.cloud_provider"
-	PROPERTY_FS_IAM_ENDPOINT           = "fs.iam_endpoint"
-	PROPERTY_FS_LOG_LEVEL              = "fs.log_level"
-	PROPERTY_FS_REGION                 = "fs.region"
-	PROPERTY_FS_USE_SSL                = "fs.use_ssl"
-	PROPERTY_FS_SSL_CA_CERT            = "fs.ssl_ca_cert"
-	PROPERTY_FS_USE_IAM                = "fs.use_iam"
-	PROPERTY_FS_USE_VIRTUAL_HOST       = "fs.use_virtual_host"
-	PROPERTY_FS_REQUEST_TIMEOUT_MS     = "fs.request_timeout_ms"
-	PROPERTY_FS_GCP_CREDENTIAL_JSON    = "fs.gcp_credential_json"
-	PROPERTY_FS_USE_CUSTOM_PART_UPLOAD = "fs.use_custom_part_upload"
+	PropertyFSAddress             = "fs.address"
+	PropertyFSBucketName          = "fs.bucket_name"
+	PropertyFSAccessKeyID         = "fs.access_key_id"
+	PropertyFSAccessKeyValue      = "fs.access_key_value"
+	PropertyFSRootPath            = "fs.root_path"
+	PropertyFSStorageType         = "fs.storage_type"
+	PropertyFSCloudProvider       = "fs.cloud_provider"
+	PropertyFSIAMEndpoint         = "fs.iam_endpoint"
+	PropertyFSLogLevel            = "fs.log_level"
+	PropertyFSRegion              = "fs.region"
+	PropertyFSUseSSL              = "fs.use_ssl"
+	PropertyFSSSLCACert           = "fs.ssl_ca_cert"
+	PropertyFSUseIAM              = "fs.use_iam"
+	PropertyFSUseVirtualHost      = "fs.use_virtual_host"
+	PropertyFSRequestTimeoutMS    = "fs.request_timeout_ms"
+	PropertyFSGCPCredentialJSON   = "fs.gcp_credential_json"
+	PropertyFSUseCustomPartUpload = "fs.use_custom_part_upload"
 )
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig
@@ -73,81 +73,81 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig) (*C.P
 
 	// Add non-empty string fields
 	if storageConfig.GetAddress() != "" {
-		keys = append(keys, PROPERTY_FS_ADDRESS)
+		keys = append(keys, PropertyFSAddress)
 		values = append(values, storageConfig.GetAddress())
 	}
 	if storageConfig.GetBucketName() != "" {
-		keys = append(keys, PROPERTY_FS_BUCKET_NAME)
+		keys = append(keys, PropertyFSBucketName)
 		values = append(values, storageConfig.GetBucketName())
 	}
 	if storageConfig.GetAccessKeyID() != "" {
-		keys = append(keys, PROPERTY_FS_ACCESS_KEY_ID)
+		keys = append(keys, PropertyFSAccessKeyID)
 		values = append(values, storageConfig.GetAccessKeyID())
 	}
 	if storageConfig.GetSecretAccessKey() != "" {
-		keys = append(keys, PROPERTY_FS_ACCESS_KEY_VALUE)
+		keys = append(keys, PropertyFSAccessKeyValue)
 		values = append(values, storageConfig.GetSecretAccessKey())
 	}
 	if storageConfig.GetRootPath() != "" {
-		keys = append(keys, PROPERTY_FS_ROOT_PATH)
+		keys = append(keys, PropertyFSRootPath)
 		values = append(values, storageConfig.GetRootPath())
 	}
 	if storageConfig.GetStorageType() != "" {
-		keys = append(keys, PROPERTY_FS_STORAGE_TYPE)
+		keys = append(keys, PropertyFSStorageType)
 		values = append(values, storageConfig.GetStorageType())
 	}
 	if storageConfig.GetCloudProvider() != "" {
-		keys = append(keys, PROPERTY_FS_CLOUD_PROVIDER)
+		keys = append(keys, PropertyFSCloudProvider)
 		values = append(values, storageConfig.GetCloudProvider())
 	}
 	if storageConfig.GetIAMEndpoint() != "" {
-		keys = append(keys, PROPERTY_FS_IAM_ENDPOINT)
+		keys = append(keys, PropertyFSIAMEndpoint)
 		values = append(values, storageConfig.GetIAMEndpoint())
 	}
 	// Always add log level if any string field is set (matching C++ behavior)
-	keys = append(keys, PROPERTY_FS_LOG_LEVEL)
+	keys = append(keys, PropertyFSLogLevel)
 	values = append(values, "Warn")
 
 	if storageConfig.GetRegion() != "" {
-		keys = append(keys, PROPERTY_FS_REGION)
+		keys = append(keys, PropertyFSRegion)
 		values = append(values, storageConfig.GetRegion())
 	}
 	if storageConfig.GetSslCACert() != "" {
-		keys = append(keys, PROPERTY_FS_SSL_CA_CERT)
+		keys = append(keys, PropertyFSSSLCACert)
 		values = append(values, storageConfig.GetSslCACert())
 	}
 	if storageConfig.GetGcpCredentialJSON() != "" {
-		keys = append(keys, PROPERTY_FS_GCP_CREDENTIAL_JSON)
+		keys = append(keys, PropertyFSGCPCredentialJSON)
 		values = append(values, storageConfig.GetGcpCredentialJSON())
 	}
 
 	// Add boolean fields
-	keys = append(keys, PROPERTY_FS_USE_SSL)
+	keys = append(keys, PropertyFSUseSSL)
 	if storageConfig.GetUseSSL() {
 		values = append(values, "true")
 	} else {
 		values = append(values, "false")
 	}
 
-	keys = append(keys, PROPERTY_FS_USE_IAM)
+	keys = append(keys, PropertyFSUseIAM)
 	if storageConfig.GetUseIAM() {
 		values = append(values, "true")
 	} else {
 		values = append(values, "false")
 	}
 
-	keys = append(keys, PROPERTY_FS_USE_VIRTUAL_HOST)
+	keys = append(keys, PropertyFSUseVirtualHost)
 	if storageConfig.GetUseVirtualHost() {
 		values = append(values, "true")
 	} else {
 		values = append(values, "false")
 	}
 
-	keys = append(keys, PROPERTY_FS_USE_CUSTOM_PART_UPLOAD)
+	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
 
 	// Add integer field
-	keys = append(keys, PROPERTY_FS_REQUEST_TIMEOUT_MS)
+	keys = append(keys, PropertyFSRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
 
 	// Convert to C arrays
