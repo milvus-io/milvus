@@ -136,8 +136,6 @@ var mathFunctions = map[string]interface{}{
 	"min": func(x, y interface{}) float64 { return math.Min(toFloat64(x), toFloat64(y)) },
 	"max": func(x, y interface{}) float64 { return math.Max(toFloat64(x), toFloat64(y)) },
 
-	"float64": func(x interface{}) float64 { return toFloat64(x) },
-
 	// Utility functions with type conversion
 	"mod":       func(x, y interface{}) float64 { return math.Mod(toFloat64(x), toFloat64(y)) },
 	"remainder": func(x, y interface{}) float64 { return math.Remainder(toFloat64(x), toFloat64(y)) },

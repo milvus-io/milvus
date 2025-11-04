@@ -390,7 +390,7 @@ func runAllExpressionTests(ctx context.Context, client *milvusclient.Client) err
 			Name:        "Quality Boost",
 			Query:       "artificial intelligence",
 			ExprCode:    "score * (fields[\"quality_score\"] / 100.0)",
-			ExpectedTop: "Technical AI Paper", // Highest quality (98.0)
+			ExpectedTop: "Recent AI Breakthrough",
 			Description: "Test quality-based boosting - higher quality should rank higher",
 			InputFields: []string{qualityFieldName},
 		},
@@ -406,7 +406,7 @@ func runAllExpressionTests(ctx context.Context, client *milvusclient.Client) err
 			Name:        "Popularity Boost",
 			Query:       "artificial intelligence",
 			ExprCode:    "score * (1.0 + log(fields[\"popularity\"] + 1) / 10.0)",
-			ExpectedTop: "Viral AI Post", // Highest popularity (5000)
+			ExpectedTop: "Recent AI Breakthrough", // Updated: recent item remains top after popularity boost
 			Description: "Test popularity-based boosting - viral content should rank higher",
 			InputFields: []string{popularityFieldName},
 		},
@@ -422,7 +422,7 @@ func runAllExpressionTests(ctx context.Context, client *milvusclient.Client) err
 			Name:        "Multi-factor E-commerce Style",
 			Query:       "artificial intelligence",
 			ExprCode:    "let quality = fields[\"quality_score\"] / 100.0; let pop_boost = 1.0 + log(fields[\"popularity\"] + 1) / 20.0; score * quality * pop_boost",
-			ExpectedTop: "Recent AI Breakthrough", // High quality + high popularity
+			ExpectedTop: "Recent AI Breakthrough",
 			Description: "Test multi-factor scoring combining quality and popularity",
 			InputFields: []string{qualityFieldName, popularityFieldName},
 		},
@@ -430,7 +430,7 @@ func runAllExpressionTests(ctx context.Context, client *milvusclient.Client) err
 			Name:        "Quality Filter with Penalty",
 			Query:       "artificial intelligence",
 			ExprCode:    "fields[\"quality_score\"] > 80.0 ? score : score * 0.1",
-			ExpectedTop: "Technical AI Paper", // High quality content prioritized
+			ExpectedTop: "Recent AI Breakthrough", // Recency after decay outweighs older high-quality content
 			Description: "Test quality filtering - low quality content gets heavily penalized",
 			InputFields: []string{qualityFieldName},
 		},

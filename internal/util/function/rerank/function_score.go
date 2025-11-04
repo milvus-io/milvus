@@ -178,10 +178,6 @@ func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *sc
 	funcScore := &FunctionScore{}
 
 	for _, function := range funcScoreSchema.Functions {
-		// Skip expression-based rerankers as they are handled at QueryNode level
-		if IsQueryNodeRanker(function) {
-			continue
-		}
 		reranker, err := createFunction(collSchema, function)
 		if err != nil {
 			return nil, err

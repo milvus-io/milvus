@@ -398,7 +398,14 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		log.Info("EXPR_RERANK: Creating function score from request",
 			zap.Int("num_functions", len(t.request.FunctionScore.Functions)),
 		)
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
+		// Filter out QueryNode-only rerankers (expr/wasm) before creating FunctionScore
+		filtered := &schemapb.FunctionScore{Functions: make([]*schemapb.FunctionSchema, 0, len(t.request.FunctionScore.Functions))}
+		for _, fn := range t.request.FunctionScore.Functions {
+			if !rerank.IsQueryNodeRanker(fn) {
+				filtered.Functions = append(filtered.Functions, fn)
+			}
+		}
+		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, filtered); err != nil {
 			log.Warn("EXPR_RERANK: Failed to create function score", zap.Error(err))
 			return err
 		}
@@ -584,7 +591,14 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		log.Info("EXPR_RERANK: Creating function score from request (regular search)",
 			zap.Int("num_functions", len(t.request.FunctionScore.Functions)),
 		)
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
+		// Filter out QueryNode-only rerankers (expr/wasm) before creating FunctionScore
+		filtered := &schemapb.FunctionScore{Functions: make([]*schemapb.FunctionSchema, 0, len(t.request.FunctionScore.Functions))}
+		for _, fn := range t.request.FunctionScore.Functions {
+			if !rerank.IsQueryNodeRanker(fn) {
+				filtered.Functions = append(filtered.Functions, fn)
+			}
+		}
+		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, filtered); err != nil {
 			log.Warn("EXPR_RERANK: Failed to create function score", zap.Error(err))
 			return err
 		}

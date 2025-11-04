@@ -23,10 +23,17 @@ func ApplyRerankOnSearchResultData(
 	if funcSchema == nil {
 		return reducedData, nil
 	}
-	if !IsQueryNodeRanker(funcSchema) {
+	if reducedData == nil || reducedData.Ids == nil {
 		return reducedData, nil
 	}
-	if reducedData == nil || reducedData.Ids == nil {
+
+	// Validate function type first: non-rerank types should error
+	if funcSchema.GetType() != schemapb.FunctionType_Rerank {
+		return nil, fmt.Errorf("%s is not rerank function.", funcSchema.GetType().String())
+	}
+
+	// Non-QueryNode rerankers are a no-op at segment-level
+	if !IsQueryNodeRanker(funcSchema) {
 		return reducedData, nil
 	}
 
