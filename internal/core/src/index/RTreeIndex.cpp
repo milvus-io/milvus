@@ -32,19 +32,22 @@ ends_with(const std::string& value, const std::string& suffix) {
 
 template <typename T>
 void
-RTreeIndex<T>::InitForBuildIndex() {
-    auto field =
-        std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-    auto prefix = disk_file_manager_->GetIndexIdentifier();
-    path_ = std::string(TMP_RTREE_INDEX_PREFIX) + prefix;
-    boost::filesystem::create_directories(path_);
-
-    std::string index_file_path = path_ + "/index_file";  // base path (no ext)
-
-    if (boost::filesystem::exists(index_file_path + ".bgi")) {
-        PanicInfo(
-            IndexBuildError, "build rtree index temp dir:{} not empty", path_);
+RTreeIndex<T>::InitForBuildIndex(bool is_growing) {
+    std::string index_file_path;
+    if (is_growing) {
+        path_ = "";
+    } else {
+        auto prefix = disk_file_manager_->GetIndexIdentifier();
+        path_ = std::string(TMP_RTREE_INDEX_PREFIX) + prefix;
+        boost::filesystem::create_directories(path_);
+        index_file_path = path_ + "/index_file";  // base path (no ext)
+        if (boost::filesystem::exists(index_file_path + ".bgi")) {
+            PanicInfo(IndexBuildError,
+                      "build rtree index temp dir:{} not empty",
+                      path_);
+        }
     }
+
     wrapper_ = std::make_shared<RTreeIndexWrapper>(index_file_path, true);
 }
 
@@ -221,7 +224,7 @@ RTreeIndex<T>::Build(const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, "insert_files");
     AssertInfo(insert_files.has_value(),
                "insert_files were empty for building RTree index");
-    InitForBuildIndex();
+    InitForBuildIndex(false);
 
     // load raw WKB data into memory
     auto field_datas =
@@ -498,7 +501,7 @@ RTreeIndex<T>::BuildWithRawDataForUT(size_t n,
     // Guard: n should represent number of strings not raw bytes
     AssertInfo(n > 0, "BuildWithRawDataForUT expects element count > 0");
     LOG_WARN("BuildWithRawDataForUT:{}", n);
-    this->InitForBuildIndex();
+    this->InitForBuildIndex(false);
 
     int64_t offset = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -521,7 +524,7 @@ RTreeIndex<T>::BuildWithStrings(const std::vector<std::string>& geometries) {
     LOG_INFO("BuildWithStrings: building RTree index for {} geometries",
              geometries.size());
 
-    this->InitForBuildIndex();
+    this->InitForBuildIndex(false);
 
     int64_t offset = 0;
     for (const auto& wkb : geometries) {
@@ -549,7 +552,7 @@ void
 RTreeIndex<T>::AddGeometry(const std::string& wkb_data, int64_t row_offset) {
     if (!wrapper_) {
         // Initialize if not already done
-        this->InitForBuildIndex();
+        this->InitForBuildIndex(true);
     }
 
     if (!wkb_data.empty()) {

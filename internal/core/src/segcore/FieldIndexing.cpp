@@ -435,9 +435,9 @@ ScalarFieldIndexing<T>::recreate_index(DataType data_type,
             sync_with_index_ = false;
             index_cur_ = 0;
             LOG_INFO(
-                "Created R-Tree index for geometry data type: {} with "
+                "Created R-Tree index for geometry fieldID: {} with "
                 "FileManagerContext",
-                data_type);
+                field_meta_.get_id().get());
             return;
         }
         index_ = index::CreateStringIndexSort();
@@ -554,7 +554,7 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
             if (!built_) {
                 try {
                     // Initialize R-Tree for building immediately when first data arrives
-                    rtree_index->InitForBuildIndex();
+                    rtree_index->InitForBuildIndex(true);
                     built_ = true;
                     sync_with_index_ = true;
                     LOG_INFO(
