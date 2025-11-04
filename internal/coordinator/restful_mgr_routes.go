@@ -17,9 +17,14 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -48,6 +53,10 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.StreamingNodeDistributionPath, s.GetStreamingNodeDistribution},
 			{management.StreamingTransferPath, s.TransferStreamingChannel},
 			{management.DataGCPath, s.HandleDatacoordGC}, // This route is unique, so it's included here.
+			// WAL
+			{management.WALAlterPath, s.HandleAlterWAL},
+			// config
+			{management.ConfigAlterPath, s.HandleAlterConfig},
 		}
 
 		// Loop through the slice and register each route.
@@ -1119,4 +1128,138 @@ func (s *mixCoordImpl) TransferStreamingChannel(w http.ResponseWriter, req *http
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+// HandleAlterWAL handles POST requests to alter the Write-Ahead Log (WAL) implementation.
+// This endpoint broadcasts an AlterWALMessage to all active pChannels to switch WAL across the cluster.
+func (s *mixCoordImpl) HandleAlterWAL(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, `{"msg": "Method not allowed, use POST"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !streamingutil.IsStreamingServiceEnabled() {
+		http.Error(w, `{"msg": "Streaming service is not enabled"}`, http.StatusBadRequest)
+		return
+	}
+
+	logger := log.With(zap.String("Scope", "WAL"))
+
+	var requestBody struct {
+		TargetWALName string            `json:"target_wal_name"`  // e.g., "woodpecker", "kafka", "pulsar", "rocksmq"
+		Config        map[string]string `json:"config,omitempty"` // Optional config for target WAL
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
+		logger.Info("HandleAlterWAL failed to decode request body", zap.Error(err))
+		http.Error(w, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if requestBody.TargetWALName == "" {
+		logger.Info("HandleAlterWAL missing target_wal_name")
+		http.Error(w, `{"msg": "target_wal_name is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	logger.Info("HandleAlterWAL start",
+		zap.String("targetWAL", requestBody.TargetWALName),
+		zap.Any("config", requestBody.Config))
+
+	if err := s.broadcastAlterWALMessage(req.Context(), requestBody.TargetWALName, requestBody.Config); err != nil {
+		logger.Info("HandleAlterWAL failed to broadcast AlterWALMessage",
+			zap.String("targetWAL", requestBody.TargetWALName),
+			zap.Error(err))
+		http.Error(w, fmt.Sprintf(`{"msg": "failed to broadcast AlterWALMessage, %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("HandleAlterWAL success", zap.String("targetWAL", requestBody.TargetWALName))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+// broadcastAlterWALMessage broadcasts an AlterWALMessage to all active pChannels.
+func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALName string, config map[string]string) error {
+	logger := log.With(zap.String("Scope", "WAL"), zap.String("targetWAL", targetWALName))
+
+	// Start broadcast with an exclusive cluster resource key to ensure only one WAL switch operation at a time
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	if err != nil {
+		if errors.Is(err, broadcast.ErrNotPrimary) {
+			logger.Info("broadcastAlterWALMessage failed, current cluster is not primary", zap.Error(err))
+			return errors.Wrap(err, "current cluster is not primary, cannot perform WAL switch")
+		}
+		logger.Info("broadcastAlterWALMessage failed to start broadcast", zap.Error(err))
+		return errors.Wrap(err, "failed to start broadcast")
+	}
+	defer broadcaster.Close()
+
+	// Get balancer to access channel assignments
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to get balancer", zap.Error(err))
+		return errors.Wrap(err, "failed to get balancer")
+	}
+
+	// Get all pChannels from the latest channel assignment
+	latestAssignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to get latest channel assignment", zap.Error(err))
+		return errors.Wrap(err, "failed to get channel assignment")
+	}
+	pChannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
+		return channel.Name()
+	})
+
+	if len(pChannels) == 0 {
+		logger.Info("broadcastAlterWALMessage failed, no active pChannel found")
+		return errors.New("no active pChannels found")
+	}
+
+	logger.Info("broadcastAlterWALMessage preparing",
+		zap.Int("pChannelCount", len(pChannels)),
+		zap.Strings("pChannels", pChannels),
+		zap.Any("config", config))
+
+	// Build message properties with WAL switch information
+	properties := make(map[string]string)
+	properties["_alter_wal_target_wal_name"] = targetWALName
+
+	// Add custom config properties
+	for k, v := range config {
+		properties["_alter_wal_config_"+k] = v
+	}
+
+	// Create AlterWAL broadcast message
+	broadcastMsg, err := message.NewAlterWALMessageBuilderV1().
+		WithHeader(&message.AlterWALMessageHeader{
+			TargetWalName: targetWALName,
+			Config:        properties,
+		}).
+		WithBody(&message.AlterWALMessageBody{}).
+		WithBroadcast(pChannels).
+		BuildBroadcast()
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to build broadcast message", zap.Error(err))
+		return errors.Wrap(err, "failed to build broadcast message")
+	}
+
+	// Broadcast the message to all pChannels
+	result, err := broadcaster.Broadcast(ctx, broadcastMsg)
+	if err != nil {
+		logger.Info("broadcastAlterWALMessage failed to broadcast message", zap.Error(err))
+		return errors.Wrap(err, "failed to broadcast message")
+	}
+
+	logger.Info("broadcastAlterWALMessage success",
+		zap.Int("pChannelCount", len(result.AppendResults)),
+		zap.Uint64("broadcastID", result.BroadcastID))
+
+	return nil
+}
+
+func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
+	// TODO: Modify etcd config, allowing operational changes regardless of immutability. When mqType is modified, forward to handleAlterWAL operation above
 }

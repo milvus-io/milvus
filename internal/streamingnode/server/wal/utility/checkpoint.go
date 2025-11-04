@@ -32,6 +32,8 @@ type WALCheckpoint struct {
 	Magic               int64
 	ReplicateCheckpoint *ReplicateCheckpoint
 	ReplicateConfig     *commonpb.ReplicateConfiguration
+	AlterWalMsgFound    bool
+	TargetWalName       string
 }
 
 // IntoProto converts the WALCheckpoint to a protobuf message.
@@ -45,6 +47,8 @@ func (c *WALCheckpoint) IntoProto() *streamingpb.WALCheckpoint {
 		RecoveryMagic:       c.Magic,
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.IntoProto(),
+		AlterWalMsgFound:    c.AlterWalMsgFound,
+		TargetWalName:       c.TargetWalName,
 	}
 }
 
@@ -56,6 +60,8 @@ func (c *WALCheckpoint) Clone() *WALCheckpoint {
 		Magic:               c.Magic,
 		ReplicateConfig:     c.ReplicateConfig,
 		ReplicateCheckpoint: c.ReplicateCheckpoint.Clone(),
+		AlterWalMsgFound:    c.AlterWalMsgFound,
+		TargetWalName:       c.TargetWalName,
 	}
 }
 

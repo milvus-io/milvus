@@ -413,8 +413,7 @@ func (_c *NMockHandler_ListLoadedSegments_Call) RunAndReturn(run func(context.Co
 func NewNMockHandler(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *NMockHandler {
+}) *NMockHandler {
 	mock := &NMockHandler{}
 	mock.Mock.Test(t)
 

@@ -297,6 +297,16 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle put collection message success")
 			}
+		case commonpb.MsgType_AlterWAL:
+			alterWALMsg := msg.(*adaptor.AlterWALMessageBody)
+			logger := log.With(
+				zap.String("pchannel", alterWALMsg.AlterWALMessage.VChannel()), // pchannel that received the alter wal message
+				zap.String("vchannel", ddn.vChannelName),                       // vchannel of the current flow graph pipeline
+				zap.String("targetWalName", alterWALMsg.AlterWALMessage.Header().TargetWalName),
+				zap.Uint64("timetick", alterWALMsg.AlterWALMessage.TimeTick()),
+			)
+			logger.Info("receive alter wal message")
+			ddn.msgHandler.HandleAlterWAL(ddn.ctx, alterWALMsg.AlterWALMessage, ddn.vChannelName)
 		}
 	}
 
