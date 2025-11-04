@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -68,7 +69,15 @@ func (cdt *createDatabaseTask) OnEnqueue() error {
 }
 
 func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
-	return ValidateDatabaseName(cdt.GetDbName())
+	err := ValidateDatabaseName(cdt.GetDbName())
+	if err != nil {
+		return err
+	}
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, cdt.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
+	return nil
 }
 
 func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
@@ -267,9 +276,9 @@ func (t *alterDatabaseTask) OnEnqueue() error {
 func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 {
 		// Check the validation of timezone
-		err := checkTimezone(t.Properties...)
-		if err != nil {
-			return err
+		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
+		if exist && !funcutil.IsTimezoneValid(userDefinedTimezone) {
+			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 	}
 	_, ok := common.GetReplicateID(t.Properties)

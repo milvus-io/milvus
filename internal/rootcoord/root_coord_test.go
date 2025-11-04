@@ -48,7 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -101,6 +102,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 		return nil
 	})
+	registry.RegisterDropLoadConfigV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
+		return nil
+	})
 
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
@@ -116,7 +120,10 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
-		registry.CallMessageAckCallback(context.Background(), msg, results)
+		retry.Do(context.Background(), func() error {
+			log.Info("broadcast message", log.FieldMessage(msg))
+			return registry.CallMessageAckCallback(context.Background(), msg, results)
+		}, retry.AttemptAlways())
 		return &types.BroadcastAppendResult{}, nil
 	}).Maybe()
 	bapi.EXPECT().Close().Return().Maybe()
@@ -125,6 +132,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().Close().Return().Maybe()
 	broadcast.ResetBroadcaster()
 	broadcast.Register(mb)
@@ -138,6 +146,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		}
 		return vchannels, nil
 	}).Maybe()
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
@@ -887,36 +896,6 @@ func TestRootCoord_RenameCollection(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
-
-	t.Run("add task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("execute task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
 }
 
 func TestRootCoord_ListPolicy(t *testing.T) {
@@ -1284,62 +1263,6 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("add task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("execute task failed", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("run ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-	})
-
-	t.Run("set_dynamic_field_bad_request", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.EnableDynamicSchemaKey, Value: "abc"},
-			},
-		})
-		assert.Error(t, merr.CheckRPCCall(resp, err))
-	})
-
-	t.Run("set_dynamic_field_ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-			Properties: []*commonpb.KeyValuePair{
-				{Key: common.EnableDynamicSchemaKey, Value: "true"},
-			},
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 }
 

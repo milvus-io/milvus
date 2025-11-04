@@ -337,6 +337,9 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeSchemaChange:
 		immutableMsg := message.MustAsImmutableSchemaChangeMessageV2(msg)
 		r.handleSchemaChange(immutableMsg)
+	case message.MessageTypeAlterCollection:
+		immutableMsg := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		r.handleAlterCollection(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
 	}
@@ -502,6 +505,21 @@ func (r *recoveryStorageImpl) handleSchemaChange(msg message.ImmutableSchemaChan
 	// persist the schema change into recovery info.
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
 		vchannelInfo.ObserveSchemaChange(msg)
+	}
+}
+
+// handlePutCollection handles the put collection message.
+func (r *recoveryStorageImpl) handleAlterCollection(msg message.ImmutableAlterCollectionMessageV2) {
+	// when put collection happens, we need to flush all segments in the collection.
+	segments := make(map[int64]struct{}, len(msg.Header().FlushedSegmentIds))
+	for _, segmentID := range msg.Header().FlushedSegmentIds {
+		segments[segmentID] = struct{}{}
+	}
+	r.flushSegments(msg, segments)
+
+	// persist the schema change into recovery info.
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+		vchannelInfo.ObserveAlterCollection(msg)
 	}
 }
 

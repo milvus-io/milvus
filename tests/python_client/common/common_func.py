@@ -684,11 +684,14 @@ def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc,
 def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
 
+def gen_geometry_field(name="geo", description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
+
+
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
-    return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary, 
+    return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary,
                     element_type=element_type, max_capacity=max_capacity, **kwargs)
-
 
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.INT8, name=name, description=description, is_primary=is_primary, **kwargs)
@@ -1335,6 +1338,8 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
 def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json_embedded_object"):
     """
     Method: gen json data for different json types. Refer to RFC7159
+    Note: String values should be passed as json.dumps(str) to ensure they are treated as strings,
+          not as serialized JSON results.
     """
     if json_type == "json_embedded_object":                 # a json object with an embedd json object
         return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i), "level2_array": [i for i in range(i, i + 10)]},
@@ -1351,7 +1356,7 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     if json_type == "json_float":                           # single float as json value
         return [i*1.0 for i in range(start, start + nb)]
     if json_type == "json_string":                          # single string as json value
-        return [str(i) for i in range(start, start + nb)]
+        return [json.dumps(str(i)) for i in range(start, start + nb)]
     if json_type == "json_bool":                            # single bool as json value
         return [bool(i) for i in range(start, start + nb)]
     else:

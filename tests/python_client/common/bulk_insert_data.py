@@ -45,6 +45,7 @@ class DataField:
     array_float_field = "array_float"
     array_string_field = "array_string"
     new_field = "new_field"
+    geo_field = "geo"
 
 
 class DataErrorType:
@@ -98,6 +99,51 @@ def gen_binary_vectors(nb, dim):
     # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 and 255
     vectors = [[random.randint(0, 255) for _ in range(dim)] for _ in range(nb)]
     return vectors
+
+
+def gen_wkt_geometry(nb, bounds=(0, 100, 0, 100)):
+    """
+    Generate random WKT geometry strings for bulk insert
+    Generates a mix of POINT, LINESTRING, and POLYGON types
+
+    Args:
+        nb: Number of geometry strings to generate
+        bounds: Coordinate bounds as (min_x, max_x, min_y, max_y)
+
+    Returns:
+        List of WKT strings
+    """
+    geometries = []
+    geom_types = ["POINT", "LINESTRING", "POLYGON"]
+
+    for _ in range(nb):
+        geom_type = random.choice(geom_types)
+
+        if geom_type == "POINT":
+            x = random.uniform(bounds[0], bounds[1])
+            y = random.uniform(bounds[2], bounds[3])
+            wkt = f"POINT ({x:.2f} {y:.2f})"
+
+        elif geom_type == "LINESTRING":
+            num_points = random.randint(2, 5)
+            points = []
+            for _ in range(num_points):
+                x = random.uniform(bounds[0], bounds[1])
+                y = random.uniform(bounds[2], bounds[3])
+                points.append(f"{x:.2f} {y:.2f}")
+            wkt = f"LINESTRING ({', '.join(points)})"
+
+        else:  # POLYGON
+            # Generate a simple rectangle polygon
+            x = random.uniform(bounds[0], bounds[1] - 20)
+            y = random.uniform(bounds[2], bounds[3] - 20)
+            width = random.uniform(10, 20)
+            height = random.uniform(10, 20)
+            wkt = f"POLYGON (({x:.2f} {y:.2f}, {x + width:.2f} {y:.2f}, {x + width:.2f} {y + height:.2f}, {x:.2f} {y + height:.2f}, {x:.2f} {y:.2f}))"
+
+        geometries.append(wkt)
+
+    return geometries
 
 
 def gen_fp16_vectors(num, dim, for_json=False):
@@ -468,6 +514,19 @@ def gen_json_in_numpy_file(dir, data_field, rows, start=0, force=False):
     return file_name
 
 
+def gen_geometry_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        data = []
+        if rows > 0:
+            data = gen_wkt_geometry(rows)
+        arr = np.array(data)
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
 def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False, nullable=False, **kwargs):
     file_name = f"{data_field}.npy"
     file = f"{dir}/{file_name}"
@@ -635,6 +694,12 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                      for i in range(start, rows + start)])
             else:
                 data = [None for _ in range(start, rows + start)]
+        elif data_field == DataField.geo_field:
+            if not nullable:
+                # Generate WKT geometry strings for parquet
+                data = gen_wkt_geometry(rows)
+            else:
+                data = [None for _ in range(start, rows + start)]
         else:
             raise Exception("unsupported field name")
 
@@ -796,6 +861,12 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     d[data_field] = [gen_unique_str(str(i)) for i in range(array_length)]
                 else:
                     d[data_field] = None
+            elif data_field == DataField.geo_field:
+                if not nullable:
+                    # Generate a single WKT geometry string
+                    d[data_field] = gen_wkt_geometry(1)[0]
+                else:
+                    d[data_field] = None
             else:
                 raise Exception("unsupported field name")
         if enable_dynamic_field:
@@ -906,6 +977,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                 file_name = gen_bool_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.json_field:
                 file_name = gen_json_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
+            elif data_field == DataField.geo_field:
+                file_name = gen_geometry_in_numpy_file(dir=data_source_new, data_field=data_field, rows=rows, force=force)
             else:
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source_new, data_field=data_field,
                                                            rows=rows, force=force, nullable=nullable, shuffle_pk=shuffle_pk)
