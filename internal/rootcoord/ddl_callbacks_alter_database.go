@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -41,15 +40,15 @@ import (
 func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.AlterDatabaseRequest) error {
 	req.DbName = strings.TrimSpace(req.DbName)
 	if req.GetProperties() == nil && req.GetDeleteKeys() == nil {
-		return errors.New("alter database with empty properties and delete keys, expected to set either properties or delete keys")
+		return merr.WrapErrParameterInvalidMsg("alter database with empty properties and delete keys, expected to set either properties or delete keys")
 	}
 
 	if len(req.GetProperties()) > 0 && len(req.GetDeleteKeys()) > 0 {
-		return errors.New("alter database cannot modify properties and delete keys at the same time")
+		return merr.WrapErrParameterInvalidMsg("alter database cannot modify properties and delete keys at the same time")
 	}
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
-		return errors.New("can not alter cipher related properties")
+		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
 	}
 
 	broadcaster, err := startBroadcastWithDatabaseLock(ctx, req.GetDbName())
@@ -71,12 +70,16 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 	var newProperties []*commonpb.KeyValuePair
 	if (len(req.GetProperties())) > 0 {
 		if IsSubsetOfProperties(req.GetProperties(), oldDB.Properties) {
-			log.Info("skip to alter database due to no changes were detected in the properties")
-			return nil
+			// no changes were detected in the properties
+			return errIgnoredAlterDatabase
 		}
 		newProperties = MergeProperties(oldDB.Properties, req.GetProperties())
 	} else if (len(req.GetDeleteKeys())) > 0 {
 		newProperties = DeleteProperties(oldDB.Properties, req.GetDeleteKeys())
+		if len(newProperties) == len(oldDB.Properties) {
+			// no changes were detected in the properties
+			return errIgnoredAlterDatabase
+		}
 	}
 
 	msg := message.NewAlterDatabaseMessageBuilderV2().
@@ -94,7 +97,7 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 	return err
 }
 
-// getAlterLoadConfigOfAlterDatabase gets the put load config of put database.
+// getAlterLoadConfigOfAlterDatabase gets the alter load config of alter database.
 func (c *Core) getAlterLoadConfigOfAlterDatabase(ctx context.Context, dbName string, oldProps []*commonpb.KeyValuePair, newProps []*commonpb.KeyValuePair) (*message.AlterLoadConfigOfAlterDatabase, error) {
 	oldReplicaNumber, _ := common.DatabaseLevelReplicaNumber(oldProps)
 	oldResourceGroups, _ := common.DatabaseLevelResourceGroups(oldProps)
@@ -129,24 +132,22 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 	if err := c.meta.AlterDatabase(ctx, db, result.GetControlChannelResult().TimeTick); err != nil {
 		return errors.Wrap(err, "failed to alter database")
 	}
-	if err := c.ExpireCaches(ctx, ce.NewBuilder().
-		WithLegacyProxyCollectionMetaCache(
-			ce.OptLPCMDBName(header.DbName),
-			ce.OptLPCMMsgType(commonpb.MsgType_AlterDatabase),
-		),
-		result.GetControlChannelResult().TimeTick); err != nil {
-		return errors.Wrap(err, "failed to expire caches")
-	}
 	if body.AlterLoadConfig != nil {
-		// TODO: should replaced with calling AlterLoadConfig message ack callback.
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
 			CollectionIDs:  body.AlterLoadConfig.CollectionIds,
 			ReplicaNumber:  body.AlterLoadConfig.ReplicaNumber,
 			ResourceGroups: body.AlterLoadConfig.ResourceGroups,
 		})
-		return merr.CheckRPCCall(resp, err)
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return errors.Wrap(err, "failed to update load config")
+		}
 	}
-	return nil
+	return c.ExpireCaches(ctx, ce.NewBuilder().
+		WithLegacyProxyCollectionMetaCache(
+			ce.OptLPCMDBName(header.DbName),
+			ce.OptLPCMMsgType(commonpb.MsgType_AlterDatabase),
+		),
+		result.GetControlChannelResult().TimeTick)
 }
 
 func MergeProperties(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {

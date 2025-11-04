@@ -42,9 +42,9 @@ func main() {
 	}
 	fmt.Printf("MmapDirPath: %s\n", paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	allocator := prepareTsoAllocator()
-	rootCoordMeta := prepareRootCoordMeta(context.Background(), allocator)
+	rootCoordMeta, rootCoordCatalog := prepareRootCoordMeta(context.Background(), allocator)
 	dataCoordCatalog := prepareDataCoordCatalog()
-	m := mmap.NewMmapMigration(rootCoordMeta, allocator, dataCoordCatalog)
+	m := mmap.NewMmapMigration(rootCoordMeta, allocator, dataCoordCatalog, rootCoordCatalog)
 	m.Migrate(context.Background())
 }
 
@@ -117,7 +117,7 @@ func metaKVCreator() (kv.MetaKv, error) {
 		etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))), nil
 }
 
-func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) rootcoord.IMetaTable {
+func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) (rootcoord.IMetaTable, metastore.RootCoordCatalog) {
 	var catalog metastore.RootCoordCatalog
 	var err error
 
@@ -158,7 +158,7 @@ func prepareRootCoordMeta(ctx context.Context, allocator tso.Allocator) rootcoor
 		panic(err)
 	}
 
-	return meta
+	return meta, catalog
 }
 
 func prepareDataCoordCatalog() metastore.DataCoordCatalog {
