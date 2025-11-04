@@ -92,7 +92,18 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
+	if deltas, err = bw.writeDelta(ctx, pack,
+		storage.WithVersion(storage.StorageV1),
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			// Get the only blob in the map
+			if len(kvs) != 1 {
+				return fmt.Errorf("expected 1 blob, got %d", len(kvs))
+			}
+			for k, blob := range kvs {
+				return bw.chunkManager.Write(ctx, k, blob)
+			}
+			return nil
+		})); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
@@ -306,7 +317,7 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
+func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack, options ...storage.RwOption) (*datapb.FieldBinlog, error) {
 	if pack.deltaData == nil {
 		return &datapb.FieldBinlog{}, nil
 	}
@@ -328,16 +339,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 	path := path.Join(bw.chunkManager.RootPath(), common.SegmentDeltaLogPath, k)
 	writer, err := storage.NewDeltalogWriter(
 		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, path,
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
-			// Get the only blob in the map
-			if len(kvs) != 1 {
-				return fmt.Errorf("expected 1 blob, got %d", len(kvs))
-			}
-			for _, blob := range kvs {
-				return bw.chunkManager.Write(ctx, path, blob)
-			}
-			return nil
-		}),
+		options...,
 	)
 	if err != nil {
 		return nil, err

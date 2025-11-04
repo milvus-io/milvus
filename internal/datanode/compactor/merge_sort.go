@@ -76,7 +76,9 @@ func mergeSortMultipleSegments(ctx context.Context,
 				deltalogPaths = append(deltalogPaths, l.GetLogPath())
 			}
 		}
-		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, binlogIO, deltalogPaths)
+		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltalogPaths,
+			storage.WithDownloader(binlogIO.Download),
+			storage.WithStorageConfig(compactionParams.StorageConfig))
 		if err != nil {
 			return nil, err
 		}
