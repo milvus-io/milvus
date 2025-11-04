@@ -1106,7 +1106,7 @@ func TestRenameCollectionAdvanced(t *testing.T) {
 
 	// rename: old name same with new name
 	err := mc.RenameCollection(ctx, client.NewRenameCollectionOption(name1, name1))
-	common.CheckErr(t, err, false, "duplicated new collection name")
+	common.CheckErr(t, err, false, "collection name or database name should be different")
 
 	// rename to a existed name
 	err = mc.RenameCollection(ctx, client.NewRenameCollectionOption(name1, name2))
