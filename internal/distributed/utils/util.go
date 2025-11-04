@@ -3,7 +3,9 @@ package utils
 import (
 	"context"
 	"crypto/x509"
+	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -83,4 +85,18 @@ func CreateCertPoolforClient(caFile string, nodeType string) (*x509.CertPool, er
 		return nil, errors.New("failed to append certificates") // Cert pool is invalid, return nil and the error
 	}
 	return certPool, err
+}
+
+func IsIPAddress(addr string) bool {
+	host := addr
+	if strings.HasPrefix(addr, "[") {
+		// IPv6: [2001:db8::1]:443
+		host = strings.SplitN(addr[1:], "]", 2)[0]
+	} else if strings.Contains(addr, ":") {
+		// IPv4: 1.2.3.4:443
+		host = strings.SplitN(addr, ":", 2)[0]
+	}
+
+	ip := net.ParseIP(host)
+	return ip != nil
 }

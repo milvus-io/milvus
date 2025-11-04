@@ -19,6 +19,7 @@ package grpcindexnodeclient
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -82,7 +83,11 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 			return nil, err
 		}
 		client.grpcClient.SetInternalTLSCertPool(cp)
-		client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
+		if utils.IsIPAddress(addr) {
+			client.grpcClient.SetInternalTLSServerName(Params.InternalTLSCfg.InternalTLSSNI.GetValue())
+		} else {
+			client.grpcClient.SetInternalTLSServerName(strings.SplitN(addr, ":", 2)[0])
+		}
 	}
 	return client, nil
 }
