@@ -1184,11 +1184,6 @@ SegmentGrowingImpl::search_ids(BitsetType& bitset,
     }
 }
 
-std::string
-SegmentGrowingImpl::debug() const {
-    return "Growing\n";
-}
-
 int64_t
 SegmentGrowingImpl::get_active_count(Timestamp ts) const {
     auto row_count = this->get_row_count();
