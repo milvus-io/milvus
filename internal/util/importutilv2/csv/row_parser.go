@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -46,6 +47,8 @@ type rowParser struct {
 	pkField              *schemapb.FieldSchema
 	dynamicField         *schemapb.FieldSchema
 	allowInsertAutoID    bool
+
+	timezone string
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey string) (RowParser, error) {
@@ -140,6 +143,7 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 		pkField:              pkField,
 		dynamicField:         dynamicField,
 		allowInsertAutoID:    allowInsertAutoID,
+		timezone:             common.GetSchemaTimezone(schema),
 	}, nil
 }
 
@@ -364,7 +368,7 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 			return 0, r.wrapTypeError(obj, field)
 		}
 		return int32(num), nil
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64:
 		num, err := strconv.ParseInt(obj, 10, 64)
 		if err != nil {
 			return 0, r.wrapTypeError(obj, field)
@@ -414,6 +418,12 @@ func (r *rowParser) parseEntity(field *schemapb.FieldSchema, obj string, useElem
 			return nil, r.wrapTypeError(obj, field)
 		}
 		return wkbValue, nil
+	case schemapb.DataType_Timestamptz:
+		tz, err := funcutil.ValidateAndReturnUnixMicroTz(obj, r.timezone)
+		if err != nil {
+			return nil, err
+		}
+		return tz, nil
 	case schemapb.DataType_FloatVector:
 		var vec []float32
 		err := json.Unmarshal([]byte(obj), &vec)
