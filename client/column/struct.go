@@ -45,7 +45,9 @@ func (c *columnStructArray) Type() entity.FieldType {
 }
 
 func (c *columnStructArray) Len() int {
-	// TODO
+	for _, field := range c.fields {
+		return field.Len()
+	}
 	return 0
 }
 

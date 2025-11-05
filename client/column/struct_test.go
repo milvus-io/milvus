@@ -52,6 +52,9 @@ func (s *StructArraySuite) TestBasic() {
 	// Test Type()
 	s.Equal(entity.FieldTypeArray, column.Type())
 
+	// Test Len()
+	s.EqualValues(5, column.Len())
+
 	// Test FieldData()
 	fd := column.FieldData()
 	s.Equal(schemapb.DataType_Array, fd.GetType())
