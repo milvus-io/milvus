@@ -28,14 +28,13 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     async def test_async_client_default(self):
-        # init client
-        milvus_client = self._client()
+        # init async client
         self.init_async_milvus_client()
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
         await self.async_milvus_client_wrap.create_collection(c_name, dimension=ct.default_dim)
-        collections, _ = self.list_collections(milvus_client)
+        collections, _ = await self.async_milvus_client_wrap.list_collections()
         assert c_name in collections
 
         # insert entities
@@ -118,18 +117,17 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     async def test_async_client_partition(self):
-        # init client
-        milvus_client = self._client()
+        # init async client
         self.init_async_milvus_client()
 
         # create collection & partition
         c_name = cf.gen_unique_str(prefix)
         p_name = cf.gen_unique_str("par")
         await self.async_milvus_client_wrap.create_collection(c_name, dimension=ct.default_dim)
-        collections, _ = self.list_collections(milvus_client)
+        collections, _ = await self.async_milvus_client_wrap.list_collections()
         assert c_name in collections
-        self.create_partition(milvus_client, c_name, p_name)
-        partitions, _ = self.list_partitions(milvus_client, c_name)
+        await self.async_milvus_client_wrap.create_partition(c_name, p_name)
+        partitions, _ = await self.async_milvus_client_wrap.list_partitions(c_name)
         assert p_name in partitions
 
         # insert entities
@@ -221,9 +219,8 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     async def test_async_client_with_schema(self, schema):
-        # init client
+        # init async client
         pk_field_name = "id"
-        milvus_client = self._client()
         self.init_async_milvus_client()
 
         # create collection
@@ -235,7 +232,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
         schema.add_field(default_vector_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
         await self.async_milvus_client_wrap.create_collection(c_name, schema=schema)
-        collections, _ = self.list_collections(milvus_client)
+        collections, _ = await self.async_milvus_client_wrap.list_collections()
         assert c_name in collections
 
         # insert entities
@@ -258,25 +255,28 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             assert r[0]['insert_count'] == step
 
         # flush
+        # TODO: call async flush() as https://github.com/milvus-io/pymilvus/issues/3060 fixed
+        # await self.async_milvus_client_wrap.flush(c_name)
+        milvus_client = self._client()
         self.flush(milvus_client, c_name)
-        stats, _ = self.get_collection_stats(milvus_client, c_name)
+        stats, _ = await self.async_milvus_client_wrap.get_collection_stats(c_name)
         assert stats["row_count"] == async_default_nb
 
         # create index -> load
-        index_params, _ = self.prepare_index_params(milvus_client,
-                                                                        field_name=ct.default_float_vec_field_name,
-                                                                        index_type="HNSW", metric_type="COSINE", M=30,
-                                                                        efConstruction=200)
+        index_params = self.async_milvus_client_wrap.prepare_index_params()[0]
+        index_params.add_index(field_name=ct.default_float_vec_field_name,
+                               index_type="HNSW", metric_type="COSINE", M=30,
+                               efConstruction=200)
         index_params.add_index(field_name=default_vector_name, index_type="IVF_SQ8",
                                metric_type="L2", nlist=32)
         await self.async_milvus_client_wrap.create_index(c_name, index_params)
         await self.async_milvus_client_wrap.load_collection(c_name)
 
-        _index, _ = self.describe_index(milvus_client, c_name, default_vector_name)
+        _index, _ = await self.async_milvus_client_wrap.describe_index(c_name, default_vector_name)
         assert _index["indexed_rows"] == async_default_nb
         assert _index["state"] == "Finished"
-        _load, _ = self.get_load_state(milvus_client, c_name)
-        assert _load["state"] == LoadState.Loaded
+        _load, _ = await self.async_milvus_client_wrap.get_load_state(c_name)
+        assert _load == LoadState.Loaded
 
         # dql tasks
         tasks = []
@@ -328,14 +328,13 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     async def test_async_client_dml(self):
-        # init client
-        milvus_client = self._client()
+        # init async client
         self.init_async_milvus_client()
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
         await self.async_milvus_client_wrap.create_collection(c_name, dimension=ct.default_dim)
-        collections, _ = self.list_collections(milvus_client)
+        collections, _ = await self.async_milvus_client_wrap.list_collections()
         assert c_name in collections
 
         # insert entities
@@ -385,19 +384,18 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     async def test_async_client_with_db(self):
-        # init client
-        milvus_client = self._client()
+        # init async client
+        self.init_async_milvus_client()
         db_name = cf.gen_unique_str("db")
-        self.create_database(milvus_client, db_name)
-        self.close(milvus_client)
+        await self.async_milvus_client_wrap.create_database(db_name)
+        await self.async_milvus_client_wrap.close()
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        milvus_client, _ = self.connection_wrap.MilvusClient(uri=uri, db_name=db_name)
         self.async_milvus_client_wrap.init_async_client(uri, db_name=db_name)
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
         await self.async_milvus_client_wrap.create_collection(c_name, dimension=ct.default_dim)
-        collections, _ = self.list_collections(milvus_client)
+        collections, _ = await self.async_milvus_client_wrap.list_collections()
         assert c_name in collections
 
         # insert entities
@@ -467,17 +465,15 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.skip("connect with zilliz cloud")
     async def test_async_client_with_token(self):
-        # init client
-        milvus_client = self._client()
+        # init async client
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
         token = cf.param_info.param_token
-        milvus_client, _ = self.connection_wrap.MilvusClient(uri=uri, token=token)
         self.async_milvus_client_wrap.init_async_client(uri, token=token)
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
         await self.async_milvus_client_wrap.create_collection(c_name, dimension=ct.default_dim)
-        collections, _ = self.list_collections(milvus_client)
+        collections, _ = await self.async_milvus_client_wrap.list_collections()
         assert c_name in collections
 
         # insert entities
