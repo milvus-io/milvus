@@ -76,6 +76,14 @@ func (suite *EmbeddingNodeSuite) SetupTest() {
 				FieldID:          102,
 				DataType:         schemapb.DataType_SparseFloatVector,
 				IsFunctionOutput: true,
+			}, {
+				Name:             "binary vector",
+				FieldID:          103,
+				DataType:         schemapb.DataType_BinaryVector,
+				IsFunctionOutput: true,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "4096"},
+				},
 			},
 		},
 		Functions: []*schemapb.FunctionSchema{{
@@ -85,6 +93,17 @@ func (suite *EmbeddingNodeSuite) SetupTest() {
 			OutputFieldIds: []int64{102},
 		}},
 	}
+
+	// Add MinHash function with auto-populated parameters using helper
+	minHashFunc, err := function.CreateMockMinHashFunctionSchema(
+		suite.collectionSchema,
+		101, // input field ID (text)
+		103, // output field ID (binary vector)
+	)
+	if err != nil {
+		panic(err)
+	}
+	suite.collectionSchema.Functions = append(suite.collectionSchema.Functions, minHashFunc)
 
 	suite.msgs = []*msgstream.InsertMsg{{
 		BaseMsg: msgstream.BaseMsg{},
@@ -280,6 +299,40 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 		runner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[2]})
 
 		err = node.bm25Embedding(runner, suite.msgs[0], nil)
+		suite.Error(err)
+	})
+}
+
+func (suite *EmbeddingNodeSuite) TestMinHashEmbedding() {
+	suite.Run("function run failed", func() {
+		collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, suite.collectionSchema)
+		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
+		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
+		suite.NoError(err)
+		defer node.Close()
+
+		runner := function.NewMockFunctionRunner(suite.T())
+		runner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock error"))
+		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[4]})
+		runner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[2]})
+
+		err = node.minhashEmbedding(runner, suite.msgs[0], nil)
+		suite.Error(err)
+	})
+
+	suite.Run("output with unknown type failed", func() {
+		collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, suite.collectionSchema)
+		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
+		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
+		suite.NoError(err)
+		defer node.Close()
+
+		runner := function.NewMockFunctionRunner(suite.T())
+		runner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)
+		runner.EXPECT().GetOutputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[3]})
+		runner.EXPECT().GetInputFields().Return([]*schemapb.FieldSchema{suite.collectionSchema.Fields[2]})
+
+		err = node.minhashEmbedding(runner, suite.msgs[0], nil)
 		suite.Error(err)
 	})
 }

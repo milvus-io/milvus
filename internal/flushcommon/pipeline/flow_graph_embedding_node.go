@@ -118,6 +118,50 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, data *
 	return nil
 }
 
+func (eNode *embeddingNode) minhashEmbedding(
+	runner function.FunctionRunner,
+	data *storage.InsertData,
+) error {
+	inputFields := runner.GetInputFields()
+	datas := []any{}
+
+	for _, inputField := range inputFields {
+		fieldData, ok := data.Data[inputField.GetFieldID()]
+		if !ok {
+			return errors.New("MinHash embedding failed: input field data not varchar/text")
+		}
+
+		datas = append(datas, fieldData.GetDataRows())
+	}
+
+	output, err := runner.BatchRun(datas...)
+	if err != nil {
+		return err
+	}
+	// MinHash function has only one output field
+	fieldData, ok := output[0].(*schemapb.FieldData)
+	if !ok {
+		return errors.New("MinHash embedding failed: MinHash runner output not FieldData")
+	}
+
+	vectorField := fieldData.GetVectors()
+	if vectorField == nil {
+		return errors.New("MinHash embedding failed: output is not a vector field")
+	}
+
+	binaryVector := vectorField.GetBinaryVector()
+	if binaryVector == nil {
+		return errors.New("MinHash embedding failed: output is not a binary vector")
+	}
+
+	outputFieldId := runner.GetOutputFields()[0].GetFieldID()
+	data.Data[outputFieldId] = &storage.BinaryVectorFieldData{
+		Data: binaryVector,
+		Dim:  int(vectorField.GetDim()),
+	}
+	return nil
+}
+
 func (eNode *embeddingNode) embedding(datas []*storage.InsertData) (map[int64]*storage.BM25Stats, error) {
 	meta := make(map[int64]*storage.BM25Stats)
 	for _, data := range datas {
@@ -126,6 +170,11 @@ func (eNode *embeddingNode) embedding(datas []*storage.InsertData) (map[int64]*s
 			switch functionSchema.GetType() {
 			case schemapb.FunctionType_BM25:
 				err := eNode.bm25Embedding(functionRunner, data, meta)
+				if err != nil {
+					return nil, err
+				}
+			case schemapb.FunctionType_MinHash:
+				err := eNode.minhashEmbedding(functionRunner, data)
 				if err != nil {
 					return nil, err
 				}
@@ -143,7 +192,9 @@ func (eNode *embeddingNode) Embedding(datas []*writebuffer.InsertData) error {
 		if err != nil {
 			return err
 		}
-		data.SetBM25Stats(stats)
+		if len(stats) > 0 {
+			data.SetBM25Stats(stats)
+		}
 	}
 	return nil
 }
