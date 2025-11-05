@@ -446,12 +446,12 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		return binlog.GetFieldID()
 	})
 
-	getInsertFiles := func(fieldID int64) ([]string, error) {
+	getInsertFiles := func(fieldID int64, enableNull bool) ([]string, error) {
 		if st.req.GetStorageVersion() == storage.StorageV2 {
 			return []string{}, nil
 		}
 		binlogs, ok := fieldBinlogs[fieldID]
-		if !ok {
+		if !ok && !enableNull {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
 		}
 		result := make([]string, 0, len(binlogs))
@@ -476,7 +476,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
 		// create text index and upload the text index files.
-		files, err := getInsertFiles(field.GetFieldID())
+		files, err := getInsertFiles(field.GetFieldID(), field.GetNullable())
 		if err != nil {
 			return err
 		}
