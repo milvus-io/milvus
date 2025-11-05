@@ -688,7 +688,7 @@ The options include 'direct' and 'buffered'. The default value is 'buffered'.`,
 		Key:          "common.diskWriteBufferSizeKb",
 		Version:      "2.5.16",
 		DefaultValue: "64",
-		Doc: `Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+		Doc: `Disk write buffer size in KB, used for both 'direct' and 'buffered' modes, default is 64KB.
 Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.`,
 		Export: true,
 	}
