@@ -215,22 +215,29 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	limit = typeutil.Unlimited
+	isLimitProvided := false
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
-	// if limit is not provided
-	if err != nil {
-		return &queryParams{limit: typeutil.Unlimited, reduceType: reduceType, isIterator: isIterator}, nil
-	}
-	limit, err = strconv.ParseInt(limitStr, 0, 64)
-	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
-	}
-
-	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, queryParamsPair)
-	// if offset is provided
+	// if limit is provided
 	if err == nil {
-		offset, err = strconv.ParseInt(offsetStr, 0, 64)
+		isLimitProvided = true
+		limit, err = strconv.ParseInt(limitStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+			return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+		}
+	}
+	if isLimitProvided {
+		offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, queryParamsPair)
+		// if offset is provided
+		if err == nil {
+			offset, err = strconv.ParseInt(offsetStr, 0, 64)
+			if err != nil {
+				return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+			}
+		}
+		// validate max result window.
+		if err = validateMaxQueryResultWindow(offset, limit); err != nil {
+			return nil, fmt.Errorf("invalid max query result window, %w", err)
 		}
 	}
 
@@ -244,11 +251,6 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		extractTimeFields = strings.FieldsFunc(extractTimeFieldsStr, func(r rune) bool {
 			return r == ',' || r == ' '
 		})
-	}
-
-	// validate max result window.
-	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
-		return nil, fmt.Errorf("invalid max query result window, %w", err)
 	}
 
 	return &queryParams{
@@ -420,7 +422,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.RetrieveRequest.IgnoreGrowing, err = isIgnoreGrowing(t.request.GetQueryParams()); err != nil {
 		return err
 	}
-
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {
 		return err
