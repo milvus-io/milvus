@@ -50,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -83,7 +82,7 @@ type mockMetaTable struct {
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
 	GetCollectionVirtualChannelsFunc func(ctx context.Context, colID int64) []string
-	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error
+	AlterCollectionFunc              func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
 	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
 	AddCredentialFunc                func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
 	GetCredentialFunc                func(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -177,8 +176,8 @@ func (m mockMetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []s
 	return m.ListAliasesByIDFunc(ctx, collID)
 }
 
-func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error {
-	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts, fieldModify)
+func (m mockMetaTable) AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	return m.AlterCollectionFunc(ctx, result)
 }
 
 func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
@@ -418,13 +417,6 @@ func newTestCore(opts ...Opt) *Core {
 		session:          &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
 		tombstoneSweeper: tombstoneSweeper,
 	}
-	executor := newMockStepExecutor()
-	executor.AddStepsFunc = func(s *stepStack) {
-		// no schedule, execute directly.
-		s.Execute(context.Background())
-	}
-	executor.StopFunc = func() {}
-	c.stepExecutor = executor
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -625,19 +617,6 @@ func withMixCoord(mixc types.MixCoord) Opt {
 	}
 }
 
-func withUnhealthyMixCoord() Opt {
-	mixc := &mocks.MixCoord{}
-	err := errors.New("mock error")
-	mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
-		&milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: merr.Status(err),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
-	)
-
-	return withMixCoord(mixc)
-}
-
 func withInvalidMixCoord() Opt {
 	mixc := &mocks.MixCoord{}
 	mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
@@ -763,6 +742,7 @@ func withValidMixCoord() Opt {
 		merr.Success(), nil,
 	)
 	mixc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mixc.EXPECT().UpdateLoadConfig(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	return withMixCoord(mixc)
 }
 
@@ -915,7 +895,7 @@ type mockBroker struct {
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
-	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollectionFunc func(ctx context.Context, collectionID UniqueID) error
 
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
 }
@@ -932,6 +912,9 @@ func newValidMockBroker() *mockBroker {
 		return nil
 	}
 	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+		return nil
+	}
+	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 		return nil
 	}
 	return broker
@@ -969,8 +952,8 @@ func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, i
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 
-func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	return b.BroadcastAlteredCollectionFunc(ctx, req)
+func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
+	return b.BroadcastAlteredCollectionFunc(ctx, collectionID)
 }
 
 func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
@@ -1088,40 +1071,5 @@ func newMockDdlTsLockManager() *mockDdlTsLockManager {
 func withDdlTsLockManager(m DdlTsLockManager) Opt {
 	return func(c *Core) {
 		c.ddlTsLockManager = m
-	}
-}
-
-type mockStepExecutor struct {
-	StepExecutor
-	StartFunc    func()
-	StopFunc     func()
-	AddStepsFunc func(s *stepStack)
-}
-
-func newMockStepExecutor() *mockStepExecutor {
-	return &mockStepExecutor{}
-}
-
-func (m mockStepExecutor) Start() {
-	if m.StartFunc != nil {
-		m.StartFunc()
-	}
-}
-
-func (m mockStepExecutor) Stop() {
-	if m.StopFunc != nil {
-		m.StopFunc()
-	}
-}
-
-func (m mockStepExecutor) AddSteps(s *stepStack) {
-	if m.AddStepsFunc != nil {
-		m.AddStepsFunc(s)
-	}
-}
-
-func withStepExecutor(executor StepExecutor) Opt {
-	return func(c *Core) {
-		c.stepExecutor = executor
 	}
 }

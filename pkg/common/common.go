@@ -313,6 +313,28 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 			return false
 		}
 	}
+	// Check struct array fields
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			for _, kv := range structField.GetTypeParams() {
+				if kv.Key == MmapEnabledKey {
+					return true
+				}
+			}
+			return false
+		}
+		// Check fields inside struct
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				for _, kv := range field.GetTypeParams() {
+					if kv.Key == MmapEnabledKey {
+						return true
+					}
+				}
+				return false
+			}
+		}
+	}
 	return false
 }
 

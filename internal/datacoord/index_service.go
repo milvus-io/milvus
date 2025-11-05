@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -55,7 +56,7 @@ func (s *Server) serverID() int64 {
 	return 0
 }
 
-func (s *Server) getFieldNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
+func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID int64) (string, error) {
 	for _, field := range schema.GetFields() {
 		if field.FieldID == fieldID {
 			return field.Name, nil
@@ -184,7 +185,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
-		fieldName, err := s.getFieldNameByID(schema, req.GetFieldID())
+		fieldName, err := s.defaultIndexNameByID(schema, req.GetFieldID())
 		if err != nil {
 			log.Warn("get field name from schema failed", zap.Int64("fieldID", req.GetFieldID()))
 			return merr.Status(err), nil
@@ -211,6 +212,14 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
 	if err != nil {
+		if errors.Is(err, errIndexOperationIgnored) {
+			log.Info("index already exists",
+				zap.Int64("collectionID", req.GetCollectionID()),
+				zap.Int64("fieldID", req.GetFieldID()),
+				zap.String("indexName", req.GetIndexName()))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
 		log.Error("Check CanCreateIndex fail", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil

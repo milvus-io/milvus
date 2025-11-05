@@ -93,9 +93,24 @@ func TestImportNewReader(t *testing.T) {
 	}
 	checkFunc("accepts only one file", req, options)
 
+	req = &internalpb.ImportFile{
+		Paths: []string{"1.jsonl", "2.ndjson"},
+	}
+	checkFunc("accepts only one file", req, options)
+
 	// json file
 	req = &internalpb.ImportFile{
 		Paths: []string{"1.json"},
+	}
+	checkFunc("io error", req, options)
+
+	req = &internalpb.ImportFile{
+		Paths: []string{"1.jsonl"},
+	}
+	checkFunc("io error", req, options)
+
+	req = &internalpb.ImportFile{
+		Paths: []string{"1.ndjson"},
 	}
 	checkFunc("io error", req, options)
 

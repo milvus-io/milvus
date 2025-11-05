@@ -359,15 +359,16 @@ class FileWriteWorkerPool {
 
     bool
     AddTask(std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(executor_mutex_);
         if (executor_ == nullptr) {
             return false;
         }
-        std::lock_guard<std::mutex> lock(executor_mutex_);
         executor_->add(std::move(task));
         return true;
     }
 
     ~FileWriteWorkerPool() {
+        std::lock_guard<std::mutex> lock(executor_mutex_);
         if (executor_ != nullptr) {
             executor_->stop();
             executor_->join();

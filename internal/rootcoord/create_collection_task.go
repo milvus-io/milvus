@@ -360,6 +360,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 
 	// Set properties for persistent
 	t.body.CollectionSchema.Properties = t.Req.GetProperties()
+	t.body.CollectionSchema.Version = 0
 	t.appendSysFields(t.body.CollectionSchema)
 	return nil
 }

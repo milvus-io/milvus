@@ -54,6 +54,7 @@ func (b *builderImpl) getConsumerConfig() kafka.ConfigMap {
 	config := &paramtable.Get().KafkaCfg
 	consumerConfig := getBasicConfig(config)
 	consumerConfig.SetKey("allow.auto.create.topics", true)
+	consumerConfig.SetKey("auto.offset.reset", "earliest")
 	for k, v := range config.ConsumerExtraConfig.GetValue() {
 		consumerConfig.SetKey(k, v)
 	}

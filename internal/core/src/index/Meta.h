@@ -38,6 +38,7 @@ constexpr const char* BITMAP_INDEX_NUM_ROWS = "bitmap_index_num_rows";
 
 constexpr const char* INDEX_TYPE = "index_type";
 constexpr const char* METRIC_TYPE = "metric_type";
+constexpr const char* EMB_LIST = "embedding_list";
 
 // scalar index type
 constexpr const char* ASCENDING_SORT = "STL_SORT";
@@ -81,6 +82,7 @@ constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
 constexpr const char* EMB_LIST_META_PATH = "emb_list_meta_file_path";
 constexpr const char* EMB_LIST_META_FILE_NAME = "emb_list_meta";
+constexpr const char* EMB_LIST_OFFSETS_PATH = "emb_list_offset_file_path";
 
 // VecIndex node filtering
 constexpr const char* VEC_OPT_FIELDS_PATH = "opt_fields_path";
