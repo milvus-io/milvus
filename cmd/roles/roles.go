@@ -483,7 +483,6 @@ func (mr *MilvusRoles) Run() {
 
 	local := mr.Local
 
-	componentMap := make(map[string]component)
 	componentFutureMap := make(map[string]*conc.Future[component])
 	if mr.EnableRootCoord {
 		rootCoord := mr.runRootCoord(ctx, local)
