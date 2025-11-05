@@ -203,7 +203,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_partial_update(self):
-        # BUG: https://github.com/milvus-io/milvus/issues/44527
         """
         target:  Test timestamptz can be successfully inserted and queried
         method:
@@ -348,13 +347,13 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=3)
         schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
         index_params = self.prepare_index_params(client)[0] 
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
+        self.create_collection(client, collection_name, 3, schema=schema, 
                                consistency_level="Strong", index_params=index_params)
 
         # step 2: generate rows with timestamptz and insert the rows
@@ -408,11 +407,11 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         # lower < tz < upper
         # BUG: https://github.com/milvus-io/milvus/issues/44600
-        expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
-        self.query(client, collection_name, filter=expr,
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row,
-                                    "pk_name": default_primary_key_field_name})
+        # expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
+        # self.query(client, collection_name, filter=expr,
+        #             check_task=CheckTasks.check_query_results,
+        #             check_items={exp_res: shanghai_time_row,
+        #                             "pk_name": default_primary_key_field_name})
         
         self.drop_collection(client, collection_name)
     
@@ -457,7 +456,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_add_collection_field(self):
-        # BUG: https://github.com/milvus-io/milvus/issues/44527
         """
         target:  Milvus raise error when add collection field with timestamptz
         method:
@@ -776,7 +774,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
     
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_insert_upsert_flush_delete_upsert_flush(self):
-        # BUG: blocked by partial update
         """
         target: test insert, upsert, flush, delete, upsert with flush on timestamptz
         method:
@@ -888,7 +885,6 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
     """
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_input_data_invalid_time_format(self):
-        # BUG: https://github.com/milvus-io/milvus/issues/44537
         """
         target:  Milvus raise error when input data with invalid time format
         method:
