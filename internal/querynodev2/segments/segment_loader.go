@@ -245,6 +245,11 @@ func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
 				binlog.LogPath = path.Join(bucketName, binlog.LogPath)
 			}
 		}
+		for _, deltaLog := range segmentInfo.GetDeltalogs() {
+			for _, binlog := range deltaLog.GetBinlogs() {
+				binlog.LogPath = path.Join(bucketName, binlog.LogPath)
+			}
+		}
 	}
 }
 
