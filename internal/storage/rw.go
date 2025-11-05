@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	sio "io"
-	"path"
 	"sort"
 
 	"github.com/samber/lo"
@@ -275,22 +274,12 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		sort.Slice(binlogs, func(i, j int) bool {
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
 		})
-		binlogLists := lo.Map(binlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
-			return fieldBinlog.GetBinlogs()
-		})
-		bucketName := rwOptions.storageConfig.BucketName
-		paths := make([][]string, len(binlogLists[0]))
-		for _, binlogs := range binlogLists {
-			for j, binlog := range binlogs {
-				logPath := binlog.GetLogPath()
-				if rwOptions.storageConfig.StorageType != "local" {
-					logPath = path.Join(bucketName, logPath)
-				}
-				paths[j] = append(paths[j], logPath)
-			}
+
+		var err error
+		rr, err = NewRecordReaderFromBinlogs(binlogs, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+		if err != nil {
+			return nil, err
 		}
-		// FIXME: add needed fields support
-		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
