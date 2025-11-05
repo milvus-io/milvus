@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
+
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -339,4 +340,40 @@ func TestFullTextSearchDefaultValue(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestTextMatchMinimumShouldMatch verifies text_match(..., minimum_should_match=N)
+func TestTextMatchMinimumShouldMatch(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), nil, hp.TNewSchemaOption().TWithFunction(function))
+
+	docs := []string{"a b", "a c", "b c", "c", "a b c"}
+	insertOption := hp.TNewDataOption().TWithTextLang(common.DefaultTextLang).TWithTextData(docs)
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), insertOption)
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+	indexparams := hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultTextSparseVecFieldName: index.NewSparseInvertedIndex(entity.BM25, 0.1)})
+	prepare.CreateIndex(ctx, t, mc, indexparams)
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// min=1 should return docs containing any token from "a b c"
+	expr1 := fmt.Sprintf("text_match(%s, \"%s\", minimum_should_match=%d)", common.DefaultTextFieldName, "a b c", 1)
+	res1, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(expr1))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, res1.ResultCount, 4)
+
+	// min=3 should return only the doc containing all three tokens
+	expr3 := fmt.Sprintf("text_match(%s, \"%s\", minimum_should_match=%d)", common.DefaultTextFieldName, "a b c", 3)
+	res3, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(expr3))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, res3.ResultCount, 1)
+
+	// min large (e.g. 10) should return 0
+	exprLarge := fmt.Sprintf("text_match(%s, \"%s\", minimum_should_match=%d)", common.DefaultTextFieldName, "a b c", 10)
+	resLarge, err := mc.Query(ctx, milvusclient.NewQueryOption(schema.CollectionName).WithFilter(exprLarge))
+	require.NoError(t, err)
+	require.Equal(t, 0, resLarge.ResultCount)
 }

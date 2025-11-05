@@ -527,17 +527,61 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		return err
 	}
 
+	// Handle optional min_should_match parameter
+	var extraValues []*planpb.GenericValue
+	if ctx.TextMatchOption() != nil {
+		minShouldMatchExpr := ctx.TextMatchOption().Accept(v)
+		if err, ok := minShouldMatchExpr.(error); ok {
+			return err
+		}
+		if minShouldMatchValue, ok := minShouldMatchExpr.(*ExprWithType); ok {
+			valueExpr := getValueExpr(minShouldMatchValue)
+			if valueExpr == nil || valueExpr.GetValue() == nil {
+				return fmt.Errorf("minimum_should_match should be a const integer expression")
+			}
+			minShouldMatch := valueExpr.GetValue().GetInt64Val()
+			if minShouldMatch < 1 {
+				return fmt.Errorf("minimum_should_match should be >= 1, got %d", minShouldMatch)
+			}
+			if minShouldMatch > 1000 {
+				return fmt.Errorf("minimum_should_match should be <= 1000, got %d", minShouldMatch)
+			}
+			extraValues = []*planpb.GenericValue{NewInt(minShouldMatch)}
+		}
+	}
+
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: columnInfo,
-					Op:         planpb.OpType_TextMatch,
-					Value:      NewString(queryText),
+					ColumnInfo:  columnInfo,
+					Op:          planpb.OpType_TextMatch,
+					Value:       NewString(queryText),
+					ExtraValues: extraValues,
 				},
 			},
 		},
 		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext) interface{} {
+	// Parse the integer constant for minimum_should_match
+	integerConstant := ctx.IntegerConstant().GetText()
+	value, err := strconv.ParseInt(integerConstant, 0, 64)
+	if err != nil {
+		return fmt.Errorf("invalid minimum_should_match value: %s", integerConstant)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(value),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Int64,
 	}
 }
 
