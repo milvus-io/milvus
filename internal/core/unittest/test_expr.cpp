@@ -17485,7 +17485,7 @@ TEST_P(ExprTest, TestSTDWithinFunction) {
     });
 }
 
-TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
+TEST(ExprTest, ParseGISFunctionFilterExprs) {
     // Build Schema
     auto schema = std::make_shared<Schema>();
     auto dim = 16;
@@ -17524,7 +17524,7 @@ TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
         >)PLAN";
 
     // Convert and parse
-    auto bin_plan = translate_text_plan_with_metric_type(raw_plan);
+    auto bin_plan = translate_text_plan_to_binary_plan(raw_plan.c_str());
     auto plan =
         CreateSearchPlanByExpr(*schema, bin_plan.data(), bin_plan.size());
 
