@@ -95,6 +95,8 @@ const (
 	CurrentScalarIndexEngineVersion = int32(2)
 )
 
+const DefaultTimezone = "UTC"
+
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
 var Endian = binary.LittleEndian
@@ -246,6 +248,7 @@ const (
 	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
+	TimezoneKey               = "timezone"
 	DatabaseDefaultTimezone   = "database.timezone"
 	CollectionDefaultTimezone = "collection.timezone"
 	AllowInsertAutoIDKey      = "allow_insert_auto_id"
@@ -311,6 +314,28 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 				}
 			}
 			return false
+		}
+	}
+	// Check struct array fields
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			for _, kv := range structField.GetTypeParams() {
+				if kv.Key == MmapEnabledKey {
+					return true
+				}
+			}
+			return false
+		}
+		// Check fields inside struct
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				for _, kv := range field.GetTypeParams() {
+					if kv.Key == MmapEnabledKey {
+						return true
+					}
+				}
+				return false
+			}
 		}
 	}
 	return false

@@ -3,6 +3,13 @@ affinity:
     preferredDuringSchedulingIgnoredDuringExecution:
     - preference:
         matchExpressions:
+        - key: jenkins-e2e-amd
+          operator: In
+          values:
+          - "true"
+      weight: 100
+    - preference:
+        matchExpressions:
         - key: node-role.kubernetes.io/e2e
           operator: Exists
       weight: 1
@@ -89,6 +96,13 @@ etcd:
       preferredDuringSchedulingIgnoredDuringExecution:
       - preference:
           matchExpressions:
+          - key: jenkins-e2e-amd
+            operator: In
+            values:
+            - "true"
+        weight: 100
+      - preference:
+          matchExpressions:
           - key: node-role.kubernetes.io/e2e
             operator: Exists
         weight: 1
@@ -105,6 +119,10 @@ etcd:
       cpu: "1"
       memory: 4Gi
   tolerations:
+  - effect: PreferNoSchedule
+    key: jenkins-milvus-ci-only
+    operator: Equal
+    value: "true"
   - effect: NoSchedule
     key: node-role.kubernetes.io/e2e
     operator: Exists
@@ -119,6 +137,13 @@ minio:
       preferredDuringSchedulingIgnoredDuringExecution:
       - preference:
           matchExpressions:
+          - key: jenkins-e2e-amd
+            operator: In
+            values:
+            - "true"
+        weight: 100
+      - preference:
+          matchExpressions:
           - key: node-role.kubernetes.io/e2e
             operator: Exists
         weight: 1
@@ -131,6 +156,10 @@ minio:
       cpu: "1"
       memory: 4Gi
   tolerations:
+  - effect: PreferNoSchedule
+    key: jenkins-milvus-ci-only
+    operator: Equal
+    value: "true"
   - effect: NoSchedule
     key: node-role.kubernetes.io/e2e
     operator: Exists
@@ -140,6 +169,13 @@ pulsarv3:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: jenkins-e2e-amd
+              operator: In
+              values:
+              - "true"
+          weight: 100
         - preference:
             matchExpressions:
             - key: node-role.kubernetes.io/e2e
@@ -158,6 +194,10 @@ pulsarv3:
         -Xmx512m
         -XX:MaxDirectMemorySize=1024m
     tolerations:
+    - effect: PreferNoSchedule
+      key: jenkins-milvus-ci-only
+      operator: Equal
+      value: "true"
     - effect: NoSchedule
       key: node-role.kubernetes.io/e2e
       operator: Exists
@@ -165,6 +205,13 @@ pulsarv3:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: jenkins-e2e-amd
+              operator: In
+              values:
+              - "true"
+          weight: 100
         - preference:
             matchExpressions:
             - key: node-role.kubernetes.io/e2e
@@ -179,6 +226,10 @@ pulsarv3:
         cpu: "0.5"
         memory: 4Gi
     tolerations:
+    - effect: PreferNoSchedule
+      key: jenkins-milvus-ci-only
+      operator: Equal
+      value: "true"
     - effect: NoSchedule
       key: node-role.kubernetes.io/e2e
       operator: Exists
@@ -188,6 +239,13 @@ pulsarv3:
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
+        - preference:
+            matchExpressions:
+            - key: jenkins-e2e-amd
+              operator: In
+              values:
+              - "true"
+          weight: 100
         - preference:
             matchExpressions:
             - key: node-role.kubernetes.io/e2e
@@ -201,6 +259,10 @@ pulsarv3:
         cpu: "0.5"
         memory: 2Gi
     tolerations:
+    - effect: PreferNoSchedule
+      key: jenkins-milvus-ci-only
+      operator: Equal
+      value: "true"
     - effect: NoSchedule
       key: node-role.kubernetes.io/e2e
       operator: Exists
@@ -217,6 +279,13 @@ pulsarv3:
         preferredDuringSchedulingIgnoredDuringExecution:
         - preference:
             matchExpressions:
+            - key: jenkins-e2e-amd
+              operator: In
+              values:
+              - "true"
+          weight: 100
+        - preference:
+            matchExpressions:
             - key: node-role.kubernetes.io/e2e
               operator: Exists
           weight: 1
@@ -229,10 +298,18 @@ pulsarv3:
         cpu: "0.5"
         memory: 2Gi
     tolerations:
+    - effect: PreferNoSchedule
+      key: jenkins-milvus-ci-only
+      operator: Equal
+      value: "true"
     - effect: NoSchedule
       key: node-role.kubernetes.io/e2e
       operator: Exists
 tolerations:
+- effect: PreferNoSchedule
+  key: jenkins-milvus-ci-only
+  operator: Equal
+  value: "true"
 - effect: NoSchedule
   key: node-role.kubernetes.io/e2e
   operator: Exists

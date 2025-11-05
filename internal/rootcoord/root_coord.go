@@ -1069,8 +1069,66 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
 	resp.UpdateTimestampStr = strconv.FormatUint(collInfo.UpdateTimestamp, 10)
-
 	return resp
+}
+
+// rewriteTimestampTzDefaultValueToString converts the default_value of TIMESTAMPTZ fields
+// in the DescribeCollectionResponse from the internal int64 (UTC microsecond) format
+// back to a human-readable, timezone-aware string (RFC3339Nano).
+//
+// This is necessary because TIMESTAMPTZ default values are stored internally as int64
+// after validation but must be returned to the user as a string, respecting the
+// collection's default timezone for display purposes if no explicit offset was stored.
+func rewriteTimestampTzDefaultValueToString(resp *milvuspb.DescribeCollectionResponse) error {
+	if resp.GetSchema() == nil {
+		return nil
+	}
+
+	// 1. Determine the target timezone for display.
+	// This is typically stored in the collection properties.
+	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, resp.GetSchema().GetProperties())
+	if !exist {
+		timezone = common.DefaultTimezone // Fallback to a default, like "UTC"
+	}
+
+	// 2. Iterate through all fields in the schema.
+	for _, fieldSchema := range resp.Schema.GetFields() {
+		// Only process TIMESTAMPTZ fields.
+		if fieldSchema.GetDataType() != schemapb.DataType_Timestamptz {
+			continue
+		}
+
+		defaultValue := fieldSchema.GetDefaultValue()
+		if defaultValue == nil {
+			continue
+		}
+
+		// 3. Check if the default value is stored in the internal int64 (LongData) format.
+		// If it's not LongData, we assume it's either unset or already a string (which shouldn't happen
+		// if the creation flow worked correctly).
+		utcMicro, ok := defaultValue.GetData().(*schemapb.ValueField_LongData)
+		if !ok {
+			continue // Skip if not stored as LongData (int64)
+		}
+
+		ts := utcMicro.LongData
+
+		// 4. Convert the int64 microsecond value back to a timezone-aware string.
+		tzString, err := funcutil.ConvertUnixMicroToTimezoneString(ts, timezone)
+		if err != nil {
+			// In a real system, you might log the error and use the raw int64 as a fallback string,
+			// but here we'll set a placeholder string to avoid crashing.
+			tzString = fmt.Sprintf("Error converting timestamp: %v", err)
+			return errors.Wrap(err, tzString)
+		}
+
+		// 5. Rewrite the default value field in the response schema.
+		// The protobuf oneof structure ensures setting one field clears the others.
+		fieldSchema.GetDefaultValue().Data = &schemapb.ValueField_StringData{
+			StringData: tzString,
+		}
+	}
+	return nil
 }
 
 func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*milvuspb.DescribeCollectionResponse, error) {
