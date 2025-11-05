@@ -54,9 +54,9 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
-
+	timezone := common.GetSchemaTimezone(schema)
 	for fieldID, r := range readers {
-		cr, err := NewFieldReader(r, fields[fieldID])
+		cr, err := NewFieldReader(r, fields[fieldID], timezone)
 		if err != nil {
 			return nil, err
 		}

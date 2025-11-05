@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -578,7 +579,7 @@ func TestTypeMismatch(t *testing.T) {
 		}
 		fileReader, err := pqarrow.NewFileReader(reader, readProps, memory.DefaultAllocator)
 		assert.NoError(t, err)
-		columnReader, err := NewFieldReader(ctx, fileReader, 0, schema.Fields[0])
+		columnReader, err := NewFieldReader(ctx, fileReader, 0, schema.Fields[0], common.DefaultTimezone)
 		assert.NoError(t, err)
 
 		_, _, err = columnReader.Next(int64(rowCount))
