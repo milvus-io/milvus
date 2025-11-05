@@ -1421,8 +1421,10 @@ class SegmentExpr : public Expr {
             return false;
         };
 
+        // if path is empty, json stats can not know key name,
+        // so we can't use json shredding data
         return PlanUseJsonStats(context) && HasJsonStats(field_id) &&
-               !path_contains_integer(nested_path);
+               !nested_path.empty() && !path_contains_integer(nested_path);
     }
 
     virtual bool
