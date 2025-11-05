@@ -33,6 +33,14 @@ const (
 	SUPERSTRUCTURE MetricType = "SUPERSTRUCTURE"
 	BM25           MetricType = "BM25"
 	MHJACCARD      MetricType = "MHJACCARD"
+
+	// The same with MaxSimCosine
+	MaxSim        MetricType = "MAX_SIM"
+	MaxSimCosine  MetricType = "MAX_SIM_COSINE"
+	MaxSimL2      MetricType = "MAX_SIM_L2"
+	MaxSimIP      MetricType = "MAX_SIM_IP"
+	MaxSimHamming MetricType = "MAX_SIM_HAMMING"
+	MaxSimJaccard MetricType = "MAX_SIM_JACCARD"
 )
 
 // CompactionState enum type for compaction state

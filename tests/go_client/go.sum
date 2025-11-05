@@ -16,6 +16,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/CloudyKit/fastprinter v0.0.0-20200109182630-33d98a066a53/go.mod h1:+3IMCy2vIlbG1XG/0ggNQv0SvxCAIpPM5b1nCz56Xno=
 github.com/CloudyKit/jet/v3 v3.0.0/go.mod h1:HKQPgSJmdK8hdoAbKUUWajkHyHo4RaU5rMdUywE7VMo=
+github.com/DATA-DOG/go-sqlmock v1.5.2 h1:OcvFkGmslmlZibjAjaHm3L//6LiuBgolP7OputlJIzU=
+github.com/DATA-DOG/go-sqlmock v1.5.2/go.mod h1:88MAG/4G7SMwSE3CeA0ZKzrT5CiOU3OJ+JlNzwDqpNU=
 github.com/Joker/hpp v1.0.0/go.mod h1:8x5n+M1Hp5hC0g8okX3sR3vFQwynaX/UgSOM9MeBKzY=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/Shopify/goreferrer v0.0.0-20181106222321-ec9c9a553398/go.mod h1:a1uqRtAwp2Xwc6WNPJEufxJ7fx3npB4UV/JOLmbu5I0=
@@ -330,10 +332,10 @@ github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5
 github.com/mediocregopher/radix/v3 v3.4.2/go.mod h1:8FL3F6UQRXHXIBSPUs5h0RybMF8i4n7wVopoX3x7Bv8=
 github.com/microcosm-cc/bluemonday v1.0.2/go.mod h1:iVP4YcDBq+n/5fb23BhYFvIMq/leAFZyRl6bYmGDlGc=
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
-github.com/milvus-io/milvus-proto/go-api/v2 v2.6.4-0.20251013093953-f3e0a710c654 h1:p604i9izeR8eWrQhOFmcmxhNhYlsvTkkmph4b2GbOeg=
-github.com/milvus-io/milvus-proto/go-api/v2 v2.6.4-0.20251013093953-f3e0a710c654/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
-github.com/milvus-io/milvus/pkg/v2 v2.6.3 h1:WDf4mXFWL5Sk/V87yLwRKq24MYMkjS2YA6qraXbLbJA=
-github.com/milvus-io/milvus/pkg/v2 v2.6.3/go.mod h1:49umaGHK9nKHJNtgBlF/iB24s1sZ/SG5/Q7iLj/Gc14=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.6.5-0.20251102105128-d157e5f676d6 h1:RWrpxw+bSWWQyavtQMcc6JtqBR1x/t/io8qRvtkosmE=
+github.com/milvus-io/milvus-proto/go-api/v2 v2.6.5-0.20251102105128-d157e5f676d6/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
+github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256 h1:M2waty0w2k4YT2HHzJk3fx6EFPD4DKxNJatitIV+gGU=
+github.com/milvus-io/milvus/pkg/v2 v2.6.4-0.20251104142533-a2ce70d25256/go.mod h1:HT6Wxahwj/l8+i+D/C3iwDzCjDa36U9gyVw6CjjK4pE=
 github.com/mitchellh/cli v1.0.0/go.mod h1:hNIlj7HEI86fIcpObd7a0FcrxTWetlwJDGcceTlRvqc=
 github.com/mitchellh/go-homedir v1.0.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
