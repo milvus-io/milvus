@@ -375,6 +375,66 @@ func TestExpr_TextMatch_MinShouldMatch(t *testing.T) {
 	}
 }
 
+func TestExpr_TextMatch_MinShouldMatch_NilValue_Coverage(t *testing.T) {
+	// This test is specifically to cover the error case in validateAndExtractMinShouldMatch
+	// which handles the edge case where minShouldMatchExpr is an ExprWithType
+
+	// Test case 1: ExprWithType with a ColumnExpr
+	// This will make getValueExpr return nil
+	exprWithColumnExpr := &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:  100,
+						DataType: schemapb.DataType_Int64,
+					},
+				},
+			},
+		},
+		dataType: schemapb.DataType_Int64,
+	}
+
+	_, err := validateAndExtractMinShouldMatch(exprWithColumnExpr)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "minimum_should_match should be a const integer expression")
+
+	// Test case 2: ExprWithType with a ValueExpr but nil Value
+	// This will make getValueExpr return a non-nil ValueExpr but GetValue() returns nil
+	exprWithNilValue := &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: nil,
+				},
+			},
+		},
+		dataType: schemapb.DataType_Int64,
+	}
+
+	_, err = validateAndExtractMinShouldMatch(exprWithNilValue)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "minimum_should_match should be a const integer expression")
+
+	// Test case 3: Valid ExprWithType with proper value
+	validExpr := &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(10),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Int64,
+	}
+
+	extraVals, err := validateAndExtractMinShouldMatch(validExpr)
+	assert.NoError(t, err)
+	assert.NotNil(t, extraVals)
+	assert.Equal(t, 1, len(extraVals))
+	assert.Equal(t, int64(10), extraVals[0].GetInt64Val())
+}
+
 func TestExpr_TextMatch_MinShouldMatch_Omitted(t *testing.T) {
 	schema := newTestSchema(true)
 	enableMatch(schema)

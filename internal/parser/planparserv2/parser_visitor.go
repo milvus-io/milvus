@@ -534,23 +534,11 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		if err, ok := minShouldMatchExpr.(error); ok {
 			return err
 		}
-		if minShouldMatchValue, ok := minShouldMatchExpr.(*ExprWithType); ok {
-			valueExpr := getValueExpr(minShouldMatchValue)
-			if valueExpr == nil || valueExpr.GetValue() == nil { // coverage-ignore: 100%
-				// we never reach here because the grammar rejects placeholder before visitor; accept either parse error or visitor error
-				// coverage-ignore-start
-				return fmt.Errorf("minimum_should_match should be a const integer expression")
-				// coverage-ignore-end
-			}
-			minShouldMatch := valueExpr.GetValue().GetInt64Val()
-			if minShouldMatch < 1 {
-				return fmt.Errorf("minimum_should_match should be >= 1, got %d", minShouldMatch)
-			}
-			if minShouldMatch > 1000 {
-				return fmt.Errorf("minimum_should_match should be <= 1000, got %d", minShouldMatch)
-			}
-			extraValues = []*planpb.GenericValue{NewInt(minShouldMatch)}
+		extraVal, err := validateAndExtractMinShouldMatch(minShouldMatchExpr)
+		if err != nil {
+			return err
 		}
+		extraValues = extraVal
 	}
 
 	return &ExprWithType{
@@ -2106,4 +2094,22 @@ func reverseCompareOp(op planpb.OpType) planpb.OpType {
 	default:
 		return planpb.OpType_Invalid
 	}
+}
+
+func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb.GenericValue, error) {
+	if minShouldMatchValue, ok := minShouldMatchExpr.(*ExprWithType); ok {
+		valueExpr := getValueExpr(minShouldMatchValue)
+		if valueExpr == nil || valueExpr.GetValue() == nil {
+			return nil, fmt.Errorf("minimum_should_match should be a const integer expression")
+		}
+		minShouldMatch := valueExpr.GetValue().GetInt64Val()
+		if minShouldMatch < 1 {
+			return nil, fmt.Errorf("minimum_should_match should be >= 1, got %d", minShouldMatch)
+		}
+		if minShouldMatch > 1000 {
+			return nil, fmt.Errorf("minimum_should_match should be <= 1000, got %d", minShouldMatch)
+		}
+		return []*planpb.GenericValue{NewInt(minShouldMatch)}, nil
+	}
+	return nil, nil
 }
