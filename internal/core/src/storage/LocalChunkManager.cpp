@@ -234,37 +234,61 @@ LocalChunkManager::RemoveDir(const std::string& dir) {
     }
 }
 
+// GetSizeOfDir is used to get the size of a directory, it will recursively
+// get the size of all files and subdirectories in the directory.
+// If file/directory doesn't exist, ignore it because it may be removed concurrently;
 int64_t
 LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
-    bool is_dir = boost::filesystem::is_directory(dirPath);
-    if (!is_dir) {
-        ThrowInfo(PathNotExist, "dir:" + dir + " not exists");
+    boost::system::error_code it_ec;
+    boost::filesystem::directory_iterator it(dirPath, it_ec);
+    if (it_ec) {
+        if (it_ec.value() == boost::system::errc::no_such_file_or_directory) {
+            return 0;
+        }
+        ThrowInfo(FileReadFailed,
+                  fmt::format("iterate directory {} failed, error: {}",
+                              dir,
+                              it_ec.message()));
     }
 
-    using boost::filesystem::directory_entry;
-    using boost::filesystem::directory_iterator;
-    std::vector<directory_entry> v;
-    copy(directory_iterator(dirPath), directory_iterator(), back_inserter(v));
-
     int64_t total_file_size = 0;
-    for (std::vector<directory_entry>::const_iterator it = v.begin();
-         it != v.end();
-         ++it) {
-        if (boost::filesystem::is_regular_file(it->path())) {
-            boost::system::error_code ec;
-            auto file_size = boost::filesystem::file_size(it->path(), ec);
-            if (ec) {
-                // The file may be removed concurrently by other threads.
-                // So the file size cannot be obtained, just ignore it.
-                LOG_INFO("size of file {} cannot be obtained with error: {}",
-                         it->path().string(),
-                         ec.message());
+    boost::filesystem::directory_iterator end_it;
+    for (; it != end_it; ++it) {
+        boost::system::error_code status_ec;
+        auto status = it->status(status_ec);
+        if (status_ec) {
+            if (status_ec.value() ==
+                boost::system::errc::no_such_file_or_directory) {
                 continue;
             }
-            total_file_size += file_size;
+            ThrowInfo(FileReadFailed,
+                      fmt::format("get status of {} failed, error: {}",
+                                  it->path().string(),
+                                  status_ec.message()));
         }
-        if (boost::filesystem::is_directory(it->path())) {
+
+        // Check if current entry is a regular file
+        if (boost::filesystem::is_regular_file(status)) {
+            boost::system::error_code file_size_ec;
+            auto file_size =
+                boost::filesystem::file_size(it->path(), file_size_ec);
+            if (file_size_ec) {
+                if (file_size_ec.value() ==
+                    boost::system::errc::no_such_file_or_directory) {
+                    continue;
+                }
+                ThrowInfo(FileReadFailed,
+                          fmt::format("get size of file {} failed, error: {}",
+                                      it->path().string(),
+                                      file_size_ec.message()));
+            }
+            total_file_size += file_size;
+            continue;
+        }
+
+        // Check if current entry is a subdirectory
+        if (boost::filesystem::is_directory(status)) {
             total_file_size += GetSizeOfDir(it->path().string());
         }
     }
