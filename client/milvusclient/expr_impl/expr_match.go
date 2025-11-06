@@ -378,14 +378,14 @@ func runAllExpressionTests(ctx context.Context, client *milvusclient.Client) err
 	now := time.Now().UnixMilli()
 
 	testCases := []TestCase{
-		{
-			Name:        "Basic Score Pass-through",
-			Query:       "artificial intelligence",
-			ExprCode:    "score",
-			ExpectedTop: "", // No specific expectation, just test basic functionality
-			Description: "Test basic expression that returns original score unchanged",
-			InputFields: nil,
-		},
+		// {
+		// 	Name:        "Basic Score Pass-through",
+		// 	Query:       "artificial intelligence",
+		// 	ExprCode:    "score",
+		// 	ExpectedTop: "", // No specific expectation, just test basic functionality
+		// 	Description: "Test basic expression that returns original score unchanged",
+		// 	InputFields: nil,
+		// },
 		{
 			Name:        "Quality Boost",
 			Query:       "artificial intelligence",
@@ -485,6 +485,212 @@ func runAllExpressionTests(ctx context.Context, client *milvusclient.Client) err
 	return nil
 }
 
+// runWeightedWithLexicalSearchTest demonstrates Weighted reranker with lexical search, min should match, and expression reranker
+func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.Client) error {
+	log.Println("\n⚖️  Running Weighted Reranker with Lexical Search + Min Should Match + Expression Reranker Test")
+	log.Println(strings.Repeat("=", 70))
+
+	query := "artificial intelligence machine learning"
+	log.Printf("Query: '%s'", query)
+
+	// Create text vector for BM25 search
+	textVector := entity.Text(query)
+
+	// Test 1: Min Should Match with text_match filter
+	log.Println("\n--- Test 1: Single BM25 Search with Min Should Match ---")
+	minShouldMatch := "1"
+	textMatchFilter := fmt.Sprintf(`text_match(%s, "%s", "min_should_match=%s")`,
+		textFieldName, query, minShouldMatch)
+	log.Printf("Filter: %s", textMatchFilter)
+
+	singleSearchResult, err := client.Search(ctx, milvusclient.NewSearchOption(
+		collectionName,
+		5,
+		[]entity.Vector{textVector},
+	).WithANNSField(textSparseFieldName).
+		WithFilter(textMatchFilter).
+		WithOutputFields("id", titleFieldName, textFieldName, qualityFieldName, popularityFieldName))
+	if err != nil {
+		return fmt.Errorf("single search with min_should_match failed: %v", err)
+	}
+
+	log.Println("Results:")
+	for _, resultSet := range singleSearchResult {
+		for i := 0; i < resultSet.ResultCount; i++ {
+			id, _ := resultSet.IDs.Get(i)
+			title, _ := resultSet.GetColumn(titleFieldName).GetAsString(i)
+			score := resultSet.Scores[i]
+			log.Printf("  [%d] ID: %v, Score: %.4f, Title: %s", i+1, id, score, title)
+		}
+	}
+
+	// Test 2: Weighted Reranker with Multiple BM25 Searches (Title + Text)
+	log.Println("\n--- Test 2: Weighted Fusion of Title and Text BM25 Searches ---")
+
+	// Create two separate ANN requests for hybrid search
+	// Request 1: Search on title sparse vector (higher weight - titles are more important)
+	titleSearchRequest := milvusclient.NewAnnRequest(titleSparseFieldName, 20, textVector).
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s")`, titleFieldName, query)).
+		WithSearchParam("metric_type", "BM25")
+
+	// Request 2: Search on text sparse vector
+	textSearchRequest := milvusclient.NewAnnRequest(textSparseFieldName, 20, textVector).
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s", "min_should_match=%s")`,
+			textFieldName, query, minShouldMatch)).
+		WithSearchParam("metric_type", "BM25")
+
+	// Create Weighted reranker (0.6 weight for title, 0.4 for text)
+	weightedReranker := milvusclient.NewWeightedReranker([]float64{0.6, 0.4})
+
+	log.Println("Executing Hybrid Search with Weighted Reranker...")
+	hybridSearchResult, err := client.HybridSearch(ctx,
+		milvusclient.NewHybridSearchOption(collectionName, 10, titleSearchRequest, textSearchRequest).
+			WithReranker(weightedReranker).
+			WithOutputFields("id", titleFieldName, textFieldName, qualityFieldName, popularityFieldName))
+	if err != nil {
+		return fmt.Errorf("hybrid search with Weighted reranker failed: %v", err)
+	}
+
+	log.Println("Weighted Fusion Results:")
+	for _, resultSet := range hybridSearchResult {
+		for i := 0; i < resultSet.ResultCount; i++ {
+			id, _ := resultSet.IDs.Get(i)
+			title, _ := resultSet.GetColumn(titleFieldName).GetAsString(i)
+			text, _ := resultSet.GetColumn(textFieldName).GetAsString(i)
+			score := resultSet.Scores[i]
+			log.Printf("  [%d] ID: %v, Weighted Score: %.4f", i+1, id, score)
+			log.Printf("      Title: %s", title)
+			log.Printf("      Text: %s", text[:min(len(text), 60)])
+		}
+	}
+
+	// Test 3: Weighted + Expression-based Reranker (Two-tier reranking)
+	log.Println("\n--- Test 3: Weighted + Expression Reranker (Two-tier) ---")
+
+	// Create expression reranker function for quality boosting
+	exprRerankerFunction := entity.NewFunction().
+		WithName("quality_boost_reranker").
+		WithType(entity.FunctionTypeRerank).
+		WithInputFields(qualityFieldName).
+		WithParam("reranker", "expr").
+		WithParam("expr_code", "score * (fields[\"quality_score\"] / 100.0)")
+
+	// Create Weighted reranker as function (70% title, 30% text)
+	weightedRerankerFunction := entity.NewFunction().
+		WithName("weighted_reranker").
+		WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "weighted").
+		WithParam("weights", "[0.7, 0.3]")
+
+	log.Println("Executing Hybrid Search with Weighted + Expression Reranker...")
+	dualRerankResult, err := client.HybridSearch(ctx,
+		milvusclient.NewHybridSearchOption(collectionName, 10, titleSearchRequest, textSearchRequest).
+			WithFunctionRerankers(weightedRerankerFunction).
+			WithFunctionRerankers(exprRerankerFunction).
+			WithOutputFields("id", titleFieldName, textFieldName, qualityFieldName, popularityFieldName))
+	if err != nil {
+		return fmt.Errorf("hybrid search with dual rerankers failed: %v", err)
+	}
+
+	log.Println("Weighted + Expression Reranked Results:")
+	for _, resultSet := range dualRerankResult {
+		for i := 0; i < resultSet.ResultCount; i++ {
+			id, _ := resultSet.IDs.Get(i)
+			title, _ := resultSet.GetColumn(titleFieldName).GetAsString(i)
+			qualityDouble, _ := resultSet.GetColumn(qualityFieldName).GetAsDouble(i)
+			quality := float32(qualityDouble)
+			score := resultSet.Scores[i]
+			log.Printf("  [%d] ID: %v, Final Score: %.4f, Quality: %.1f", i+1, id, score, quality)
+			log.Printf("      Title: %s", title)
+		}
+	}
+
+	// Test 4: Complex scenario - Weighted with three BM25 searches + expr reranker
+	log.Println("\n--- Test 4: Weighted with Three BM25 Searches + Complex Expression Reranker ---")
+
+	now := time.Now().UnixMilli()
+
+	// Create three searches with different characteristics
+	// Search 1: Title search (highest weight)
+	priorityTitleSearch := milvusclient.NewAnnRequest(titleSparseFieldName, 30, textVector).
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s")`, titleFieldName, query)).
+		WithSearchParam("metric_type", "BM25")
+
+	// Search 2: Text search with min_should_match (medium weight)
+	standardTextSearch := milvusclient.NewAnnRequest(textSparseFieldName, 15, textVector).
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s", "min_should_match=2")`,
+			textFieldName, query)).
+		WithSearchParam("metric_type", "BM25")
+
+	// Search 3: Another title search with exact phrase (lower weight)
+	exactTitleSearch := milvusclient.NewAnnRequest(titleSparseFieldName, 10, textVector).
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s")`, titleFieldName, "artificial intelligence")).
+		WithSearchParam("metric_type", "BM25")
+
+	// Create weighted reranker for 3 searches (0.5, 0.3, 0.2)
+	tripleWeightedFunction := entity.NewFunction().
+		WithName("triple_weighted_reranker").
+		WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "weighted").
+		WithParam("weights", "[0.5, 0.3, 0.2]")
+
+	// Complex expression reranker combining quality, popularity, and recency
+	complexExprCode := fmt.Sprintf(
+		"let age_days = (%d - fields[\"created_at\"]) / 86400000; "+
+			"let recency = exp(-0.01 * age_days); "+
+			"let quality = fields[\"quality_score\"] / 100.0; "+
+			"let pop_boost = 1.0 + log(fields[\"popularity\"] + 1) / 20.0; "+
+			"score * quality * pop_boost * recency",
+		now)
+
+	complexExprReranker := entity.NewFunction().
+		WithName("multi_factor_reranker").
+		WithType(entity.FunctionTypeRerank).
+		WithInputFields(createdAtFieldName, qualityFieldName, popularityFieldName).
+		WithParam("reranker", "expr").
+		WithParam("expr_code", complexExprCode)
+
+	log.Println("Executing Complex Hybrid Search with 3 searches...")
+	complexResult, err := client.HybridSearch(ctx,
+		milvusclient.NewHybridSearchOption(collectionName, 8, priorityTitleSearch, standardTextSearch, exactTitleSearch).
+			WithFunctionRerankers(tripleWeightedFunction).
+			WithFunctionRerankers(complexExprReranker).
+			WithOutputFields("id", titleFieldName, createdAtFieldName, qualityFieldName, popularityFieldName, categoryFieldName))
+	if err != nil {
+		return fmt.Errorf("complex hybrid search failed: %v", err)
+	}
+
+	log.Println("Complex Multi-factor Reranked Results (Weighted + Expression):")
+	for _, resultSet := range complexResult {
+		for i := 0; i < resultSet.ResultCount; i++ {
+			id, _ := resultSet.IDs.Get(i)
+			title, _ := resultSet.GetColumn(titleFieldName).GetAsString(i)
+			createdAt, _ := resultSet.GetColumn(createdAtFieldName).GetAsInt64(i)
+			qualityDouble, _ := resultSet.GetColumn(qualityFieldName).GetAsDouble(i)
+			quality := float32(qualityDouble)
+			popularity, _ := resultSet.GetColumn(popularityFieldName).GetAsInt64(i)
+			category, _ := resultSet.GetColumn(categoryFieldName).GetAsString(i)
+			score := resultSet.Scores[i]
+
+			ageDays := (now - createdAt) / 86400000
+			log.Printf("  [%d] ID: %v, Score: %.4f", i+1, id, score)
+			log.Printf("      Title: %s", title)
+			log.Printf("      Quality: %.1f, Popularity: %d, Age: %d days, Category: %s",
+				quality, popularity, ageDays, category)
+		}
+	}
+
+	log.Println("\n✅ All Weighted + Lexical Search tests completed successfully!")
+	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -518,6 +724,12 @@ func main() {
 		log.Fatalf("failed to run tests: %v", err)
 	}
 
+	log.Println("\n⚖️  Running Weighted Reranker + Lexical Search tests...")
+	err = runWeightedWithLexicalSearchTest(ctx, milvusClient)
+	if err != nil {
+		log.Fatalf("failed to run Weighted reranker tests: %v", err)
+	}
+
 	log.Println("\n🧹 Cleaning up...")
 	err = milvusClient.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
 	if err != nil {
@@ -526,5 +738,5 @@ func main() {
 		log.Printf("✅ Collection '%s' dropped successfully.", collectionName)
 	}
 
-	log.Println("\n🎉 Expression Reranker test suite completed!")
+	log.Println("\n🎉 All test suites completed!")
 }

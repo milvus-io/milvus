@@ -154,7 +154,7 @@ func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankO
 	if len(inputs.inputFieldIds) > 0 {
 		// Find the first non-empty fieldData and prepare result fields
 		for _, fieldData := range inputs.fieldData {
-			if fieldData != nil && len(fieldData.GetFieldsData()) > 0 {
+			if fieldData != nil && len(fieldData.GetFieldsData()) > 0 && typeutil.GetSizeOfIDs(fieldData.GetIds()) > 0 {
 				ret.FieldsData = typeutil.PrepareResultFieldData(fieldData.GetFieldsData(), searchParams.limit)
 				break
 			}
@@ -168,7 +168,7 @@ func appendResult[T PKType](inputs *rerankInputs, outputs *rerankOutputs, idScor
 	scores := idScores.scores
 	outputs.searchResultData.Topks = append(outputs.searchResultData.Topks, int64(len(ids)))
 	outputs.searchResultData.Scores = append(outputs.searchResultData.Scores, scores...)
-	if len(inputs.fieldData) > 0 && len(outputs.searchResultData.FieldsData) > 0 {
+	if len(inputs.fieldData) > 0 && len(inputs.inputFieldIds) > 0 && len(outputs.searchResultData.FieldsData) > 0 {
 		for idx := range ids {
 			loc := idScores.locations[idx]
 			typeutil.AppendFieldData(outputs.searchResultData.FieldsData, inputs.fieldData[loc.batchIdx].GetFieldsData(), int64(loc.offset))
