@@ -132,6 +132,9 @@ type writeBufferBase struct {
 	errHandler           func(err error)
 	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
+	// LOB manager for large TEXT fields
+	lobManager *storage.LOBManager
+
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
@@ -168,7 +171,46 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		zap.String("channel", wb.channelName))
 	wb.cpRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
 
+	// Initialize LOB manager if enabled
+	if err := wb.initLOBManager(option); err != nil {
+		return nil, errors.Wrap(err, "failed to initialize LOB manager")
+	}
+
 	return wb, nil
+}
+
+func (wb *writeBufferBase) initLOBManager(option *writeBufferOption) error {
+	params := paramtable.Get()
+
+	lobEnabled := params.DataNodeCfg.LOBEnabled.GetAsBool()
+	if !lobEnabled {
+		wb.logger.Info("LOB storage is disabled")
+		wb.lobManager = nil
+		return nil
+	}
+
+	lobThreshold := params.DataNodeCfg.LOBSizeThreshold.GetAsInt64()
+	lobLazyWriteMaxSize := params.DataNodeCfg.LOBLazyWriteMaxSize.GetAsInt64()
+
+	lobMgr, err := storage.NewLOBManager(
+		wb.collectionID,
+		wb.allocator,
+		storage.WithLOBManagerEnabled(lobEnabled),
+		storage.WithLOBManagerSizeThreshold(lobThreshold),
+		storage.WithLOBManagerLazyWriteMaxSize(lobLazyWriteMaxSize),
+	)
+	if err != nil {
+		return errors.Wrap(err, "failed to create LOB manager")
+	}
+
+	wb.lobManager = lobMgr
+	wb.logger.Info("LOB manager initialized with hybrid mode",
+		zap.Bool("enabled", lobEnabled),
+		zap.Int64("sizeThreshold", lobThreshold),
+		zap.Int64("lazyWriteMaxSize", lobLazyWriteMaxSize),
+	)
+
+	return nil
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
@@ -539,6 +581,14 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	var totalMemSize float64 = 0
 	var tsFrom, tsTo uint64
 
+	// Flush LOB data for this segment before syncing
+	if wb.lobManager != nil && wb.lobManager.IsEnabled() {
+		if err := wb.lobManager.FlushSegment(ctx, segmentID); err != nil {
+			log.Error("failed to flush LOB data for segment", zap.Error(err))
+			return nil, errors.Wrap(err, "failed to flush LOB data")
+		}
+	}
+
 	insert, bm25, delta, schema, timeRange, startPos := wb.yieldBuffer(segmentID)
 	if timeRange != nil {
 		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
@@ -592,12 +642,15 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
 
+	lobMetadata := wb.GetLOBMetadata(segmentID)
+
 	task := syncmgr.NewSyncTask().
 		WithAllocator(wb.allocator).
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
-		WithSyncPack(pack)
+		WithSyncPack(pack).
+		WithLOBMetadata(lobMetadata)
 	return task, nil
 }
 
@@ -658,6 +711,13 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		log.Error("failed to drop channel", zap.Error(err))
 		// TODO change to remove channel in the future
 		panic(err)
+	}
+
+	// Close LOB manager
+	if wb.lobManager != nil {
+		if err := wb.lobManager.Close(ctx); err != nil {
+			log.Error("failed to close LOB manager", zap.Error(err))
+		}
 	}
 }
 
@@ -735,4 +795,16 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 	}
 
 	return result, nil
+}
+
+// GetLOBMetadata returns LOB metadata from all segments in this write buffer
+func (wb *writeBufferBase) GetLOBMetadata(segmentID int64) *storage.LOBSegmentMetadata {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	if wb.lobManager == nil {
+		return nil
+	}
+
+	return wb.lobManager.GetSegmentMetadata(segmentID)
 }

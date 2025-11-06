@@ -5622,6 +5622,12 @@ type dataNodeConfig struct {
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
 
+	// LOB (Large Object) storage
+	LOBEnabled                         ParamItem `refreshable:"false"`
+	LOBSizeThreshold                   ParamItem `refreshable:"true"`
+	LOBLazyWriteMaxSize                ParamItem `refreshable:"true"`
+	LOBCompactionSmartRewriteThreshold ParamItem `refreshable:"true"`
+
 	// watchEvent
 	WatchEventTicklerInterval ParamItem `refreshable:"false"`
 
@@ -5845,6 +5851,51 @@ Setting this parameter too small causes the system to store a small amount of da
 		Export:       true,
 	}
 	p.SyncPeriod.Init(base.mgr)
+
+	p.LOBEnabled = ParamItem{
+		Key:          "dataNode.segment.lob.enabled",
+		Version:      "2.6.7",
+		DefaultValue: "false",
+		Doc:          "Enable LOB (Large Object) storage for TEXT fields. When enabled, TEXT data exceeding the threshold will be stored in separate files.",
+		Export:       true,
+	}
+	p.LOBEnabled.Init(base.mgr)
+
+	p.LOBSizeThreshold = ParamItem{
+		Key:          "dataNode.segment.lob.sizeThreshold",
+		Version:      "2.6.7",
+		DefaultValue: "65536",
+		Doc: "Minimum size threshold in bytes for storing TEXT data as LOB (Large Object). " +
+			"TEXT values larger than this threshold will be considered for LOB storage. " +
+			"Default: 65536 (64KB)",
+		Export: true,
+	}
+	p.LOBSizeThreshold.Init(base.mgr)
+
+	p.LOBLazyWriteMaxSize = ParamItem{
+		Key:          "dataNode.segment.lob.lazyWriteMaxSize",
+		Version:      "2.6.7",
+		DefaultValue: "10485760",
+		Doc: "Maximum size in bytes for lazy-mode LOB writes. " +
+			"TEXT values between sizeThreshold and lazyWriteMaxSize are written during segment flush (lazy mode), " +
+			"while larger TEXT values are written immediately (eager mode) to reduce memory pressure. " +
+			"This provides a hybrid approach: small TEXT inline, medium TEXT lazy, large TEXT eager. " +
+			"Default: 10485760 (10MB)",
+		Export: true,
+	}
+	p.LOBLazyWriteMaxSize.Init(base.mgr)
+
+	p.LOBCompactionSmartRewriteThreshold = ParamItem{
+		Key:          "dataNode.segment.lob.compaction.smartRewriteThreshold",
+		Version:      "2.6.7",
+		DefaultValue: "0.20",
+		Doc: "Delete ratio threshold for LOB compaction SmartRewrite mode. " +
+			"Below this threshold, LOB files are simply copied to target segment (Move mode). " +
+			"Above this threshold, LOB files are filtered to remove unused rows and merge small files (SmartRewrite mode). " +
+			"Default: 0.20 (20%)",
+		Export: true,
+	}
+	p.LOBCompactionSmartRewriteThreshold.Init(base.mgr)
 
 	p.WatchEventTicklerInterval = ParamItem{
 		Key:          "dataNode.segment.watchEventTicklerInterval",

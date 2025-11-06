@@ -687,11 +687,33 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
 	}
 
-	// save binlogs, start positions and checkpoints
+	// save binlogs, start positions, checkpoints and LOB metadata
 	operators = append(operators,
 		UpdateStartPosition(req.GetStartPositions()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
+
+	// Update LOB metadata if present
+	if req.GetLobMetadata() != nil && len(req.GetLobMetadata()) > 0 {
+		operators = append(operators, UpdateLOBMetadataOperator(req.GetSegmentID(), req.GetLobMetadata()))
+
+		// Calculate totals from field-level metadata for logging
+		totalFiles := int32(0)
+		totalRecords := int64(0)
+		totalBytes := int64(0)
+		for _, fieldMeta := range req.GetLobMetadata() {
+			totalFiles += int32(len(fieldMeta.GetLobFiles()))
+			totalRecords += fieldMeta.GetRecordCount()
+			totalBytes += fieldMeta.GetTotalBytes()
+		}
+
+		log.Info("SaveBinlogPaths with LOB metadata",
+			zap.Int64("segmentID", req.GetSegmentID()),
+			zap.Int32("lobFiles", totalFiles),
+			zap.Int64("lobRecords", totalRecords),
+			zap.Int64("lobBytes", totalBytes),
+		)
+	}
 
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {

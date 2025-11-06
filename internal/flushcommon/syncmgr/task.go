@@ -74,6 +74,7 @@ type SyncTask struct {
 	statsBinlogs  map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
 	bm25Binlogs   map[int64]*datapb.FieldBinlog
 	deltaBinlog   *datapb.FieldBinlog
+	lobMetadata   *storage.LOBSegmentMetadata // LOB metadata for this segment
 
 	writeRetryOpts []retry.Option
 

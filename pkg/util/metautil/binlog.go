@@ -16,6 +16,13 @@ func BuildInsertLogPath(rootPath string, collectionID, partitionID, segmentID, f
 	return path.Join(rootPath, common.SegmentInsertLogPath, k)
 }
 
+// BuildLOBLogPath builds the path for the LOB log file.
+// Format: {root_path}/insert_log/{collection_id}/{partition_id}/{segment_id}/{field_id}/lob/{log_id}
+func BuildLOBLogPath(rootPath string, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) string {
+	basePath := BuildInsertLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, logID)
+	return path.Join(basePath, "lob", strconv.FormatInt(logID, 10))
+}
+
 func ParseInsertLogPath(path string) (collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID, ok bool) {
 	infos := strings.Split(path, pathSep)
 	l := len(infos)

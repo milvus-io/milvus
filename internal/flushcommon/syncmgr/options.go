@@ -78,3 +78,8 @@ func (t *SyncTask) WithFailureCallback(callback func(error)) *SyncTask {
 	t.failureCallback = callback
 	return t
 }
+
+func (t *SyncTask) WithLOBMetadata(metadata *storage.LOBSegmentMetadata) *SyncTask {
+	t.lobMetadata = metadata
+	return t
+}

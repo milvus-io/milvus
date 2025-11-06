@@ -228,6 +228,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context) {
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
+			gc.recycleOrphanedLOBFiles(ctx)
 		})
 	}()
 	go func() {
@@ -557,12 +558,19 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			logs[key] = struct{}{}
 		}
 
+		// Add LOB files to deletion list
+		lobFiles := gc.getLOBFiles(ctx, cloned)
+		for key := range lobFiles {
+			logs[key] = struct{}{}
+		}
+
 		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
 			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
 			zap.Int("stats_logs", len(cloned.GetStatslogs())),
 			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
 			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
+			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+			zap.Int("lob_files", len(lobFiles)))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
 			cloned = nil
@@ -678,6 +686,24 @@ func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 	}
 
 	return textLogs
+}
+
+func (gc *garbageCollector) getLOBFiles(ctx context.Context, sinfo *SegmentInfo) map[string]struct{} {
+	lobFiles := make(map[string]struct{})
+
+	lobMetadata := sinfo.GetLobMetadata()
+	if lobMetadata == nil || len(lobMetadata) == 0 {
+		return lobFiles
+	}
+
+	for _, fieldMeta := range lobMetadata {
+		for _, lobFile := range fieldMeta.LobFiles {
+			fullPath := path.Join(gc.option.cli.RootPath(), lobFile)
+			lobFiles[fullPath] = struct{}{}
+		}
+	}
+
+	return lobFiles
 }
 
 func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {
@@ -1169,6 +1195,102 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 		}
 	}
 	log.Info("json index files recycle done")
+
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+}
+
+// extractLOBMetadataFromSegment extracts LOB metadata from a segment
+func (gc *garbageCollector) extractLOBMetadataFromSegment(ctx context.Context, seg *SegmentInfo) *storage.LOBSegmentMetadata {
+	// Get LOB metadata from SegmentInfo (now a map of field ID to LOBFieldMetadata)
+	protoMeta := seg.GetLobMetadata()
+	if protoMeta == nil || len(protoMeta) == 0 {
+		return nil
+	}
+
+	// Convert protobuf LOBMetadata map to storage.LOBSegmentMetadata
+	// Since we removed segment-level metadata, calculate totals from field metadata
+	metadata := storage.NewLOBSegmentMetadata()
+	metadata.Version = 1 // Fixed version
+
+	for fieldID, fieldMeta := range protoMeta {
+		storageMeta := &storage.LOBFieldMetadata{
+			FieldID:       fieldMeta.GetFieldId(),
+			LOBFiles:      fieldMeta.GetLobFiles(),
+			SizeThreshold: fieldMeta.GetSizeThreshold(),
+			RecordCount:   fieldMeta.GetRecordCount(),
+			TotalBytes:    fieldMeta.GetTotalBytes(),
+		}
+		metadata.LOBFields[fieldID] = storageMeta
+
+		// Accumulate segment-level totals
+		metadata.TotalLOBFiles += len(fieldMeta.GetLobFiles())
+		metadata.TotalLOBRecords += fieldMeta.GetRecordCount()
+		metadata.TotalLOBBytes += fieldMeta.GetTotalBytes()
+	}
+
+	return metadata
+}
+
+// buildActiveLOBSegmentMap builds a map of active segment LOB metadata
+func (gc *garbageCollector) buildActiveLOBSegmentMap(ctx context.Context) map[int64]*storage.LOBSegmentMetadata {
+	result := make(map[int64]*storage.LOBSegmentMetadata)
+
+	// Get all non-dropped segments
+	activeSegments := gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetState() != commonpb.SegmentState_Dropped
+	}))
+
+	log.Info("building active LOB segment map", zap.Int("totalActiveSegments", len(activeSegments)))
+
+	for _, seg := range activeSegments {
+		if ctx.Err() != nil {
+			// process canceled
+			return result
+		}
+
+		// Extract LOB metadata from segment
+		lobMeta := gc.extractLOBMetadataFromSegment(ctx, seg)
+		if lobMeta != nil && lobMeta.HasLOBFields() {
+			result[seg.GetID()] = lobMeta
+		}
+	}
+
+	log.Info("active LOB segment map built", zap.Int("segmentsWithLOB", len(result)))
+	return result
+}
+
+// recycleOrphanedLOBFiles scans and removes orphaned LOB files
+func (gc *garbageCollector) recycleOrphanedLOBFiles(ctx context.Context) {
+	start := time.Now()
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleOrphanedLOBFiles"), zap.Time("startAt", start))
+	log.Info("start recycleOrphanedLOBFiles...")
+	defer func() {
+		log.Info("recycleOrphanedLOBFiles done", zap.Duration("timeCost", time.Since(start)))
+	}()
+
+	// Build active segment LOB metadata map
+	activeSegments := gc.buildActiveLOBSegmentMap(ctx)
+
+	log.Info("built active LOB segment map", zap.Int("activeSegments", len(activeSegments)))
+
+	// Create LOB GC instance
+	lobGC := storage.NewLOBGarbageCollector(
+		gc.option.cli,
+		storage.WithLOBGCMinAge(gc.option.missingTolerance),
+	)
+
+	// Execute LOB file scan and cleanup
+	if err := lobGC.ScanAndCleanup(ctx, activeSegments, gc.option.cli.RootPath()); err != nil {
+		log.Warn("LOB GC scan and cleanup failed", zap.Error(err))
+		return
+	}
+
+	// Get and log statistics
+	stats := lobGC.GetStatistics()
+	log.Info("LOB GC completed",
+		zap.Any("scannedFiles", stats["scanned_files"]),
+		zap.Any("deletedFiles", stats["deleted_files"]),
+		zap.Any("deletedBytes", stats["deleted_bytes"]))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }

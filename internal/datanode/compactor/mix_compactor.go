@@ -21,9 +21,14 @@ import (
 	"fmt"
 	sio "io"
 	"math"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -66,6 +71,23 @@ type mixCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+
+	// LOB compaction support
+	lobHelper         *LOBCompactionHelper
+	sourceLOBMetadata []*storage.LOBSegmentMetadata
+	lobMode           CompactionLOBMode
+
+	// LOB readers/writers for SmartRewrite mode
+	// lobReaders: fieldID -> (lobFileID -> LOBReaderInfo)
+	lobReaders map[int64]map[uint64]*lobReaderInfo
+	// lobWriters: fieldID -> LOB writer for target segment
+	lobWriters map[int64]*storage.LOBWriter
+}
+
+// lobReaderInfo holds LOB reader and associated file path
+type lobReaderInfo struct {
+	reader   *storage.LOBReader
+	filePath string
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -78,6 +100,13 @@ func NewMixCompactionTask(
 	sortByFieldIDs []int64,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
+
+	// Initialize LOB helper if LOB is enabled
+	var lobHelper *LOBCompactionHelper
+	if IsLOBEnabled() {
+		lobHelper = NewLOBCompactionHelper(binlogIO)
+	}
+
 	return &mixCompactionTask{
 		ctx:              ctx1,
 		cancel:           cancel,
@@ -88,6 +117,7 @@ func NewMixCompactionTask(
 		done:             make(chan struct{}, 1),
 		compactionParams: compactionParams,
 		sortByFieldIDs:   sortByFieldIDs,
+		lobHelper:        lobHelper,
 	}
 }
 
@@ -134,7 +164,104 @@ func (t *mixCompactionTask) preCompact() error {
 		zap.Int64("estimatedOutputSegmentCount", outputSegmentCount),
 	)
 
+	// LOB compaction preparation
+	if t.lobHelper != nil {
+		// Extract LOB metadata from source segments
+		t.sourceLOBMetadata = make([]*storage.LOBSegmentMetadata, 0)
+		for _, segBinlog := range t.plan.GetSegmentBinlogs() {
+			lobMeta, err := t.lobHelper.ExtractLOBMetadataFromSegment(
+				t.ctx,
+				segBinlog.GetSegmentID(),
+				t.collectionID,
+				t.partitionID,
+			)
+			if err != nil {
+				log.Warn("failed to extract LOB metadata from segment",
+					zap.Int64("segmentID", segBinlog.GetSegmentID()),
+					zap.Error(err))
+				// Continue even if LOB metadata extraction fails
+				continue
+			}
+			if lobMeta != nil && lobMeta.HasLOBFields() {
+				t.sourceLOBMetadata = append(t.sourceLOBMetadata, lobMeta)
+			}
+		}
+
+		// Decide LOB compaction mode if we have LOB data
+		if len(t.sourceLOBMetadata) > 0 {
+			// Estimate delete ratio from plan metadata
+			deleteRatio := t.estimateDeleteRatio()
+
+			t.lobMode = t.lobHelper.DecideCompactionMode(
+				t.plan.GetType(),
+				deleteRatio,
+				len(t.plan.GetSegmentBinlogs()),
+			)
+
+			log.Info("LOB compaction mode decided",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int("sourceLOBCount", len(t.sourceLOBMetadata)),
+				zap.Float64("estimatedDeleteRatio", deleteRatio),
+				zap.String("mode", t.getLOBModeName(t.lobMode)),
+			)
+		}
+	}
+
 	return nil
+}
+
+// estimateDeleteRatio estimates the delete ratio from plan metadata
+// by counting delete entries in deltalogs vs total input rows
+func (t *mixCompactionTask) estimateDeleteRatio() float64 {
+	var totalInputRows int64
+	var totalDeleteCount int64
+
+	// Sum input rows and delete counts
+	for _, segBinlog := range t.plan.GetSegmentBinlogs() {
+		// Calculate rows from first field binlog (all fields should have same row count)
+		if len(segBinlog.GetFieldBinlogs()) > 0 {
+			for _, binlog := range segBinlog.GetFieldBinlogs()[0].GetBinlogs() {
+				totalInputRows += binlog.GetEntriesNum()
+			}
+		}
+
+		// Count deletes in deltalogs
+		for _, deltalog := range segBinlog.GetDeltalogs() {
+			for _, binlog := range deltalog.GetBinlogs() {
+				totalDeleteCount += binlog.GetEntriesNum()
+			}
+		}
+	}
+
+	if totalInputRows == 0 {
+		return 0
+	}
+
+	deleteRatio := float64(totalDeleteCount) / float64(totalInputRows)
+
+	log.Info("estimated delete ratio",
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64("totalInputRows", totalInputRows),
+		zap.Int64("totalDeleteCount", totalDeleteCount),
+		zap.Float64("deleteRatio", deleteRatio))
+
+	return deleteRatio
+}
+
+// getLOBModeName returns the string representation of LOB compaction mode
+func (t *mixCompactionTask) getLOBModeName(mode CompactionLOBMode) string {
+	switch mode {
+	case CompactionLOBModeReferenceOnly:
+		return "Reference-Only"
+	case CompactionLOBModeMove:
+		return "Move"
+	case CompactionLOBModeSmartRewrite:
+		return "SmartRewrite"
+	case CompactionLOBModeSkip:
+		return "Skip"
+	default:
+		return "Unknown"
+	}
 }
 
 func (t *mixCompactionTask) mergeSplit(
@@ -231,6 +358,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer reader.Close()
 
+	// Check if we need to process LOB fields (SmartRewrite mode)
+	needProcessLOB := t.lobMode == CompactionLOBModeSmartRewrite && len(t.lobWriters) > 0
+
 	for {
 		var r storage.Record
 		r, err = reader.Next()
@@ -242,6 +372,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
 				return
 			}
+		}
+
+		// If SmartRewrite mode, wrap record with LOB processing
+		if needProcessLOB {
+			r = t.wrapRecordWithLOBProcessing(ctx, r)
 		}
 
 		var (
@@ -311,6 +446,227 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	return
 }
 
+// lobProcessingRecord is a wrapper that lazily processes LOB references when columns are accessed
+type lobProcessingRecord struct {
+	originalRecord storage.Record
+	task           *mixCompactionTask
+	ctx            context.Context
+	processedCols  map[int64]arrow.Array
+	mu             sync.Mutex
+}
+
+// wrapRecordWithLOBProcessing wraps a record to process LOB references lazily
+func (t *mixCompactionTask) wrapRecordWithLOBProcessing(ctx context.Context, rec storage.Record) storage.Record {
+	return &lobProcessingRecord{
+		originalRecord: rec,
+		task:           t,
+		ctx:            ctx,
+		processedCols:  make(map[int64]arrow.Array),
+	}
+}
+
+func (r *lobProcessingRecord) Column(fieldID storage.FieldID) arrow.Array {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Check if we already processed this column
+	if processedCol, exists := r.processedCols[fieldID]; exists {
+		return processedCol
+	}
+
+	// Get original column
+	origCol := r.originalRecord.Column(fieldID)
+	if origCol == nil {
+		return nil
+	}
+
+	// Check if this is a LOB field that needs processing
+	lobWriter, hasWriter := r.task.lobWriters[fieldID]
+	if !hasWriter {
+		// Not a LOB field, return original
+		return origCol
+	}
+
+	lobReaders, hasReaders := r.task.lobReaders[fieldID]
+	if !hasReaders {
+		// No readers, return original
+		return origCol
+	}
+
+	// This is a LOB field - process all references in the column
+	binaryArray, ok := origCol.(*array.Binary)
+	if !ok {
+		// Not a binary array, return original
+		return origCol
+	}
+
+	// Process all references in this column (batch processing like insert)
+	newRefBytes := make([][]byte, binaryArray.Len())
+	for rowIdx := 0; rowIdx < binaryArray.Len(); rowIdx++ {
+		if binaryArray.IsNull(rowIdx) {
+			newRefBytes[rowIdx] = nil
+			continue
+		}
+
+		oldRefBytes := binaryArray.Value(rowIdx)
+
+		// Check if this is a LOB reference
+		if len(oldRefBytes) != storage.LOBReferenceSize {
+			// Not a LOB reference, keep original
+			newRefBytes[rowIdx] = oldRefBytes
+			continue
+		}
+
+		// Decode old reference
+		ref, err := storage.DecodeLOBReference(oldRefBytes)
+		if err != nil {
+			// Decode failed, keep original
+			newRefBytes[rowIdx] = oldRefBytes
+			continue
+		}
+
+		// Get LOB reader for this file
+		lobReaderInfo, exists := lobReaders[ref.LobFileID]
+		if !exists {
+			log.Warn("LOB reader not found, keeping original reference",
+				zap.Int64("fieldID", fieldID),
+				zap.Uint64("lobFileID", ref.LobFileID))
+			newRefBytes[rowIdx] = oldRefBytes
+			continue
+		}
+
+		// Read LOB data from source file
+		lobData, err := lobReaderInfo.reader.ReadText(r.ctx, ref, lobReaderInfo.filePath)
+		if err != nil {
+			log.Warn("failed to read LOB data, keeping original reference",
+				zap.Int64("fieldID", fieldID),
+				zap.Uint64("lobFileID", ref.LobFileID),
+				zap.Uint32("rowOffset", ref.RowOffset),
+				zap.Error(err))
+			newRefBytes[rowIdx] = oldRefBytes
+			continue
+		}
+
+		// Write LOB data to target file (like insert)
+		newRef, err := lobWriter.WriteText(r.ctx, lobData)
+		if err != nil {
+			log.Warn("failed to write LOB data, keeping original reference",
+				zap.Int64("fieldID", fieldID),
+				zap.Error(err))
+			newRefBytes[rowIdx] = oldRefBytes
+			continue
+		}
+
+		// Encode new reference
+		newRefBytes[rowIdx] = storage.EncodeLOBReference(newRef)
+	}
+
+	// Build new binary array with updated references
+	binaryBuilder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	for _, refBytes := range newRefBytes {
+		if refBytes == nil {
+			binaryBuilder.AppendNull()
+		} else {
+			binaryBuilder.Append(refBytes)
+		}
+	}
+	processedCol := binaryBuilder.NewBinaryArray()
+	binaryBuilder.Release()
+
+	// Cache the processed column
+	r.processedCols[fieldID] = processedCol
+
+	return processedCol
+}
+
+func (r *lobProcessingRecord) Len() int {
+	return r.originalRecord.Len()
+}
+
+func (r *lobProcessingRecord) Release() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Release all processed columns
+	for _, col := range r.processedCols {
+		col.Release()
+	}
+	r.processedCols = nil
+
+	// Release original record
+	r.originalRecord.Release()
+}
+
+func (r *lobProcessingRecord) Retain() {
+	r.originalRecord.Retain()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Retain all processed columns
+	for _, col := range r.processedCols {
+		col.Retain()
+	}
+}
+
+// processLOBReferenceForRow processes a single row's LOB fields during compaction
+// It reads LOB data from source files, writes to target files, and returns updated reference bytes
+func (t *mixCompactionTask) processLOBReferenceForRow(
+	ctx context.Context,
+	fieldID int64,
+	refBytes []byte,
+) ([]byte, error) {
+	// Check if this is a LOB reference (16 bytes)
+	if len(refBytes) != storage.LOBReferenceSize {
+		// Not a LOB reference, return original value
+		return refBytes, nil
+	}
+
+	// Get LOB writer for this field
+	lobWriter, hasWriter := t.lobWriters[fieldID]
+	if !hasWriter {
+		return refBytes, errors.Newf("no LOB writer found for field %d", fieldID)
+	}
+
+	// Get LOB readers map for this field
+	lobReaders, hasReaders := t.lobReaders[fieldID]
+	if !hasReaders {
+		return refBytes, errors.Newf("no LOB readers found for field %d", fieldID)
+	}
+
+	// Decode LOB reference
+	ref, err := storage.DecodeLOBReference(refBytes)
+	if err != nil {
+		// If decode fails, treat as non-LOB data
+		log.Warn("failed to decode LOB reference, treating as regular data",
+			zap.Int64("fieldID", fieldID),
+			zap.Error(err))
+		return refBytes, nil
+	}
+
+	// Get the LOB reader for this LOB file
+	lobReaderInfo, exists := lobReaders[ref.LobFileID]
+	if !exists {
+		return nil, errors.Newf("LOB reader not found for file ID %d field %d", ref.LobFileID, fieldID)
+	}
+
+	// Read LOB data from source file
+	lobData, err := lobReaderInfo.reader.ReadText(ctx, ref, lobReaderInfo.filePath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read LOB data from file %d offset %d", ref.LobFileID, ref.RowOffset)
+	}
+
+	// Write LOB data to target file and get new reference
+	newRef, err := lobWriter.WriteText(ctx, lobData)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to write LOB data for field %d", fieldID)
+	}
+
+	// Encode new reference
+	newRefBytes := storage.EncodeLOBReference(newRef)
+	return newRefBytes, nil
+}
+
 func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	durInQueue := t.tr.RecordSpan()
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("MixCompact-%d", t.GetPlanID()))
@@ -364,24 +720,111 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	var res []*datapb.CompactionSegment
 	var err error
+
+	// For SmartRewrite mode, initialize LOB readers/writers before compaction
+	var lobFileIDAlloc allocator.Interface
+	if t.lobMode == CompactionLOBModeSmartRewrite && t.lobHelper != nil && len(t.sourceLOBMetadata) > 0 {
+		log.Info("initializing LOB readers/writers for SmartRewrite mode")
+
+		// Initialize LOB readers for source segments
+		if err := t.initLOBReaders(ctxTimeout); err != nil {
+			log.Warn("failed to initialize LOB readers", zap.Error(err))
+			return nil, err
+		}
+		defer t.closeLOBReaders(ctxTimeout)
+
+		// Allocate target segment ID for LOB writers
+		segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
+		targetSegmentID, err := segIDAlloc.AllocOne()
+		if err != nil {
+			log.Warn("failed to allocate target segment ID for LOB", zap.Error(err))
+			return nil, err
+		}
+
+		// Create allocator for LOB file IDs (use pre-allocated log IDs)
+		lobFileIDAlloc = allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
+
+		// Initialize LOB writers for target segment
+		if err := t.initLOBWriters(ctxTimeout, targetSegmentID, lobFileIDAlloc); err != nil {
+			log.Warn("failed to initialize LOB writers", zap.Error(err))
+			return nil, err
+		}
+		defer func() {
+			if lobMeta, err := t.closeLOBWriters(ctxTimeout); err != nil {
+				log.Warn("failed to close LOB writers", zap.Error(err))
+			} else if lobMeta != nil && lobMeta.HasLOBFields() {
+				// Attach LOB metadata to first result segment
+				if len(res) > 0 {
+					protoMeta := t.convertLOBMetadataToProto(lobMeta)
+					res[0].LobMetadata = protoMeta
+					log.Info("attached LOB metadata to compaction result",
+						zap.Int("lobFiles", lobMeta.TotalLOBFiles),
+						zap.Int64("lobRecords", lobMeta.TotalLOBRecords))
+				}
+			}
+		}()
+	}
+
+	// Use normal compaction path for all modes
 	if sortMergeAppicable {
-		// TODO: the implementation of mergeSortMultipleSegments is not correct, also see issue: https://github.com/milvus-io/milvus/issues/43034
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
-		if err != nil {
-			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
-			return nil, err
-		}
 	} else {
 		res, err = t.mergeSplit(ctxTimeout)
-		if err != nil {
-			log.Warn("compact wrong, failed to mergeSplit", zap.Error(err))
-			return nil, err
-		}
+	}
+	if err != nil {
+		log.Warn("compact wrong, failed to compact", zap.Error(err))
+		return nil, err
 	}
 
 	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)), zap.Any("res", res))
+
+	// Post-process LOB files based on mode
+	if t.lobHelper != nil && len(t.sourceLOBMetadata) > 0 && len(res) > 0 {
+		lobCompactStart := time.Now()
+
+		switch t.lobMode {
+		case CompactionLOBModeMove:
+			// Move mode: relocate LOB files without filtering
+			log.Info("post-processing LOB files in Move mode",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int("sourceSegments", len(t.sourceLOBMetadata)),
+				zap.Int("targetSegments", len(res)))
+
+			err = t.relocateLOBFiles(ctxTimeout, res)
+			if err != nil {
+				log.Warn("failed to relocate LOB files", zap.Error(err))
+				// Continue even if LOB relocation fails
+			} else {
+				log.Info("LOB files relocated successfully",
+					zap.Duration("lobRelocateElapse", time.Since(lobCompactStart)))
+			}
+
+		case CompactionLOBModeReferenceOnly:
+			// Reference-Only mode: merge metadata only, files stay in place
+			log.Info("post-processing LOB metadata in Reference-Only mode",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int("sourceSegments", len(t.sourceLOBMetadata)))
+
+			err = t.mergeLOBMetadataOnly(res)
+			if err != nil {
+				log.Warn("failed to merge LOB metadata", zap.Error(err))
+			} else {
+				log.Info("LOB metadata merged successfully",
+					zap.Duration("lobMetadataMergeElapse", time.Since(lobCompactStart)))
+			}
+
+		case CompactionLOBModeSmartRewrite:
+			// SmartRewrite mode: LOB processing should have been done in batch loop
+			// If we reach here, it means SmartRewrite is not yet implemented
+			log.Warn("SmartRewrite mode not fully implemented yet, no post-processing needed")
+
+		default:
+			// No LOB processing or Skip mode
+			log.Debug("no LOB post-processing needed", zap.String("mode", t.getLOBModeName(t.lobMode)))
+		}
+	}
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
@@ -394,6 +837,278 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
+}
+
+// convertLOBMetadataToProto converts storage LOB metadata to protobuf format
+// relocateLOBFiles relocates LOB files from source segments to target segment (Move mode)
+// This is a fast operation that simply copies files without reading their content
+func (t *mixCompactionTask) relocateLOBFiles(
+	ctx context.Context,
+	resultSegments []*datapb.CompactionSegment,
+) error {
+	if len(resultSegments) == 0 {
+		return errors.New("no result segments to relocate LOB files")
+	}
+
+	// For simplicity, assign all LOB files to the first result segment
+	// In a real implementation, we would split LOB files proportionally
+	targetSegmentID := resultSegments[0].GetSegmentID()
+
+	log.Info("relocating LOB files",
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64("targetSegmentID", targetSegmentID),
+		zap.Int("sourceSegmentCount", len(t.sourceLOBMetadata)))
+
+	// Call storage layer to relocate LOB files
+	lobResult, err := t.lobHelper.CompactLOBFiles(
+		ctx,
+		t.sourceLOBMetadata,
+		targetSegmentID,
+		t.partitionID,
+		t.collectionID,
+		CompactionLOBModeMove,
+	)
+	if err != nil {
+		return errors.Wrap(err, "failed to relocate LOB files")
+	}
+
+	// Add LOB metadata to result segment
+	if lobResult != nil && lobResult.Metadata != nil && lobResult.Metadata.HasLOBFields() {
+		protoLOBMeta := t.convertLOBMetadataToProto(lobResult.Metadata)
+		resultSegments[0].LobMetadata = protoLOBMeta
+
+		log.Info("LOB files relocated",
+			zap.Int64("targetSegmentID", targetSegmentID),
+			zap.Int("lobFiles", lobResult.Metadata.TotalLOBFiles),
+			zap.Int64("lobRecords", lobResult.Metadata.TotalLOBRecords),
+			zap.Int64("lobBytes", lobResult.Metadata.TotalLOBBytes))
+	}
+
+	return nil
+}
+
+// initLOBReaders initializes LOB readers for reading source LOB files
+func (t *mixCompactionTask) initLOBReaders(ctx context.Context) error {
+	t.lobReaders = make(map[int64]map[uint64]*lobReaderInfo)
+
+	log.Info("initializing LOB readers",
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int("sourceSegmentCount", len(t.sourceLOBMetadata)))
+
+	chunkManager := t.binlogIO.(storage.ChunkManager)
+
+	for _, sourceMeta := range t.sourceLOBMetadata {
+		for fieldID, fieldMeta := range sourceMeta.LOBFields {
+			if t.lobReaders[fieldID] == nil {
+				t.lobReaders[fieldID] = make(map[uint64]*lobReaderInfo)
+			}
+
+			// Create reader for each LOB file
+			for _, lobFilePath := range fieldMeta.LOBFiles {
+				// Extract LOB file ID from path
+				lobFileID, err := extractLOBFileIDFromPath(lobFilePath)
+				if err != nil {
+					log.Warn("failed to extract LOB file ID, skipping",
+						zap.String("path", lobFilePath),
+						zap.Error(err))
+					continue
+				}
+
+				// Create LOB reader
+				reader := storage.NewLOBReader(chunkManager)
+
+				t.lobReaders[fieldID][lobFileID] = &lobReaderInfo{
+					reader:   reader,
+					filePath: lobFilePath,
+				}
+
+				log.Debug("created LOB reader",
+					zap.Int64("fieldID", fieldID),
+					zap.Uint64("lobFileID", lobFileID),
+					zap.String("path", lobFilePath))
+			}
+		}
+	}
+
+	log.Info("LOB readers initialized",
+		zap.Int("fieldCount", len(t.lobReaders)))
+
+	return nil
+}
+
+// initLOBWriters initializes LOB writers for writing target LOB files
+func (t *mixCompactionTask) initLOBWriters(ctx context.Context, targetSegmentID int64, lobFileIDAlloc allocator.Interface) error {
+	t.lobWriters = make(map[int64]*storage.LOBWriter)
+
+	log.Info("initializing LOB writers",
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int64("targetSegmentID", targetSegmentID))
+
+	// Find all LOB fields in schema
+	for _, field := range t.plan.GetSchema().GetFields() {
+		if field.GetDataType() != schemapb.DataType_VarChar {
+			continue
+		}
+
+		// Check if this field has LOB data in source segments
+		hasLOBData := false
+		for _, sourceMeta := range t.sourceLOBMetadata {
+			if _, exists := sourceMeta.LOBFields[field.GetFieldID()]; exists {
+				hasLOBData = true
+				break
+			}
+		}
+
+		if !hasLOBData {
+			continue
+		}
+
+		// Create LOB writer for this field
+		writer, err := storage.NewLOBWriter(
+			targetSegmentID,
+			t.partitionID,
+			field.GetFieldID(),
+			t.collectionID,
+			lobFileIDAlloc, // Use allocator for LOB file IDs
+			t.compactionParams.StorageConfig,
+		)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create LOB writer for field %d", field.GetFieldID())
+		}
+
+		t.lobWriters[field.GetFieldID()] = writer
+
+		log.Debug("created LOB writer",
+			zap.Int64("fieldID", field.GetFieldID()),
+			zap.Int64("targetSegmentID", targetSegmentID))
+	}
+
+	log.Info("LOB writers initialized",
+		zap.Int("fieldCount", len(t.lobWriters)))
+
+	return nil
+}
+
+// closeLOBReaders closes all LOB readers
+func (t *mixCompactionTask) closeLOBReaders(ctx context.Context) {
+	// LOBReader doesn't have Close method, just clear the map
+	t.lobReaders = nil
+}
+
+// closeLOBWriters closes all LOB writers and collects their metadata
+func (t *mixCompactionTask) closeLOBWriters(ctx context.Context) (*storage.LOBSegmentMetadata, error) {
+	targetMetadata := storage.NewLOBSegmentMetadata()
+
+	for fieldID, writer := range t.lobWriters {
+		if writer != nil {
+			// Flush and close writer
+			if err := writer.Close(ctx); err != nil {
+				log.Error("failed to close LOB writer",
+					zap.Int64("fieldID", fieldID),
+					zap.Error(err))
+				return nil, errors.Wrapf(err, "failed to close LOB writer for field %d", fieldID)
+			}
+
+			// Collect statistics from writer
+			stats := writer.GetStatistics()
+			fieldMeta := &storage.LOBFieldMetadata{
+				FieldID:       fieldID,
+				LOBFiles:      writer.GetLOBFilePaths(),
+				SizeThreshold: writer.GetLOBSizeThreshold(),
+				RecordCount:   stats["total_lob_records"].(int64),
+				TotalBytes:    stats["total_lob_bytes"].(int64),
+			}
+
+			targetMetadata.LOBFields[fieldID] = fieldMeta
+			targetMetadata.TotalLOBFiles += len(fieldMeta.LOBFiles)
+			targetMetadata.TotalLOBRecords += fieldMeta.RecordCount
+			targetMetadata.TotalLOBBytes += fieldMeta.TotalBytes
+
+			log.Info("closed LOB writer",
+				zap.Int64("fieldID", fieldID),
+				zap.Int("lobFiles", len(fieldMeta.LOBFiles)),
+				zap.Int64("recordCount", fieldMeta.RecordCount),
+				zap.Int64("totalBytes", fieldMeta.TotalBytes))
+		}
+	}
+
+	t.lobWriters = nil
+	return targetMetadata, nil
+}
+
+// extractLOBFileIDFromPath extracts LOB file ID from file path
+// Path format: .../insert_log/{coll}/{part}/{seg}/{field}/lob/{lobfile}.parquet
+func extractLOBFileIDFromPath(filePath string) (uint64, error) {
+	parts := strings.Split(filePath, "/")
+	if len(parts) < 2 {
+		return 0, errors.Newf("invalid LOB file path: %s", filePath)
+	}
+
+	// Find "lob" in path
+	for i, part := range parts {
+		if part == "lob" && i+1 < len(parts) {
+			filename := parts[i+1]
+			filename = strings.TrimSuffix(filename, ".parquet")
+			lobFileID, err := strconv.ParseUint(filename, 10, 64)
+			if err != nil {
+				return 0, errors.Wrapf(err, "failed to parse LOB file ID from %s", filename)
+			}
+			return lobFileID, nil
+		}
+	}
+
+	return 0, errors.Newf("no LOB file ID found in path: %s", filePath)
+}
+
+// mergeLOBMetadataOnly merges LOB metadata from source segments (Reference-Only mode)
+// LOB files stay in their original locations
+func (t *mixCompactionTask) mergeLOBMetadataOnly(
+	resultSegments []*datapb.CompactionSegment,
+) error {
+	if len(resultSegments) == 0 {
+		return errors.New("no result segments to merge LOB metadata")
+	}
+
+	log.Info("merging LOB metadata only",
+		zap.Int64("planID", t.GetPlanID()),
+		zap.Int("sourceSegmentCount", len(t.sourceLOBMetadata)))
+
+	// Simply merge metadata from all source segments
+	mergedMetadata := storage.MergeLOBMetadata(t.sourceLOBMetadata)
+
+	if mergedMetadata != nil && mergedMetadata.HasLOBFields() {
+		protoLOBMeta := t.convertLOBMetadataToProto(mergedMetadata)
+		resultSegments[0].LobMetadata = protoLOBMeta
+
+		log.Info("LOB metadata merged",
+			zap.Int("lobFiles", mergedMetadata.TotalLOBFiles),
+			zap.Int64("lobRecords", mergedMetadata.TotalLOBRecords),
+			zap.Int64("lobBytes", mergedMetadata.TotalLOBBytes))
+	}
+
+	return nil
+}
+
+// convertLOBMetadataToProto converts internal LOBSegmentMetadata to proto field metadata map
+// Note: Segment-level aggregated info (Version, TotalLobFiles, etc.) is not included in proto anymore
+func (t *mixCompactionTask) convertLOBMetadataToProto(meta *storage.LOBSegmentMetadata) map[int64]*datapb.LOBFieldMetadata {
+	if meta == nil || !meta.HasLOBFields() {
+		return nil
+	}
+
+	protoFieldMap := make(map[int64]*datapb.LOBFieldMetadata)
+
+	for fieldID, fieldMeta := range meta.LOBFields {
+		protoFieldMap[fieldID] = &datapb.LOBFieldMetadata{
+			FieldId:       fieldMeta.FieldID,
+			LobFiles:      fieldMeta.LOBFiles,
+			SizeThreshold: fieldMeta.SizeThreshold,
+			RecordCount:   fieldMeta.RecordCount,
+			TotalBytes:    fieldMeta.TotalBytes,
+		}
+	}
+
+	return protoFieldMap
 }
 
 func (t *mixCompactionTask) Complete() {
