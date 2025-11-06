@@ -159,12 +159,4 @@ DECLARE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_all);
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total);
 DECLARE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_all);
 
-// --- file writer metrics ---
-
-DECLARE_PROMETHEUS_COUNTER_FAMILY(disk_write_total_bytes);
-DECLARE_PROMETHEUS_COUNTER(disk_write_total_bytes_buffered);
-DECLARE_PROMETHEUS_COUNTER(disk_write_total_bytes_direct);
-
-// --- file writer metrics end ---
-
 }  // namespace milvus::monitor

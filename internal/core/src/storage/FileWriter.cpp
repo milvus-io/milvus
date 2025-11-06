@@ -15,8 +15,9 @@
 // limitations under the License.
 
 #include <utility>
+#include <cstdlib>
+#include "common/EasyAssert.h"
 #include "folly/futures/Future.h"
-#include "monitor/prometheus_client.h"
 #include "storage/FileWriter.h"
 
 namespace milvus::storage {
@@ -27,26 +28,26 @@ FileWriter::FileWriter(std::string filename, io::Priority priority)
       rate_limiter_(io::WriteRateLimiter::GetInstance()) {
     auto mode = GetMode();
     use_direct_io_ = mode == WriteMode::DIRECT;
+    use_writer_pool_ = FileWriteWorkerPool::GetInstance().HasPool();
+
+    // allocate an internal aligned buffer for both modes to batch writes
+    size_t buf_size = GetBufferSize();
+    AssertInfo(
+        buf_size != 0 && (buf_size % ALIGNMENT_BYTES) == 0,
+        "Buffer size must be greater than 0 and aligned to the alignment "
+        "size, buf_size: {}, alignment size: {}",
+        buf_size,
+        ALIGNMENT_BYTES);
+    capacity_ = buf_size;
+    aligned_buf_ = aligned_alloc(ALIGNMENT_BYTES, capacity_);
+    if (aligned_buf_ == nullptr) {
+        PanicInfo(ErrorCode::MemAllocateFailed,
+                  "Failed to allocate aligned buffer of size {}",
+                  capacity_);
+    }
+
     auto open_flags = O_CREAT | O_RDWR | O_TRUNC;
     if (use_direct_io_) {
-        // check if the file is aligned to the alignment size
-        size_t buf_size = GetBufferSize();
-        AssertInfo(
-            buf_size != 0 && (buf_size % ALIGNMENT_BYTES) == 0,
-            "Buffer size must be greater than 0 and aligned to the alignment "
-            "size, buf_size: {}, alignment size: {}, error: {}",
-            buf_size,
-            ALIGNMENT_BYTES,
-            strerror(errno));
-        capacity_ = buf_size;
-        auto err = posix_memalign(&aligned_buf_, ALIGNMENT_BYTES, capacity_);
-        if (err != 0) {
-            aligned_buf_ = nullptr;
-            PanicInfo(
-                ErrorCode::MemAllocateFailed,
-                "Failed to allocate aligned buffer for direct io, error: {}",
-                strerror(err));
-        }
 #ifndef __APPLE__
         open_flags |= O_DIRECT;
 #endif
@@ -85,7 +86,7 @@ FileWriter::Cleanup() noexcept {
         close(fd_);
         fd_ = -1;
     }
-    if (use_direct_io_) {
+    if (aligned_buf_ != nullptr) {
         free(aligned_buf_);
         aligned_buf_ = nullptr;
     }
@@ -129,7 +130,7 @@ FileWriter::PositionedWriteWithCheck(const void* data,
             ++empty_loops;
             // if the empty loops is too large or the total wait time is too long, we should write the data directly
             if (empty_loops > MAX_EMPTY_LOOPS || total_wait_us > MAX_WAIT_US) {
-                allowed_bytes = rate_limiter_.GetBytesPerPeriod();
+                allowed_bytes = bytes_to_write;
                 empty_loops = 0;
                 total_wait_us = 0;
             } else {
@@ -154,14 +155,8 @@ FileWriter::PositionedWriteWithCheck(const void* data,
 }
 
 void
-FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
+FileWriter::WriteInternal(const void* data, size_t nbyte) {
     const char* src = static_cast<const char*>(data);
-    // if the data can fit in the aligned buffer, we can just copy it to the aligned buffer
-    if (offset_ + nbyte <= capacity_) {
-        memcpy(static_cast<char*>(aligned_buf_) + offset_, src, nbyte);
-        offset_ += nbyte;
-        return;
-    }
     size_t left_size = nbyte;
 
     // we should fill and handle the cached aligned buffer first
@@ -208,21 +203,20 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
     }
 
     assert(src == static_cast<const char*>(data) + nbyte);
-
-    monitor::disk_write_total_bytes_direct.Increment(nbyte);
-}
-
-void
-FileWriter::WriteWithBufferedIO(const void* data, size_t nbyte) {
-    PositionedWriteWithCheck(data, nbyte, file_size_);
-    file_size_ += nbyte;
-    monitor::disk_write_total_bytes_buffered.Increment(nbyte);
 }
 
 void
 FileWriter::Write(const void* data, size_t nbyte) {
-    AssertInfo(fd_ != -1, "FileWriter is not initialized or finished");
-    if (nbyte == 0) {
+    // if the data can fit in the aligned buffer, we can just copy it to the aligned buffer
+    if (nbyte <= capacity_ - offset_) {
+        const char* src = static_cast<const char*>(data);
+        memcpy(static_cast<char*>(aligned_buf_) + offset_, src, nbyte);
+        offset_ += nbyte;
+        return;
+    }
+
+    if (!use_writer_pool_) {
+        WriteInternal(data, nbyte);
         return;
     }
 
@@ -230,11 +224,7 @@ FileWriter::Write(const void* data, size_t nbyte) {
     auto future = promise->getFuture();
     auto task = [this, data, nbyte, promise]() {
         try {
-            if (use_direct_io_) {
-                WriteWithDirectIO(data, nbyte);
-            } else {
-                WriteWithBufferedIO(data, nbyte);
-            }
+            WriteInternal(data, nbyte);
             promise->setValue(folly::Unit{});
         } catch (...) {
             promise->setException(
@@ -242,6 +232,8 @@ FileWriter::Write(const void* data, size_t nbyte) {
         }
     };
 
+    // try to add the task to the writer pool
+    // fallback to write the data directly if the task cannot be added to the pool
     if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
         try {
             future.wait();
@@ -253,11 +245,7 @@ FileWriter::Write(const void* data, size_t nbyte) {
                       e.what());
         }
     } else {
-        if (use_direct_io_) {
-            WriteWithDirectIO(data, nbyte);
-        } else {
-            WriteWithBufferedIO(data, nbyte);
-        }
+        WriteInternal(data, nbyte);
     }
 }
 
@@ -270,7 +258,6 @@ FileWriter::FlushWithDirectIO() {
            nearest_aligned_offset - offset_);
     PositionedWriteWithCheck(aligned_buf_, nearest_aligned_offset, file_size_);
     file_size_ += offset_;
-    monitor::disk_write_total_bytes_direct.Increment(offset_);
     // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
     if (ftruncate(fd_, file_size_) != 0) {
         Cleanup();
@@ -282,10 +269,18 @@ FileWriter::FlushWithDirectIO() {
     offset_ = 0;
 }
 
+void
+FileWriter::FlushWithBufferedIO() {
+    if (offset_ == 0) {
+        return;
+    }
+    PositionedWriteWithCheck(aligned_buf_, offset_, file_size_);
+    file_size_ += offset_;
+    offset_ = 0;
+}
+
 size_t
 FileWriter::Finish() {
-    AssertInfo(fd_ != -1, "FileWriter is not initialized or finished");
-
     // if the aligned buffer is not empty, we should flush it to the file
     if (offset_ != 0) {
         auto promise = std::make_shared<folly::Promise<folly::Unit>>();
@@ -294,6 +289,8 @@ FileWriter::Finish() {
             try {
                 if (use_direct_io_) {
                     FlushWithDirectIO();
+                } else {
+                    FlushWithBufferedIO();
                 }
                 promise->setValue(folly::Unit{});
             } catch (...) {
@@ -315,6 +312,8 @@ FileWriter::Finish() {
         } else {
             if (use_direct_io_) {
                 FlushWithDirectIO();
+            } else {
+                FlushWithBufferedIO();
             }
         }
     }
