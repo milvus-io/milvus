@@ -150,11 +150,14 @@ func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankO
 		Ids:        &schemapb.IDs{},
 		Topks:      []int64{},
 	}
-	// Find the first non-empty fieldData and prepare result fields
-	for _, fieldData := range inputs.fieldData {
-		if fieldData != nil && len(fieldData.GetFieldsData()) > 0 {
-			ret.FieldsData = typeutil.PrepareResultFieldData(fieldData.GetFieldsData(), searchParams.limit)
-			break
+	// Only prepare field data if this reranker actually needs input fields
+	if len(inputs.inputFieldIds) > 0 {
+		// Find the first non-empty fieldData and prepare result fields
+		for _, fieldData := range inputs.fieldData {
+			if fieldData != nil && len(fieldData.GetFieldsData()) > 0 {
+				ret.FieldsData = typeutil.PrepareResultFieldData(fieldData.GetFieldsData(), searchParams.limit)
+				break
+			}
 		}
 	}
 	return &rerankOutputs{ret}
