@@ -319,6 +319,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                schema_->get_fields().end();
     }
 
+    void
+    prefetch_chunks(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    const std::vector<int64_t>& chunk_ids) const override;
+
  protected:
     // blob and row_count
     PinWrapper<SpanBase>

@@ -787,6 +787,14 @@ class SegmentExpr : public Expr {
 
         size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
 
+        // prefetch chunks to reduce cache miss latency
+        std::vector<int64_t> pf_chunk_ids;
+        pf_chunk_ids.reserve(num_data_chunk_ - start_chunk);
+        for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+            pf_chunk_ids.push_back(i);
+        }
+        segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
+
         for (size_t i = start_chunk; i < num_data_chunk_; i++) {
             auto data_pos =
                 process_all_chunks

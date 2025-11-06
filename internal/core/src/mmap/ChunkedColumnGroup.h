@@ -262,6 +262,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                group_->GetNumRowsUntilChunk(chunk_id);
     }
 
+    // TODO(tiered storage): make it async
+    void
+    PrefetchChunks(milvus::OpContext* op_ctx,
+                   const std::vector<int64_t>& chunk_ids) const override {
+        group_->GetGroupChunks(op_ctx, chunk_ids);
+    }
+
     PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         if (!IsChunkedColumnDataType(data_type_)) {
