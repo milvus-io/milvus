@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -4836,7 +4837,15 @@ func TestInjectMinHashPermutations(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "text_field", DataType: schemapb.DataType_VarChar},
-				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, Dim: 4096}, // 128 * 32 bits
+				{Name: "minhash_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "4096",
+						},
+					},
+				},
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{
@@ -4854,8 +4863,10 @@ func TestInjectMinHashPermutations(t *testing.T) {
 			},
 		}
 
-		// Call validateFunction which should inject permutations
+		// Call validateFunction and injectFunctionInternalParams
 		err := validateFunction(schema)
+		assert.NoError(t, err)
+		err = injectFunctionInternalParams(schema)
 		assert.NoError(t, err)
 
 		// Verify permutations were injected
@@ -4895,7 +4906,9 @@ func TestInjectMinHashPermutations(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{Name: "text_field", DataType: schemapb.DataType_VarChar},
-				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, Dim: 2048}, // 64 * 32 bits
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "2048"},
+				}}, // 64 * 32 bits
 			},
 			Functions: []*schemapb.FunctionSchema{
 				{
@@ -4911,8 +4924,10 @@ func TestInjectMinHashPermutations(t *testing.T) {
 			},
 		}
 
-		// Call validateFunction which should NOT inject new permutations
+		// Call validateFunction and injectFunctionInternalParams
 		err := validateFunction(schema)
+		assert.NoError(t, err)
+		err = injectFunctionInternalParams(schema)
 		assert.NoError(t, err)
 
 		// Verify permutations were not changed
@@ -4944,8 +4959,10 @@ func TestInjectMinHashPermutations(t *testing.T) {
 			},
 		}
 
-		// Call validateFunction
+		// Call validateFunction and injectFunctionInternalParams
 		err := validateFunction(schema)
+		assert.NoError(t, err)
+		err = injectFunctionInternalParams(schema)
 		assert.NoError(t, err)
 
 		// Verify no permutations were added to BM25 function
@@ -4960,7 +4977,9 @@ func TestInjectMinHashPermutations(t *testing.T) {
 			return &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{Name: "text_field", DataType: schemapb.DataType_VarChar},
-					{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, Dim: 4096},
+					{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4096"},
+					}},
 				},
 				Functions: []*schemapb.FunctionSchema{
 					{
@@ -4982,8 +5001,13 @@ func TestInjectMinHashPermutations(t *testing.T) {
 
 		// Inject permutations in both schemas
 		err1 := validateFunction(schema1)
-		err2 := validateFunction(schema2)
 		assert.NoError(t, err1)
+		err1 = injectFunctionInternalParams(schema1)
+		assert.NoError(t, err1)
+
+		err2 := validateFunction(schema2)
+		assert.NoError(t, err2)
+		err2 = injectFunctionInternalParams(schema2)
 		assert.NoError(t, err2)
 
 		// Extract permutations from both schemas

@@ -91,19 +91,18 @@ func (suite *EmbeddingNodeSuite) SetupTest() {
 			Type:           schemapb.FunctionType_BM25,
 			InputFieldIds:  []int64{101},
 			OutputFieldIds: []int64{102},
+		}, {
+			Name:           "MinHash",
+			Type:           schemapb.FunctionType_MinHash,
+			InputFieldIds:  []int64{101},
+			OutputFieldIds: []int64{103},
 		}},
 	}
 
-	// Add MinHash function with auto-populated parameters using helper
-	minHashFunc, err := function.CreateMockMinHashFunctionSchema(
-		suite.collectionSchema,
-		101, // input field ID (text)
-		103, // output field ID (binary vector)
-	)
+	err := function.MockMinHashFunctionSchema(suite.collectionSchema)
 	if err != nil {
 		panic(err)
 	}
-	suite.collectionSchema.Functions = append(suite.collectionSchema.Functions, minHashFunc)
 
 	suite.msgs = []*msgstream.InsertMsg{{
 		BaseMsg: msgstream.BaseMsg{},
