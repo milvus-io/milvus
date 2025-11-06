@@ -14,6 +14,7 @@ import (
 
 const (
 	truncateCursorSubscriptionName = "truncate-cursor"
+	defaultBacklogSize             = 100 * 1024 * 1024 // default 100MB
 )
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
@@ -32,22 +33,10 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 	var backlogClearHelper *backlogClearHelper
 	if opt.Channel.AccessMode == types.AccessModeRW {
 		backlogAutoClearBytes := paramtable.Get().PulsarCfg.BacklogAutoClearBytes.GetAsSize()
-		if backlogAutoClearBytes > 0 {
-			backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes)
-		} else {
-			// Initialize a persistent cursor to protect the topic from being retention.
-			cursor, err := o.c.Subscribe(pulsar.ConsumerOptions{
-				Topic:                       opt.Channel.Name,
-				SubscriptionName:            truncateCursorSubscriptionName,
-				Type:                        pulsar.Exclusive,
-				MaxPendingChunkedMessage:    0,
-				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
-			})
-			if err != nil {
-				return nil, err
-			}
-			cursor.Close()
+		if backlogAutoClearBytes <= 0 {
+			backlogAutoClearBytes = defaultBacklogSize
 		}
+		backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes)
 	}
 	w := &walImpl{
 		WALHelper:          helper.NewWALHelper(opt),

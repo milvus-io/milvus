@@ -700,6 +700,7 @@ type WoodpeckerConfig struct {
 	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
 	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
 	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
+	RetentionTTL                   ParamItem `refreshable:"true"`
 
 	// storage
 	StorageType ParamItem `refreshable:"false"`
@@ -896,6 +897,16 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.ReaderMaxFetchThreads.Init(base.mgr)
 
+	p.RetentionTTL = ParamItem{
+		Key:          "woodpecker.logstore.retentionPolicy.ttl",
+		Version:      "2.6.0",
+		DefaultValue: "72h",
+		FallbackKeys: []string{"streaming.walTruncate.retentionInterval"},
+		Doc:          "Time to live for truncated segments in seconds, default is 72h",
+		Export:       true,
+	}
+	p.RetentionTTL.Init(base.mgr)
+
 	p.StorageType = ParamItem{
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
@@ -1083,8 +1094,7 @@ set this option to non-zero will create a subscription seek to latest position t
 If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
 so admin of pulsar should give enough retention time to avoid the wal message lost.
 If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
-Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
-The retention policy of pulsar can set shorter to save the storage space in this case.`,
+If this option is zero or negative, it will be ignored and the default value (100m) will be used.`,
 		Export: true,
 	}
 	p.BacklogAutoClearBytes.Init(base.mgr)

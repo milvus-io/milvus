@@ -87,11 +87,9 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		Payload:    pb.Payload,
 		Properties: pb.Properties,
 	})
-	if w.backlogClearHelper != nil {
-		// Observe the append traffic even if the message is not sent successfully.
-		// Because if the write is failed, the message may be already written to the pulsar topic.
-		w.backlogClearHelper.ObserveAppend(msg.EstimateSize())
-	}
+	// Observe the append traffic even if the message is not sent successfully.
+	// Because if the write is failed, the message may be already written to the pulsar topic.
+	w.backlogClearHelper.ObserveAppend(msg.EstimateSize())
 	if err != nil {
 		w.Log().RatedWarn(1, "send message to pulsar failed", zap.Error(err))
 		return nil, err
@@ -140,7 +138,7 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 		panic("truncate on a wal that is not in read-write mode")
 	}
 	if w.backlogClearHelper != nil {
-		// if the backlog clear helper is enabled, the truncate make no sense, skip it.
+		// The backlogClearHelper is always non-nil currently, so we can determine the truncate position
 		return nil
 	}
 	cursor, err := w.c.Subscribe(pulsar.ConsumerOptions{
