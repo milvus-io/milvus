@@ -579,6 +579,19 @@ ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
     return mmap_field_ids_.find(field_id) != mmap_field_ids_.end();
 }
 
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::vector<int64_t>& chunk_ids) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(field_id)) {
+        column->PrefetchChunks(op_ctx, chunk_ids);
+    }
+}
+
 PinWrapper<SpanBase>
 ChunkedSegmentSealedImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                           FieldId field_id,
