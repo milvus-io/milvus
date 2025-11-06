@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -117,12 +118,40 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 		AutoID:             s.AutoID,
 		EnableDynamicField: s.EnableDynamicField,
 	}
-	r.Fields = lo.Map(s.Fields, func(field *Field, _ int) *schemapb.FieldSchema {
-		return field.ProtoMessage()
+	r.Fields = lo.FilterMap(s.Fields, func(field *Field, _ int) (*schemapb.FieldSchema, bool) {
+		if field.DataType == FieldTypeArray && field.ElementType == FieldTypeStruct {
+			return nil, false
+		}
+		return field.ProtoMessage(), true
 	})
 
 	r.Functions = lo.Map(s.Functions, func(function *Function, _ int) *schemapb.FunctionSchema {
 		return function.ProtoMessage()
+	})
+
+	r.StructArrayFields = lo.FilterMap(s.Fields, func(field *Field, _ int) (*schemapb.StructArrayFieldSchema, bool) {
+		if field.DataType != FieldTypeArray || field.ElementType != FieldTypeStruct {
+			return nil, false
+		}
+		f := &schemapb.StructArrayFieldSchema{
+			Name:        field.Name,
+			Description: field.Description,
+			TypeParams:  MapKvPairs(field.TypeParams),
+		}
+		if field.StructSchema != nil {
+			f.Fields = lo.Map(field.StructSchema.Fields, func(field *Field, _ int) *schemapb.FieldSchema {
+				// translate to ArrayStruct
+				f := field.ProtoMessage()
+				f.ElementType = f.DataType
+				if typeutil.IsVectorType(f.DataType) {
+					f.DataType = schemapb.DataType_ArrayOfVector
+				} else {
+					f.DataType = schemapb.DataType_Array
+				}
+				return f
+			})
+		}
+		return f, true
 	})
 
 	return r

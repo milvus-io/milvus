@@ -553,7 +553,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		if !ok2 {
 			dbTz = common.DefaultTimezone
 		}
-		timezoneKV := &commonpb.KeyValuePair{Key: common.CollectionDefaultTimezone, Value: dbTz}
+		timezoneKV := &commonpb.KeyValuePair{Key: common.TimezoneKey, Value: dbTz}
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 

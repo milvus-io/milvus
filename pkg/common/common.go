@@ -248,10 +248,8 @@ const (
 	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
-	TimezoneKey               = "timezone"
-	DatabaseDefaultTimezone   = "database.timezone"
-	CollectionDefaultTimezone = "collection.timezone"
-	AllowInsertAutoIDKey      = "allow_insert_auto_id"
+	TimezoneKey          = "timezone"
+	AllowInsertAutoIDKey = "allow_insert_auto_id"
 )
 
 const (

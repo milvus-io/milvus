@@ -66,7 +66,8 @@ import (
 )
 
 const (
-	UsedDiskMemoryRatio = 4
+	UsedDiskMemoryRatio      = 4
+	UsedDiskMemoryRatioAisaq = 64
 )
 
 var errRetryTimerNotified = errors.New("retry timer notified")
@@ -374,10 +375,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				return errors.Wrap(err, "At LoadBloomFilter")
 			}
 			segment.SetBloomFilter(bfs)
-		}
-
-		if err = segment.FinishLoad(); err != nil {
-			return errors.Wrap(err, "At FinishLoad")
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
@@ -962,6 +959,10 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	loadRawDataSpan := tr.RecordSpan()
 
+	if err = segment.FinishLoad(); err != nil {
+		return errors.Wrap(err, "At FinishLoad")
+	}
+
 	// load text indexes.
 	for _, info := range textIndexes {
 		if err := segment.LoadTextIndex(ctx, info, schemaHelper); err != nil {
@@ -1041,6 +1042,9 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	} else {
 		if err := segment.LoadMultiFieldData(ctx); err != nil {
 			return err
+		}
+		if err := segment.FinishLoad(); err != nil {
+			return errors.Wrap(err, "At FinishLoad")
 		}
 	}
 

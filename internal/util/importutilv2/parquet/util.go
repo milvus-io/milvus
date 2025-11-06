@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	common2 "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -135,18 +136,18 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			continue
 		}
 
-		// auto-id field must not provided
+		// auto-id field must not be provided
 		if typeutil.IsAutoPKField(field) && !allowInsertAutoID {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}
-		// function output field must not provided
+		// function output field must not be provided
 		if field.GetIsFunctionOutput() {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
 		}
 
-		cr, err := NewFieldReader(ctx, fileReader, i, field)
+		cr, err := NewFieldReader(ctx, fileReader, i, field, common2.GetSchemaTimezone(schema))
 		if err != nil {
 			return nil, err
 		}
@@ -352,13 +353,13 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return &arrow.Int16Type{}, nil
 	case schemapb.DataType_Int32:
 		return &arrow.Int32Type{}, nil
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64:
 		return &arrow.Int64Type{}, nil
 	case schemapb.DataType_Float:
 		return &arrow.Float32Type{}, nil
 	case schemapb.DataType_Double:
 		return &arrow.Float64Type{}, nil
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
+	case schemapb.DataType_VarChar, schemapb.DataType_String, schemapb.DataType_Timestamptz:
 		return &arrow.StringType{}, nil
 	case schemapb.DataType_JSON:
 		return &arrow.StringType{}, nil
