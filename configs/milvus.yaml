@@ -1023,7 +1023,7 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
-  enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats
+  enabledJSONShredding: false # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONShredding: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
