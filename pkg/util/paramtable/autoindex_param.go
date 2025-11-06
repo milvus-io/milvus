@@ -49,15 +49,16 @@ type AutoIndexConfig struct {
 	AutoIndexSearchConfig  ParamItem  `refreshable:"true"`
 	AutoIndexTuningConfig  ParamGroup `refreshable:"true"`
 
-	ScalarAutoIndexEnable   ParamItem `refreshable:"true"`
-	ScalarAutoIndexParams   ParamItem `refreshable:"true"`
-	ScalarNumericIndexType  ParamItem `refreshable:"true"`
-	ScalarIntIndexType      ParamItem `refreshable:"true"`
-	ScalarVarcharIndexType  ParamItem `refreshable:"true"`
-	ScalarBoolIndexType     ParamItem `refreshable:"true"`
-	ScalarFloatIndexType    ParamItem `refreshable:"true"`
-	ScalarJSONIndexType     ParamItem `refreshable:"true"`
-	ScalarGeometryIndexType ParamItem `refreshable:"true"`
+	ScalarAutoIndexEnable      ParamItem `refreshable:"true"`
+	ScalarAutoIndexParams      ParamItem `refreshable:"true"`
+	ScalarNumericIndexType     ParamItem `refreshable:"true"`
+	ScalarIntIndexType         ParamItem `refreshable:"true"`
+	ScalarVarcharIndexType     ParamItem `refreshable:"true"`
+	ScalarBoolIndexType        ParamItem `refreshable:"true"`
+	ScalarFloatIndexType       ParamItem `refreshable:"true"`
+	ScalarJSONIndexType        ParamItem `refreshable:"true"`
+	ScalarGeometryIndexType    ParamItem `refreshable:"true"`
+	ScalarTimestampTzIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
 }
@@ -197,7 +198,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
 		Version:      "2.4.0",
-		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED", "geometry": "RTREE"}`,
+		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED", "geometry": "RTREE", "timestamptz": "STL_SORT"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
 
@@ -261,6 +262,18 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarGeometryIndexType.Init(base.mgr)
+
+	p.ScalarTimestampTzIndexType = ParamItem{
+		Version: "2.6.0",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["timestamptz"]
+		},
+	}
+	p.ScalarTimestampTzIndexType.Init(base.mgr)
 
 	p.BitmapCardinalityLimit = ParamItem{
 		Key:          "scalarAutoIndex.params.bitmapCardinalityLimit",

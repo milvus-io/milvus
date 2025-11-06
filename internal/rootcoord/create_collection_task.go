@@ -151,6 +151,70 @@ func checkGeometryDefaultValue(value string) error {
 	return nil
 }
 
+// checkAndRewriteTimestampTzDefaultValue processes the collection schema to validate
+// and rewrite default values for TIMESTAMPTZ fields.
+//
+// Background:
+//  1. TIMESTAMPTZ default values are initially stored as user-provided ISO 8601 strings
+//     (in ValueField.GetStringData()).
+//  2. Milvus stores TIMESTAMPTZ data internally as UTC microseconds (int64).
+//
+// Logic:
+// The function iterates through all fields of type DataType_Timestamptz. For each field
+// with a default value:
+//  1. It retrieves the collection's default timezone if no offset is present in the string.
+//  2. It calls ValidateAndReturnUnixMicroTz to validate the string (including the UTC
+//     offset range check) and convert it to the absolute UTC microsecond (int64) value.
+//  3. It rewrites the ValueField, setting the LongData field with the calculated int64
+//     value, thereby replacing the initial string representation.
+func checkAndRewriteTimestampTzDefaultValue(schema *schemapb.CollectionSchema) error {
+	// 1. Get the collection-level default timezone.
+	// Assuming common.TimezoneKey and common.DefaultTimezone are defined constants.
+	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, schema.GetProperties())
+	if !exist {
+		timezone = common.DefaultTimezone
+	}
+
+	for _, fieldSchema := range schema.GetFields() {
+		// Only process TIMESTAMPTZ fields.
+		if fieldSchema.GetDataType() != schemapb.DataType_Timestamptz {
+			continue
+		}
+
+		defaultValue := fieldSchema.GetDefaultValue()
+		if defaultValue == nil {
+			continue
+		}
+
+		// 2. Read the default value as a string (the input format).
+		// We expect the default value to be set in string_data initially.
+		stringTz := defaultValue.GetStringData()
+		if stringTz == "" {
+			// Skip or handle empty string default values if necessary.
+			continue
+		}
+
+		// 3. Validate the string and convert it to UTC microsecond (int64).
+		// This also performs the critical UTC offset range validation.
+		utcMicro, err := funcutil.ValidateAndReturnUnixMicroTz(stringTz, timezone)
+		if err != nil {
+			// If validation fails (e.g., invalid format or illegal offset), return error immediately.
+			return err
+		}
+
+		// 4. Rewrite the default value to store the UTC microsecond (int64).
+		// By setting ValueField_LongData, the oneof field in the protobuf structure
+		// automatically switches from string_data to long_data.
+		defaultValue.Data = &schemapb.ValueField_LongData{
+			LongData: utcMicro,
+		}
+
+		// The original string_data field is now cleared due to the oneof nature,
+		// and the default value is correctly represented as an int64 microsecond value.
+	}
+	return nil
+}
+
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
 		if funcutil.SliceContain(systemFields, f.GetName()) {
@@ -169,6 +233,11 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	}
 
 	if err := checkFieldSchema(schema.GetFields()); err != nil {
+		return err
+	}
+
+	// Validate default
+	if err := checkAndRewriteTimestampTzDefaultValue(schema); err != nil {
 		return err
 	}
 
@@ -358,6 +427,12 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 
+	// Validate timezone
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
+
 	// Set properties for persistent
 	t.body.CollectionSchema.Properties = t.Req.GetProperties()
 	t.body.CollectionSchema.Version = 0
@@ -447,13 +522,13 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 	}
 	// set collection timezone
 	properties := t.Req.GetProperties()
-	ok, _ := getDefaultTimezoneVal(properties...)
+	_, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, properties)
 	if !ok {
-		ok, defaultTz := getDefaultTimezoneVal(db.Properties...)
-		if !ok {
-			defaultTz = "UTC"
+		dbTz, ok2 := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, db.Properties)
+		if !ok2 {
+			dbTz = common.DefaultTimezone
 		}
-		timezoneKV := &commonpb.KeyValuePair{Key: common.CollectionDefaultTimezone, Value: defaultTz}
+		timezoneKV := &commonpb.KeyValuePair{Key: common.TimezoneKey, Value: dbTz}
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 

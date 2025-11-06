@@ -469,6 +469,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     op_ctx, dst, offsets, count);
                 break;
             }
+            case DataType::TIMESTAMPTZ: {
+                BulkPrimitiveValueAtImpl<int64_t, int64_t>(
+                    op_ctx, dst, offsets, count);
+                break;
+            }
             case DataType::FLOAT: {
                 BulkPrimitiveValueAtImpl<float, float>(
                     op_ctx, dst, offsets, count);

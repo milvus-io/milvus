@@ -45,6 +45,11 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
 		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
 	}
+	// Validate timezone
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, req.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
+	}
 
 	isEnableDynamicSchema, targetValue, err := common.IsEnableDynamicSchema(req.GetProperties())
 	if err != nil {

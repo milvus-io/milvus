@@ -56,6 +56,10 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecVisitorImpl<double>(input);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            result = ExecVisitorImpl<int64_t>(input);
+            break;
+        }
         case DataType::VARCHAR: {
             if (segment_->type() == SegmentType::Growing &&
                 !storage::MmapManager::GetInstance()

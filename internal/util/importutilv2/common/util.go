@@ -22,6 +22,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -104,4 +106,20 @@ func CheckValidString(s string, maxLength int64, field *schemapb.FieldSchema) er
 		return err
 	}
 	return nil
+}
+
+// GetSchemaTimezone retrieves the timezone string from the CollectionSchema's properties.
+// It falls back to common.DefaultTimezone if the key is not found or the value is empty.
+func GetSchemaTimezone(schema *schemapb.CollectionSchema) string {
+	// 1. Attempt to retrieve the timezone value from the schema's properties.
+	// We assume funcutil.TryGetAttrByKeyFromRepeatedKV returns the value and a boolean indicating existence.
+	// If the key is not found, the returned timezone string will be the zero value ("").
+	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, schema.GetProperties())
+
+	// 2. If the retrieved value is empty, use the system default timezone.
+	if timezone == "" {
+		timezone = common.DefaultTimezone
+	}
+
+	return timezone
 }

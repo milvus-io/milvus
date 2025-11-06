@@ -66,6 +66,11 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	t.Rsp = convertModelToDesc(coll, aliases, db.Name)
+	// NEW STEP: Convert TIMESTAMPTZ default values back to string format for the user.
+	err = rewriteTimestampTzDefaultValueToString(t.Rsp)
+	if err != nil {
+		return err
+	}
 	t.Rsp.RequestTime = t.ts
 	return nil
 }
