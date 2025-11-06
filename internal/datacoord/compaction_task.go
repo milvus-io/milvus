@@ -45,8 +45,6 @@ type CompactionTask interface {
 	SetNodeID(UniqueID) error
 	NeedReAssignNodeID() bool
 	SaveTaskMeta() error
-
-	CheckCompactionContainsSegment(segmentID int64) bool
 }
 
 type compactionTaskOpt func(task *datapb.CompactionTask)
