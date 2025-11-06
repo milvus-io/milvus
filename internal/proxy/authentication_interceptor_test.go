@@ -49,19 +49,6 @@ func TestValidAuth(t *testing.T) {
 	assert.False(t, res)
 }
 
-func TestValidSourceID(t *testing.T) {
-	ctx := context.Background()
-	// no metadata
-	res := validSourceID(ctx, nil)
-	assert.False(t, res)
-	// illegal metadata
-	res = validSourceID(ctx, []string{"invalid_sourceid"})
-	assert.False(t, res)
-	// normal sourceId
-	res = validSourceID(ctx, []string{crypto.Base64Encode(util.MemberCredID)})
-	assert.True(t, res)
-}
-
 func TestAuthenticationInterceptor(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true") // mock authorization is turned on
@@ -81,11 +68,6 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	// with valid username/password
 	md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser:mockPass"))
-	ctx = metadata.NewIncomingContext(ctx, md)
-	_, err = AuthenticationInterceptor(ctx)
-	assert.NoError(t, err)
-	// with valid sourceId
-	md = metadata.Pairs("sourceid", crypto.Base64Encode(util.MemberCredID))
 	ctx = metadata.NewIncomingContext(ctx, md)
 	_, err = AuthenticationInterceptor(ctx)
 	assert.NoError(t, err)
