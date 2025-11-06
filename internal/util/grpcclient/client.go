@@ -39,8 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
-	"github.com/milvus-io/milvus/pkg/util"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
@@ -290,7 +288,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				},
 				MinConnectTimeout: c.DialTimeout,
 			}),
-			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 			grpc.FailOnNonTempDialError(true),
 			grpc.WithReturnConnectionError(),
 			grpc.WithDisableRetry(),
@@ -329,7 +326,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				},
 				MinConnectTimeout: c.DialTimeout,
 			}),
-			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 			grpc.FailOnNonTempDialError(true),
 			grpc.WithReturnConnectionError(),
 			grpc.WithDisableRetry(),
