@@ -45,12 +45,8 @@ const (
 	SegmentIndexPrefix = "segment-index"
 	FieldIndexPrefix   = "field-index"
 
-	HeaderAuthorize = "authorization"
-	HeaderToken     = "token"
-	// HeaderSourceID identify requests from Milvus members and client requests
-	HeaderSourceID = "sourceId"
-	// MemberCredID id for Milvus members (data/index/query node/coord component)
-	MemberCredID        = "@@milvus-member@@"
+	HeaderAuthorize     = "authorization"
+	HeaderToken         = "token"
 	CredentialSeperator = ":"
 	UserRoot            = "root"
 	PasswordHolder      = "___"
