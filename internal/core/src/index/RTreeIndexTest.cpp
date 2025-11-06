@@ -15,7 +15,7 @@
 #include <string>
 #include <fstream>
 
-#include "index/RTreeIndex.h"
+#include "RTreeIndex.h"
 #include "storage/Util.h"
 #include "storage/FileManager.h"
 #include "common/Types.h"
@@ -24,7 +24,7 @@
 #include "pb/plan.pb.h"
 #include "common/Geometry.h"
 #include "common/EasyAssert.h"
-#include "index/IndexFactory.h"
+#include "IndexFactory.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -32,7 +32,7 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "common/Consts.h"
 #include "test_utils/storage_test_utils.h"
-#include "index/Utils.h"
+#include "Utils.h"
 #include "storage/ThreadPools.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
