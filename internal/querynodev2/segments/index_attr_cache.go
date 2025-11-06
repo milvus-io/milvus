@@ -68,6 +68,11 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
+	if vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType) {
+		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatioAisaq
+		neededDiskSize := indexInfo.IndexSize
+		return uint64(neededMemSize), uint64(neededDiskSize), nil
+	}
 	if indexType == indexparamcheck.IndexINVERTED {
 		neededMemSize := 0
 		// we will mmap the binlog if the index type is inverted index.
