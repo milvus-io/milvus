@@ -1355,7 +1355,7 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     if json_type == "json_float":                           # single float as json value
         return [i*1.0 for i in range(start, start + nb)]
     if json_type == "json_string":                          # single string as json value
-        return [str(i) for i in range(start, start + nb)]
+        return [json.dumps(str(i)) for i in range(start, start + nb)]
     if json_type == "json_bool":                            # single bool as json value
         return [bool(i) for i in range(start, start + nb)]
     else:
