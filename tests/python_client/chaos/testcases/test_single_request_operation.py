@@ -24,6 +24,7 @@ from chaos.checker import (CollectionCreateChecker,
                            AlterCollectionChecker,
                            AddFieldChecker,
                            CollectionRenameChecker,
+                           TensorSearchChecker,
                            Op,
                            EventRecords,
                            ResultAnalyzer
@@ -83,8 +84,9 @@ class TestOperations(TestBase):
         checkers = {
             Op.create: CollectionCreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
+            Op.tensor_search :TensorSearchChecker(collection_name=c_name),
             Op.upsert: UpsertChecker(collection_name=c_name),
-            Op.partial_update: PartialUpdateChecker(collection_name=c_name),
+            Op.partial_update: PartialUpdateChecker(collection_name=c_name), 
             Op.flush: FlushChecker(collection_name=c_name),
             Op.index: IndexCreateChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),

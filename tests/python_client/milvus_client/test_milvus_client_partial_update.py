@@ -111,7 +111,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         """
         # step 1: create collection with all datatype schema
         client = self._client()
-        schema = cf.gen_all_datatype_collection_schema(dim=default_dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=default_dim, enable_struct_array_field=False)
         index_params = self.prepare_index_params(client)[0]
         text_sparse_emb_field_name = "text_sparse_emb"
 
@@ -124,6 +124,9 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                 index_params.add_index(field_name, index_type="AUTOINDEX", metric_type="BM25")
             else:
                 index_params.add_index(field_name, index_type="AUTOINDEX")
+        emb_list_field_names = cf.get_emb_list_field_name_list(schema=schema)
+        for emb_list_field_name in emb_list_field_names:
+            index_params.add_index(emb_list_field_name, index_type="AUTOINDEX", metric_type="MAX_SIM_COSINE")
 
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
         self.create_collection(client, collection_name, default_dim, schema=schema, 
