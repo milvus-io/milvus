@@ -102,12 +102,4 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shredding);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load);
 
-// --- file writer metrics ---
-
-DECLARE_PROMETHEUS_COUNTER_FAMILY(disk_write_total_bytes);
-DECLARE_PROMETHEUS_COUNTER(disk_write_total_bytes_buffered);
-DECLARE_PROMETHEUS_COUNTER(disk_write_total_bytes_direct);
-
-// --- file writer metrics end ---
-
 }  // namespace milvus::monitor
