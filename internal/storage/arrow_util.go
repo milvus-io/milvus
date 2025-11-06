@@ -339,6 +339,11 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) string { return schema.GetDefaultValue().GetStringData() }),
 				nil)
+		case schemapb.DataType_JSON:
+			bd := builder.(*array.BinaryBuilder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) []byte { return schema.GetDefaultValue().GetBytesData() }),
+				nil)
 		default:
 			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("Unexpected default value type: %s", schema.GetDataType().String()))
 		}
