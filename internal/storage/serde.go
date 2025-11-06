@@ -26,6 +26,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
@@ -831,7 +832,7 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 	sfw.numRows += r.Len()
 	a := r.Column(sfw.fieldId)
 
-	sfw.writtenUncompressed += a.Data().SizeInBytes()
+	sfw.writtenUncompressed += calculateActualDataSize(a)
 	rec := array.NewRecord(sfw.schema, []arrow.Array{a}, int64(r.Len()))
 	defer rec.Release()
 	return sfw.fw.WriteBuffered(rec)
@@ -1046,7 +1047,7 @@ func (mfw *multiFieldRecordWriter) Write(r Record) error {
 	columns := make([]arrow.Array, len(mfw.fieldIDs))
 	for i, fieldId := range mfw.fieldIDs {
 		columns[i] = r.Column(fieldId)
-		mfw.writtenUncompressed += columns[i].Data().SizeInBytes()
+		mfw.writtenUncompressed += calculateActualDataSize(columns[i])
 	}
 	rec := array.NewRecord(mfw.schema, columns, int64(r.Len()))
 	defer rec.Release()
@@ -1224,4 +1225,262 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 		}
 	}
 	return nil
+}
+
+func calculateActualDataSize(a arrow.Array) uint64 {
+	data := a.Data()
+	if data == nil {
+		return 0
+	}
+
+	return ActualSizeInBytes(data)
+}
+
+// calculate preciese data size of sliced ArrayData
+func ActualSizeInBytes(data arrow.ArrayData) uint64 {
+	var size uint64
+	dt := data.DataType()
+	length := data.Len()
+	offset := data.Offset()
+	buffers := data.Buffers()
+
+	switch dt.ID() {
+	case arrow.NULL:
+		return 0
+
+	case arrow.BOOL:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+
+	case arrow.UINT8, arrow.INT8:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length)
+		}
+
+	case arrow.UINT16, arrow.INT16, arrow.FLOAT16:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 2)
+		}
+
+	case arrow.UINT32, arrow.INT32, arrow.FLOAT32, arrow.DATE32, arrow.TIME32,
+		arrow.INTERVAL_MONTHS:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 4)
+		}
+
+	case arrow.UINT64, arrow.INT64, arrow.FLOAT64, arrow.DATE64, arrow.TIME64,
+		arrow.TIMESTAMP, arrow.DURATION, arrow.INTERVAL_DAY_TIME:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 8)
+		}
+
+	case arrow.INTERVAL_MONTH_DAY_NANO:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 16)
+		}
+
+	case arrow.DECIMAL128:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 16)
+		}
+
+	case arrow.DECIMAL256:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 32)
+		}
+
+	case arrow.FIXED_SIZE_BINARY:
+		fsbType := dt.(*arrow.FixedSizeBinaryType)
+		byteWidth := fsbType.ByteWidth
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * byteWidth)
+		}
+
+	case arrow.STRING, arrow.BINARY:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil && buffers[2] != nil {
+			size += uint64((length + 1) * 4)
+			offsets := arrow.Int32Traits.CastFromBytes(buffers[1].Bytes())
+			if offset+length < len(offsets) {
+				dataStart := offsets[offset]
+				dataEnd := offsets[offset+length]
+				size += uint64(dataEnd - dataStart)
+			}
+		}
+
+	case arrow.LARGE_STRING, arrow.LARGE_BINARY:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil && buffers[2] != nil {
+			size += uint64((length + 1) * 8)
+			offsets := arrow.Int64Traits.CastFromBytes(buffers[1].Bytes())
+			if offset+length < len(offsets) {
+				dataStart := offsets[offset]
+				dataEnd := offsets[offset+length]
+				size += uint64(dataEnd - dataStart)
+			}
+		}
+
+	case arrow.STRING_VIEW, arrow.BINARY_VIEW:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * arrow.ViewHeaderSizeBytes)
+		}
+		for i := 2; i < len(buffers); i++ {
+			if buffers[i] != nil {
+				size += uint64(buffers[i].Len())
+			}
+		}
+
+	case arrow.LIST, arrow.MAP:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64((length + 1) * 4)
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.LARGE_LIST:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64((length + 1) * 8)
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.LIST_VIEW:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 4)
+		}
+		if buffers[2] != nil {
+			size += uint64(length * 4)
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.LARGE_LIST_VIEW:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 8)
+		}
+		if buffers[2] != nil {
+			size += uint64(length * 8)
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.FIXED_SIZE_LIST:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.STRUCT:
+		if buffers[0] != nil {
+			size += uint64(bitutil.BytesForBits(int64(length)))
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.SPARSE_UNION:
+		if buffers[0] != nil {
+			size += uint64(length)
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.DENSE_UNION:
+		if buffers[0] != nil {
+			size += uint64(length)
+		}
+		if buffers[1] != nil {
+			size += uint64(length * 4)
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.DICTIONARY:
+		for _, buf := range buffers {
+			if buf != nil {
+				size += uint64(buf.Len())
+			}
+		}
+		if dict := data.Dictionary(); dict != nil {
+			size += ActualSizeInBytes(dict)
+		}
+
+	case arrow.RUN_END_ENCODED:
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+
+	case arrow.EXTENSION:
+		extType := dt.(arrow.ExtensionType)
+		storageData := array.NewData(extType.StorageType(), length, buffers, data.Children(), data.NullN(), offset)
+		size = ActualSizeInBytes(storageData)
+		storageData.Release()
+
+	default:
+		for _, buf := range buffers {
+			if buf != nil {
+				size += uint64(buf.Len())
+			}
+		}
+		for _, child := range data.Children() {
+			size += ActualSizeInBytes(child)
+		}
+	}
+
+	return size
 }
