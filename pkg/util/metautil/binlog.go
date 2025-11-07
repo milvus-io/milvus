@@ -1,11 +1,13 @@
 package metautil
 
 import (
+	"fmt"
 	"path"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -63,6 +65,9 @@ func GetSegmentIDFromStatsLogPath(logPath string) typeutil.UniqueID {
 
 func BuildDeltaLogPath(rootPath string, collectionID, partitionID, segmentID, logID typeutil.UniqueID) string {
 	k := JoinIDPath(collectionID, partitionID, segmentID, logID)
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		k = fmt.Sprintf("%s.parquet", k)
+	}
 	return path.Join(rootPath, common.SegmentDeltaLogPath, k)
 }
 

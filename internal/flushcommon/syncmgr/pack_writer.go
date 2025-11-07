@@ -335,8 +335,7 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack, option
 	}
 
 	logID := bw.nextID()
-	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, logID)
-	path := path.Join(bw.chunkManager.RootPath(), common.SegmentDeltaLogPath, k)
+	path := metautil.BuildDeltaLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, logID)
 	writer, err := storage.NewDeltalogWriter(
 		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, path,
 		options...,
