@@ -86,12 +86,16 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<BitmapIndex<std::string>>(file_manager_context);
-    }
-    if (index_type == HYBRID_INDEX_TYPE) {
+    } else if (index_type == HYBRID_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<std::string>>(
             create_index_info.tantivy_index_version, file_manager_context);
+    } else if (index_type == MARISA_TRIE || index_type == MARISA_TRIE_UPPER) {
+        return CreateStringIndexMarisa(file_manager_context);
+    } else if (index_type == ASCENDING_SORT) {
+        return CreateStringIndexSort(file_manager_context);
+    } else {
+        ThrowInfo(Unsupported, "unsupported index type: {}", index_type);
     }
-    return CreateStringIndexSort(file_manager_context);
 #else
     ThrowInfo(Unsupported, "unsupported platform");
 #endif
