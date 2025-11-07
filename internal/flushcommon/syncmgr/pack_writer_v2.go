@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -93,11 +94,7 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack,
-		storage.WithVersion(storage.StorageV2),
-		storage.WithStorageConfig(bw.storageConfig),
-		storage.WithColumnGroups(bw.columnGroups),
-	); err != nil {
+	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
@@ -207,6 +204,57 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 	return logs, nil
+}
+
+func (bw *BulkPackWriterV2) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
+	if pack.deltaData == nil {
+		return &datapb.FieldBinlog{}, nil
+	}
+
+	pkField := func() *schemapb.FieldSchema {
+		for _, field := range bw.schema.Fields {
+			if field.IsPrimaryKey {
+				return field
+			}
+		}
+		return nil
+	}()
+	if pkField == nil {
+		return nil, fmt.Errorf("primary key field not found")
+	}
+
+	logID := bw.nextID()
+	path := metautil.BuildDeltaLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, logID)
+	writer, err := storage.NewDeltalogWriter(
+		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, path,
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(bw.storageConfig),
+		storage.WithColumnGroups(bw.columnGroups),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	err = writeDeltaInternal(ctx, pack, writer, pkField)
+	if err != nil {
+		return nil, err
+	}
+
+	deltalog := &datapb.Binlog{
+		EntriesNum:    pack.deltaData.RowCount,
+		TimestampFrom: pack.tsFrom,
+		TimestampTo:   pack.tsTo,
+		LogPath:       path,
+		LogSize:       pack.deltaData.Size() / 4, // Not used
+		MemorySize:    pack.deltaData.Size(),
+	}
+	bw.sizeWritten += deltalog.LogSize
+
+	return &datapb.FieldBinlog{
+		FieldID:     pkField.GetFieldID(),
+		Binlogs:     []*datapb.Binlog{deltalog},
+		ChildFields: []int64{0, 1},
+	}, nil
 }
 
 func (bw *BulkPackWriterV2) serializeBinlog(_ context.Context, pack *SyncPack) (storage.Record, error) {

@@ -1363,7 +1363,6 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	)
 	log.Info("loading delta...")
 
-	var paths []string
 	var rowNums int64
 	for _, deltaLog := range deltaLogs {
 		for _, bLog := range deltaLog.GetBinlogs() {
@@ -1372,14 +1371,8 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
 				continue
 			}
-			paths = append(paths, bLog.GetLogPath())
 			rowNums += bLog.GetEntriesNum()
 		}
-	}
-
-	if len(paths) == 0 {
-		log.Info("there are no delta logs saved with segment, skip loading delete record")
-		return nil
 	}
 
 	collection := loader.manager.Collection.Get(segment.Collection())
@@ -1391,52 +1384,67 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	reader, err := storage.NewDeltalogReader(pkField, paths,
-		storage.WithDownloader(
-			func(ctx context.Context, paths []string) ([][]byte, error) {
-				return loader.cm.MultiRead(ctx, paths)
-			},
-		),
-		storage.WithStorageConfig(&indexpb.StorageConfig{
-			Address:           paramtable.Get().MinioCfg.Address.GetValue(),
-			BucketName:        paramtable.Get().MinioCfg.BucketName.GetValue(),
-			AccessKeyID:       paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
-			SecretAccessKey:   paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
-			RootPath:          paramtable.Get().MinioCfg.RootPath.GetValue(),
-			StorageType:       paramtable.Get().CommonCfg.StorageType.GetValue(),
-			IAMEndpoint:       paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
-			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
-			Region:            paramtable.Get().MinioCfg.Region.GetValue(),
-			SslCACert:         paramtable.Get().MinioCfg.SslCACert.GetValue(),
-			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
-		}),
-	)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
+	for _, deltalog := range deltaLogs {
+		opts := make([]storage.RwOption, 0)
 
-	for {
-		dl, err := reader.Next()
+		if len(deltalog.ChildFields) > 0 {
+			opts = append(
+				opts,
+				storage.WithVersion(storage.StorageV2),
+				storage.WithStorageConfig(&indexpb.StorageConfig{
+					Address:           paramtable.Get().MinioCfg.Address.GetValue(),
+					BucketName:        paramtable.Get().MinioCfg.BucketName.GetValue(),
+					AccessKeyID:       paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
+					SecretAccessKey:   paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
+					RootPath:          paramtable.Get().MinioCfg.RootPath.GetValue(),
+					StorageType:       paramtable.Get().CommonCfg.StorageType.GetValue(),
+					IAMEndpoint:       paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
+					CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
+					Region:            paramtable.Get().MinioCfg.Region.GetValue(),
+					SslCACert:         paramtable.Get().MinioCfg.SslCACert.GetValue(),
+					GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
+				}))
+		} else {
+			opts = append(
+				opts,
+				storage.WithDownloader(
+					func(ctx context.Context, paths []string) ([][]byte, error) {
+						return loader.cm.MultiRead(ctx, paths)
+					},
+				),
+			)
+		}
+		paths := lo.Map(deltalog.Binlogs, func(binlog *datapb.Binlog, _ int) string {
+			return binlog.GetLogPath()
+		})
+		reader, err := storage.NewDeltalogReader(pkField, paths, opts...)
 		if err != nil {
-			if err == io.EOF {
-				break
-			}
 			return err
 		}
+		defer reader.Close()
 
-		for i := 0; i < dl.Len(); i++ {
-			var pk storage.PrimaryKey
-			switch pkField.DataType {
-			case schemapb.DataType_Int64:
-				pk = storage.NewInt64PrimaryKey(dl.Column(pkField.FieldID).(*array.Int64).Value(i))
-			case schemapb.DataType_VarChar:
-				pk = storage.NewVarCharPrimaryKey(dl.Column(pkField.FieldID).(*array.String).Value(i))
-			}
-			ts := typeutil.Timestamp(dl.Column(common.TimeStampField).(*array.Int64).Value(i))
-			err = deltaData.Append(pk, ts)
+		for {
+			dl, err := reader.Next()
 			if err != nil {
+				if err == io.EOF {
+					break
+				}
 				return err
+			}
+
+			for i := 0; i < dl.Len(); i++ {
+				var pk storage.PrimaryKey
+				switch pkField.DataType {
+				case schemapb.DataType_Int64:
+					pk = storage.NewInt64PrimaryKey(dl.Column(pkField.FieldID).(*array.Int64).Value(i))
+				case schemapb.DataType_VarChar:
+					pk = storage.NewVarCharPrimaryKey(dl.Column(pkField.FieldID).(*array.String).Value(i))
+				}
+				ts := typeutil.Timestamp(dl.Column(common.TimeStampField).(*array.Int64).Value(i))
+				err = deltaData.Append(pk, ts)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
