@@ -73,7 +73,17 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        **kwargs).run()
         return res, check_result
-    
+    @trace()
+    def create_struct_field_schema(self, client, check_task=None,
+                      check_items=None, **kwargs):
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.create_struct_field_schema], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       **kwargs).run()
+        return res, check_result    
+
+
     @trace()
     def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
 
