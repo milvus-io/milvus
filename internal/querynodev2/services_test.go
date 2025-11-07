@@ -1579,6 +1579,8 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 
 	// data
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, nil)
+	defer suite.node.manager.Collection.Unref(suite.collectionID, 1)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
