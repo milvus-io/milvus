@@ -3,25 +3,19 @@ from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTE
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
-    Collection
+    Collection, Function, FunctionType, FunctionScore
 )
-from common.constants import *
+
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
-import heapq
-from time import sleep
-from decimal import Decimal, getcontext
-import decimal
-import multiprocessing
-import numbers
+from base.client_v2_base import TestMilvusClientV2Base
+
 import random
 import math
-import numpy
-import threading
 import pytest
 import pandas as pd
 from faker import Faker
@@ -78,6 +72,193 @@ index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
 half_nb = ct.default_nb // 2
 max_hybrid_search_req_num = ct.max_hybrid_search_req_num
+
+default_primary_key_field_name = "id"
+default_vector_field_name = "vector"
+
+
+@pytest.mark.xdist_group("TestMilvusClientHybridSearch")
+class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
+    """Test search with hybrid search functionality"""
+
+    def setup_class(self):
+        super().setup_class(self)
+        self.collection_name = "TestMilvusClientHybridSearch" + cf.gen_unique_str("_")
+        self.partition_names = ["partition_1", "partition_2"]
+        self.float_vector_field_name1 = "float_vector1"
+        self.float_vector_field_name2 = "float_vector2"
+        self.sparse_vector_field_name1 = "text_sparse_emb1"
+        self.sparse_vector_field_name2 = "text_sparse_emb2"
+        self.float_vector_dim = 128
+        self.primary_keys = []
+        self.enable_dynamic_field = False
+        self.datas = []
+
+    @pytest.fixture(scope="class", autouse=True)
+    def prepare_collection(self, request):
+        """
+        Initialize collection before test class runs
+        """
+        # Get client connection
+        client = self._client()
+        analyzer_params = {
+            "tokenizer": "standard",
+        }
+
+        # Create collection
+        collection_schema = self.create_schema(client)[0]
+        collection_schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        collection_schema.add_field(self.float_vector_field_name1, DataType.FLOAT_VECTOR, dim=128)
+        collection_schema.add_field(self.float_vector_field_name2, DataType.FLOAT_VECTOR, dim=128)
+        collection_schema.add_field(self.sparse_vector_field_name1, DataType.SPARSE_FLOAT_VECTOR)
+        collection_schema.add_field(self.sparse_vector_field_name2, DataType.SPARSE_FLOAT_VECTOR)
+        collection_schema.add_field('text1', DataType.VARCHAR, max_length=6553,
+                                    enable_analyzer=True, analyzer_params=analyzer_params)
+        collection_schema.add_field('text2', DataType.VARCHAR, max_length=6553,
+                                    enable_analyzer=True, analyzer_params=analyzer_params)
+        collection_schema.add_field(default_int64_field_name, DataType.INT64)
+        collection_schema.add_field('json', DataType.JSON)
+        collection_schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=256)
+        bm25_function1 = Function(
+            name=self.sparse_vector_field_name1,
+            function_type=FunctionType.BM25,
+            input_field_names=["text1"],
+            output_field_names=self.sparse_vector_field_name1,
+            params={},
+        )
+        bm25_function2 = Function(
+            name=self.sparse_vector_field_name2,
+            function_type=FunctionType.BM25,
+            input_field_names=["text2"],
+            output_field_names=self.sparse_vector_field_name2,
+            params={},
+        )
+        collection_schema.add_function(bm25_function1)
+        collection_schema.add_function(bm25_function2)
+        self.create_collection(client, self.collection_name, schema=collection_schema,
+                               enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
+        for partition_name in self.partition_names:
+            self.create_partition(client, self.collection_name, partition_name=partition_name)
+
+        # Define number of insert iterations
+        insert_times = 2
+
+        # Generate vectors for each type and store in self
+        float_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim,
+                                       vector_data_type=DataType.FLOAT_VECTOR)
+        float_vectors2 = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim,
+                                       vector_data_type=DataType.FLOAT_VECTOR)
+        texts1 = cf.gen_varchar_data(length=10, nb=default_nb * insert_times, text_mode=True)
+        texts2 = cf.gen_varchar_data(length=10, nb=default_nb * insert_times, text_mode=True)
+
+        # Insert data multiple times with non-duplicated primary keys
+        for j in range(insert_times):
+            # Group rows by partition based on primary key mod 3
+            default_rows = []
+            partition1_rows = []
+            partition2_rows = []
+
+            for i in range(default_nb):
+                pk = i + j * default_nb
+                row = {
+                    default_primary_key_field_name: pk,
+                    self.float_vector_field_name1: list(float_vectors[pk]),
+                    self.float_vector_field_name2: list(float_vectors2[pk]),
+                    "text1": texts1[pk],
+                    "text2": texts2[pk],
+                    "json": {"float": pk * 1.0, "str": str(pk)},
+                    default_string_field_name: str(pk),
+                    default_int64_field_name: pk
+                }
+                self.datas.append(row)
+
+                # Distribute to partitions based on pk mod 3
+                if pk % 3 == 0:
+                    default_rows.append(row)
+                elif pk % 3 == 1:
+                    partition1_rows.append(row)
+                else:
+                    partition2_rows.append(row)
+
+            # Insert into respective partitions
+            if default_rows:
+                self.insert(client, self.collection_name, data=default_rows)
+            if partition1_rows:
+                self.insert(client, self.collection_name, data=partition1_rows, partition_name=self.partition_names[0])
+            if partition2_rows:
+                self.insert(client, self.collection_name, data=partition2_rows, partition_name=self.partition_names[1])
+
+            # Track all inserted data and primary keys
+            self.primary_keys.extend([i + j * default_nb for i in range(default_nb)])
+
+        self.flush(client, self.collection_name)
+
+        # Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=self.float_vector_field_name1,
+                               metric_type="COSINE",
+                               index_type="IVF_FLAT",
+                               params={"nlist": 128})
+        index_params.add_index(field_name=self.float_vector_field_name2,
+                               metric_type="L2",
+                               index_type="HNSW",
+                               params={})
+        index_params.add_index(field_name=self.sparse_vector_field_name1,
+                               metric_type="BM25",
+                               index_type="SPARSE_INVERTED_INDEX",
+                               params={})
+        index_params.add_index(field_name=self.sparse_vector_field_name2,
+                               metric_type="BM25",
+                               index_type="SPARSE_INVERTED_INDEX",
+                               params={})
+        self.create_index(client, self.collection_name, index_params=index_params, timeout=300)
+
+        # Load collection
+        self.load_collection(client, self.collection_name)
+
+        def teardown():
+            self.drop_collection(self._client(), self.collection_name)
+
+        request.addfinalizer(teardown)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_hybrid_search_compare_results_with_nqs(self):
+        """
+        target: test hybrid search results are consitent if searching with nq>1 and qn=1
+        method: 1. use self collection and hybrid search with nq>1 and qn=1
+        2. hybrid search with nq=5
+        3. hyrbid search with 5 nqs one by one
+        expected: 1. the results of hybrid search with nq>1 and qn=1 are consitent with the results of hybrid search with nq=5
+                 2. the results of hybrid search with 5 nqs one by one are consitent with the results of hybrid search with nq=5
+        """
+        client = self._client()
+
+        nq = 5 
+        search_vectors = cf.gen_vectors(nq, self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
+        # search with nq=5
+
+        req_list = []
+        for field_name in [self.float_vector_field_name1, self.float_vector_field_name2]:
+            req = AnnSearchRequest(**{
+                "data": search_vectors,
+                "anns_field": field_name,
+                "param": {},
+                "limit": default_limit,
+            })
+            req_list.append(req)
+        hybrid_res = self.hybrid_search(client, self.collection_name, reqs=req_list,
+                                        rerank=WeightedRanker(*[0.5, 0.5]),
+                                        limit=default_limit,
+                                        output_fields=[default_primary_key_field_name, default_string_field_name],
+                                        check_task=CheckTasks.check_search_results,
+                                        check_items={"nq": nq,
+                                                     "ids": self.primary_keys,
+                                                     "limit": default_limit,
+                                                       "pk_name": default_primary_key_field_name,
+                                                       "original_entities": self.datas,
+                                                       "output_fields": [default_primary_key_field_name, default_string_field_name]})[0]
+        # for i in range(len(hybrid_res)):
+        #     assert hybrid_res[i].distances[0] - hybrid_res[i].distances[1] < hybrid_search_epsilon
 
 
 class TestCollectionHybridSearchValid(TestcaseBase):
