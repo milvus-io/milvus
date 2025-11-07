@@ -92,18 +92,7 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 		log.Error("failed to process stats blob", zap.Error(err))
 		return
 	}
-	if deltas, err = bw.writeDelta(ctx, pack,
-		storage.WithVersion(storage.StorageV1),
-		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
-			// Get the only blob in the map
-			if len(kvs) != 1 {
-				return fmt.Errorf("expected 1 blob, got %d", len(kvs))
-			}
-			for k, blob := range kvs {
-				return bw.chunkManager.Write(ctx, k, blob)
-			}
-			return nil
-		})); err != nil {
+	if deltas, err = bw.writeDelta(ctx, pack); err != nil {
 		log.Error("failed to process delta blob", zap.Error(err))
 		return
 	}
@@ -317,7 +306,55 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 	return logs, nil
 }
 
-func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack, options ...storage.RwOption) (*datapb.FieldBinlog, error) {
+func writeDeltaInternal(ctx context.Context, pack *SyncPack, writer storage.RecordWriter, pkField *schemapb.FieldSchema) error {
+	pkType := func() arrow.DataType {
+		switch pkField.DataType {
+		case schemapb.DataType_Int64:
+			return arrow.PrimitiveTypes.Int64
+		case schemapb.DataType_VarChar:
+			return arrow.BinaryTypes.String
+		default:
+			return nil
+		}
+	}()
+	if pkType == nil {
+		return fmt.Errorf("unexpected pk type %v", pkField.DataType)
+	}
+
+	pkBuilder := array.NewBuilder(memory.DefaultAllocator, pkType)
+	tsBuilder := array.NewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+	defer pkBuilder.Release()
+	defer tsBuilder.Release()
+
+	for i := int64(0); i < pack.deltaData.RowCount; i++ {
+		switch pkField.DataType {
+		case schemapb.DataType_Int64:
+			pkBuilder.(*array.Int64Builder).Append(pack.deltaData.Pks[i].GetValue().(int64))
+		case schemapb.DataType_VarChar:
+			pkBuilder.(*array.StringBuilder).Append(pack.deltaData.Pks[i].GetValue().(string))
+		default:
+			return fmt.Errorf("unexpected pk type %v", pkField.DataType)
+		}
+		tsBuilder.(*array.Int64Builder).Append(int64(pack.deltaData.Tss[i]))
+	}
+
+	pkArray := pkBuilder.NewArray()
+	tsArray := tsBuilder.NewArray()
+	record := storage.NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: pkType},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+	}, nil), []arrow.Array{pkArray, tsArray}, pack.deltaData.RowCount), map[storage.FieldID]int{
+		common.RowIDField:     0,
+		common.TimeStampField: 1,
+	})
+	err := writer.Write(record)
+	if err != nil {
+		return err
+	}
+	return writer.Close()
+}
+
+func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*datapb.FieldBinlog, error) {
 	if pack.deltaData == nil {
 		return &datapb.FieldBinlog{}, nil
 	}
@@ -338,57 +375,22 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack, option
 	path := metautil.BuildDeltaLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, logID)
 	writer, err := storage.NewDeltalogWriter(
 		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, path,
-		options...,
+		storage.WithVersion(storage.StorageV1),
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			// Get the only blob in the map
+			if len(kvs) != 1 {
+				return fmt.Errorf("expected 1 blob, got %d", len(kvs))
+			}
+			for k, blob := range kvs {
+				return bw.chunkManager.Write(ctx, k, blob)
+			}
+			return nil
+		}),
 	)
 	if err != nil {
 		return nil, err
 	}
-
-	pkType := func() arrow.DataType {
-		switch pkField.DataType {
-		case schemapb.DataType_Int64:
-			return arrow.PrimitiveTypes.Int64
-		case schemapb.DataType_VarChar:
-			return arrow.BinaryTypes.String
-		default:
-			return nil
-		}
-	}()
-	if pkType == nil {
-		return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
-	}
-
-	pkBuilder := array.NewBuilder(memory.DefaultAllocator, pkType)
-	tsBuilder := array.NewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
-	defer pkBuilder.Release()
-	defer tsBuilder.Release()
-
-	for i := int64(0); i < pack.deltaData.RowCount; i++ {
-		switch pkField.DataType {
-		case schemapb.DataType_Int64:
-			pkBuilder.(*array.Int64Builder).Append(pack.deltaData.Pks[i].GetValue().(int64))
-		case schemapb.DataType_VarChar:
-			pkBuilder.(*array.StringBuilder).Append(pack.deltaData.Pks[i].GetValue().(string))
-		default:
-			return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
-		}
-		tsBuilder.(*array.Int64Builder).Append(int64(pack.deltaData.Tss[i]))
-	}
-
-	pkArray := pkBuilder.NewArray()
-	tsArray := tsBuilder.NewArray()
-	record := storage.NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{
-		{Name: "pk", Type: pkType},
-		{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
-	}, nil), []arrow.Array{pkArray, tsArray}, pack.deltaData.RowCount), map[storage.FieldID]int{
-		common.RowIDField:     0,
-		common.TimeStampField: 1,
-	})
-	err = writer.Write(record)
-	if err != nil {
-		return nil, err
-	}
-	err = writer.Close()
+	err = writeDeltaInternal(ctx, pack, writer, pkField)
 	if err != nil {
 		return nil, err
 	}

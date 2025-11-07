@@ -298,12 +298,18 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			return nil, err
 		}
 		log.Debug("L0 compaction write record success", zap.String("path", path))
+		var childFields []int64 = nil
+		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+			childFields = []int64{0, 1}
+		}
+
 		results = append(results, &datapb.CompactionSegment{
 			SegmentID: segmentID,
 			Channel:   t.plan.GetChannel(),
 			Deltalogs: []*datapb.FieldBinlog{
 				{
-					Binlogs: []*datapb.Binlog{{LogPath: path, LogSize: int64(writer.GetWrittenUncompressed())}},
+					Binlogs:     []*datapb.Binlog{{LogPath: path, LogSize: int64(writer.GetWrittenUncompressed())}},
+					ChildFields: childFields,
 				},
 			},
 			NumOfRows: int64(len(deletes.pks)),
