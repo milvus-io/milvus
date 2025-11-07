@@ -337,9 +337,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
-    virtual std::string
-    debug() const = 0;
-
     int64_t
     get_real_count() const override;
 
@@ -576,11 +573,6 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* seg_offsets,
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
-
-    virtual std::vector<SegOffset>
-    search_pk(milvus::OpContext* op_ctx,
-              const PkType& pk,
-              Timestamp timestamp) const = 0;
 
     virtual void
     pk_range(milvus::OpContext* op_ctx,
