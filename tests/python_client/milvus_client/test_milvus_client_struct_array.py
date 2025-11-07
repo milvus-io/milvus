@@ -1825,6 +1825,115 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         assert len(results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_type", ["HNSW", "DISKANN"])
+    @pytest.mark.xfail(reason="DISKANN is not supported yet https://github.com/milvus-io/milvus/issues/45412")
+    def test_search_struct_array_different_index_types(self, index_type):
+        """
+        target: test search with different index types for struct array subvector fields
+        method: create index with different types (HNSW, DISKANN) and search
+        expected: search works correctly with all supported index types
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_{index_type.lower()}")
+        client = self._client()
+
+        # Create schema
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
+        )
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field(
+            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
+        )
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=50,
+        )
+
+        res, check = self.create_collection(client, collection_name, schema=schema)
+        assert check
+
+        # Insert data
+        data = []
+        for i in range(100):
+            struct_array = [
+                {"clip_embedding1": [random.random() for _ in range(default_dim)]}
+            ]
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+            }
+            data.append(row)
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+
+        # Create index with specified index type
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+
+        # Configure index parameters based on index type
+        if index_type == "HNSW":
+            index_params.add_index(
+                field_name="clips[clip_embedding1]",
+                index_name=f"struct_index_{index_type.lower()}",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params=INDEX_PARAMS,
+            )
+        elif index_type == "DISKANN":
+            index_params.add_index(
+                field_name="clips[clip_embedding1]",
+                index_name=f"struct_index_{index_type.lower()}",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params={},
+            )
+
+        res, check = self.create_index(client, collection_name, index_params)
+        assert check
+
+        # Load collection
+        res, check = self.load_collection(client, collection_name)
+        assert check
+
+        # Search with the index type
+        search_vector = [random.random() for _ in range(default_dim)]
+        search_tensor = EmbeddingList()
+        search_tensor.add(search_vector)
+
+        # Prepare search params based on index type
+        search_params = {"metric_type": "MAX_SIM_COSINE"}
+        if index_type == "DISKANN":
+            # DISKANN requires search_list parameter
+            search_params["params"] = {"search_list": 30}
+
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="clips[clip_embedding1]",
+            search_params=search_params,
+            limit=10,
+        )
+        assert check
+        assert len(results[0]) > 0
+        log.info(
+            f"Search with {index_type} index type returned {len(results[0])} results"
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("retrieval_ann_ratio", [1.0, 3.0, 5.0, 10.0])
     def test_search_with_retrieval_ann_ratio(self, retrieval_ann_ratio):
         """
@@ -2343,6 +2452,138 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index_type", ["HNSW", "DISKANN"])
+    @pytest.mark.xfail(reason="DISKANN is not supported yet https://github.com/milvus-io/milvus/issues/45412")
+    def test_hybrid_search_struct_array_different_index_types(self, index_type):
+        """
+        target: test hybrid search with different index types for struct array subvector fields
+        method: perform hybrid search with different index types (HNSW, DISKANN)
+        expected: hybrid search works correctly with all supported index types
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_hybrid_idx_{index_type.lower()}")
+        client = self._client()
+
+        # Create schema
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(
+            field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100
+        )
+        schema.add_field(
+            field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
+        )
+
+        struct_schema = client.create_struct_field_schema()
+        struct_schema.add_field(
+            "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
+        )
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=50,
+        )
+
+        # Create indexes with specified index type
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="embeddings",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+
+        # Configure index parameters based on index type
+        if index_type == "HNSW":
+            index_params.add_index(
+                field_name="clips[clip_embedding]",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params=INDEX_PARAMS,
+            )
+        elif index_type == "DISKANN":
+            index_params.add_index(
+                field_name="clips[clip_embedding]",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params={},
+            )
+
+        res, check = self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params
+        )
+        assert check
+
+        # Insert data
+        num_entities = 100
+        rng = np.random.default_rng(seed=19530)
+        data = []
+        for i in range(num_entities):
+            clips = [{"clip_embedding": rng.random(default_dim).tolist()}]
+
+            row = {
+                "pk": str(i),
+                "embeddings": rng.random(default_dim).tolist(),
+                "clips": clips,
+            }
+            data.append(row)
+
+        res, check = self.insert(client, collection_name, data)
+        assert check
+
+        # Load collection
+        client.load_collection(collection_name)
+
+        # Prepare hybrid search
+        default_limit = 5
+        req_list = []
+
+        # First search request on normal vector field
+        vectors_to_search = rng.random((1, default_dim)).tolist()
+        req_list.append(
+            AnnSearchRequest(
+                **{
+                    "data": vectors_to_search,
+                    "anns_field": "embeddings",
+                    "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+                    "limit": default_limit,
+                }
+            )
+        )
+
+        # Second search request on struct array vector field
+        search_tensor = EmbeddingList()
+        search_tensor.add(rng.random(default_dim).tolist())
+
+        # Prepare search params based on index type
+        search_param = {"metric_type": "MAX_SIM_COSINE"}
+        if index_type == "DISKANN":
+            # DISKANN requires search_list parameter
+            search_param["params"] = {"search_list": 30}
+
+        req_list.append(
+            AnnSearchRequest(
+                **{
+                    "data": [search_tensor],
+                    "anns_field": "clips[clip_embedding]",
+                    "param": search_param,
+                    "limit": default_limit,
+                }
+            )
+        )
+
+        # Perform hybrid search
+        hybrid_res = client.hybrid_search(
+            collection_name, req_list, RRFRanker(), default_limit
+        )
+
+        assert len(hybrid_res) > 0
+        assert len(hybrid_res[0]) > 0
+        log.info(
+            f"Hybrid search with {index_type} index type returned {len(hybrid_res[0])} results"
+        )
 
 
 class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
