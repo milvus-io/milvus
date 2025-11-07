@@ -11,11 +11,20 @@ use crate::{
 pub extern "C" fn tantivy_match_query(
     ptr: *mut c_void,
     query: *const c_char,
+    min_should_match: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
     let query = cstr_to_str!(query);
-    unsafe { (*real).match_query(query, bitset).into() }
+    if min_should_match > 1 {
+        unsafe {
+            (*real)
+                .match_query_with_minimum(query, min_should_match, bitset)
+                .into()
+        }
+    } else {
+        unsafe { (*real).match_query(query, bitset).into() }
+    }
 }
 
 #[no_mangle]
