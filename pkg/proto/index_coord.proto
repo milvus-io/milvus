@@ -83,6 +83,7 @@ message SegmentIndex {
     uint64 finished_time = 18;
     uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
     int32 current_scalar_index_version = 20;
+    string index_type = 21;
 }
 
 message RegisterNodeRequest {

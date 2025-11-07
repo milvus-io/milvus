@@ -31,9 +31,11 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -164,4 +166,67 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 	inspector.reloadFromMeta()
+}
+
+func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
+	ctx := context.Background()
+	notifyChan := make(chan int64, 1)
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storage := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+
+	meta := &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes:          make(map[UniqueID]map[UniqueID]*model.Index),
+			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 2,
+			PartitionID:  3,
+			NumOfRows:    100,
+			State:        commonpb.SegmentState_Flushed,
+			IsSorted:     true,
+			Level:        datapb.SegmentLevel_L1,
+		},
+	}
+	meta.segments.SetSegment(segment.GetID(), segment)
+
+	meta.indexMeta.indexes[2] = map[UniqueID]*model.Index{
+		5: {
+			CollectionID: 2,
+			FieldID:      101,
+			IndexID:      5,
+			IndexName:    indexName,
+			IndexParams: []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+				{Key: paramtable.OverrideIndexTypeKey, Value: "DISKANN"},
+			},
+		},
+	}
+
+	inspector := newIndexInspector(ctx, notifyChan, meta, scheduler, alloc, handler, storage, versionManager)
+
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(12345), nil)
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
+	scheduler.EXPECT().Enqueue(mock.Anything).Return()
+
+	err := inspector.createIndexForSegment(ctx, segment, 5)
+	assert.NoError(t, err)
+
+	segIndexes := meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	segIdx, ok := segIndexes[5]
+	assert.True(t, ok)
+	assert.Equal(t, "DISKANN", segIdx.IndexType)
 }
