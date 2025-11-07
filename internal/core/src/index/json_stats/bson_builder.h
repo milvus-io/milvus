@@ -28,7 +28,6 @@
 #include <bsoncxx/json.hpp>
 #include <simdjson.h>
 #include <bsoncxx/types.hpp>
-#include <bson/bson.h>
 #include "index/json_stats/utils.h"
 #include "common/EasyAssert.h"
 namespace milvus::index {
