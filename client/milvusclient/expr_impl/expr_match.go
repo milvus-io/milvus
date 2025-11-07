@@ -499,7 +499,7 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 	// Test 1: Min Should Match with text_match filter
 	log.Println("\n--- Test 1: Single BM25 Search with Min Should Match ---")
 	minShouldMatch := "1"
-	textMatchFilter := fmt.Sprintf(`text_match(%s, "%s", "min_should_match=%s")`,
+	textMatchFilter := fmt.Sprintf(`text_match(%s, "%s", minimum_should_match=%s)`,
 		textFieldName, query, minShouldMatch)
 	log.Printf("Filter: %s", textMatchFilter)
 
@@ -511,7 +511,7 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		WithFilter(textMatchFilter).
 		WithOutputFields("id", titleFieldName, textFieldName, qualityFieldName, popularityFieldName))
 	if err != nil {
-		return fmt.Errorf("single search with min_should_match failed: %v", err)
+		return fmt.Errorf("single search with minimum_should_match failed: %v", err)
 	}
 
 	log.Println("Results:")
@@ -535,7 +535,7 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 
 	// Request 2: Search on text sparse vector
 	textSearchRequest := milvusclient.NewAnnRequest(textSparseFieldName, 20, textVector).
-		WithFilter(fmt.Sprintf(`text_match(%s, "%s", "min_should_match=%s")`,
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s", minimum_should_match=%s)`,
 			textFieldName, query, minShouldMatch)).
 		WithSearchParam("metric_type", "BM25")
 
@@ -551,12 +551,47 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		return fmt.Errorf("hybrid search with Weighted reranker failed: %v", err)
 	}
 
-	log.Println("Weighted Fusion Results:")
+	log.Println("Weighted Fusion Results: result count = ", len(hybridSearchResult), " hybridSearchResult[0].ResultCount = ", hybridSearchResult[0].ResultCount, " hybridSearchResult[0].IDs.Len() = ", hybridSearchResult[0].IDs.Len())
 	for _, resultSet := range hybridSearchResult {
 		for i := 0; i < resultSet.ResultCount; i++ {
 			id, _ := resultSet.IDs.Get(i)
-			title, _ := resultSet.GetColumn(titleFieldName).GetAsString(i)
-			text, _ := resultSet.GetColumn(textFieldName).GetAsString(i)
+			log.Printf("  [%d] ID: %v", i+1, id)
+			log.Printf("  [%d] Score: %.4f", i+1, resultSet.Scores[i])
+			// resultSet.Fields.Len() returns number of rows; use len(resultSet.Fields) for column count
+			rows := 0
+			if resultSet.Fields != nil {
+				rows = resultSet.Fields.Len()
+			}
+			cols := len(resultSet.Fields)
+			log.Printf(" rows: %d, columns: %d", rows, cols)
+
+			// Safely enumerate available fields to help debug nil-pointer issues
+			availableFields := []string{}
+			for fi := 0; fi < cols; fi++ {
+				f := resultSet.Fields[fi]
+				if f == nil {
+					availableFields = append(availableFields, fmt.Sprintf("[%d]=<nil>", fi))
+					continue
+				}
+				availableFields = append(availableFields, f.Name())
+			}
+			log.Printf(" available fields: %v", availableFields)
+
+			// Guard GetColumn usage to avoid nil deref
+			var title, text string
+			titleCol := resultSet.GetColumn(titleFieldName)
+			if titleCol == nil {
+				log.Printf("WARN: GetColumn(%s) returned nil; available=%v", titleFieldName, availableFields)
+			} else {
+				title, _ = titleCol.GetAsString(i)
+			}
+
+			textCol := resultSet.GetColumn(textFieldName)
+			if textCol == nil {
+				log.Printf("WARN: GetColumn(%s) returned nil; available=%v", textFieldName, availableFields)
+			} else {
+				text, _ = textCol.GetAsString(i)
+			}
 			score := resultSet.Scores[i]
 			log.Printf("  [%d] ID: %v, Weighted Score: %.4f", i+1, id, score)
 			log.Printf("      Title: %s", title)
@@ -605,8 +640,8 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		}
 	}
 
-	// Test 4: Complex scenario - Weighted with three BM25 searches + expr reranker
-	log.Println("\n--- Test 4: Weighted with Three BM25 Searches + Complex Expression Reranker ---")
+	// Test 4: Complex scenario - Weighted with three BM25 searches + expr reranker + boost ranker
+	log.Println("\n--- Test 4: Weighted with Three BM25 Searches + Complex Expression Reranker + Boost Ranker ---")
 
 	now := time.Now().UnixMilli()
 
@@ -616,9 +651,9 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		WithFilter(fmt.Sprintf(`text_match(%s, "%s")`, titleFieldName, query)).
 		WithSearchParam("metric_type", "BM25")
 
-	// Search 2: Text search with min_should_match (medium weight)
+	// Search 2: Text search with minimum_should_match (medium weight)
 	standardTextSearch := milvusclient.NewAnnRequest(textSparseFieldName, 15, textVector).
-		WithFilter(fmt.Sprintf(`text_match(%s, "%s", "min_should_match=2")`,
+		WithFilter(fmt.Sprintf(`text_match(%s, "%s", minimum_should_match=2)`,
 			textFieldName, query)).
 		WithSearchParam("metric_type", "BM25")
 
@@ -650,17 +685,27 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		WithParam("reranker", "expr").
 		WithParam("expr_code", complexExprCode)
 
-	log.Println("Executing Complex Hybrid Search with 3 searches...")
+	// Boost Ranker for featured category items
+	// This will boost documents with category="featured" by 1.5x
+	boostReranker := entity.NewFunction().
+		WithName("category_boost_reranker").
+		WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("filter", "category == \"featured\"").
+		WithParam("weight", "1.5")
+
+	log.Println("Executing Complex Hybrid Search with 3 searches + Boost Ranker...")
 	complexResult, err := client.HybridSearch(ctx,
 		milvusclient.NewHybridSearchOption(collectionName, 8, priorityTitleSearch, standardTextSearch, exactTitleSearch).
 			WithFunctionRerankers(tripleWeightedFunction).
 			WithFunctionRerankers(complexExprReranker).
+			WithFunctionRerankers(boostReranker).
 			WithOutputFields("id", titleFieldName, createdAtFieldName, qualityFieldName, popularityFieldName, categoryFieldName))
 	if err != nil {
 		return fmt.Errorf("complex hybrid search failed: %v", err)
 	}
 
-	log.Println("Complex Multi-factor Reranked Results (Weighted + Expression):")
+	log.Println("Complex Multi-factor Reranked Results (Weighted + Expression + Boost):")
 	for _, resultSet := range complexResult {
 		for i := 0; i < resultSet.ResultCount; i++ {
 			id, _ := resultSet.IDs.Get(i)

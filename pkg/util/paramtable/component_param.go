@@ -1279,7 +1279,7 @@ This helps Milvus-CDC synchronize incremental data`,
 	p.HybridSearchRequeryPolicy = ParamItem{
 		Key:          "common.requery.hybridSearchPolicy",
 		Version:      "2.6.3",
-		DefaultValue: "OutputVector",
+		DefaultValue: "outputfields",
 		Doc:          `the policy to decide when to do requery in hybrid search, support "always", "outputvector" and "outputfields"`,
 		Export:       false,
 	}
