@@ -39,6 +39,17 @@ class TraverseJsonForBuildStatsAccessor {
     }
 };
 
+// Friend accessor declared in JsonKeyStats to invoke private method for UT
+class CollectSingleJsonStatsInfoAccessor {
+ public:
+    static void
+    Call(JsonKeyStats& s,
+         const char* json,
+         std::map<JsonKey, milvus::index::KeyStatsInfo>& infos) {
+        s.CollectSingleJsonStatsInfo(json, infos);
+    }
+};
+
 namespace {
 
 // Helper to tokenize JSON using jsmn
@@ -119,4 +130,22 @@ TEST(TraverseJsonForBuildStatsTest,
                JSONType::STRING,
                "https://api.github.com/repos/gegangene/scheduler");
     expect_has("/msg", JSONType::STRING, "line1\nline2\t中文 / backslash \\");
+}
+
+TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
+    const char* json = "";
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = "/tmp/test-collect-single-json-stats-info";
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
+    EXPECT_NO_THROW(
+        { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
 }
