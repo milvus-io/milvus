@@ -101,7 +101,13 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
 		limit = int64(hitNum)
-		ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit)
+		// Find the first non-empty FieldsData as template
+		for _, result := range subSearchResultData {
+			if len(result.GetFieldsData()) > 0 {
+				ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+				break
+			}
+		}
 	}
 
 	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
@@ -193,7 +199,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
+			FieldsData: []*schemapb.FieldData{},
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -209,6 +215,14 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
+	}
+
+	// Find the first non-empty FieldsData as template
+	for _, result := range subSearchResultData {
+		if len(result.GetFieldsData()) > 0 {
+			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+			break
+		}
 	}
 
 	var (
@@ -289,7 +303,9 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			groupEntities := groupByValMap[groupVal]
 			for _, groupEntity := range groupEntities {
 				subResData := subSearchResultData[groupEntity.subSearchIdx]
-				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+				if len(ret.Results.FieldsData) > 0 {
+					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+				}
 				typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 				ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
 				gpFieldBuilder.Add(groupVal)
@@ -336,7 +352,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		Results: &schemapb.SearchResultData{
 			NumQueries: nq,
 			TopK:       topk,
-			FieldsData: typeutil.PrepareResultFieldData(subSearchResultData[0].GetFieldsData(), limit),
+			FieldsData: []*schemapb.FieldData{},
 			Scores:     []float32{},
 			Ids:        &schemapb.IDs{},
 			Topks:      []int64{},
@@ -352,6 +368,14 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		return ret, err
 	} else {
 		ret.GetResults().AllSearchCount = allSearchCount
+	}
+
+	// Find the first non-empty FieldsData as template
+	for _, result := range subSearchResultData {
+		if len(result.GetFieldsData()) > 0 {
+			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+			break
+		}
 	}
 
 	subSearchNum := len(subSearchResultData)
@@ -407,7 +431,9 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				}
 				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
-				retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				if len(ret.Results.FieldsData) > 0 {
+					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+				}
 				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				cursors[subSearchIdx]++
