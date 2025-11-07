@@ -159,6 +159,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     auto is_pk = field_id == schema_->get_primary_field_id();
 
+    LOG_INFO("LoadScalarIndex, fieldID:{}. segmentID:{}, is_pk:{}",
+             info.field_id,
+             id_,
+             is_pk);
     // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
     if (is_pk && is_sorted_by_pk_) {
         LOG_INFO(
@@ -231,6 +235,11 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         // need the pk field again.
         fields_.rlock()->at(field_id)->ManualEvictCache();
     }
+    LOG_INFO(
+        "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
+        info.field_id,
+        id_,
+        request.has_raw_data);
 }
 
 void
@@ -2581,19 +2590,23 @@ ChunkedSegmentSealedImpl::FinishLoad() {
     std::unique_lock lck(mutex_);
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
+            // no filling system fields
             continue;
         }
-        // cannot use is_field_exist, since it check schema only
-        // this shall check the ready bitset here
-        if (!get_bit(field_data_ready_bitset_, field_id) &&
-            !get_bit(index_ready_bitset_, field_id)) {
-            // vector field is not supported to be "added field", thus if a vector
-            // field is absent, it means for some reason we want to skip loading this
-            // field.
-            if (!IsVectorDataType(field_meta.get_data_type())) {
-                fill_empty_field(field_meta);
-            }
+        if (get_bit(field_data_ready_bitset_, field_id)) {
+            // no filling fields that data already loaded
+            continue;
         }
+        if (get_bit(index_ready_bitset_, field_id) &&
+            (index_has_raw_data_[field_id])) {
+            // no filling fields that index already loaded and has raw data
+            continue;
+        }
+        if (IsVectorDataType(field_meta.get_data_type())) {
+            // no filling vector fields
+            continue;
+        }
+        fill_empty_field(field_meta);
     }
 }
 
