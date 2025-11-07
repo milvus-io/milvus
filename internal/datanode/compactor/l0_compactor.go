@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -198,7 +199,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 	allDelta map[any]typeutil.Timestamp,
 	segmentBfs map[int64]*pkoracle.BloomFilterSet,
 ) ([]*datapb.CompactionSegment, error) {
-	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
+	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitAndWrite")
 	defer span.End()
 
 	allSeg := lo.Associate(t.plan.GetSegmentBinlogs(),
@@ -265,19 +266,8 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			return nil, err
 		}
 
-		path, err := binlog.BuildLogPathWithRootPath(
-			t.compactionParams.StorageConfig.GetRootPath(),
-			storage.DeleteBinlog,
-			segment.GetCollectionID(),
-			segment.GetPartitionID(),
-			segment.GetSegmentID(),
-			-1,
-			logID,
-		)
-		if err != nil {
-			log.Warn("L0 compaction build log path fail", zap.Int64("segmentID", segmentID), zap.Error(err))
-			return nil, err
-		}
+		path := metautil.BuildDeltaLogPath(
+			t.compactionParams.StorageConfig.GetRootPath(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(), logID)
 
 		writer, err := storage.NewDeltalogWriter(ctx,
 			segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(),
@@ -307,7 +297,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			log.Warn("L0 compaction close writer fail", zap.Int64("segmentID", segmentID), zap.Error(err))
 			return nil, err
 		}
-
+		log.Debug("L0 compaction write record success", zap.String("path", path))
 		results = append(results, &datapb.CompactionSegment{
 			SegmentID: segmentID,
 			Channel:   t.plan.GetChannel(),

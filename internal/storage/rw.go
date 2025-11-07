@@ -391,8 +391,6 @@ func NewDeltalogWriter(
 			},
 		}
 		bucketName := rwOptions.storageConfig.BucketName
-		// add extension to the path
-		path = path + ".parquet"
 		return NewPackedRecordWriter(bucketName, []string{path}, schema,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize,
 			[]storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1}, Fields: []int64{0, common.TimeStampField}}},
