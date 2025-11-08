@@ -265,6 +265,16 @@ All existing load/release/search/query test cases passes.
 - Worker delete failed test cases
 - Worker offline test cases
 
+### Lexical search: `minimum_should_match` support
+
+We recently added support for the `minimum_should_match` parameter on lexical `text_match` filters. Implementation notes:
+
+- Evaluation point: `minimum_should_match` is applied by the lexical/text-match component when producing candidate sets; it reduces the set of document IDs passed into ANN/reranking stages.
+- Scope: this parameter applies only to BM25/lexical `text_match` (indexed text). Percentage values are NOT supported — only integer counts are accepted.
+- Rationale: enforcing a minimum number of matching terms at the lexical layer reduces downstream reranker load and can improve precision for keyword-heavy queries.
+- Tradeoffs: stricter minimums reduce recall and may surface fewer candidates for dense/vector rerankers. Choose defaults conservatively and test on representative datasets.
+- Performance: evaluation is done on inverted/indexed text structures (BM25), so cost scales with number of expanded terms and posting list sizes.
+
 ## References
 
 None

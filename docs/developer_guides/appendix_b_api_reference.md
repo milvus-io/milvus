@@ -760,6 +760,46 @@ message InsertResponse {
 
 #### 3.3 Query
 
+###### 3.3.X Lexical `text_match` filter
+
+**Description:**
+
+`text_match` is a lexical matching helper that can be used inside filter expressions to run indexed/BM25-style matching on `varchar`/text fields. It is commonly used to constrain or boost candidate sets in searches and hybrid searches.
+
+**Syntax (filter expression):**
+
+```
+text_match(field_name, "query string", minimum_should_match=<int>)
+```
+
+**Parameters:**
+
+- `field_name` (string): the name of the textual field to match against.
+- `query string` (string): the whitespace-separated textual query.
+- `minimum_should_match` (optional): integer (e.g. `2`). When provided, it requires at least this many matching terms from the `query string` to consider a document a match. If omitted, default `text_match` semantics apply.
+
+**Semantics & notes:**
+
+- `minimum_should_match` is evaluated by the lexical/text-match component and acts as a candidate filter — documents that do not meet the minimum are excluded before later ranking/reranking stages.
+- Supported types: integer counts only. Percentage values are NOT supported.
+- Scope: `minimum_should_match` is applicable only to lexical/BM25-style `text_match` (indexed text) and does not affect vector/ANN scoring.
+- Can be used inside boolean filter expressions (e.g. `text_match(title, "foo bar", minimum_should_match=1) OR text_match(body, "foo bar baz", minimum_should_match=2)`).
+
+**Examples:**
+
+1) Simple filter requiring at least one matching term:
+
+```
+filter = text_match(document_text, "artificial intelligence machine learning", minimum_should_match=1)
+```
+
+2) Combined boolean filters:
+
+```
+text_match(title, "semantic search", minimum_should_match=1) OR text_match(description, "semantic search", minimum_should_match=2)
+```
+
+
 #### 3.3 Index
 
 ###### 3.3.1 CreateIndex
