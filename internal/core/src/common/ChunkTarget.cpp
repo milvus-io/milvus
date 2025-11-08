@@ -27,9 +27,9 @@ MemChunkTarget::write(const void* data, size_t size) {
     size_ += size;
 }
 
-std::tuple<char*, size_t, std::string>
+char*
 MemChunkTarget::release() {
-    return {data_, cap_, ""};
+    return data_;
 }
 
 size_t
@@ -53,7 +53,7 @@ MmapChunkTarget::write(const void* data, size_t size) {
     size_ += size;
 }
 
-std::tuple<char*, size_t, std::string>
+char*
 MmapChunkTarget::release() {
     flush();
 
@@ -64,7 +64,7 @@ MmapChunkTarget::release() {
                "failed to map: {}, map_size={}",
                strerror(errno),
                cap_);
-    return {static_cast<char*>(m), cap_, file_path_};
+    return static_cast<char*>(m);
 }
 
 size_t

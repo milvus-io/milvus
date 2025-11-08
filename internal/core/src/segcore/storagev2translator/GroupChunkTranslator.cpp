@@ -296,6 +296,12 @@ GroupChunkTranslator::load_group_chunk(
     // Create chunks for each field in this batch
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     // Iterate through field_id_list to get field_id and create chunk
+    std::vector<FieldId> field_ids;
+    std::vector<FieldMeta> field_metas;
+    std::vector<arrow::ArrayVector> array_vecs;
+    field_metas.reserve(table->schema()->num_fields());
+    array_vecs.reserve(table->schema()->num_fields());
+
     for (int i = 0; i < table->schema()->num_fields(); ++i) {
         AssertInfo(table->schema()->field(i)->metadata()->Contains(
                        milvus_storage::ARROW_FIELD_ID_KEY),
@@ -322,41 +328,19 @@ GroupChunkTranslator::load_group_chunk(
             fid.get());
         const auto& field_meta = it->second;
         const arrow::ArrayVector& array_vec = table->column(i)->chunks();
-        std::unique_ptr<Chunk> chunk;
-        if (!use_mmap_) {
-            // Memory mode
-            chunk = create_chunk(field_meta, array_vec);
-        } else {
-            // Mmap mode
-            std::filesystem::path filepath;
-            if (field_meta.get_main_field_id() != INVALID_FIELD_ID) {
-                // json shredding mode
-                filepath =
-                    std::filesystem::path(column_group_info_.mmap_dir_path) /
-                    std::to_string(segment_id_) /
-                    std::to_string(field_meta.get_main_field_id()) /
-                    std::to_string(field_id) / std::to_string(cid);
-            } else {
-                filepath =
-                    std::filesystem::path(column_group_info_.mmap_dir_path) /
-                    std::to_string(segment_id_) / std::to_string(field_id) /
-                    std::to_string(cid);
-            }
+        field_ids.push_back(fid);
+        field_metas.push_back(field_meta);
+        array_vecs.push_back(array_vec);
+    }
 
-            LOG_INFO(
-                "[StorageV2] translator {} mmaping field {} chunk {} to path "
-                "{}",
-                key_,
-                field_id,
-                cid,
-                filepath.string());
-
-            std::filesystem::create_directories(filepath.parent_path());
-
-            chunk = create_chunk(field_meta, array_vec, filepath.string());
-        }
-
-        chunks[fid] = std::move(chunk);
+    if (!use_mmap_) {
+        chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+    } else {
+        std::filesystem::path filepath;
+        filepath = std::filesystem::path(column_group_info_.mmap_dir_path) /
+                   fmt::format("seg_{}_cg_{}_cid_{}", segment_id_, column_group_info_.field_id, cid);
+        std::filesystem::create_directories(filepath.parent_path());
+        chunks = create_group_chunk(field_ids, field_metas, array_vecs, filepath.string());
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
