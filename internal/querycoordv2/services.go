@@ -265,7 +265,6 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID())
 	logger.Info("release collection done")
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -352,12 +351,6 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		logger.Warn("failed to release partitions", zap.Error(err))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
-	}
-	if collectionReleased {
-		job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID())
-	} else {
-		job.WaitCurrentTargetUpdated(ctx, s.targetObserver, req.GetCollectionID())
-		job.WaitCollectionReleased(s.dist, s.checkerController, req.GetCollectionID(), req.GetPartitionIDs()...)
 	}
 	logger.Info("release partitions done", zap.Bool("collectionReleased", collectionReleased))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
