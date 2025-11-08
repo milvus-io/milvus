@@ -28,6 +28,7 @@ namespace milvus {
 
 std::pair<size_t, size_t>
 StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    row_nums_ = 0;
     size_t size = 0;
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
@@ -38,13 +39,11 @@ StringChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
             auto str = array->GetView(i);
             size += str.size();
         }
-        if (nullable_) {
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            size += null_bitmap_n;
-        }
         row_nums_ += array->length();
     }
-
+    if (nullable_) {
+        size += (row_nums_ + 7) / 8;
+    }
     size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
     return {size, row_nums_};
 }
@@ -74,7 +73,7 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 
     // write data
     int offset_num = row_nums_ + 1;
-    uint32_t offset_start_pos = target->tell() + sizeof(uint32_t) * offset_num;
+    uint32_t offset_start_pos = sizeof(uint32_t) * offset_num;
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
     for (const auto& str : strs) {
@@ -96,6 +95,7 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 
 std::pair<size_t, size_t>
 JSONChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    row_nums_ = 0;
     size_t size = 0;
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
@@ -104,13 +104,11 @@ JSONChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
             auto json = Json(simdjson::padded_string(str));
             size += json.data().size();
         }
-        if (nullable_) {
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            size += null_bitmap_n;
-        }
         row_nums_ += array->length();
     }
-
+    if (nullable_) {
+        size += (row_nums_ + 7) / 8;
+    }
     size += sizeof(uint32_t) * (row_nums_ + 1) + simdjson::SIMDJSON_PADDING;
 
     return {size, row_nums_};
@@ -140,7 +138,7 @@ JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
     write_null_bit_maps(null_bitmaps, target);
 
     int offset_num = row_nums_ + 1;
-    uint32_t offset_start_pos = target->tell() + sizeof(uint32_t) * offset_num;
+    uint32_t offset_start_pos = sizeof(uint32_t) * offset_num;
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
     for (const auto& json : jsons) {
@@ -170,12 +168,11 @@ GeometryChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
             auto str = array->GetView(i);
             size += str.size();
         }
-        if (nullable_) {
-            size += (data->length() + 7) / 8;
-        }
         row_nums_ += array->length();
     }
-
+    if (nullable_) {
+        size += (row_nums_ + 7) / 8;
+    }
     size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_GEOMETRY_PADDING;
     return {size, row_nums_};
 }
@@ -205,7 +202,7 @@ GeometryChunkWriter::write_to_target(
 
     const int offset_num = row_nums_ + 1;
     uint32_t offset_start_pos =
-        static_cast<uint32_t>(target->tell() + sizeof(uint32_t) * offset_num);
+        static_cast<uint32_t>(sizeof(uint32_t) * offset_num);
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
     for (const auto& str : wkb_strs) {
@@ -226,6 +223,7 @@ GeometryChunkWriter::write_to_target(
 
 std::pair<size_t, size_t>
 ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
+    row_nums_ = 0;
     size_t size = 0;
     const bool is_string = IsStringDataType(element_type_);
 
@@ -242,12 +240,11 @@ ArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
             }
         }
 
-        if (nullable_) {
-            size += (data->length() + 7) / 8;
-        }
         row_nums_ += array->length();
     }
-
+    if (nullable_) {
+        size += (row_nums_ + 7) / 8;
+    }
     size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
     return {size, row_nums_};
 }
@@ -278,8 +275,7 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 
     const int offsets_num = row_nums_ + 1;
     const int len_num = row_nums_;
-    uint32_t offset_start_pos =
-        target->tell() + sizeof(uint32_t) * (offsets_num + len_num);
+    uint32_t offset_start_pos = sizeof(uint32_t) * (offsets_num + len_num);
 
     std::vector<uint32_t> offsets(offsets_num);
     std::vector<uint32_t> lens(len_num);
@@ -362,8 +358,7 @@ VectorArrayChunkWriter::write_to_target(
     std::vector<const uint8_t*> vector_data_ptrs;
     std::vector<size_t> data_sizes;
 
-    uint32_t current_offset =
-        sizeof(uint32_t) * (row_nums_ * 2 + 1) + target->tell();
+    uint32_t current_offset = sizeof(uint32_t) * (row_nums_ * 2 + 1);
 
     for (const auto& array_data : array_vec) {
         auto list_array =
@@ -423,12 +418,12 @@ SparseFloatVectorChunkWriter::calculate_size(
             auto str = array->GetView(i);
             size += str.size();
         }
-        if (nullable_) {
-            size += (data->length() + 7) / 8;
-        }
         row_nums_ += array->length();
     }
 
+    if (nullable_) {
+        size += (row_nums_ + 7) / 8;
+    }
     size += sizeof(uint64_t) * (row_nums_ + 1);
     return {size, row_nums_};
 }
@@ -456,7 +451,7 @@ SparseFloatVectorChunkWriter::write_to_target(
     write_null_bit_maps(null_bitmaps, target);
 
     const int offset_num = row_nums_ + 1;
-    uint64_t offset_start_pos = target->tell() + sizeof(uint64_t) * offset_num;
+    uint64_t offset_start_pos = sizeof(uint64_t) * offset_num;
     std::vector<uint64_t> offsets;
     offsets.reserve(offset_num);
 
@@ -549,14 +544,15 @@ create_chunk_writer(const FieldMeta& field_meta) {
 
 static inline std::unique_ptr<Chunk>
 make_chunk(const FieldMeta& field_meta,
-           const std::shared_ptr<ChunkTarget>& target,
-           size_t row_nums) {
+           size_t row_nums,
+           char* data,
+           size_t size,
+           const std::string& file_path) {
     int dim = IsVectorDataType(field_meta.get_data_type()) &&
                       !IsSparseFloatVectorDataType(field_meta.get_data_type())
                   ? field_meta.get_dim()
                   : 1;
     bool nullable = field_meta.is_nullable();
-    auto [data, size, file_path] = target->release();
     auto mmap_file_raii =
         file_path.empty() ? nullptr : std::make_unique<MmapFileRAII>(file_path);
     switch (field_meta.get_data_type()) {
@@ -700,17 +696,6 @@ make_chunk(const FieldMeta& field_meta,
 }
 
 std::unique_ptr<Chunk>
-create_chunk(const FieldMeta& field_meta, const arrow::ArrayVector& array_vec) {
-    auto cw = create_chunk_writer(field_meta);
-    auto [size, row_nums] = cw->calculate_size(array_vec);
-    size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
-                          ~(ChunkTarget::ALIGNED_SIZE - 1);
-    auto target = std::make_shared<MemChunkTarget>(aligned_size);
-    cw->write_to_target(array_vec, target);
-    return make_chunk(field_meta, target, row_nums);
-}
-
-std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
              const std::string& file_path) {
@@ -718,9 +703,99 @@ create_chunk(const FieldMeta& field_meta,
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
                           ~(ChunkTarget::ALIGNED_SIZE - 1);
-    auto target = std::make_shared<MmapChunkTarget>(file_path, aligned_size);
+    std::shared_ptr<ChunkTarget> target;
+    if (file_path.empty()) {
+        target = std::make_shared<MemChunkTarget>(aligned_size);
+    } else {
+        target = std::make_shared<MmapChunkTarget>(file_path, aligned_size);
+    }
     cw->write_to_target(array_vec, target);
-    return make_chunk(field_meta, target, row_nums);
+    auto data = target->release();
+    return make_chunk(field_meta, row_nums, data, size, file_path);
+}
+
+std::unordered_map<FieldId, std::shared_ptr<Chunk>>
+create_group_chunk(const std::vector<FieldId>& field_ids,
+                   const std::vector<FieldMeta>& field_metas,
+                   const std::vector<arrow::ArrayVector>& array_vec,
+                   const std::string& file_path) {
+    std::vector<std::shared_ptr<ChunkWriterBase>> cws;
+    cws.reserve(field_ids.size());
+    size_t total_aligned_size = 0, final_row_nums = 0;
+    for (size_t i = 0; i < field_ids.size(); i++) {
+        auto field_meta = field_metas[i];
+        cws.push_back(create_chunk_writer(field_meta));
+    }
+    std::vector<size_t> chunk_sizes;
+    chunk_sizes.reserve(field_ids.size());
+    std::vector<size_t> chunk_offsets;
+    chunk_offsets.reserve(field_ids.size());
+    for (size_t i = 0; i < field_ids.size(); i++) {
+        auto [size, row_nums] = cws[i]->calculate_size(array_vec[i]);
+        // Allocate and place each sub-chunk at an aligned boundary,
+        // but keep the raw (unaligned) size for chunk construction.
+        auto aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
+                            ~(ChunkTarget::ALIGNED_SIZE - 1);
+        // store raw size for make_chunk()
+        chunk_sizes.push_back(size);
+        chunk_offsets.push_back(total_aligned_size);
+        total_aligned_size += aligned_size;
+        // each column should have the same number of rows
+        if (i == 0) {
+            final_row_nums = row_nums;
+        } else {
+            if (row_nums != final_row_nums) {
+                ThrowInfo(DataTypeInvalid,
+                          "All columns should have the same number of rows");
+            }
+        }
+    }
+    std::shared_ptr<ChunkTarget> target;
+    if (file_path.empty()) {
+        target = std::make_shared<MemChunkTarget>(total_aligned_size);
+    } else {
+        target =
+            std::make_shared<MmapChunkTarget>(file_path, total_aligned_size);
+    }
+    for (size_t i = 0; i < field_ids.size(); i++) {
+        auto start_off = target->tell();
+        cws[i]->write_to_target(array_vec[i], target);
+        auto end_off = target->tell();
+        auto written = static_cast<size_t>(end_off - start_off);
+        if (written != chunk_sizes[i]) {
+            ThrowInfo(DataTypeInvalid,
+                      "The written size {} of field {} does not match the expected size {}",
+                      written, field_ids[i].get(), chunk_sizes[i]);
+        }
+        auto aligned_size = (written + ChunkTarget::ALIGNED_SIZE - 1) &
+                            ~(ChunkTarget::ALIGNED_SIZE - 1);
+        auto padding_size = aligned_size - written;
+        if (padding_size > 0) {
+            std::string padding(padding_size, 0);
+            target->write(padding.data(), padding_size);
+        }
+    }
+
+    auto data = target->release();
+
+    std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
+    for (size_t i = 0; i < field_ids.size(); i++) {
+        chunks[field_ids[i]] = std::move(make_chunk(field_metas[i],
+                                                    final_row_nums,
+                                                    data + chunk_offsets[i],
+                                                    chunk_sizes[i],
+                                                    file_path));
+        LOG_INFO(
+            "created chunk for field {} with chunk offset: {}, chunk "
+            "size: {}, file path: {}",
+            field_ids[i].get(),
+            chunk_sizes[i],
+            chunk_offsets[i],
+            chunk_sizes[i],
+            file_path);
+    }
+
+    return chunks;
 }
 
 arrow::ArrayVector

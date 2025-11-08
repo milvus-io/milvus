@@ -28,7 +28,7 @@ class ChunkTarget {
     virtual void
     write(const void* data, size_t size) = 0;
 
-    virtual std::tuple<char*, size_t, std::string>
+    virtual char*
     release() = 0;
 
     virtual ~ChunkTarget() = default;
@@ -47,7 +47,7 @@ class MmapChunkTarget : public ChunkTarget {
     void
     write(const void* data, size_t size) override;
 
-    std::tuple<char*, size_t, std::string>
+    char*
     release() override;
 
     size_t
@@ -82,7 +82,7 @@ class MemChunkTarget : public ChunkTarget {
     void
     write(const void* data, size_t size) override;
 
-    std::tuple<char*, size_t, std::string>
+    char*
     release() override;
 
     size_t

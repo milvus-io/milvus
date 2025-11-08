@@ -91,11 +91,10 @@ class ChunkWriter final : public ChunkWriterBase {
         for (const auto& data : array_vec) {
             row_nums += data->length();
             auto array = std::static_pointer_cast<ArrowType>(data);
-            if (nullable_) {
-                auto null_bitmap_n = (data->length() + 7) / 8;
-                size += null_bitmap_n;
-            }
             size += array->length() * dim_ * sizeof(T);
+        }
+        if (nullable_) {
+            size += (row_nums + 7) / 8;
         }
         row_nums_ = row_nums;
         return {size, row_nums};
@@ -164,9 +163,9 @@ class StringChunkWriter : public ChunkWriterBase {
 
     void
     write_to_target(const arrow::ArrayVector& array_vec,
-          const std::shared_ptr<ChunkTarget>& target) override;
+                    const std::shared_ptr<ChunkTarget>& target) override;
 
-private:
+ private:
     std::vector<std::string_view> strs_;
 };
 
@@ -179,7 +178,7 @@ class JSONChunkWriter : public ChunkWriterBase {
 
     void
     write_to_target(const arrow::ArrayVector& array_vec,
-          const std::shared_ptr<ChunkTarget>& target) override;
+                    const std::shared_ptr<ChunkTarget>& target) override;
 };
 
 class GeometryChunkWriter : public ChunkWriterBase {
@@ -191,7 +190,7 @@ class GeometryChunkWriter : public ChunkWriterBase {
 
     void
     write_to_target(const arrow::ArrayVector& array_vec,
-          const std::shared_ptr<ChunkTarget>& target) override;
+                    const std::shared_ptr<ChunkTarget>& target) override;
 };
 
 class ArrayChunkWriter : public ChunkWriterBase {
@@ -205,7 +204,7 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
     void
     write_to_target(const arrow::ArrayVector& array_vec,
-          const std::shared_ptr<ChunkTarget>& target) override;
+                    const std::shared_ptr<ChunkTarget>& target) override;
 
  private:
     const milvus::DataType element_type_;
@@ -213,11 +212,8 @@ class ArrayChunkWriter : public ChunkWriterBase {
 
 class VectorArrayChunkWriter : public ChunkWriterBase {
  public:
-    VectorArrayChunkWriter(int64_t dim,
-                           const milvus::DataType element_type)
-        : ChunkWriterBase(false),
-          element_type_(element_type),
-          dim_(dim) {
+    VectorArrayChunkWriter(int64_t dim, const milvus::DataType element_type)
+        : ChunkWriterBase(false), element_type_(element_type), dim_(dim) {
     }
 
     std::pair<size_t, size_t>
@@ -225,7 +221,7 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
 
     void
     write_to_target(const arrow::ArrayVector& array_vec,
-          const std::shared_ptr<ChunkTarget>& target) override;
+                    const std::shared_ptr<ChunkTarget>& target) override;
 
  private:
     const milvus::DataType element_type_;
@@ -241,16 +237,19 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
 
     void
     write_to_target(const arrow::ArrayVector& array_vec,
-          const std::shared_ptr<ChunkTarget>& target) override;
+                    const std::shared_ptr<ChunkTarget>& target) override;
 };
-
-std::unique_ptr<Chunk>
-create_chunk(const FieldMeta& field_meta, const arrow::ArrayVector& array_vec);
 
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
-             const std::string& file_path);
+             const std::string& file_path = "");
+
+std::unordered_map<FieldId, std::shared_ptr<Chunk>>
+create_group_chunk(const std::vector<FieldId>& field_ids,
+                   const std::vector<FieldMeta>& field_metas,
+                   const std::vector<arrow::ArrayVector>& array_vec,
+                   const std::string& file_path = "");
 
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);
