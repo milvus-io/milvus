@@ -957,7 +957,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 			dbChanged = true
 		}
 	}
-	newColl.UpdateTimestamp = result.GetControlChannelResult().TimeTick
+	newColl.UpdateTimestamp = result.GetMaxTimeTick()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if !dbChanged {
