@@ -80,7 +80,7 @@ docker run -d ^
     --health-start-period=90s ^
     --health-timeout=20s ^
     --health-retries=3 ^
-    milvusdb/milvus:v2.6.4 ^
+    milvusdb/milvus:v2.6.5 ^
     milvus run standalone >nul
 if %errorlevel% neq 0 (
     echo Failed to start Milvus container.
