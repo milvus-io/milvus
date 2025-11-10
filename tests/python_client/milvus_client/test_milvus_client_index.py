@@ -851,7 +851,7 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
             supported_field_type = "varchar"
             got_json_suffix = ""
         if not_supported_varchar_scalar_index == "STL_SORT":
-            supported_field_type = "numeric or varchar"
+            supported_field_type = "numeric, varchar or timestamptz"
             got_json_suffix = ", got JSON"
         if not_supported_varchar_scalar_index == "BITMAP":
             supported_field_type = "bool, int, string and array"

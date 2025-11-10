@@ -164,7 +164,7 @@ TEST(TextMatch, Index) {
     index->Reload();
 
     {
-        auto res = index->MatchQuery("football");
+        auto res = index->MatchQuery("football", 1);
         ASSERT_EQ(res.size(), 3);
         ASSERT_TRUE(res[0]);
         ASSERT_FALSE(res[1]);
@@ -177,11 +177,16 @@ TEST(TextMatch, Index) {
         ASSERT_TRUE(res2[0]);
         ASSERT_FALSE(res2[1]);
         ASSERT_TRUE(res2[2]);
-        res = index->MatchQuery("nothing");
+        res = index->MatchQuery("nothing", 1);
         ASSERT_EQ(res.size(), 3);
         ASSERT_FALSE(res[0]);
         ASSERT_FALSE(res[1]);
         ASSERT_FALSE(res[2]);
+        auto res3 = index->MatchQuery("football pingpang cricket", 2);
+        ASSERT_EQ(res3.size(), 3);
+        ASSERT_TRUE(res3[0]);
+        ASSERT_FALSE(res3[1]);
+        ASSERT_FALSE(res3[2]);
     }
 
     {

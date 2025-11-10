@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -211,6 +212,14 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
 	if err != nil {
+		if errors.Is(err, errIndexOperationIgnored) {
+			log.Info("index already exists",
+				zap.Int64("collectionID", req.GetCollectionID()),
+				zap.Int64("fieldID", req.GetFieldID()),
+				zap.String("indexName", req.GetIndexName()))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+			return merr.Success(), nil
+		}
 		log.Error("Check CanCreateIndex fail", zap.Error(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil

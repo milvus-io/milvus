@@ -3,6 +3,9 @@ package broadcast
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -29,6 +32,13 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 	broadcaster, err := singleton.GetWithContext(ctx)
 	if err != nil {
 		return nil, err
+	}
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return nil, errors.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
 }

@@ -44,6 +44,9 @@ type Balancer interface {
 	// ReplicateRole returns the replicate role of the balancer.
 	ReplicateRole() replicateutil.Role
 
+	// WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
+	WaitUntilWALbasedDDLReady(ctx context.Context) error
+
 	// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 	// If the error is returned, the balancer is closed.
 	// Otherwise, the following rules are applied:

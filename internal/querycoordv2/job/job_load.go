@@ -101,7 +101,7 @@ func (job *LoadCollectionJob) Execute() error {
 
 	// 2. put load info meta
 	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
-	fieldIDs := make([]int64, len(req.GetLoadFields()))
+	fieldIDs := make([]int64, 0, len(req.GetLoadFields()))
 	for _, loadField := range req.GetLoadFields() {
 		if loadField.GetIndexId() != 0 {
 			fieldIndexIDs[loadField.GetFieldId()] = loadField.GetIndexId()

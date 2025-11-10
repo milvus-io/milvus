@@ -440,17 +440,22 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
 				}
 			case *schemapb.ValueField_StringData:
-				if dtype != schemapb.DataType_VarChar {
-					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
+				if dtype != schemapb.DataType_VarChar && dtype != schemapb.DataType_Timestamptz {
+					if dtype != schemapb.DataType_VarChar {
+						return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")
+					}
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
 				}
-				maxLength, err := parameterutil.GetMaxLength(fieldSchema)
-				if err != nil {
-					return err
-				}
-				defaultValueLength := len(fieldSchema.GetDefaultValue().GetStringData())
-				if int64(defaultValueLength) > maxLength {
-					msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
-					return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
+				if dtype == schemapb.DataType_VarChar {
+					maxLength, err := parameterutil.GetMaxLength(fieldSchema)
+					if err != nil {
+						return err
+					}
+					defaultValueLength := len(fieldSchema.GetDefaultValue().GetStringData())
+					if int64(defaultValueLength) > maxLength {
+						msg := fmt.Sprintf("the length (%d) of string exceeds max length (%d)", defaultValueLength, maxLength)
+						return merr.WrapErrParameterInvalid("valid length string", "string length exceeds max length", msg)
+					}
 				}
 			case *schemapb.ValueField_BytesData:
 				if dtype != schemapb.DataType_JSON {
@@ -567,14 +572,4 @@ func nextFieldID(coll *model.Collection) int64 {
 		}
 	}
 	return maxFieldID + 1
-}
-
-func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
-	for _, p := range props {
-		// used in collection or database
-		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone {
-			return true, p.Value
-		}
-	}
-	return false, ""
 }

@@ -37,6 +37,9 @@ type ReplicateStreamClient interface {
 	// return ErrReplicateIgnored if the message should not be replicated.
 	Replicate(msg message.ImmutableMessage) error
 
+	// BlockUntilFinish blocks until the replicate stream client is finished.
+	BlockUntilFinish()
+
 	// Close closes the replicate stream client.
 	Close()
 }

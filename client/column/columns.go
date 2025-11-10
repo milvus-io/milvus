@@ -161,6 +161,18 @@ func parseArrayData(fieldName string, elementType schemapb.DataType, fieldDataLi
 	}
 }
 
+func parseStructArrayData(fieldName string, structArray *schemapb.StructArrayField, begin, end int) (Column, error) {
+	var fields []Column
+	for _, field := range structArray.GetFields() {
+		field, err := FieldDataColumn(field, begin, end)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	return NewColumnStructArray(fieldName, fields), nil
+}
+
 func int32ToType[T ~int8 | int16](data []int32) []T {
 	return lo.Map(data, func(i32 int32, _ int) T {
 		return T(i32)
@@ -206,6 +218,10 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		return parseScalarData(fd.GetFieldName(), fd.GetScalars().GetStringData().GetData(), begin, end, validData, NewColumnVarChar, NewNullableColumnVarChar)
 
 	case schemapb.DataType_Array:
+		// handle struct array field
+		if fd.GetStructArrays() != nil {
+			return parseStructArrayData(fd.GetFieldName(), fd.GetStructArrays(), begin, end)
+		}
 		data := fd.GetScalars().GetArrayData()
 		return parseArrayData(fd.GetFieldName(), data.GetElementType(), data.GetData(), validData, begin, end)
 

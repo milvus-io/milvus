@@ -53,6 +53,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+var errIndexOperationIgnored = errors.New("index operation ignored")
+
 type indexMeta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
@@ -375,7 +377,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		if req.IndexName == index.IndexName {
 			if req.FieldID == index.FieldID && checkParams(index, req) &&
 				/*only check json params when it is json index*/ (!isJson || checkIdenticalJson(index, req)) {
-				return index.IndexID, nil
+				return index.IndexID, errIndexOperationIgnored
 			}
 			errMsg := "at most one distinct index is allowed per field"
 			log.Warn(errMsg,
@@ -1060,12 +1062,17 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
 	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
 	m.fieldIndexLock.RLock()
-	fieldIndexes, ok := m.indexes[collectionID]
+	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
 		return ret
 	}
+	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
+	for id, index := range fieldIndexesMap {
+		fieldIndexes[id] = index
+	}
 	m.fieldIndexLock.RUnlock()
+
 	for _, segID := range segmentIDs {
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes.Get(segID)

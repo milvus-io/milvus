@@ -72,3 +72,45 @@ func TestFieldSchema(t *testing.T) {
 		(&Field{}).WithTypeParams("a", "b")
 	})
 }
+
+func TestStructSchema(t *testing.T) {
+	// Test NewStructSchema
+	schema := NewStructSchema()
+	assert.NotNil(t, schema)
+	assert.Empty(t, schema.Fields)
+
+	// Test WithField
+	field1 := NewField().WithName("age").WithDataType(FieldTypeInt32)
+	field2 := NewField().WithName("name").WithDataType(FieldTypeVarChar).WithMaxLength(100)
+	field3 := NewField().WithName("score").WithDataType(FieldTypeFloat)
+
+	schema.WithField(field1).WithField(field2).WithField(field3)
+	assert.Equal(t, 3, len(schema.Fields))
+	assert.Equal(t, "age", schema.Fields[0].Name)
+	assert.Equal(t, FieldTypeInt32, schema.Fields[0].DataType)
+	assert.Equal(t, "name", schema.Fields[1].Name)
+	assert.Equal(t, FieldTypeVarChar, schema.Fields[1].DataType)
+	assert.Equal(t, "score", schema.Fields[2].Name)
+	assert.Equal(t, FieldTypeFloat, schema.Fields[2].DataType)
+}
+
+func TestFieldWithStructSchema(t *testing.T) {
+	// Create a struct schema
+	structSchema := NewStructSchema().
+		WithField(NewField().WithName("id").WithDataType(FieldTypeInt64)).
+		WithField(NewField().WithName("value").WithDataType(FieldTypeDouble))
+
+	// Create a field with struct schema
+	field := NewField().
+		WithName("struct_array_field").
+		WithDataType(FieldTypeArray).
+		WithElementType(FieldTypeStruct).
+		WithStructSchema(structSchema)
+
+	assert.NotNil(t, field.StructSchema)
+	assert.Equal(t, 2, len(field.StructSchema.Fields))
+	assert.Equal(t, "id", field.StructSchema.Fields[0].Name)
+	assert.Equal(t, FieldTypeInt64, field.StructSchema.Fields[0].DataType)
+	assert.Equal(t, "value", field.StructSchema.Fields[1].Name)
+	assert.Equal(t, FieldTypeDouble, field.StructSchema.Fields[1].DataType)
+}

@@ -169,6 +169,7 @@ func (r *channelReplicator) startConsumeLoop() {
 			if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 				if util.IsReplicationRemovedByAlterReplicateConfigMessage(msg, r.channel.Value) {
 					logger.Info("replication removed, stop consume loop")
+					r.streamClient.BlockUntilFinish()
 					return
 				}
 			}

@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <vector>
-#include "index/RTreeIndexWrapper.h"
+#include "RTreeIndexWrapper.h"
 #include "common/Geometry.h"
 
 class RTreeIndexWrapperTest : public ::testing::Test {

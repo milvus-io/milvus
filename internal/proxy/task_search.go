@@ -96,6 +96,8 @@ type searchTask struct {
 	functionScore *rerank.FunctionScore
 	rankParams    *rankParams
 
+	resolvedTimezoneStr string
+
 	isIterator bool
 	// we always remove pk field from output fields, as search result already contains pk field.
 	// if the user explicitly set pk field in output fields, we add it back to the result.
@@ -285,6 +287,19 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
 		}
 	}
+
+	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
+	if exist {
+		if !funcutil.IsTimezoneValid(timezone) {
+			log.Info("get invalid timezone from request", zap.String("timezone", timezone))
+			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
+		}
+		log.Debug("determine timezone from request", zap.String("user defined timezone", timezone))
+	} else {
+		timezone = getColTimezone(collectionInfo)
+		log.Debug("determine timezone from collection", zap.Any("collection timezone", timezone))
+	}
+	t.resolvedTimezoneStr = timezone
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
@@ -878,32 +893,16 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
-	// Translate timestamp to ISO string
-	collName := t.request.GetCollectionName()
-	dbName := t.request.GetDbName()
-	collID, err := globalMetaCache.GetCollectionID(context.Background(), dbName, collName)
-	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
-		return err
-	}
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collName, collID)
-	if err != nil {
-		log.Warn("fail to get collection info", zap.Error(err))
-		return err
-	}
-	_, colTimezone := getColTimezone(colInfo)
 	timeFields := parseTimeFields(t.request.SearchParams)
-	timezoneUserDefined := parseTimezone(t.request.SearchParams)
 	if timeFields != nil {
 		log.Debug("extracting fields for timestamptz", zap.Strings("fields", timeFields))
-		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), []string{timezoneUserDefined, colTimezone}, timeFields)
+		err = extractFieldsFromResults(t.result.GetResults().GetFieldsData(), t.resolvedTimezoneStr, timeFields)
 		if err != nil {
 			log.Warn("fail to extract fields for timestamptz", zap.Error(err))
 			return err
 		}
 	} else {
-		log.Debug("translate timstamp to ISO string", zap.String("user define timezone", timezoneUserDefined))
-		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), timezoneUserDefined, colTimezone)
+		err = timestamptzUTC2IsoStr(t.result.GetResults().GetFieldsData(), t.resolvedTimezoneStr)
 		if err != nil {
 			log.Warn("fail to translate timestamp", zap.Error(err))
 			return err

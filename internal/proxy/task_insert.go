@@ -243,13 +243,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// trans timestamptz data
-	_, colTimezone := getColTimezone(colInfo)
-	err = timestamptzIsoStr2Utc(it.insertMsg.GetFieldsData(), colTimezone)
-	if err != nil {
-		return err
-	}
-
 	partitionKeyMode, err := isPartitionKeyMode(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("check partition key mode failed", zap.String("collectionName", collectionName), zap.Error(err))

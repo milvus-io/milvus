@@ -40,6 +40,58 @@ class AsyncMilvusClientWrapper:
         return res, check_result
 
     @logger_interceptor()
+    async def list_collections(self, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.list_collections(timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def has_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.has_collection(collection_name, timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def has_partition(self, collection_name: str, partition_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.has_partition(collection_name, partition_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def describe_collection(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.describe_collection(collection_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def list_partitions(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.list_partitions(collection_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def get_collection_stats(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.get_collection_stats(collection_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def flush(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.flush(collection_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def get_load_state(self, collection_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.get_load_state(collection_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def describe_index(self, collection_name: str, index_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.describe_index(collection_name, index_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def create_database(self, db_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.create_database(db_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def drop_database(self, db_name: str, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.drop_database(db_name, timeout, **kwargs)
+
+    @logger_interceptor()
+    async def list_databases(self, timeout: Optional[float] = None, **kwargs):
+        return await self.async_milvus_client.list_databases(timeout, **kwargs)
+    
+    @logger_interceptor()
+    async def list_indexes(self, collection_name: str, field_name: str = "", **kwargs):
+        return await self.async_milvus_client.list_indexes(collection_name, field_name, **kwargs)
+
+    @logger_interceptor()
     async def create_collection(self,
                                 collection_name: str,
                                 dimension: Optional[int] = None,
@@ -196,6 +248,11 @@ class AsyncMilvusClientWrapper:
     def create_schema(cls, **kwargs):
         kwargs["check_fields"] = False  # do not check fields for now
         return CollectionSchema([], **kwargs)
+
+    @classmethod
+    def prepare_index_params(cls, field_name: str = "", **kwargs):
+        res, check = api_request([AsyncMilvusClient.prepare_index_params, field_name], **kwargs)
+        return res, check
 
     @logger_interceptor()
     async def close(self, **kwargs):

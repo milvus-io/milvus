@@ -19,12 +19,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // broadcastAlterCollectionForAlterCollection broadcasts the put collection message for alter collection.
 func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+	if req.GetCollectionName() == "" {
+		return merr.WrapErrParameterInvalidMsg("alter collection failed, collection name does not exists")
+	}
+
 	if len(req.GetProperties()) == 0 && len(req.GetDeleteKeys()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("no properties or delete keys provided")
 	}
@@ -35,6 +40,16 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	if hookutil.ContainsCipherProperties(req.GetProperties(), req.GetDeleteKeys()) {
 		return merr.WrapErrParameterInvalidMsg("can not alter cipher related properties")
+	}
+
+	if funcutil.SliceContain(req.GetDeleteKeys(), common.EnableDynamicSchemaKey) {
+		return merr.WrapErrParameterInvalidMsg("cannot delete key %s, dynamic field schema could support set to true/false", common.EnableDynamicSchemaKey)
+	}
+
+	// Validate timezone
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, req.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
 	isEnableDynamicSchema, targetValue, err := common.IsEnableDynamicSchema(req.GetProperties())

@@ -94,5 +94,11 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for put event")
 	}
+	// Wait for delete event to be processed
+	select {
+	case <-notifyCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for delete event")
+	}
 	ctrl.Stop()
 }

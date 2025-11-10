@@ -121,4 +121,6 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 			return
 		}
 	}
+	// all the tombstones are dropped, reset the tombstones.
+	s.tombstones = make([]tombstoneItem, 0)
 }

@@ -301,10 +301,8 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	_, dbTimezone := getDbTimezone(db)
-	_, colTimezone := getColTimezone(colInfo)
-	timezonePreference := []string{colTimezone, dbTimezone}
-	visitorArgs := &planparserv2.ParserVisitorArgs{TimezonePreference: timezonePreference}
+	colTimezone := getColTimezone(colInfo)
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
 	start := time.Now()
 	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)

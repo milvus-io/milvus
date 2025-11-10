@@ -134,8 +134,8 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 			},
 		}
 		tmpIndexID, err := m.CanCreateIndex(req, false)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(indexID), tmpIndexID)
+		assert.ErrorIs(t, err, errIndexOperationIgnored)
+		assert.Zero(t, tmpIndexID)
 	})
 
 	t.Run("user index params not consistent", func(t *testing.T) {
@@ -203,8 +203,8 @@ func TestMeta_ScalarAutoIndex(t *testing.T) {
 			},
 		}
 		tmpIndexID, err := m.CanCreateIndex(req, false)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(indexID), tmpIndexID)
+		assert.ErrorIs(t, err, errIndexOperationIgnored)
+		assert.Zero(t, tmpIndexID)
 		newIndexParams := req.GetIndexParams()
 		assert.Equal(t, len(newIndexParams), 1)
 		assert.Equal(t, newIndexParams[0].Key, common.IndexTypeKey)
@@ -287,8 +287,8 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		assert.NoError(t, err)
 
 		tmpIndexID, err = m.CanCreateIndex(req, false)
-		assert.NoError(t, err)
-		assert.Equal(t, indexID, tmpIndexID)
+		assert.ErrorIs(t, err, errIndexOperationIgnored)
+		assert.Zero(t, tmpIndexID)
 	})
 
 	t.Run("params not consistent", func(t *testing.T) {
@@ -326,8 +326,8 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		req.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "AUTOINDEX"}, {Key: common.MetricTypeKey, Value: "COSINE"}}
 		req.UserAutoindexMetricTypeSpecified = false
 		tmpIndexID, err = m.CanCreateIndex(req, false)
-		assert.NoError(t, err)
-		assert.Equal(t, indexID, tmpIndexID)
+		assert.ErrorIs(t, err, errIndexOperationIgnored)
+		assert.Zero(t, tmpIndexID)
 		// req should follow the meta
 		assert.Equal(t, "L2", req.GetUserIndexParams()[1].Value)
 		assert.Equal(t, "L2", req.GetIndexParams()[1].Value)

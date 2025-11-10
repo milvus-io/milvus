@@ -58,7 +58,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
             zeroRightOperand.set_int64_val(0);
             auto helperExpr =
                 std::make_shared<milvus::expr::BinaryArithOpEvalRangeExpr>(
-                    expr_->timestamp_column_,
+                    expr_->column_,
                     expr_->compare_op_,
                     proto::plan::ArithOpType::Add,
                     expr_->compare_value_,

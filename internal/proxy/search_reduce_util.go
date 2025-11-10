@@ -514,6 +514,7 @@ func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResu
 	}
 
 	if len(validSearchResults) <= 0 {
+		log.Debug("reduced search results is empty, fill in empty result")
 		return fillInEmptyResult(nq), nil
 	}
 

@@ -37,8 +37,8 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
                       name,
                       op_ctx,
                       segment,
-                      expr->timestamp_column_.field_id_,
-                      expr->timestamp_column_.nested_path_,
+                      expr->column_.field_id_,
+                      expr->column_.nested_path_,
                       DataType::TIMESTAMPTZ,
                       active_count,
                       batch_size,
@@ -55,6 +55,11 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
     bool
     IsSource() const override {
         return true;
+    }
+
+    std::optional<milvus::expr::ColumnInfo>
+    GetColumnInfo() const override {
+        return expr_->column_;
     }
 
  private:

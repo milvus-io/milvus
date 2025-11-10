@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -46,6 +47,8 @@ type rowParser struct {
 
 	structArrays      map[string]interface{}
 	allowInsertAutoID bool
+
+	timezone string
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
@@ -102,6 +105,7 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		functionOutputFields: functionOutputFields,
 		structArrays:         sturctArrays,
 		allowInsertAutoID:    allowInsertAutoID,
+		timezone:             common.GetSchemaTimezone(schema),
 	}, nil
 }
 
@@ -371,7 +375,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return int32(num), nil
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64:
 		value, ok := obj.(json.Number)
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
@@ -561,8 +565,17 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		if err != nil {
 			return nil, r.wrapTypeError(wktValue, fieldID)
 		}
-
 		return wkbValue, nil
+	case schemapb.DataType_Timestamptz:
+		strValue, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, r.timezone)
+		if err != nil {
+			return nil, err
+		}
+		return tz, nil
 	case schemapb.DataType_Array:
 		arr, ok := obj.([]interface{})
 		if !ok {
@@ -706,26 +719,6 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
 				DoubleData: &schemapb.DoubleArray{
-					Data: values,
-				},
-			},
-		}, nil
-	case schemapb.DataType_Timestamptz:
-		values := make([]int64, len(arr))
-		for i, v := range arr {
-			value, ok := v.(json.Number)
-			if !ok {
-				return nil, r.wrapArrayValueTypeError(arr, eleType)
-			}
-			num, err := strconv.ParseInt(value.String(), 0, 64)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse int64: %w", err)
-			}
-			values[i] = num
-		}
-		return &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_TimestamptzData{
-				TimestamptzData: &schemapb.TimestamptzArray{
 					Data: values,
 				},
 			},

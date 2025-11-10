@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -46,11 +47,14 @@ type FieldReader struct {
 	field          *schemapb.FieldSchema
 	sparseIsString bool
 
+	// timezone is the collection's default timezone
+	timezone string
+
 	// structReader is non-nil when Struct Array field exists
 	structReader *StructFieldReader
 }
 
-func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema) (*FieldReader, error) {
+func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex int, field *schemapb.FieldSchema, timezone string) (*FieldReader, error) {
 	columnReader, err := reader.GetColumn(ctx, columnIndex)
 	if err != nil {
 		return nil, err
@@ -77,6 +81,7 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 		dim:            int(dim),
 		field:          field,
 		sparseIsString: sparseIsString,
+		timezone:       timezone,
 	}
 	return cr, nil
 }
@@ -112,7 +117,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		data, err := ReadIntegerOrFloatData[int32](c, count)
 		return data, nil, err
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableIntegerOrFloatData[int64](c, count)
 		}
@@ -158,7 +163,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		return data, nil, typeutil.VerifyFloats64(data.([]float64))
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
-			return ReadNullableStringData(c, count, true)
+			return ReadNullableStringData(c, count)
 		}
 		data, err := ReadStringData(c, count, true)
 		return data, nil, err
@@ -170,10 +175,16 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		data, err := ReadJSONData(c, count)
 		return data, nil, err
 	case schemapb.DataType_Geometry:
-		if c.field.GetNullable() {
+		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
 			return ReadNullableGeometryData(c, count)
 		}
 		data, err := ReadGeometryData(c, count)
+		return data, nil, err
+	case schemapb.DataType_Timestamptz:
+		if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
+			return ReadNullableTimestamptzData(c, count)
+		}
+		data, err := ReadTimestamptzData(c, count)
 		return data, nil, err
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		// vector not support default_value
@@ -215,7 +226,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		vectors := lo.Flatten(arrayData.([][]int8))
 		return vectors, nil, nil
 	case schemapb.DataType_Array:
-		// array has not support default_value
+		// array has not supported default_value
 		if c.field.GetNullable() {
 			return ReadNullableArrayData(c, count)
 		}
@@ -551,14 +562,19 @@ func ReadStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, er
 	return data, nil
 }
 
-func ReadNullableStringData(pcr *FieldReader, count int64, isVarcharField bool) (any, []bool, error) {
+// readRawStringDataFromParquet handles the low-level logic of reading string chunks
+// from the Parquet column, extracting data, validity mask, and performing VARCHAR length checks.
+// It returns the raw string data and the corresponding validity mask.
+func readRawStringDataFromParquet(pcr *FieldReader, count int64) ([]string, []bool, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, nil, err
 	}
+	dataType := pcr.field.GetDataType()
 	data := make([]string, 0, count)
 	validData := make([]bool, 0, count)
 	var maxLength int64
+	isVarcharField := typeutil.IsStringType(dataType)
 	if isVarcharField {
 		maxLength, err = parameterutil.GetMaxLength(pcr.field)
 		if err != nil {
@@ -599,10 +615,26 @@ func ReadNullableStringData(pcr *FieldReader, count int64, isVarcharField bool) 
 	if len(data) == 0 {
 		return nil, nil, nil
 	}
+	return data, validData, nil
+}
+
+func ReadNullableStringData(pcr *FieldReader, count int64) (any, []bool, error) {
+	// Delegate I/O, Arrow iteration, and VARCHAR validation to the helper function.
+	data, validData, err := readRawStringDataFromParquet(pcr, count)
+	if err != nil {
+		return nil, nil, err
+	}
+	if data == nil {
+		return nil, nil, nil
+	}
 	if pcr.field.GetDefaultValue() != nil {
+		// Fill default values for standard string fields (VARCHAR, String, Geometry).
 		defaultValue := pcr.field.GetDefaultValue().GetStringData()
+		// Assuming fillWithDefaultValueImpl is available
 		return fillWithDefaultValueImpl(data, defaultValue, validData, pcr.field)
 	}
+
+	// Return raw data for convertible types or non-defaulted fields.
 	return data, validData, nil
 }
 
@@ -636,7 +668,7 @@ func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
 
 func ReadNullableJSONData(pcr *FieldReader, count int64) (any, []bool, error) {
 	// JSON field read data from string array Parquet
-	data, validData, err := ReadNullableStringData(pcr, count, false)
+	data, validData, err := readRawStringDataFromParquet(pcr, count)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -644,9 +676,10 @@ func ReadNullableJSONData(pcr *FieldReader, count int64) (any, []bool, error) {
 		return nil, nil, nil
 	}
 	byteArr := make([][]byte, 0)
-	for i, str := range data.([]string) {
+	defaultValue := []byte(nil)
+	for i, str := range data {
 		if !validData[i] {
-			byteArr = append(byteArr, []byte(nil))
+			byteArr = append(byteArr, defaultValue)
 			continue
 		}
 		var dummy interface{}
@@ -666,9 +699,76 @@ func ReadNullableJSONData(pcr *FieldReader, count int64) (any, []bool, error) {
 	return byteArr, validData, nil
 }
 
+// ReadNullableTimestamptzData reads Timestamptz data from the Parquet column,
+// handling nullability by parsing the time string and converting it to the internal int64 format.
+func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, error) {
+	// 1. Read the raw data as strings from the underlying Parquet column.
+	// This is because Timestamptz data is initially stored as strings in the insertion layer
+	// or represented as strings in the Parquet file for ease of parsing/validation.
+	data, validData, err := readRawStringDataFromParquet(pcr, count)
+	if err != nil {
+		return nil, nil, err
+	}
+	// If no data was read (e.g., end of file), return nil.
+	if data == nil {
+		return nil, nil, nil
+	}
+
+	// 2. Initialize the target array for internal int64 timestamps (UTC microseconds).
+	int64Ts := make([]int64, 0, len(data))
+	defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
+
+	// 3. Iterate over the string array and convert each timestamp.
+	for i, strValue := range data {
+		// Check the validity mask: If it's null, append the zero value (0) and continue.
+		if !validData[i] {
+			int64Ts = append(int64Ts, defaultValue)
+			continue
+		}
+
+		// Convert the ISO 8601 string to int64 (UTC microseconds).
+		// The pcr.timezone is used as the default timezone if the string (strValue)
+		// does not contain an explicit UTC offset (e.g., "+08:00").
+		tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, pcr.timezone)
+		if err != nil {
+			return nil, nil, err
+		}
+		int64Ts = append(int64Ts, tz)
+	}
+	return int64Ts, validData, nil
+}
+
+// ReadTimestamptzData reads non-nullable Timestamptz data from the Parquet column.
+// It assumes all values are present (non-null) and converts them to the internal int64 format.
+func ReadTimestamptzData(pcr *FieldReader, count int64) (any, error) {
+	// Read the raw data as strings. Since this is a non-nullable field, we use ReadStringData.
+	data, err := ReadStringData(pcr, count, false)
+	if err != nil {
+		return nil, err
+	}
+	// If no data was read (e.g., end of file), return nil.
+	if data == nil {
+		return nil, nil
+	}
+
+	int64Ts := make([]int64, 0, len(data.([]string)))
+	for _, strValue := range data.([]string) {
+		// Convert the ISO 8601 string to int64 (UTC microseconds).
+		// The pcr.timezone is used as the default if the string lacks an explicit offset.
+		tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, pcr.timezone)
+		if err != nil {
+			return nil, err
+		}
+		int64Ts = append(int64Ts, tz)
+	}
+
+	// Return the converted int64 array.
+	return int64Ts, nil
+}
+
 func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error) {
 	// Geometry field read data from string array Parquet
-	data, validData, err := ReadNullableStringData(pcr, count, false)
+	data, validData, err := readRawStringDataFromParquet(pcr, count)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -676,9 +776,14 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 		return nil, nil, nil
 	}
 	wkbValues := make([][]byte, 0)
-	for i, wktValue := range data.([]string) {
+	defaultValueStr := pcr.field.GetDefaultValue().GetStringData()
+	defaultValue := []byte(nil)
+	if defaultValueStr != "" {
+		defaultValue, _ = pkgcommon.ConvertWKTToWKB(defaultValueStr)
+	}
+	for i, wktValue := range data {
 		if !validData[i] {
-			wkbValues = append(wkbValues, []byte(nil))
+			wkbValues = append(wkbValues, defaultValue)
 			continue
 		}
 		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)

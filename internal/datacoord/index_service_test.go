@@ -112,6 +112,7 @@ func initStreamingSystem(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}).Maybe()
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().Close().Return().Maybe()
 	balance.Register(b)
 	channel.ResetStaticPChannelStatsManager()

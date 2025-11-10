@@ -146,6 +146,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		}
 		return vchannels, nil
 	}).Maybe()
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
 	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()

@@ -190,6 +190,19 @@ func TestGenerateEmptyArray(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			tag: "internal_default_json",
+			field: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_JSON,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_BytesData{
+						BytesData: []byte(`{}`),
+					},
+				},
+			},
+			expectValue: []byte(`{}`),
+		},
 	}
 
 	for _, tc := range cases {

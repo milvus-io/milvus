@@ -365,10 +365,6 @@ func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
 	t.taskProto.Store(task)
 }
 
-func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
-	return false
-}
-
 func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	compactionParams, err := compaction.GenerateJSONParams()
 	if err != nil {

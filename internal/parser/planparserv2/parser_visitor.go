@@ -12,11 +12,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ParserVisitorArgs struct {
-	TimezonePreference []string
+	Timezone string
 }
 
 type ParserVisitor struct {
@@ -526,17 +527,52 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 		return err
 	}
 
+	// Handle optional min_should_match parameter
+	var extraValues []*planpb.GenericValue
+	if ctx.TextMatchOption() != nil {
+		minShouldMatchExpr := ctx.TextMatchOption().Accept(v)
+		if err, ok := minShouldMatchExpr.(error); ok {
+			return err
+		}
+		extraVal, err := validateAndExtractMinShouldMatch(minShouldMatchExpr)
+		if err != nil {
+			return err
+		}
+		extraValues = extraVal
+	}
+
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
-					ColumnInfo: columnInfo,
-					Op:         planpb.OpType_TextMatch,
-					Value:      NewString(queryText),
+					ColumnInfo:  columnInfo,
+					Op:          planpb.OpType_TextMatch,
+					Value:       NewString(queryText),
+					ExtraValues: extraValues,
 				},
 			},
 		},
 		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext) interface{} {
+	// Parse the integer constant for minimum_should_match
+	integerConstant := ctx.IntegerConstant().GetText()
+	value, err := strconv.ParseInt(integerConstant, 0, 64)
+	if err != nil {
+		return fmt.Errorf("invalid minimum_should_match value: %s", integerConstant)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ValueExpr{
+				ValueExpr: &planpb.ValueExpr{
+					Value: NewInt(value),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Int64,
 	}
 }
 
@@ -1920,7 +1956,7 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
-func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareContext) interface{} {
+func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCompareForwardContext) interface{} {
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().Accept(v)
 	if err != nil {
@@ -1952,7 +1988,7 @@ func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareCo
 
 	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 
-	timestamptzInt64, err := parseISOWithTimezone(unquotedCompareStr, v.args.TimezonePreference)
+	timestamptzInt64, err := funcutil.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
 		return err
 	}
@@ -1975,4 +2011,105 @@ func (v *ParserVisitor) VisitTimestamptzCompare(ctx *parser.TimestamptzCompareCo
 		expr:     newExpr,
 		dataType: schemapb.DataType_Bool,
 	}
+}
+
+func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCompareReverseContext) interface{} {
+	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	identifier := ctx.Identifier().GetText()
+	if err != nil {
+		return fmt.Errorf("can not translate identifier: %s", identifier)
+	}
+	if colExpr.dataType != schemapb.DataType_Timestamptz {
+		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
+	}
+
+	arithOp := planpb.ArithOpType_Unknown
+	interval := &planpb.Interval{}
+	if ctx.GetOp1() != nil {
+		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
+		rawIntervalStr := ctx.GetInterval_string().GetText()
+		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+		if err != nil {
+			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+		}
+		interval, err = parseISODuration(unquotedIntervalStr)
+		if err != nil {
+			return err
+		}
+	}
+
+	rawCompareStr := ctx.GetCompare_string().GetText()
+	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
+	if err != nil {
+		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
+	}
+
+	originalCompareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
+
+	compareOp := reverseCompareOp(originalCompareOp)
+
+	if compareOp == planpb.OpType_Invalid && originalCompareOp != planpb.OpType_Invalid {
+		return fmt.Errorf("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
+	}
+
+	timestamptzInt64, err := funcutil.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
+	if err != nil {
+		return err
+	}
+
+	newExpr := &planpb.Expr{
+		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+				TimestamptzColumn: toColumnInfo(colExpr),
+				ArithOp:           arithOp,
+				Interval:          interval,
+				CompareOp:         compareOp,
+				CompareValue: &planpb.GenericValue{
+					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+				},
+			},
+		},
+	}
+
+	return &ExprWithType{
+		expr:     newExpr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func reverseCompareOp(op planpb.OpType) planpb.OpType {
+	switch op {
+	case planpb.OpType_LessThan:
+		return planpb.OpType_GreaterThan
+	case planpb.OpType_LessEqual:
+		return planpb.OpType_GreaterEqual
+	case planpb.OpType_GreaterThan:
+		return planpb.OpType_LessThan
+	case planpb.OpType_GreaterEqual:
+		return planpb.OpType_LessEqual
+	case planpb.OpType_Equal:
+		return planpb.OpType_Equal
+	case planpb.OpType_NotEqual:
+		return planpb.OpType_NotEqual
+	default:
+		return planpb.OpType_Invalid
+	}
+}
+
+func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb.GenericValue, error) {
+	if minShouldMatchValue, ok := minShouldMatchExpr.(*ExprWithType); ok {
+		valueExpr := getValueExpr(minShouldMatchValue)
+		if valueExpr == nil || valueExpr.GetValue() == nil {
+			return nil, fmt.Errorf("minimum_should_match should be a const integer expression")
+		}
+		minShouldMatch := valueExpr.GetValue().GetInt64Val()
+		if minShouldMatch < 1 {
+			return nil, fmt.Errorf("minimum_should_match should be >= 1, got %d", minShouldMatch)
+		}
+		if minShouldMatch > 1000 {
+			return nil, fmt.Errorf("minimum_should_match should be <= 1000, got %d", minShouldMatch)
+		}
+		return []*planpb.GenericValue{NewInt(minShouldMatch)}, nil
+	}
+	return nil, nil
 }

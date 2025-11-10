@@ -332,10 +332,6 @@ func (t *clusteringCompactionTask) Clean() bool {
 	return t.doClean() == nil
 }
 
-func (t *clusteringCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
-	return false
-}
-
 func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()))

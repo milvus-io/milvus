@@ -55,11 +55,17 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Boolean.
 	VisitBoolean(ctx *BooleanContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#TimestamptzCompareReverse.
+	VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#STDWithin.
 	VisitSTDWithin(ctx *STDWithinContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Shift.
 	VisitShift(ctx *ShiftContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#TimestamptzCompareForward.
+	VisitTimestamptzCompareForward(ctx *TimestamptzCompareForwardContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Call.
 	VisitCall(ctx *CallContext) interface{}
@@ -112,9 +118,6 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Unary.
 	VisitUnary(ctx *UnaryContext) interface{}
 
-	// Visit a parse tree produced by PlanParser#TimestamptzCompare.
-	VisitTimestamptzCompare(ctx *TimestamptzCompareContext) interface{}
-
 	// Visit a parse tree produced by PlanParser#Integer.
 	VisitInteger(ctx *IntegerContext) interface{}
 
@@ -144,4 +147,7 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#STOverlaps.
 	VisitSTOverlaps(ctx *STOverlapsContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#textMatchOption.
+	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
 }

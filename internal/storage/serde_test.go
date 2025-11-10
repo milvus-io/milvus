@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/bitutil"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
 
@@ -461,4 +462,397 @@ func TestArrayOfVectorIntegration(t *testing.T) {
 	dimStr, ok := field.Metadata.GetValue("dim")
 	assert.True(t, ok)
 	assert.Equal(t, "4", dimStr)
+}
+
+func TestActualSizeInBytesSlicedFixedSizeBinary(t *testing.T) {
+	dim := 128
+	byteWidth := dim * 4
+	totalRows := 1000
+
+	builder := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: byteWidth})
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		vec := make([]byte, byteWidth)
+		for j := range vec {
+			vec[j] = byte((i + j) % 256)
+		}
+		builder.Append(vec)
+	}
+
+	arr := builder.NewArray().(*array.FixedSizeBinary)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(totalRows))) + uint64(totalRows*byteWidth)
+
+		assert.Equal(t, expectedSize, actualSize)
+		t.Logf("Full array - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [100:200]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 100, 200).(*array.FixedSizeBinary)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen))) + uint64(slicedLen*byteWidth)
+
+		assert.Equal(t, 100, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [100:200] - ActualSize: %d, Expected: %d (length: %d)", actualSize, expectedSize, slicedLen)
+	})
+
+	t.Run("Sliced array [0:10]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 0, 10).(*array.FixedSizeBinary)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen))) + uint64(slicedLen*byteWidth)
+
+		assert.Equal(t, 10, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+
+		t.Logf("Sliced [0:10] - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [990:1000]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 990, 1000).(*array.FixedSizeBinary)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen))) + uint64(slicedLen*byteWidth)
+
+		assert.Equal(t, 10, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+
+		t.Logf("Sliced [990:1000] - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+}
+
+func TestActualSizeInBytesSlicedString(t *testing.T) {
+	totalRows := 100
+	builder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		builder.Append(string(make([]byte, i+10)))
+	}
+
+	arr := builder.NewArray().(*array.String)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+		expectedDataSize := (10 + 109) * 50
+		expectedOffsetSize := (totalRows + 1) * 4
+		expectedNullBitmapSize := bitutil.BytesForBits(int64(totalRows))
+		expectedTotal := uint64(expectedNullBitmapSize + int64(expectedOffsetSize) + int64(expectedDataSize))
+
+		assert.GreaterOrEqual(t, actualSize, expectedTotal)
+		t.Logf("Full array - ActualSize: %d", actualSize)
+	})
+
+	t.Run("Sliced array [10:20]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 10, 20).(*array.String)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+
+		assert.Equal(t, 10, slicedLen)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [10:20] - ActualSize: %d (length: %d)", actualSize, slicedLen)
+	})
+
+	t.Run("Sliced array [0:5]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 0, 5).(*array.String)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+
+		assert.Equal(t, 5, slicedLen)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [0:5] - ActualSize: %d", actualSize)
+	})
+}
+
+func TestActualSizeInBytesSlicedInt64(t *testing.T) {
+	totalRows := 1000
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		builder.Append(int64(i))
+	}
+
+	arr := builder.NewArray().(*array.Int64)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(totalRows))) + uint64(totalRows*8)
+
+		assert.Equal(t, expectedSize, actualSize)
+		t.Logf("Full array - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [100:200]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 100, 200).(*array.Int64)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen))) + uint64(slicedLen*8)
+
+		assert.Equal(t, 100, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+
+		t.Logf("Sliced [100:200] - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [500:501]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 500, 501).(*array.Int64)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen))) + uint64(slicedLen*8)
+
+		assert.Equal(t, 1, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+
+		t.Logf("Sliced [500:501] - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+}
+
+func TestActualSizeInBytesSlicedList(t *testing.T) {
+	pool := memory.DefaultAllocator
+
+	listBuilder := array.NewListBuilder(pool, arrow.PrimitiveTypes.Int32)
+	defer listBuilder.Release()
+
+	valueBuilder := listBuilder.ValueBuilder().(*array.Int32Builder)
+
+	totalRows := 100
+	for i := 0; i < totalRows; i++ {
+		listBuilder.Append(true)
+		numElements := i%10 + 1
+		for j := 0; j < numElements; j++ {
+			valueBuilder.Append(int32(i*10 + j))
+		}
+	}
+
+	arr := listBuilder.NewArray().(*array.List)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+
+		nullBitmapSize := bitutil.BytesForBits(int64(totalRows))
+		offsetSize := (totalRows + 1) * 4
+		childSize := ActualSizeInBytes(arr.ListValues().Data())
+		expectedSize := uint64(nullBitmapSize+int64(offsetSize)) + childSize
+
+		assert.Equal(t, expectedSize, actualSize)
+		t.Logf("Full array - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [10:20]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 10, 20).(*array.List)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+
+		assert.Equal(t, 10, slicedLen)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [10:20] - ActualSize: %d (length: %d)", actualSize, slicedLen)
+	})
+
+	t.Run("Sliced array [0:1]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 0, 1).(*array.List)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+
+		assert.Equal(t, 1, slicedLen)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [0:1] - ActualSize: %d", actualSize)
+	})
+}
+
+func TestActualSizeInBytesSlicedFloat32(t *testing.T) {
+	totalRows := 500
+	builder := array.NewFloat32Builder(memory.DefaultAllocator)
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		builder.Append(float32(i) * 1.5)
+	}
+
+	arr := builder.NewArray().(*array.Float32)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(totalRows))) + uint64(totalRows*4)
+
+		assert.Equal(t, expectedSize, actualSize)
+		t.Logf("Full array - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [200:300]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 200, 300).(*array.Float32)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen))) + uint64(slicedLen*4)
+
+		assert.Equal(t, 100, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+
+		t.Logf("Sliced [200:300] - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+}
+
+func TestActualSizeInBytesSlicedBool(t *testing.T) {
+	totalRows := 1024
+	builder := array.NewBooleanBuilder(memory.DefaultAllocator)
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		builder.Append(i%2 == 0)
+	}
+
+	arr := builder.NewArray().(*array.Boolean)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(totalRows)) * 2)
+
+		assert.Equal(t, expectedSize, actualSize)
+		t.Logf("Full array - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+
+	t.Run("Sliced array [512:768]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 512, 768).(*array.Boolean)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+		expectedSize := uint64(bitutil.BytesForBits(int64(slicedLen)) * 2)
+
+		assert.Equal(t, 256, slicedLen)
+		assert.Equal(t, expectedSize, actualSize)
+
+		t.Logf("Sliced [512:768] - ActualSize: %d, Expected: %d", actualSize, expectedSize)
+	})
+}
+
+func TestActualSizeInBytesSlicedBinary(t *testing.T) {
+	totalRows := 50
+	builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		data := make([]byte, i+5)
+		for j := range data {
+			data[j] = byte(i)
+		}
+		builder.Append(data)
+	}
+
+	arr := builder.NewArray().(*array.Binary)
+	defer arr.Release()
+
+	t.Run("Full array", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+
+		t.Logf("Full array - ActualSize: %d", actualSize)
+	})
+
+	t.Run("Sliced array [10:30]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 10, 30).(*array.Binary)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+
+		assert.Equal(t, 20, slicedLen)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [10:30] - ActualSize: %d (length: %d)", actualSize, slicedLen)
+	})
+
+	t.Run("Sliced array [0:10]", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 0, 10).(*array.Binary)
+		defer sliced.Release()
+
+		slicedLen := sliced.Len()
+		actualSize := ActualSizeInBytes(sliced.Data())
+
+		assert.Equal(t, 10, slicedLen)
+		assert.Less(t, actualSize, ActualSizeInBytes(arr.Data()))
+
+		t.Logf("Sliced [0:10] - ActualSize: %d", actualSize)
+	})
+}
+
+func TestActualSizeInBytesCompareWithDataSizeInBytes(t *testing.T) {
+	dim := 768
+	byteWidth := dim * 4
+	totalRows := 1000
+
+	builder := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: byteWidth})
+	defer builder.Release()
+
+	for i := 0; i < totalRows; i++ {
+		vec := make([]byte, byteWidth)
+		for j := range vec {
+			vec[j] = byte((i + j) % 256)
+		}
+		builder.Append(vec)
+	}
+
+	arr := builder.NewArray().(*array.FixedSizeBinary)
+	defer arr.Release()
+
+	t.Run("Full array comparison", func(t *testing.T) {
+		actualSize := ActualSizeInBytes(arr.Data())
+		arrowSize := arr.Data().SizeInBytes()
+
+		t.Logf("Full array - ActualSizeInBytes: %d, Data().SizeInBytes(): %d", actualSize, arrowSize)
+		t.Logf("Difference: %d bytes (%.2f%%)",
+			int64(arrowSize)-int64(actualSize),
+			float64(int64(arrowSize)-int64(actualSize))/float64(actualSize)*100)
+	})
+
+	t.Run("Sliced array [100:200] comparison", func(t *testing.T) {
+		sliced := array.NewSlice(arr, 100, 200).(*array.FixedSizeBinary)
+		defer sliced.Release()
+
+		actualSize := ActualSizeInBytes(sliced.Data())
+		arrowSize := sliced.Data().SizeInBytes()
+		expectedSize := uint64(100 * byteWidth)
+
+		t.Logf("Sliced [100:200] - ActualSizeInBytes: %d, Data().SizeInBytes(): %d", actualSize, arrowSize)
+		t.Logf("Expected actual data: %d bytes", expectedSize)
+		t.Logf("ActualSizeInBytes correctly accounts for slice: %v", actualSize < uint64(totalRows*byteWidth))
+
+		assert.Less(t, actualSize, uint64(totalRows*byteWidth))
+	})
 }
