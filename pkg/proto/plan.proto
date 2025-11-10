@@ -190,6 +190,7 @@ message GISFunctionFilterExpr{
     Intersects = 6;
     Within = 7;
     DWithin = 8;
+    IsValidOp = 9;
   }
   GISOp op = 3;
   double distance = 4;  // Distance parameter for DWithin
