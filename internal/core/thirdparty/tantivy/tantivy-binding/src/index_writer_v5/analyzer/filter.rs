@@ -118,6 +118,7 @@ trait LanguageParser {
 impl LanguageParser for &str {
     fn into_language(self) -> Result<Language> {
         match self.to_lowercase().as_str() {
+            "arabic" => Ok(Language::Arabic),
             "arabig" => Ok(Language::Arabic),
             "danish" => Ok(Language::Danish),
             "dutch" => Ok(Language::Dutch),
