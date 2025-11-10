@@ -174,55 +174,21 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	// Check if collection already has replicas
-	existedReplicas := m.getByCollection(params.CollectionID)
-	if len(existedReplicas) > 0 {
-		// If replicas already exist, update existing replicas based on config.
-		return m.updateExistingReplicas(ctx, params, existedReplicas)
-	}
-
-	// If no replicas exist, create new ones
-	return m.createNewReplicas(ctx, params)
-}
-
-// updateExistingReplicas updates existing replicas based on config.
-func (m *ReplicaManager) updateExistingReplicas(ctx context.Context, params SpawnWithReplicaConfigParams, existingReplicas []*Replica) ([]*Replica, error) {
-	configMap := lo.KeyBy(params.Configs, func(config *messagespb.LoadReplicaConfig) int64 {
-		return config.GetReplicaId()
+	existedReplicas := lo.KeyBy(m.getByCollection(params.CollectionID), func(replica *Replica) int64 {
+		return replica.GetID()
 	})
 
-	replicas := make([]*Replica, 0)
-	for _, existingReplica := range existingReplicas {
-		replicaID := existingReplica.GetID()
-		config, found := configMap[replicaID]
-		if !found {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				fmt.Sprintf("replica %d not found in config", replicaID))
-		}
-
-		// only update replica's ResourceGroup
-		mutableReplica := existingReplica.CopyForWrite()
-		mutableReplica.SetResourceGroup(config.GetResourceGroupName())
-		replica := mutableReplica.IntoReplica()
-		replicas = append(replicas, replica)
-		log.Ctx(ctx).Info("update replica for collection",
-			zap.Int64("collectionID", params.CollectionID),
-			zap.Int64("replicaID", replicaID),
-			zap.String("resourceGroup", config.GetResourceGroupName()),
-		)
-	}
-	if err := m.put(ctx, replicas...); err != nil {
-		return nil, errors.Wrap(err, "failed to put replicas")
-	}
-	return replicas, nil
-}
-
-// createNewReplicas creates new replicas based on config.
-func (m *ReplicaManager) createNewReplicas(ctx context.Context, params SpawnWithReplicaConfigParams) ([]*Replica, error) {
 	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
 	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
 	replicas := make([]*Replica, 0)
 	for _, config := range params.Configs {
+		if existedReplica, ok := existedReplicas[config.GetReplicaId()]; ok {
+			// if the replica is already existed, just update the resource group
+			mutableReplica := existedReplica.CopyForWrite()
+			mutableReplica.SetResourceGroup(config.GetResourceGroupName())
+			replicas = append(replicas, mutableReplica.IntoReplica())
+			continue
+		}
 		replica := NewReplicaWithPriority(&querypb.Replica{
 			ID:            config.GetReplicaId(),
 			CollectionID:  params.CollectionID,
