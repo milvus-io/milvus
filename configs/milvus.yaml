@@ -135,15 +135,16 @@ minio:
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
   # aliyun (ack): https://www.alibabacloud.com/help/en/container-service-for-kubernetes/latest/use-rrsa-to-enforce-access-control
   # aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/latest/attach-an-instance-ram-role
+  # volcengine: https://www.volcengine.com/docs/6460/1324604
   useIAM: false
-  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
+  # Cloud Provider of S3. Supports: "aws", "gcp", "aliyun", "volcengine".
   # Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
   # You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
   # You can use "gcp" for other cloud provider supports S3 API with signature v2
   # You can use "aliyun" for other cloud provider uses virtual host style bucket
   # You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
   # for authentication.
-  # When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now
+  # When useIAM enabled, only "aws", "gcp", "aliyun", "volcengine" is supported for now
   cloudProvider: aws
   # The JSON content contains the gcs service account credentials.
   # Used only for the "gcpnative" cloud provider.
