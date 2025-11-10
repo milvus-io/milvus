@@ -151,7 +151,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if _, ok := uniqueData[id]; !ok {
-				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx + int(col.nqOffset)}
 				uniqueData[id] = texts[idx]
 			}
 		}
