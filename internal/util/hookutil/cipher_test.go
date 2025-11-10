@@ -17,7 +17,9 @@
 package hookutil
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -36,6 +38,11 @@ func TestCipherSuite(t *testing.T) {
 
 func (s *CipherSuite) SetupSuite() {
 	paramtable.Init()
+}
+
+func (s *CipherSuite) SetupTest() {
+	initCipherOnce = sync.Once{}
+	storeCipher(nil)
 }
 
 func (s *CipherSuite) TestGetCipherNil() {
@@ -83,6 +90,7 @@ func (s *CipherSuite) TestGetEzByCollProperties() {
 }
 
 func (s *CipherSuite) TestTidyDBCipherProperties() {
+	InitTestCipher()
 	// Test with encryption enabled and root key already present
 	dbPropertiesWithRootKey := []*commonpb.KeyValuePair{
 		{Key: EncryptionEnabledKey, Value: "true"},
@@ -177,4 +185,226 @@ func (s *CipherSuite) TestContainsCipherProperty() {
 	for _, test := range tests {
 		s.Equal(test.expected, ContainsCipherProperties(test.props, test.keys))
 	}
+}
+
+func (s *CipherSuite) TestBuildCipherInitConfig() {
+	config := buildCipherInitConfig()
+	s.NotNil(config)
+	s.Contains(config, CipherConfigMilvusRoleName)
+}
+
+func (s *CipherSuite) TestReloadCipherConfig() {
+	InitTestCipher()
+
+	ctx := context.Background()
+	err := reloadCipherConfig(ctx, "test.key", "oldValue", "newValue")
+	s.NoError(err)
+
+	storeCipher(nil)
+	err = reloadCipherConfig(ctx, "test.key", "oldValue", "newValue")
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestNewKmsConfigFields() {
+	params := paramtable.GetCipherParams()
+
+	s.NotNil(params.DefaultRootKey.GetValue())
+	s.NotNil(params.KmsAwsRoleARN.GetValue())
+	s.NotNil(params.KmsAwsExternalID.GetValue())
+	s.NotNil(params.RotationPeriodInHours.GetValue())
+	s.NotNil(params.UpdatePerieldInMinutes.GetValue())
+
+	s.Equal("cipherPlugin.kms.defaultKey", params.DefaultRootKey.Key)
+	s.Equal("cipherPlugin.kms.credentials.aws.roleARN", params.KmsAwsRoleARN.Key)
+	s.Equal("cipherPlugin.kms.credentials.aws.externalID", params.KmsAwsExternalID.Key)
+}
+
+func (s *CipherSuite) TestAsMessageConfig() {
+	ez := &EZ{EzID: 123, CollectionID: 456}
+	config := ez.AsMessageConfig()
+	s.NotNil(config)
+	s.Equal(int64(123), config.EzID)
+	s.Equal(int64(456), config.CollectionID)
+
+	var nilEz *EZ
+	s.Nil(nilEz.AsMessageConfig())
+}
+
+func (s *CipherSuite) TestGetStoragePluginContext() {
+	storeCipher(nil)
+	result := GetStoragePluginContext([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}}, 2)
+	s.Nil(result)
+
+	InitTestCipher()
+	properties := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}}
+	result = GetStoragePluginContext(properties, 2)
+	s.NotNil(result)
+	s.Equal(2, len(result))
+	s.Equal(CipherConfigCreateEZ, result[0].Key)
+	s.Equal("1", result[0].Value)
+	s.Equal(CipherConfigUnsafeEZK, result[1].Key)
+	s.Equal("unsafe key", result[1].Value)
+
+	result = GetStoragePluginContext([]*commonpb.KeyValuePair{}, 2)
+	s.Nil(result)
+}
+
+func (s *CipherSuite) TestGetDBCipherProperties() {
+	props := GetDBCipherProperties(123, "test-kms-key")
+	s.Equal(3, len(props))
+	s.Equal(EncryptionEnabledKey, props[0].Key)
+	s.Equal("true", props[0].Value)
+	s.Equal(EncryptionEzIDKey, props[1].Key)
+	s.Equal("123", props[1].Value)
+	s.Equal(EncryptionRootKeyKey, props[2].Key)
+	s.Equal("test-kms-key", props[2].Value)
+}
+
+func (s *CipherSuite) TestRemoveEZByDBProperties() {
+	storeCipher(nil)
+	err := RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	s.NoError(err)
+
+	InitTestCipher()
+	err = RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	s.NoError(err)
+
+	err = RemoveEZByDBProperties([]*commonpb.KeyValuePair{{Key: "other", Value: "value"}})
+	s.NoError(err)
+
+	err = RemoveEZByDBProperties([]*commonpb.KeyValuePair{})
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestCreateLocalEZByPluginContext() {
+	storeCipher(nil)
+	ctx, err := CreateLocalEZByPluginContext([]*commonpb.KeyValuePair{{Key: CipherConfigCreateEZ, Value: "1"}})
+	s.NoError(err)
+	s.Nil(ctx)
+
+	InitTestCipher()
+	context := []*commonpb.KeyValuePair{
+		{Key: CipherConfigCreateEZ, Value: "123"},
+		{Key: CipherConfigUnsafeEZK, Value: "test-key"},
+	}
+	ctx, err = CreateLocalEZByPluginContext(context)
+	s.NoError(err)
+	s.NotNil(ctx)
+	s.Equal(int64(123), ctx.EncryptionZoneId)
+	s.Equal("test-key", ctx.EncryptionKey)
+
+	ctx, err = CreateLocalEZByPluginContext([]*commonpb.KeyValuePair{{Key: CipherConfigCreateEZ, Value: "invalid"}})
+	s.Error(err)
+	s.Nil(ctx)
+
+	ctx, err = CreateLocalEZByPluginContext([]*commonpb.KeyValuePair{{Key: CipherConfigCreateEZ, Value: "1"}})
+	s.NoError(err)
+	s.Nil(ctx)
+}
+
+func (s *CipherSuite) TestCreateEZByDBProperties() {
+	storeCipher(nil)
+	err := CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	s.NoError(err)
+
+	InitTestCipher()
+	props := []*commonpb.KeyValuePair{
+		{Key: EncryptionEzIDKey, Value: "123"},
+		{Key: EncryptionRootKeyKey, Value: "test-root-key"},
+	}
+	err = CreateEZByDBProperties(props)
+	s.NoError(err)
+
+	err = CreateEZByDBProperties([]*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "1"}})
+	s.NoError(err)
+
+	err = CreateEZByDBProperties([]*commonpb.KeyValuePair{})
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestGetEzPropByDBProperties() {
+	props := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "123"}}
+	result := GetEzPropByDBProperties(props)
+	s.NotNil(result)
+	s.Equal(EncryptionEzIDKey, result.Key)
+	s.Equal("123", result.Value)
+
+	result = GetEzPropByDBProperties([]*commonpb.KeyValuePair{{Key: "other", Value: "value"}})
+	s.Nil(result)
+
+	result = GetEzPropByDBProperties([]*commonpb.KeyValuePair{})
+	s.Nil(result)
+}
+
+func (s *CipherSuite) TestGetEzByCollPropertiesInvalidValue() {
+	props := []*commonpb.KeyValuePair{{Key: EncryptionEzIDKey, Value: "invalid"}}
+	result := GetEzByCollProperties(props, 456)
+	s.NotNil(result)
+	s.Equal(int64(0), result.EzID)
+	s.Equal(int64(456), result.CollectionID)
+}
+
+func (s *CipherSuite) TestIsDBEncryptionEnabledCaseInsensitive() {
+	props := []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "True"}}
+	s.True(IsDBEncryptionEnabled(props))
+
+	props = []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "TRUE"}}
+	s.True(IsDBEncryptionEnabled(props))
+
+	props = []*commonpb.KeyValuePair{{Key: EncryptionEnabledKey, Value: "false"}}
+	s.False(IsDBEncryptionEnabled(props))
+}
+
+func (s *CipherSuite) TestRegisterCallback() {
+	initCipherOnce = sync.Once{}
+	storeCipher(nil)
+	InitTestCipher()
+
+	registerCallback()
+
+	ctx := context.Background()
+	err := reloadCipherConfig(ctx, "test.key", "old", "new")
+	s.NoError(err)
+}
+
+func (s *CipherSuite) TestTidyDBCipherPropertiesWithDefaultKey() {
+	initCipherOnce = sync.Once{}
+	storeCipher(nil)
+	InitTestCipher()
+
+	oldValue := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	defer paramtable.GetCipherParams().DefaultRootKey.SwapTempValue(oldValue)
+
+	paramtable.GetCipherParams().DefaultRootKey.SwapTempValue("default-test-key")
+
+	dbProperties := []*commonpb.KeyValuePair{
+		{Key: EncryptionEnabledKey, Value: "true"},
+	}
+	result, err := TidyDBCipherProperties(1, dbProperties)
+	s.NoError(err)
+	s.NotNil(result)
+	s.Equal(3, len(result))
+
+	foundEzID := false
+	foundRootKey := false
+	for _, kv := range result {
+		if kv.Key == EncryptionEzIDKey {
+			s.Equal("1", kv.Value)
+			foundEzID = true
+		}
+		if kv.Key == EncryptionRootKeyKey {
+			s.Equal("default-test-key", kv.Value)
+			foundRootKey = true
+		}
+	}
+	s.True(foundEzID)
+	s.True(foundRootKey)
+}
+
+func (s *CipherSuite) TestGetEzByCollPropertiesNotFound() {
+	props := []*commonpb.KeyValuePair{
+		{Key: "other_key", Value: "value"},
+	}
+	result := GetEzByCollProperties(props, 456)
+	s.Nil(result)
 }
