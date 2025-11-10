@@ -724,21 +724,32 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
     void
     FillFieldData(const std::optional<DefaultValueType> default_value,
                   ssize_t element_count) override {
-        // todo: add json default_value
-        AssertInfo(!default_value.has_value(),
-                   "json type not support default_value");
         if (element_count == 0) {
             return;
         }
-        null_count_ = element_count;
 
         std::lock_guard lck(tell_mutex_);
         if (length_ + element_count > get_num_rows()) {
             resize_field_data(length_ + element_count);
         }
 
-        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
-            valid_data_.data(), length_, element_count, false);
+        if (default_value.has_value()) {
+            AssertInfo(default_value->has_bytes_data(),
+                       "json type default_value shall be bytes data");
+
+            auto data = default_value->bytes_data();
+            Json default_json = Json(data.data(), data.size());
+            std::fill(data_.data() + length_,
+                      data_.data() + length_ + element_count,
+                      default_json);
+            bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
+                valid_data_.data(), length_, element_count, true);
+        } else {
+            null_count_ = element_count;
+            bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
+                valid_data_.data(), length_, element_count, false);
+        }
+
         length_ += element_count;
     }
 
