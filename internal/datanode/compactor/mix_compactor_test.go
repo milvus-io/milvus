@@ -66,6 +66,7 @@ func (s *MixCompactionTaskStorageV1Suite) SetupSuite() {
 }
 
 func (s *MixCompactionTaskStorageV1Suite) setupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "false")
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
 	s.meta = genTestCollectionMeta()
@@ -100,7 +101,6 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 func (s *MixCompactionTaskStorageV1Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storage.enablev2", "false")
 }
 
 func (s *MixCompactionTaskStorageV1Suite) SetupBM25() {
@@ -139,8 +139,8 @@ func (s *MixCompactionTaskStorageV1Suite) SetupSubTest() {
 
 func (s *MixCompactionTaskStorageV1Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
-	paramtable.Get().Reset("common.storageType")
-	paramtable.Get().Reset("common.storage.enablev2")
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableStorageV2.Key)
 }
 
 func getMilvusBirthday() time.Time {
@@ -760,7 +760,14 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 
 			pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
 			s.Require().NoError(err)
-			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField, []string{"random"},
+			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField,
+				[]*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogPath: "random"},
+						},
+					},
+				},
 				storage.WithDownloader(mockBinlogIO.Download),
 				storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 			s.NoError(err)
@@ -791,16 +798,29 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsOneSegment() {
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{"mock_error"}).
 		Return(nil, errors.New("mock_error")).Once()
 
-	invalidPaths := []string{"mock_error"}
 	pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
 	s.Require().NoError(err)
-	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField, invalidPaths,
+	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField,
+		[]*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "mock_error"},
+				},
+			},
+		},
 		storage.WithDownloader(s.mockBinlogIO.Download),
 		storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.Error(err)
 	s.Nil(got)
 
-	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField, []string{"a"},
+	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField,
+		[]*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogPath: "a"},
+				},
+			},
+		},
 		storage.WithDownloader(s.mockBinlogIO.Download),
 		storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.NoError(err)

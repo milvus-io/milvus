@@ -86,6 +86,12 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{blob.GetValue()}, nil).Maybe()
+
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "false")
+}
+
+func (s *LevelZeroCompactionTaskSuite) TearDownTest() {
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableStorageV2.Key)
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestGetMaxBatchSize() {
