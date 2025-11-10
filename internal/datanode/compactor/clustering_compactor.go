@@ -566,17 +566,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 	processStart := time.Now()
 	var remained int64 = 0
 
-	deltaPaths := make([]string, 0)
-	for _, d := range segment.GetDeltalogs() {
-		for _, l := range d.GetBinlogs() {
-			deltaPaths = append(deltaPaths, l.GetLogPath())
-		}
-	}
 	options := []storage.RwOption{
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField, deltaPaths, options...)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField, segment.GetDeltalogs(), options...)
 	if err != nil {
 		return err
 	}
