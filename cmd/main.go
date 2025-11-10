@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/exp/slices"
 
@@ -56,7 +57,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		// wait for the command to finish
+		// wait for the command to finish. This is crucial for preventing the child process from becoming a Zombie (Z state).
 		waitCh := make(chan error, 1)
 		go func() {
 			waitCh <- cmd.Wait()
@@ -64,16 +65,42 @@ func main() {
 		}()
 
 		sc := make(chan os.Signal, 1)
+		// The filtering logic is now handled within the select case block.
 		signal.Notify(sc)
 
 		// Need a for loop to handle multiple signals
 		for {
 			select {
 			case sig := <-sc:
-				if err := cmd.Process.Signal(sig); err != nil {
-					log.Println("error sending signal", sig, err)
+				// --- Enhanced judgment logic for robustness and filtering ---
+
+				// 1. **Filter out SIGCHLD**: This signal is for the parent process to handle the child's exit status.
+				// It must not be forwarded, and cmd.Wait() handles the actual reaping.
+				if sig == syscall.SIGCHLD {
+					// We only log the event and continue to let cmd.Wait() handle the exit state.
+					log.Println("Received SIGCHLD. Not forwarding, handled by cmd.Wait().")
+					continue
 				}
+
+				// 2. Check if the child process has already exited
+				// ProcessState not nil and Exited() is true means the process is terminated
+				if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+					log.Printf("Received signal %v, but child process (PID %d) has already exited. Skipping forwarding.", sig, cmd.Process.Pid)
+					continue
+				}
+
+				// Attempt to forward the signal to the child process (For SIGTERM, SIGINT, SIGHUP, etc.)
+				log.Printf("Forwarding signal %v to subprocess (PID %d)...", sig, cmd.Process.Pid)
+				if err := cmd.Process.Signal(sig); err != nil {
+					// Common errors: "no such process" if the process exited milliseconds before
+					log.Printf("Error forwarding signal %v to subprocess (PID %d): %v", sig, cmd.Process.Pid, err)
+				}
+
 			case err := <-waitCh:
+				// Received result from cmd.Wait(), indicating the child process has terminated.
+				// Start execution of cleanup logic.
+				log.Println("Subprocess termination detected. Starting cleanup...")
+
 				// clean session
 				paramtable.Init()
 				params := paramtable.Get()
@@ -85,20 +112,24 @@ func main() {
 					sessionSuffix := sessionutil.GetSessions(cmd.Process.Pid)
 					defer sessionutil.RemoveServerInfoFile(cmd.Process.Pid)
 
-					if err := milvus.CleanSession(metaPath, etcdEndpoints, sessionSuffix); err != nil {
-						log.Println("clean session failed", err.Error())
+					if cleanErr := milvus.CleanSession(metaPath, etcdEndpoints, sessionSuffix); cleanErr != nil {
+						log.Println("clean session failed:", cleanErr.Error())
+					} else {
+						log.Println("Etcd session cleaned successfully.")
 					}
 				}
 
 				if err != nil {
-					log.Println("subprocess exit, ", err.Error())
+					log.Println("Subprocess exited with error:", err.Error())
 				} else {
-					log.Println("exit code:", cmd.ProcessState.ExitCode())
+					log.Println("Subprocess exited successfully with code:", cmd.ProcessState.ExitCode())
 				}
+				// Exit the Wrapper process, which triggers Kubelet to restart the Pod
 				return
 			}
 		}
 	} else {
+		// Original Milvus startup logic when the --run-with-subprocess flag is absent
 		milvus.RunMilvus(os.Args)
 	}
 }
