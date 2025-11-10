@@ -46,7 +46,7 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return errors.Wrap(err, "context error while waiting for collection released")
+			return errors.Wrapf(err, "context error while waiting for release, collection=%d", collection)
 		}
 
 		var (
@@ -78,7 +78,8 @@ func WaitCollectionReleased(ctx context.Context, dist *meta.DistributionManager,
 				collection, currentChannelCount, currentSegmentCount)
 		}
 
-		log.Ctx(ctx).Info("wait for release done", zap.Int64("collection", collection),
+		log.Ctx(ctx).Info("waitting for release...",
+			zap.Int64("collection", collection),
 			zap.Int64s("partitions", partitions),
 			zap.Int("channel", currentChannelCount),
 			zap.Int("segments", currentSegmentCount),
@@ -98,7 +99,7 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 	// manual trigger update next target
 	ready, err := targetObserver.UpdateNextTarget(collection)
 	if err != nil {
-		return errors.Wrap(err, "failed to update next target for sync partition job")
+		return errors.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}
 
 	// accelerate check
@@ -108,7 +109,7 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 	case <-ready:
 		return nil
 	case <-ctx.Done():
-		return errors.Wrap(ctx.Err(), "context error while waiting for current target updated")
+		return errors.Wrapf(ctx.Err(), "context error while waiting for current target updated, collection=%d", collection)
 	case <-time.After(waitCollectionReleasedTimeout):
 		return errors.Errorf("wait current target updated timeout, collection=%d", collection)
 	}
