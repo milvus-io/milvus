@@ -204,13 +204,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	seg *datapb.CompactionSegmentBinlogs,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
-	deltaPaths := make([]string, 0)
-	for _, fieldBinlog := range seg.GetDeltalogs() {
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			deltaPaths = append(deltaPaths, binlog.GetLogPath())
-		}
-	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltaPaths,
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, seg.GetDeltalogs(),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {

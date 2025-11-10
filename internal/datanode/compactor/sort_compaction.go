@@ -175,13 +175,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 
-	deltalogPaths := make([]string, 0)
-	for _, fieldBinlog := range t.plan.SegmentBinlogs[0].GetDeltalogs() {
-		for _, binlog := range fieldBinlog.GetBinlogs() {
-			deltalogPaths = append(deltalogPaths, binlog.GetLogPath())
-		}
-	}
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltalogPaths,
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, t.plan.SegmentBinlogs[0].GetDeltalogs(),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {

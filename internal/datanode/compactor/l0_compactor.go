@@ -398,13 +398,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 		return nil, err
 	}
 
-	paths := make([]string, 0)
-	for _, deltaLog := range deltaLogs {
-		for _, binlog := range deltaLog.GetBinlogs() {
-			paths = append(paths, binlog.GetLogPath())
-		}
-	}
-	allDelta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, paths,
+	allDelta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltaLogs,
 		storage.WithDownloader(t.BinlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
