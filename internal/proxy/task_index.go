@@ -1045,18 +1045,6 @@ func (dit *dropIndexTask) OnEnqueue() error {
 }
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
-	collName, fieldName := dit.CollectionName, dit.FieldName
-
-	if err := validateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if fieldName != "" {
-		if err := validateFieldName(fieldName); err != nil {
-			return err
-		}
-	}
-
 	collID, err := globalMetaCache.GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
 	if err != nil {
 		return err
