@@ -988,7 +988,7 @@ common:
     internaltlsEnabled: false
     tlsMode: 0
   session:
-    ttl: 10 # ttl value when session granting a lease to register service
+    ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
   locks:
     metrics:
