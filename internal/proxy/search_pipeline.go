@@ -728,7 +728,6 @@ func buildStringFragments(task *highlightTask, idx int, frags []*querypb.Highlig
 		fragBytes := []byte{}
 		cursor := int(frag.GetStartOffset())
 		for i := 0; i < len(frag.GetOffsets())/2; i++ {
-			log.Info("test--", zap.Int64("start", frag.Offsets[i<<1]), zap.Int64("end", frag.Offsets[(i<<1)+1]))
 			startOffset := int(frag.Offsets[i<<1])
 			endOffset := int(frag.Offsets[(i<<1)+1])
 			if cursor < startOffset {
