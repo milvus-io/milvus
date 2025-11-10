@@ -182,10 +182,14 @@ func (job *LoadCollectionJob) Execute() error {
 	// 7. wait for partition released if any partition is released
 	if len(toReleasePartitions) > 0 {
 		if err = WaitCurrentTargetUpdated(ctx, job.targetObserver, req.GetCollectionId()); err != nil {
-			return err
+			log.Warn("failed to wait current target updated", zap.Error(err))
+			// return nil to avoid infinite retry on DDL callback
+			return nil
 		}
 		if err = WaitCollectionReleased(ctx, job.dist, job.checkerController, req.GetCollectionId(), toReleasePartitions...); err != nil {
-			return err
+			log.Warn("failed to wait partition released", zap.Error(err))
+			// return nil to avoid infinite retry on DDL callback
+			return nil
 		}
 		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
 	}

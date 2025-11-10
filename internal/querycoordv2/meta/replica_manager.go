@@ -174,15 +174,11 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
-	existedReplicas := lo.KeyBy(m.getByCollection(params.CollectionID), func(replica *Replica) int64 {
-		return replica.GetID()
-	})
-
 	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
 	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
 	replicas := make([]*Replica, 0)
 	for _, config := range params.Configs {
-		if existedReplica, ok := existedReplicas[config.GetReplicaId()]; ok {
+		if existedReplica, ok := m.replicas[config.GetReplicaId()]; ok {
 			// if the replica is already existed, just update the resource group
 			mutableReplica := existedReplica.CopyForWrite()
 			mutableReplica.SetResourceGroup(config.GetResourceGroupName())
