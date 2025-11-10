@@ -89,15 +89,6 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	fBinlogs, deltalogs, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
 	s.NoError(err)
 
-	dblobs, err := getInt64DeltaBlobs(
-		1,
-		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
-	)
-	s.Require().NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltalogs.GetBinlogs()[0].GetLogPath()}).
-		Return([][]byte{dblobs.GetValue()}, nil).Once()
-
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
 			CollectionID:   1,
@@ -151,15 +142,6 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 
 	fBinlogs, deltalogs, _, _, _, err := s.initStorageV2Segments(10240, segmentID)
 	s.NoError(err)
-
-	dblobs, err := getInt64DeltaBlobs(
-		1,
-		[]int64{100},
-		[]uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)},
-	)
-	s.Require().NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltalogs.GetBinlogs()[0].GetLogPath()}).
-		Return([][]byte{dblobs.GetValue()}, nil).Once()
 
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
