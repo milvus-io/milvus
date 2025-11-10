@@ -571,5 +571,18 @@ func nextFieldID(coll *model.Collection) int64 {
 			maxFieldID = field.FieldID
 		}
 	}
+
+	// Also check StructArrayFields and their sub-fields to avoid ID conflicts
+	for _, structField := range coll.StructArrayFields {
+		if structField.FieldID > maxFieldID {
+			maxFieldID = structField.FieldID
+		}
+		for _, subField := range structField.Fields {
+			if subField.FieldID > maxFieldID {
+				maxFieldID = subField.FieldID
+			}
+		}
+	}
+
 	return maxFieldID + 1
 }
