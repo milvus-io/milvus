@@ -122,7 +122,7 @@ func (p *knowhereConfig) UpdateIndexParams(indexType string, stage string, index
 	overrideIndexType := GetKeyFromSlice(indexParams, OverrideIndexTypeKey)
 	if overrideIndexType != "" {
 		overrideIndexParams := p.getIndexParam(overrideIndexType, stage)
-		log.Info("overrideIndexParams", zap.String("overrideIndexType", overrideIndexType), zap.Any("overrideIndexParams", overrideIndexParams))
+		log.Info("override index params", zap.String("overrideIndexType", overrideIndexType), zap.Any("overrideIndexParams", overrideIndexParams))
 		for key, val := range overrideIndexParams {
 			indexParams = append(indexParams,
 				&commonpb.KeyValuePair{

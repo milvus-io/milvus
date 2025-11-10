@@ -189,6 +189,10 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		}
 	}
 	newIndexType := GetIndexType(indexParams)
+	if newIndexType != "" && newIndexType != indexType {
+		log.Info("override index type", zap.String("indexType", indexType), zap.String("newIndexType", newIndexType))
+		indexType = newIndexType
+	}
 
 	segIndex := &model.SegmentIndex{
 		SegmentID:      segment.ID,
@@ -199,7 +203,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		BuildID:        buildID,
 		CreatedUTCTime: uint64(time.Now().Unix()),
 		WriteHandoff:   false,
-		IndexType:      newIndexType,
+		IndexType:      indexType,
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
