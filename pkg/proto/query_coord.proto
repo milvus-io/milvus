@@ -1015,14 +1015,13 @@ message ValidateAnalyzerRequest{
 }
 
 // HighlightTask fetch highlight for all queries at one field
-// len(target_texts) == len(topks) == nq
-// len(texts) == sum(topks)
+// len(texts) == search_text_num + corpus_text_num
 message HighlightTask{
     string field_name = 1;
     int64 field_id = 2;
     repeated string texts = 3;
-    repeated string analyzer_names = 4;
-
+    repeated string analyzer_names = 4; // used if field with multi-analyzer
+    
     int64 search_text_num = 5;
     int64 corpus_text_num = 6;
 }
@@ -1031,7 +1030,7 @@ message GetHighlightRequest{
     common.MsgBase base = 1;
     string channel = 2;
     repeated int64 topks = 3;
-    repeated HighlightTask tasks=4;
+    repeated HighlightTask tasks=4; // one task for one field
 }
 
 // start_offset and end_offset are fragment offset in the original text

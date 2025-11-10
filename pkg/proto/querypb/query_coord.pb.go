@@ -7764,8 +7764,7 @@ func (x *ValidateAnalyzerRequest) GetAnalyzerInfos() []*AnalyzerInfo {
 }
 
 // HighlightTask fetch highlight for all queries at one field
-// len(target_texts) == len(topks) == nq
-// len(texts) == sum(topks)
+// len(texts) == search_text_num + corpus_text_num
 type HighlightTask struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -7774,7 +7773,7 @@ type HighlightTask struct {
 	FieldName     string   `protobuf:"bytes,1,opt,name=field_name,json=fieldName,proto3" json:"field_name,omitempty"`
 	FieldId       int64    `protobuf:"varint,2,opt,name=field_id,json=fieldId,proto3" json:"field_id,omitempty"`
 	Texts         []string `protobuf:"bytes,3,rep,name=texts,proto3" json:"texts,omitempty"`
-	AnalyzerNames []string `protobuf:"bytes,4,rep,name=analyzer_names,json=analyzerNames,proto3" json:"analyzer_names,omitempty"`
+	AnalyzerNames []string `protobuf:"bytes,4,rep,name=analyzer_names,json=analyzerNames,proto3" json:"analyzer_names,omitempty"` // used if field with multi-analyzer
 	SearchTextNum int64    `protobuf:"varint,5,opt,name=search_text_num,json=searchTextNum,proto3" json:"search_text_num,omitempty"`
 	CorpusTextNum int64    `protobuf:"varint,6,opt,name=corpus_text_num,json=corpusTextNum,proto3" json:"corpus_text_num,omitempty"`
 }
@@ -7861,7 +7860,7 @@ type GetHighlightRequest struct {
 	Base    *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	Channel string            `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
 	Topks   []int64           `protobuf:"varint,3,rep,packed,name=topks,proto3" json:"topks,omitempty"`
-	Tasks   []*HighlightTask  `protobuf:"bytes,4,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	Tasks   []*HighlightTask  `protobuf:"bytes,4,rep,name=tasks,proto3" json:"tasks,omitempty"` // one task for one field
 }
 
 func (x *GetHighlightRequest) Reset() {
