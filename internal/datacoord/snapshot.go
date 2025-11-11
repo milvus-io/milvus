@@ -22,13 +22,14 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/hamba/avro/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -45,10 +46,22 @@ const (
 
 	// SnapshotManifestsSubPath is the subdirectory for manifest files
 	SnapshotManifestsSubPath = "manifests"
-
-	// SnapshotVersionHintFile is the filename for version hint file
-	SnapshotVersionHintFile = "version-hint.txt"
 )
+
+var (
+	// Cached Avro schemas for better performance
+	manifestSchemaOnce sync.Once
+	manifestSchema     avro.Schema
+	manifestSchemaErr  error
+)
+
+// getManifestSchema returns the cached manifest schema
+func getManifestSchema() (avro.Schema, error) {
+	manifestSchemaOnce.Do(func() {
+		manifestSchema, manifestSchemaErr = avro.Parse(getProperAvroSchema())
+	})
+	return manifestSchema, manifestSchemaErr
+}
 
 // --- 1. Go Struct Definitions Based on Protobuf Messages ---
 
@@ -66,14 +79,24 @@ type SnapshotData struct {
 // ManifestEntry is a single record written to a Manifest File.
 // It describes the details of a Segment.
 type ManifestEntry struct {
-	Status        string                  `avro:"status"`
-	SnapshotID    int64                   `avro:"snapshot_id"`
-	SegmentID     int64                   `avro:"segment_id"`
-	PartitionID   int64                   `avro:"partition_id"`
-	SegmentLevel  int64                   `avro:"segment_level"`
-	BinlogFiles   []AvroFieldBinlog       `avro:"binlog_files"`
-	DeltalogFiles []AvroFieldBinlog       `avro:"deltalog_files"`
-	IndexFiles    []AvroIndexFilePathInfo `avro:"index_files"`
+	Status            string                  `avro:"status"`
+	SnapshotID        int64                   `avro:"snapshot_id"`
+	SegmentID         int64                   `avro:"segment_id"`
+	PartitionID       int64                   `avro:"partition_id"`
+	SegmentLevel      int64                   `avro:"segment_level"`
+	BinlogFiles       []AvroFieldBinlog       `avro:"binlog_files"`
+	DeltalogFiles     []AvroFieldBinlog       `avro:"deltalog_files"`
+	IndexFiles        []AvroIndexFilePathInfo `avro:"index_files"`
+	ChannelName       string                  `avro:"channel_name"`
+	NumOfRows         int64                   `avro:"num_of_rows"`
+	StatslogFiles     []AvroFieldBinlog       `avro:"statslog_files"`
+	Bm25StatslogFiles []AvroFieldBinlog       `avro:"bm25_statslog_files"`
+	TextIndexFiles    []AvroTextIndexEntry    `avro:"text_index_files"`
+	JsonKeyIndexFiles []AvroJsonKeyIndexEntry `avro:"json_key_index_files"`
+	StartPosition     *AvroMsgPosition        `avro:"start_position"`
+	DmlPosition       *AvroMsgPosition        `avro:"dml_position"`
+	StorageVersion    int64                   `avro:"storage_version"`
+	IsSorted          bool                    `avro:"is_sorted"`
 }
 
 // AvroFieldBinlog represents datapb.FieldBinlog in Avro-compatible format
@@ -115,23 +138,53 @@ type AvroKeyValuePair struct {
 	Value string `avro:"value"`
 }
 
-// ManifestListEntry is a single record written to a Manifest List File.
-// It points to a specific Manifest File.
-type ManifestListEntry struct {
-	ManifestPath   string `avro:"manifest_path"`
-	ManifestLength int64  `avro:"manifest_length"`
-	// More summary information can be added for query pruning, e.g., partition info.
+// AvroMsgPosition represents msgpb.MsgPosition in Avro-compatible format
+type AvroMsgPosition struct {
+	ChannelName string `avro:"channel_name"`
+	MsgID       []byte `avro:"msg_id"`
+	MsgGroup    string `avro:"msg_group"`
+	Timestamp   int64  `avro:"timestamp"`
+}
+
+// AvroTextIndexStats represents datapb.TextIndexStats in Avro-compatible format
+type AvroTextIndexStats struct {
+	FieldID    int64    `avro:"field_id"`
+	Version    int64    `avro:"version"`
+	Files      []string `avro:"files"`
+	LogSize    int64    `avro:"log_size"`
+	MemorySize int64    `avro:"memory_size"`
+	BuildID    int64    `avro:"build_id"`
+}
+
+// AvroJsonKeyStats represents datapb.JsonKeyStats in Avro-compatible format
+type AvroJsonKeyStats struct {
+	FieldID                int64    `avro:"field_id"`
+	Version                int64    `avro:"version"`
+	Files                  []string `avro:"files"`
+	LogSize                int64    `avro:"log_size"`
+	MemorySize             int64    `avro:"memory_size"`
+	BuildID                int64    `avro:"build_id"`
+	JsonKeyStatsDataFormat int64    `avro:"json_key_stats_data_format"`
+}
+
+// AvroTextIndexEntry represents a single entry in the text index map (converted from map to array)
+type AvroTextIndexEntry struct {
+	FieldID int64               `avro:"field_id"`
+	Stats   *AvroTextIndexStats `avro:"stats"`
+}
+
+// AvroJsonKeyIndexEntry represents a single entry in the json key index map (converted from map to array)
+type AvroJsonKeyIndexEntry struct {
+	FieldID int64             `avro:"field_id"`
+	Stats   *AvroJsonKeyStats `avro:"stats"`
 }
 
 // SnapshotMetadata is the structure that is ultimately written to metadata.json.
 type SnapshotMetadata struct {
-	SnapshotID   int64                      `json:"snapshot-id"`
-	TimestampMs  int64                      `json:"timestamp-ms"`
-	ManifestList string                     `json:"manifest-list"`
-	Schema       *schemapb.CollectionSchema `json:"schema"`
-	Indexes      []*indexpb.IndexInfo       `json:"indexes"`
-	Properties   map[string]string          `json:"properties"`
-	Summary      map[string]interface{}     `json:"summary"`
+	SnapshotInfo *datapb.SnapshotInfo          `json:"snapshot-info"`
+	Collection   *datapb.CollectionDescription `json:"collection"`
+	Indexes      []*indexpb.IndexInfo          `json:"indexes"`
+	ManifestList []string                      `json:"manifest-list"`
 }
 
 // --- 3. Core Writer ---
@@ -143,31 +196,24 @@ snapshots/{collection_id}/
 ├── metadata/
 │   ├── 00001-{uuid}.json          # Snapshot version 1 metadata (JSON format)
 │   ├── 00002-{uuid}.json          # Snapshot version 2 metadata (JSON format)
-│   ├── ...
-│   └── version-hint.txt           # Points to the latest metadata file name
+│   └── ...
 │
 └── manifests/
-    ├── snap-{snapshot_id}-list-{uuid}.avro    # Manifest List for snapshot (Avro format)
     ├── data-file-manifest-{uuid}.avro         # Manifest File containing segment details (Avro format)
     └── ...
 
 Example paths:
 - s3://bucket/snapshots/12345/metadata/00001-a1b2c3d4.json
-- s3://bucket/snapshots/12345/metadata/version-hint.txt
-- s3://bucket/snapshots/12345/manifests/snap-1-list-e5f6g7h8.avro
 - s3://bucket/snapshots/12345/manifests/data-file-manifest-i9j0k1l2.avro
 
 File Format Details:
-- metadata/*.json: JSON format containing snapshot metadata, schema, and properties
-- version-hint.txt: Plain text file containing the filename of the latest metadata file
-- manifests/*-list-*.avro: Avro format containing list of manifest files with summary info
+- metadata/*.json: JSON format containing snapshot metadata, collection schema, indexes, and manifest file paths array
 - manifests/data-file-manifest-*.avro: Avro format containing detailed segment information
 
 Access Pattern:
-1. Read version-hint.txt to get the latest metadata filename
-2. Read the metadata JSON file to get snapshot info and manifest list path
-3. Read the manifest list Avro file to get manifest file paths (with pruning)
-4. Read relevant manifest Avro files to get segment file paths
+1. Find the metadata JSON file by snapshot ID (iterate through metadata files)
+2. Read the metadata JSON file to get snapshot info and manifest file paths
+3. Read manifest Avro files to get segment file paths
 */
 
 // SnapshotWriter is responsible for writing snapshots to S3.
@@ -185,41 +231,44 @@ func NewSnapshotWriter(cm storage.ChunkManager) *SnapshotWriter {
 // Save is the main entry point, executing the complete snapshot saving logic.
 // Returns the S3 path of the metadata file for the saved snapshot.
 func (w *SnapshotWriter) Save(ctx context.Context, snapshot *SnapshotData) (string, error) {
+	// Validate input parameters
+	if snapshot == nil {
+		return "", fmt.Errorf("snapshot cannot be nil")
+	}
+	if snapshot.SnapshotInfo == nil {
+		return "", fmt.Errorf("snapshot info cannot be nil")
+	}
 	collectionID := snapshot.SnapshotInfo.GetCollectionId()
+	if collectionID <= 0 {
+		return "", fmt.Errorf("invalid collection ID: %d", collectionID)
+	}
 	snapshotID := snapshot.SnapshotInfo.GetId()
+	if snapshotID <= 0 {
+		return "", fmt.Errorf("invalid snapshot ID: %d", snapshotID)
+	}
+	if snapshot.Collection == nil {
+		return "", fmt.Errorf("collection description cannot be nil")
+	}
+
 	basePath := path.Join(SnapshotRootPath, strconv.FormatInt(collectionID, 10))
 	writeUUID := uuid.New().String()
 
 	// Step 1: Write segment information to one or more Manifest files.
-	manifestFilePath, manifestFileLength, err := w.writeManifestFile(ctx, basePath, snapshotID, writeUUID, snapshot.Segments)
+	manifestFilePath, _, err := w.writeManifestFile(ctx, basePath, snapshotID, writeUUID, snapshot.Segments)
 	if err != nil {
 		return "", fmt.Errorf("failed to write manifest file: %w", err)
 	}
 	log.Info("Successfully wrote manifest file",
 		zap.String("manifestFilePath", manifestFilePath))
 
-	// Step 2: Create and write the Manifest List file, pointing to the file(s) created in Step 1.
-	manifestListPath, err := w.writeManifestList(ctx, basePath, snapshotID, writeUUID, manifestFilePath, manifestFileLength)
-	if err != nil {
-		return "", fmt.Errorf("failed to write manifest list: %w", err)
-	}
-	log.Info("Successfully wrote manifest list",
-		zap.String("manifestListPath", manifestListPath))
-
-	// Step 3: Create and write the core metadata.json file.
-	metadataFilePath, metadataFileName, err := w.writeMetadataFile(ctx, basePath, writeUUID, snapshot, manifestListPath)
+	// Step 2: Create and write the core metadata.json file with manifest paths.
+	manifestPaths := []string{manifestFilePath}
+	metadataFilePath, _, err := w.writeMetadataFile(ctx, basePath, writeUUID, snapshot, manifestPaths)
 	if err != nil {
 		return "", fmt.Errorf("failed to write metadata file: %w", err)
 	}
 	log.Info("Successfully wrote metadata file",
 		zap.String("metadataFilePath", metadataFilePath))
-
-	// Step 4: Atomically update the version-hint.txt file to point to the new metadata file.
-	if err := w.updateVersionHint(ctx, basePath, metadataFileName); err != nil {
-		return "", fmt.Errorf("failed to update version hint: %w", err)
-	}
-	log.Info("Successfully updated version hint",
-		zap.String("metadataFileName", metadataFileName))
 
 	return metadataFilePath, nil
 }
@@ -229,18 +278,32 @@ func (w *SnapshotWriter) writeManifestFile(ctx context.Context, basePath string,
 	// Convert segments to ManifestEntry format
 	var entries []ManifestEntry
 	for _, segment := range segments {
-		// Convert BinlogFiles to Avro format
+		// Convert Binlogs to Avro format
 		var avroBinlogFiles []AvroFieldBinlog
-		for _, binlog := range segment.GetBinlogFiles() {
+		for _, binlog := range segment.GetBinlogs() {
 			avroFieldBinlog := convertFieldBinlogToAvro(binlog)
 			avroBinlogFiles = append(avroBinlogFiles, avroFieldBinlog)
 		}
 
-		// Convert DeltalogFiles to Avro format
+		// Convert Deltalogs to Avro format
 		var avroDeltalogFiles []AvroFieldBinlog
-		for _, deltalog := range segment.GetDeltalogFiles() {
+		for _, deltalog := range segment.GetDeltalogs() {
 			avroFieldBinlog := convertFieldBinlogToAvro(deltalog)
 			avroDeltalogFiles = append(avroDeltalogFiles, avroFieldBinlog)
+		}
+
+		// Convert Statslogs to Avro format
+		var avroStatslogFiles []AvroFieldBinlog
+		for _, statslog := range segment.GetStatslogs() {
+			avroFieldBinlog := convertFieldBinlogToAvro(statslog)
+			avroStatslogFiles = append(avroStatslogFiles, avroFieldBinlog)
+		}
+
+		// Convert Bm25Statslogs to Avro format
+		var avroBm25StatslogFiles []AvroFieldBinlog
+		for _, bm25Statslog := range segment.GetBm25Statslogs() {
+			avroFieldBinlog := convertFieldBinlogToAvro(bm25Statslog)
+			avroBm25StatslogFiles = append(avroBm25StatslogFiles, avroFieldBinlog)
 		}
 
 		// Convert IndexFiles to Avro format
@@ -250,23 +313,39 @@ func (w *SnapshotWriter) writeManifestFile(ctx context.Context, basePath string,
 			avroIndexFiles = append(avroIndexFiles, avroIndexFile)
 		}
 
+		// Convert TextIndexFiles (map to array) to Avro format
+		avroTextIndexFiles := convertTextIndexMapToAvro(segment.GetTextIndexFiles())
+
+		// Convert JsonKeyIndexFiles (map to array) to Avro format
+		avroJsonKeyIndexFiles := convertJsonKeyIndexMapToAvro(segment.GetJsonKeyIndexFiles())
+
 		entry := ManifestEntry{
-			Status:        "ADDED",
-			SnapshotID:    snapshotID,
-			SegmentID:     segment.GetSegmentId(),
-			PartitionID:   segment.GetPartitionId(),
-			SegmentLevel:  segment.GetSegmentLevel(),
-			BinlogFiles:   avroBinlogFiles,
-			DeltalogFiles: avroDeltalogFiles,
-			IndexFiles:    avroIndexFiles,
+			Status:            "ADDED",
+			SnapshotID:        snapshotID,
+			SegmentID:         segment.GetSegmentId(),
+			PartitionID:       segment.GetPartitionId(),
+			SegmentLevel:      int64(segment.GetSegmentLevel()),
+			BinlogFiles:       avroBinlogFiles,
+			DeltalogFiles:     avroDeltalogFiles,
+			IndexFiles:        avroIndexFiles,
+			ChannelName:       segment.GetChannelName(),
+			NumOfRows:         segment.GetNumOfRows(),
+			StatslogFiles:     avroStatslogFiles,
+			Bm25StatslogFiles: avroBm25StatslogFiles,
+			TextIndexFiles:    avroTextIndexFiles,
+			JsonKeyIndexFiles: avroJsonKeyIndexFiles,
+			StartPosition:     convertMsgPositionToAvro(segment.GetStartPosition()),
+			DmlPosition:       convertMsgPositionToAvro(segment.GetDmlPosition()),
+			StorageVersion:    segment.GetStorageVersion(),
+			IsSorted:          segment.GetIsSorted(),
 		}
 		entries = append(entries, entry)
 	}
 
-	// Use the proper Avro schema
-	avroSchema, err := avro.Parse(getProperAvroSchema())
+	// Use the cached Avro schema
+	avroSchema, err := getManifestSchema()
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to parse avro schema: %w", err)
+		return "", 0, fmt.Errorf("failed to get manifest schema: %w", err)
 	}
 
 	// Serialize to binary
@@ -287,69 +366,44 @@ func (w *SnapshotWriter) writeManifestFile(ctx context.Context, basePath string,
 	return manifestFilePath, int64(len(binaryData)), nil
 }
 
-// writeManifestList writes a Manifest List file pointing to the manifest files.
-func (w *SnapshotWriter) writeManifestList(ctx context.Context, basePath string, snapshotID int64, writeUUID, manifestPath string, manifestLength int64) (string, error) {
-	// Create ManifestListEntry
-	entry := ManifestListEntry{
-		ManifestPath:   manifestPath,
-		ManifestLength: manifestLength,
+// getNextVersion gets the next version number for a snapshot metadata file.
+func (w *SnapshotWriter) getNextVersion(ctx context.Context, basePath string) (int, error) {
+	metadataDir := path.Join(basePath, SnapshotMetadataSubPath)
+	files, _, err := storage.ListAllChunkWithPrefix(ctx, w.chunkManager, metadataDir, false)
+	if err != nil {
+		// If directory doesn't exist or other errors, start from version 1
+		return 1, nil
 	}
 
-	// Define Avro schema for array of ManifestListEntry
-	avroSchemaStr := `{
-		"type": "array", "items": {
-			"type": "record",
-			"name": "ManifestListEntry",
-			"fields": [
-				{"name": "manifest_path", "type": "string"},
-				{"name": "manifest_length", "type": "long"}
-			]
+	maxVersion := 0
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".json") {
+			continue
 		}
-	}`
-
-	avroSchema, err := avro.Parse(avroSchemaStr)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse avro schema: %w", err)
+		filename := path.Base(file)
+		// Extract version number from filename like "00001-uuid.json"
+		parts := strings.Split(filename, "-")
+		if len(parts) >= 1 {
+			if version, err := strconv.Atoi(parts[0]); err == nil {
+				if version > maxVersion {
+					maxVersion = version
+				}
+			}
+		}
 	}
 
-	// Serialize to binary - wrap entry in array
-	binaryData, err := avro.Marshal(avroSchema, []ManifestListEntry{entry})
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize manifest list entry to avro binary: %w", err)
-	}
-
-	// Generate file path
-	manifestListFileName := fmt.Sprintf("snap-%d-list-%s.avro", snapshotID, writeUUID)
-	manifestListPath := path.Join(basePath, SnapshotManifestsSubPath, manifestListFileName)
-
-	// Write to storage
-	if err := w.chunkManager.Write(ctx, manifestListPath, binaryData); err != nil {
-		return "", fmt.Errorf("failed to write manifest list file to storage: %w", err)
-	}
-
-	return manifestListPath, nil
+	return maxVersion + 1, nil
 }
 
 // writeMetadataFile writes the main metadata.json file.
 // Returns the full file path and the file name.
-func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, basePath string, writeUUID string, snapshot *SnapshotData, manifestListPath string) (string, string, error) {
-	// Create metadata structure
+func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, basePath string, writeUUID string, snapshot *SnapshotData, manifestPaths []string) (string, string, error) {
+	// Create metadata structure - save complete SnapshotInfo and Collection
 	metadata := &SnapshotMetadata{
-		SnapshotID:   snapshot.SnapshotInfo.GetId(),
-		TimestampMs:  snapshot.SnapshotInfo.GetCreateTs(),
-		ManifestList: manifestListPath,
-		Schema:       snapshot.Collection.GetSchema(),
-		Indexes:      snapshot.Indexes, // Add indexes to metadata
-		Properties: map[string]string{
-			"name":        snapshot.SnapshotInfo.GetName(),
-			"description": snapshot.SnapshotInfo.GetDescription(),
-			"s3_location": snapshot.SnapshotInfo.GetS3Location(),
-		},
-		Summary: map[string]interface{}{
-			"segment_count": len(snapshot.Segments),
-			"index_count":   len(snapshot.Indexes),
-			"partition_ids": snapshot.SnapshotInfo.GetPartitionIds(),
-		},
+		SnapshotInfo: snapshot.SnapshotInfo,
+		Collection:   snapshot.Collection,
+		Indexes:      snapshot.Indexes,
+		ManifestList: manifestPaths,
 	}
 
 	// Serialize to JSON
@@ -358,8 +412,14 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, basePath string,
 		return "", "", fmt.Errorf("failed to marshal metadata to JSON: %w", err)
 	}
 
-	// Generate file path with version number
-	metadataFileName := fmt.Sprintf("00001-%s.json", writeUUID)
+	// Get next version number
+	version, err := w.getNextVersion(ctx, basePath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get next version: %w", err)
+	}
+
+	// Generate file path with version number (padded to 5 digits)
+	metadataFileName := fmt.Sprintf("%05d-%s.json", version, writeUUID)
 	metadataFilePath := path.Join(basePath, SnapshotMetadataSubPath, metadataFileName)
 
 	// Write to storage
@@ -370,27 +430,21 @@ func (w *SnapshotWriter) writeMetadataFile(ctx context.Context, basePath string,
 	return metadataFilePath, metadataFileName, nil
 }
 
-// updateVersionHint atomically updates the version-hint.txt file.
-func (w *SnapshotWriter) updateVersionHint(ctx context.Context, basePath string, metadataFileName string) error {
-	versionHintPath := path.Join(basePath, SnapshotMetadataSubPath, SnapshotVersionHintFile)
-	versionHintData := []byte(metadataFileName)
-
-	if err := w.chunkManager.Write(ctx, versionHintPath, versionHintData); err != nil {
-		return fmt.Errorf("failed to write version hint file: %w", err)
-	}
-
-	return nil
-}
-
 // Drop removes a specific snapshot by collection ID and snapshot ID.
 // This function performs the following steps:
 // 1. Find and read the metadata file for the specified snapshot
-// 2. Read the manifest list to get all manifest files
+// 2. Get all manifest file paths from metadata
 // 3. Remove all manifest files referenced by the snapshot
-// 4. Remove the manifest list file
-// 5. Remove the metadata file
-// 6. Update version-hint.txt if the deleted snapshot was the latest
+// 4. Remove the metadata file
 func (w *SnapshotWriter) Drop(ctx context.Context, collectionID int64, snapshotID int64) error {
+	// Validate input parameters
+	if collectionID <= 0 {
+		return fmt.Errorf("invalid collection ID: %d", collectionID)
+	}
+	if snapshotID <= 0 {
+		return fmt.Errorf("invalid snapshot ID: %d", snapshotID)
+	}
+
 	basePath := path.Join(SnapshotRootPath, strconv.FormatInt(collectionID, 10))
 
 	// Step 1: Find metadata file for the specific snapshot ID
@@ -399,52 +453,28 @@ func (w *SnapshotWriter) Drop(ctx context.Context, collectionID int64, snapshotI
 		return fmt.Errorf("failed to find metadata file for snapshot %d: %w", snapshotID, err)
 	}
 
-	// Step 2: Read metadata file to get manifest list path
+	// Step 2: Read metadata file to get manifest paths
 	metadata, err := w.readMetadataFile(ctx, metadataFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Step 3: Read manifest list to get all manifest files
-	manifestEntries, err := w.readManifestList(ctx, metadata.ManifestList)
-	if err != nil {
-		return fmt.Errorf("failed to read manifest list: %w", err)
-	}
-
-	// Step 4: Remove all manifest files
-	var manifestPaths []string
-	for _, entry := range manifestEntries {
-		manifestPaths = append(manifestPaths, entry.ManifestPath)
-	}
-
-	if len(manifestPaths) > 0 {
-		if err := w.chunkManager.MultiRemove(ctx, manifestPaths); err != nil {
+	// Step 3: Remove all manifest files
+	if len(metadata.ManifestList) > 0 {
+		if err := w.chunkManager.MultiRemove(ctx, metadata.ManifestList); err != nil {
 			return fmt.Errorf("failed to remove manifest files: %w", err)
 		}
 		log.Info("Successfully removed manifest files",
-			zap.Int("count", len(manifestPaths)),
+			zap.Int("count", len(metadata.ManifestList)),
 			zap.Int64("snapshotID", snapshotID))
 	}
 
-	// Step 5: Remove manifest list file
-	if err := w.chunkManager.Remove(ctx, metadata.ManifestList); err != nil {
-		return fmt.Errorf("failed to remove manifest list file: %w", err)
-	}
-	log.Info("Successfully removed manifest list file",
-		zap.String("manifestListPath", metadata.ManifestList))
-
-	// Step 6: Remove metadata file
+	// Step 4: Remove metadata file
 	if err := w.chunkManager.Remove(ctx, metadataFilePath); err != nil {
 		return fmt.Errorf("failed to remove metadata file: %w", err)
 	}
 	log.Info("Successfully removed metadata file",
 		zap.String("metadataFilePath", metadataFilePath))
-
-	// Step 7: Check if we need to update version-hint.txt
-	// If the deleted snapshot was the latest, we need to find the next latest snapshot
-	if err := w.updateVersionHintAfterDrop(ctx, basePath, snapshotID); err != nil {
-		return fmt.Errorf("failed to update version hint after drop: %w", err)
-	}
 
 	log.Info("Successfully dropped snapshot",
 		zap.Int64("snapshotID", snapshotID),
@@ -475,15 +505,18 @@ func (w *SnapshotWriter) findMetadataFileBySnapshotID(ctx context.Context, baseP
 		// Read and parse metadata file
 		metadata, err := w.readMetadataFile(ctx, file)
 		if err != nil {
-			continue // Skip files that can't be parsed
+			log.Warn("Failed to parse metadata file, skipping",
+				zap.String("file", file),
+				zap.Error(err))
+			continue
 		}
 
-		if metadata.SnapshotID == snapshotID {
+		if metadata.SnapshotInfo.GetId() == snapshotID {
 			return file, nil
 		}
 	}
 
-	return "", fmt.Errorf("snapshot %d not found", snapshotID)
+	return "", fmt.Errorf("snapshot %d not found, checked %d files", snapshotID, len(files))
 }
 
 // readMetadataFile reads and parses a metadata JSON file.
@@ -503,134 +536,6 @@ func (w *SnapshotWriter) readMetadataFile(ctx context.Context, filePath string) 
 	return &metadata, nil
 }
 
-// readManifestList reads and parses a manifest list Avro file.
-func (w *SnapshotWriter) readManifestList(ctx context.Context, filePath string) ([]ManifestListEntry, error) {
-	// Read file content
-	data, err := w.chunkManager.Read(ctx, filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest list file: %w", err)
-	}
-
-	// Add debug logging
-	log.Ctx(ctx).Info("Reading manifest list file", zap.String("filePath", filePath), zap.Int("dataLength", len(data)))
-
-	// Define Avro schema for ManifestListEntry
-	avroSchemaStr := `{
-		"type": "array", "items": {
-			"type": "record",
-			"name": "ManifestListEntry",
-			"fields": [
-				{"name": "manifest_path", "type": "string"},
-				{"name": "manifest_length", "type": "long"}
-			]
-		}
-	}`
-	avroSchema, err := avro.Parse(avroSchemaStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create avro codec: %w", err)
-	}
-
-	// Parse Avro data
-	var entries []ManifestListEntry
-	if err := avro.Unmarshal(avroSchema, data, &entries); err != nil {
-		// Add more detailed error information
-		return nil, fmt.Errorf("failed to decode avro record from %s (data length: %d): %w", filePath, len(data), err)
-	}
-
-	log.Ctx(ctx).Info("Successfully parsed manifest list entries", zap.Int("entryCount", len(entries)), zap.String("filePath", filePath))
-	return entries, nil
-}
-
-// updateVersionHintAfterDrop updates version-hint.txt after dropping a snapshot.
-// If the dropped snapshot was the latest, it finds the next latest snapshot and updates the hint.
-func (w *SnapshotWriter) updateVersionHintAfterDrop(ctx context.Context, basePath string, droppedSnapshotID int64) error {
-	versionHintPath := path.Join(basePath, SnapshotMetadataSubPath, SnapshotVersionHintFile)
-
-	// Read current version hint
-	currentHintData, err := w.chunkManager.Read(ctx, versionHintPath)
-	if err != nil {
-		// If version hint doesn't exist, nothing to update
-		return nil
-	}
-
-	currentMetadataFileName := strings.TrimSpace(string(currentHintData))
-	if currentMetadataFileName == "" {
-		return nil
-	}
-
-	// Read the current metadata file to check if it's the dropped snapshot
-	currentMetadataPath := path.Join(basePath, SnapshotMetadataSubPath, currentMetadataFileName)
-	currentMetadata, err := w.readMetadataFile(ctx, currentMetadataPath)
-	if err != nil {
-		// If we can't read the current metadata, try to find the latest valid one
-		return w.findAndUpdateLatestSnapshot(ctx, basePath)
-	}
-
-	// If the current snapshot is not the dropped one, no need to update
-	if currentMetadata.SnapshotID != droppedSnapshotID {
-		return nil
-	}
-
-	// The dropped snapshot was the latest, find the next latest
-	return w.findAndUpdateLatestSnapshot(ctx, basePath)
-}
-
-// findAndUpdateLatestSnapshot finds the latest remaining snapshot and updates version-hint.txt.
-func (w *SnapshotWriter) findAndUpdateLatestSnapshot(ctx context.Context, basePath string) error {
-	metadataDir := path.Join(basePath, SnapshotMetadataSubPath)
-
-	// List all metadata files
-	files, _, err := storage.ListAllChunkWithPrefix(ctx, w.chunkManager, metadataDir, false)
-	if err != nil {
-		return fmt.Errorf("failed to list metadata files: %w", err)
-	}
-
-	var latestSnapshot *SnapshotMetadata
-	var latestMetadataFileName string
-
-	// Find the latest snapshot by timestamp
-	for _, file := range files {
-		if !strings.HasSuffix(file, ".json") {
-			continue
-		}
-
-		// Read and parse metadata file
-		metadata, err := w.readMetadataFile(ctx, file)
-		if err != nil {
-			continue // Skip files that can't be parsed
-		}
-
-		if latestSnapshot == nil || metadata.TimestampMs > latestSnapshot.TimestampMs {
-			latestSnapshot = metadata
-			latestMetadataFileName = path.Base(file)
-		}
-	}
-
-	// Update version hint with the latest snapshot
-	if latestSnapshot != nil {
-		versionHintPath := path.Join(basePath, SnapshotMetadataSubPath, SnapshotVersionHintFile)
-		versionHintData := []byte(latestMetadataFileName)
-
-		if err := w.chunkManager.Write(ctx, versionHintPath, versionHintData); err != nil {
-			return fmt.Errorf("failed to update version hint file: %w", err)
-		}
-
-		log.Info("Updated version hint to latest snapshot",
-			zap.String("latestMetadataFileName", latestMetadataFileName),
-			zap.Int64("latestSnapshotID", latestSnapshot.SnapshotID))
-	} else {
-		// No snapshots left, remove version hint file
-		versionHintPath := path.Join(basePath, SnapshotMetadataSubPath, SnapshotVersionHintFile)
-		if err := w.chunkManager.Remove(ctx, versionHintPath); err != nil {
-			log.Info("Warning: failed to remove version hint file",
-				zap.Error(err))
-		}
-		log.Info("No snapshots remaining, removed version hint file")
-	}
-
-	return nil
-}
-
 // --- 4. Snapshot Reader ---
 
 // SnapshotReader is responsible for reading snapshots from S3.
@@ -646,26 +551,21 @@ func NewSnapshotReader(cm storage.ChunkManager) *SnapshotReader {
 }
 
 // ReadSnapshot reads a complete snapshot by collection ID and snapshot ID.
-// If snapshotID is 0, it will read the latest snapshot.
 func (r *SnapshotReader) ReadSnapshot(ctx context.Context, collectionID int64, snapshotID int64, includeSegments bool) (*SnapshotData, error) {
+	// Validate input parameters
+	if collectionID <= 0 {
+		return nil, fmt.Errorf("invalid collection ID: %d", collectionID)
+	}
+	if snapshotID <= 0 {
+		return nil, fmt.Errorf("invalid snapshot ID: %d (must be > 0)", snapshotID)
+	}
+
 	basePath := path.Join(SnapshotRootPath, strconv.FormatInt(collectionID, 10))
 
-	// Step 1: Get metadata file path
-	var metadataFilePath string
-	var err error
-
-	if snapshotID == 0 {
-		// Read latest snapshot from version-hint.txt
-		metadataFilePath, err = r.getLatestMetadataFile(ctx, basePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get latest metadata file: %w", err)
-		}
-	} else {
-		// Find metadata file for specific snapshot ID
-		metadataFilePath, err = r.findMetadataFileBySnapshotID(ctx, basePath, snapshotID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find metadata file for snapshot %d: %w", snapshotID, err)
-		}
+	// Step 1: Find metadata file for specific snapshot ID
+	metadataFilePath, err := r.findMetadataFileBySnapshotID(ctx, basePath, snapshotID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find metadata file for snapshot %d: %w", snapshotID, err)
 	}
 
 	// Step 2: Read metadata file
@@ -674,72 +574,27 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, collectionID int64, s
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Step 3: Read manifest list
-	manifestEntries, err := r.readManifestList(ctx, metadata.ManifestList)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest list: %w", err)
-	}
-
-	// Step 4: Read all manifest files to get segment information
+	// Step 3: Read all manifest files to get segment information
 	var allSegments []*datapb.SegmentDescription
 	if includeSegments {
-		for _, manifestEntry := range manifestEntries {
-			segments, err := r.readManifestFile(ctx, manifestEntry.ManifestPath)
+		for _, manifestPath := range metadata.ManifestList {
+			segments, err := r.readManifestFile(ctx, manifestPath)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read manifest file %s: %w", manifestEntry.ManifestPath, err)
+				return nil, fmt.Errorf("failed to read manifest file %s: %w", manifestPath, err)
 			}
 			allSegments = append(allSegments, segments...)
 		}
 	}
 
-	// Step 5: Build SnapshotData
+	// Step 4: Build SnapshotData - use complete SnapshotInfo and Collection from metadata
 	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Id:           metadata.SnapshotID,
-			CollectionId: collectionID,
-			CreateTs:     metadata.TimestampMs,
-			Name:         metadata.Properties["name"],
-			Description:  metadata.Properties["description"],
-			S3Location:   metadata.Properties["s3_location"],
-		},
-		Collection: &datapb.CollectionDescription{
-			Schema: metadata.Schema,
-		},
-		Segments: allSegments,
-		Indexes:  metadata.Indexes,
-	}
-
-	// Extract partition IDs from summary if available
-	if partitionIDs, ok := metadata.Summary["partition_ids"].([]interface{}); ok {
-		var pids []int64
-		for _, pid := range partitionIDs {
-			if pidInt, ok := pid.(float64); ok {
-				pids = append(pids, int64(pidInt))
-			}
-		}
-		snapshotData.SnapshotInfo.PartitionIds = pids
+		SnapshotInfo: metadata.SnapshotInfo,
+		Collection:   metadata.Collection,
+		Segments:     allSegments,
+		Indexes:      metadata.Indexes,
 	}
 
 	return snapshotData, nil
-}
-
-// getLatestMetadataFile reads version-hint.txt to get the latest metadata file path.
-func (r *SnapshotReader) getLatestMetadataFile(ctx context.Context, basePath string) (string, error) {
-	versionHintPath := path.Join(basePath, SnapshotMetadataSubPath, SnapshotVersionHintFile)
-
-	// Read version hint file
-	data, err := r.chunkManager.Read(ctx, versionHintPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read version hint file: %w", err)
-	}
-
-	// Extract metadata filename
-	metadataFileName := strings.TrimSpace(string(data))
-	if metadataFileName == "" {
-		return "", fmt.Errorf("version hint file is empty")
-	}
-
-	return path.Join(basePath, SnapshotMetadataSubPath, metadataFileName), nil
 }
 
 // findMetadataFileBySnapshotID finds metadata file for a specific snapshot ID.
@@ -761,15 +616,18 @@ func (r *SnapshotReader) findMetadataFileBySnapshotID(ctx context.Context, baseP
 		// Read and parse metadata file
 		metadata, err := r.readMetadataFile(ctx, file)
 		if err != nil {
-			continue // Skip files that can't be parsed
+			log.Warn("Failed to parse metadata file, skipping",
+				zap.String("file", file),
+				zap.Error(err))
+			continue
 		}
 
-		if metadata.SnapshotID == snapshotID {
+		if metadata.SnapshotInfo.GetId() == snapshotID {
 			return file, nil
 		}
 	}
 
-	return "", fmt.Errorf("snapshot %d not found", snapshotID)
+	return "", fmt.Errorf("snapshot %d not found, checked %d files", snapshotID, len(files))
 }
 
 // readMetadataFile reads and parses a metadata JSON file.
@@ -789,41 +647,6 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 	return &metadata, nil
 }
 
-// readManifestList reads and parses a manifest list Avro file.
-func (r *SnapshotReader) readManifestList(ctx context.Context, filePath string) ([]ManifestListEntry, error) {
-	// Read file content
-	data, err := r.chunkManager.Read(ctx, filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest list file: %w", err)
-	}
-
-	// Define Avro schema for ManifestListEntry
-	avroSchemaStr := `{
-		"type": "array", "items": {
-			"type": "record",
-			"name": "ManifestListEntry",
-			"fields": [
-				{"name": "manifest_path", "type": "string"},
-				{"name": "manifest_length", "type": "long"}
-			]
-		}
-	}`
-
-	avroSchema, err := avro.Parse(avroSchemaStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create avro codec: %w", err)
-	}
-
-	// Parse Avro data
-	var entries []ManifestListEntry
-	err = avro.Unmarshal(avroSchema, data, &entries)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse avro data: %w", err)
-	}
-
-	return entries, nil
-}
-
 // readManifestFile reads and parses a manifest Avro file.
 func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string) ([]*datapb.SegmentDescription, error) {
 	// Read file content
@@ -832,10 +655,10 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string) 
 		return nil, fmt.Errorf("failed to read manifest file: %w", err)
 	}
 
-	// Use the proper Avro schema
-	avroSchema, err := avro.Parse(getProperAvroSchema())
+	// Use the cached Avro schema
+	avroSchema, err := getManifestSchema()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create avro codec: %w", err)
+		return nil, fmt.Errorf("failed to get manifest schema: %w", err)
 	}
 
 	// Parse Avro data
@@ -851,25 +674,47 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string) 
 		// Only include segments with status "ADDED"
 		if record.Status == "ADDED" {
 			segment := &datapb.SegmentDescription{
-				SegmentId:    record.SegmentID,
-				PartitionId:  record.PartitionID,
-				SegmentLevel: record.SegmentLevel,
+				SegmentId:      record.SegmentID,
+				PartitionId:    record.PartitionID,
+				SegmentLevel:   datapb.SegmentLevel(record.SegmentLevel),
+				ChannelName:    record.ChannelName,
+				NumOfRows:      record.NumOfRows,
+				StartPosition:  convertAvroToMsgPosition(record.StartPosition),
+				DmlPosition:    convertAvroToMsgPosition(record.DmlPosition),
+				StorageVersion: record.StorageVersion,
+				IsSorted:       record.IsSorted,
 			}
 
 			// Convert BinlogFiles from Avro format
 			for _, binlogFile := range record.BinlogFiles {
-				segment.BinlogFiles = append(segment.BinlogFiles, convertAvroToFieldBinlog(binlogFile))
+				segment.Binlogs = append(segment.Binlogs, convertAvroToFieldBinlog(binlogFile))
 			}
 
 			// Convert DeltalogFiles from Avro format
 			for _, deltalogFile := range record.DeltalogFiles {
-				segment.DeltalogFiles = append(segment.DeltalogFiles, convertAvroToFieldBinlog(deltalogFile))
+				segment.Deltalogs = append(segment.Deltalogs, convertAvroToFieldBinlog(deltalogFile))
+			}
+
+			// Convert StatslogFiles from Avro format
+			for _, statslogFile := range record.StatslogFiles {
+				segment.Statslogs = append(segment.Statslogs, convertAvroToFieldBinlog(statslogFile))
+			}
+
+			// Convert Bm25StatslogFiles from Avro format
+			for _, bm25StatslogFile := range record.Bm25StatslogFiles {
+				segment.Bm25Statslogs = append(segment.Bm25Statslogs, convertAvroToFieldBinlog(bm25StatslogFile))
 			}
 
 			// Convert IndexFiles from Avro format
 			for _, indexFile := range record.IndexFiles {
 				segment.IndexFiles = append(segment.IndexFiles, convertAvroToIndexFilePathInfo(indexFile))
 			}
+
+			// Convert TextIndexFiles (array to map) from Avro format
+			segment.TextIndexFiles = convertAvroToTextIndexMap(record.TextIndexFiles)
+
+			// Convert JsonKeyIndexFiles (array to map) from Avro format
+			segment.JsonKeyIndexFiles = convertAvroToJsonKeyIndexMap(record.JsonKeyIndexFiles)
 
 			segments = append(segments, segment)
 		}
@@ -878,19 +723,13 @@ func (r *SnapshotReader) readManifestFile(ctx context.Context, filePath string) 
 	return segments, nil
 }
 
-// Helper function to convert []interface{} to []string
-func convertInterfaceSliceToStringSlice(input []interface{}) []string {
-	result := make([]string, len(input))
-	for i, v := range input {
-		if str, ok := v.(string); ok {
-			result[i] = str
-		}
-	}
-	return result
-}
-
 // ListSnapshots lists all available snapshots for a collection.
 func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) ([]*datapb.SnapshotInfo, error) {
+	// Validate input parameters
+	if collectionID <= 0 {
+		return nil, fmt.Errorf("invalid collection ID: %d", collectionID)
+	}
+
 	basePath := path.Join(SnapshotRootPath, strconv.FormatInt(collectionID, 10))
 	metadataDir := path.Join(basePath, SnapshotMetadataSubPath)
 
@@ -909,31 +748,14 @@ func (r *SnapshotReader) ListSnapshots(ctx context.Context, collectionID int64) 
 		// Read and parse metadata file
 		metadata, err := r.readMetadataFile(ctx, file)
 		if err != nil {
-			continue // Skip files that can't be parsed
+			log.Warn("Failed to parse metadata file, skipping",
+				zap.String("file", file),
+				zap.Error(err))
+			continue
 		}
 
-		// Create SnapshotInfo
-		snapshotInfo := &datapb.SnapshotInfo{
-			Id:           metadata.SnapshotID,
-			CollectionId: collectionID,
-			CreateTs:     metadata.TimestampMs,
-			Name:         metadata.Properties["name"],
-			Description:  metadata.Properties["description"],
-			S3Location:   metadata.Properties["s3_location"],
-		}
-
-		// Extract partition IDs from summary if available
-		if partitionIDs, ok := metadata.Summary["partition_ids"].([]interface{}); ok {
-			var pids []int64
-			for _, pid := range partitionIDs {
-				if pidInt, ok := pid.(float64); ok {
-					pids = append(pids, int64(pidInt))
-				}
-			}
-			snapshotInfo.PartitionIds = pids
-		}
-
-		snapshots = append(snapshots, snapshotInfo)
+		// Use SnapshotInfo directly from metadata
+		snapshots = append(snapshots, metadata.SnapshotInfo)
 	}
 
 	return snapshots, nil
@@ -1039,6 +861,141 @@ func convertAvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.Ind
 	return info
 }
 
+// convertMsgPositionToAvro converts msgpb.MsgPosition to AvroMsgPosition
+func convertMsgPositionToAvro(pos *msgpb.MsgPosition) *AvroMsgPosition {
+	if pos == nil {
+		return &AvroMsgPosition{
+			ChannelName: "",
+			MsgID:       []byte{},
+			MsgGroup:    "",
+			Timestamp:   0,
+		}
+	}
+	return &AvroMsgPosition{
+		ChannelName: pos.GetChannelName(),
+		MsgID:       pos.GetMsgID(),
+		MsgGroup:    pos.GetMsgGroup(),
+		Timestamp:   int64(pos.GetTimestamp()),
+	}
+}
+
+// convertTextIndexStatsToAvro converts datapb.TextIndexStats to AvroTextIndexStats
+func convertTextIndexStatsToAvro(stats *datapb.TextIndexStats) *AvroTextIndexStats {
+	if stats == nil {
+		return nil
+	}
+	return &AvroTextIndexStats{
+		FieldID:    stats.GetFieldID(),
+		Version:    stats.GetVersion(),
+		Files:      stats.GetFiles(),
+		LogSize:    stats.GetLogSize(),
+		MemorySize: stats.GetMemorySize(),
+		BuildID:    stats.GetBuildID(),
+	}
+}
+
+// convertJsonKeyStatsToAvro converts datapb.JsonKeyStats to AvroJsonKeyStats
+func convertJsonKeyStatsToAvro(stats *datapb.JsonKeyStats) *AvroJsonKeyStats {
+	if stats == nil {
+		return nil
+	}
+	return &AvroJsonKeyStats{
+		FieldID:                stats.GetFieldID(),
+		Version:                stats.GetVersion(),
+		Files:                  stats.GetFiles(),
+		LogSize:                stats.GetLogSize(),
+		MemorySize:             stats.GetMemorySize(),
+		BuildID:                stats.GetBuildID(),
+		JsonKeyStatsDataFormat: stats.GetJsonKeyStatsDataFormat(),
+	}
+}
+
+// convertTextIndexMapToAvro converts map[int64]*TextIndexStats to []AvroTextIndexEntry
+func convertTextIndexMapToAvro(indexMap map[int64]*datapb.TextIndexStats) []AvroTextIndexEntry {
+	var entries []AvroTextIndexEntry
+	for fieldID, stats := range indexMap {
+		entries = append(entries, AvroTextIndexEntry{
+			FieldID: fieldID,
+			Stats:   convertTextIndexStatsToAvro(stats),
+		})
+	}
+	return entries
+}
+
+// convertJsonKeyIndexMapToAvro converts map[int64]*JsonKeyStats to []AvroJsonKeyIndexEntry
+func convertJsonKeyIndexMapToAvro(indexMap map[int64]*datapb.JsonKeyStats) []AvroJsonKeyIndexEntry {
+	var entries []AvroJsonKeyIndexEntry
+	for fieldID, stats := range indexMap {
+		entries = append(entries, AvroJsonKeyIndexEntry{
+			FieldID: fieldID,
+			Stats:   convertJsonKeyStatsToAvro(stats),
+		})
+	}
+	return entries
+}
+
+// convertAvroToMsgPosition converts AvroMsgPosition back to msgpb.MsgPosition
+func convertAvroToMsgPosition(avroPos *AvroMsgPosition) *msgpb.MsgPosition {
+	if avroPos == nil {
+		return nil
+	}
+	return &msgpb.MsgPosition{
+		ChannelName: avroPos.ChannelName,
+		MsgID:       avroPos.MsgID,
+		MsgGroup:    avroPos.MsgGroup,
+		Timestamp:   uint64(avroPos.Timestamp),
+	}
+}
+
+// convertAvroToTextIndexStats converts AvroTextIndexStats back to datapb.TextIndexStats
+func convertAvroToTextIndexStats(avroStats *AvroTextIndexStats) *datapb.TextIndexStats {
+	if avroStats == nil {
+		return nil
+	}
+	return &datapb.TextIndexStats{
+		FieldID:    avroStats.FieldID,
+		Version:    avroStats.Version,
+		Files:      avroStats.Files,
+		LogSize:    avroStats.LogSize,
+		MemorySize: avroStats.MemorySize,
+		BuildID:    avroStats.BuildID,
+	}
+}
+
+// convertAvroToJsonKeyStats converts AvroJsonKeyStats back to datapb.JsonKeyStats
+func convertAvroToJsonKeyStats(avroStats *AvroJsonKeyStats) *datapb.JsonKeyStats {
+	if avroStats == nil {
+		return nil
+	}
+	return &datapb.JsonKeyStats{
+		FieldID:                avroStats.FieldID,
+		Version:                avroStats.Version,
+		Files:                  avroStats.Files,
+		LogSize:                avroStats.LogSize,
+		MemorySize:             avroStats.MemorySize,
+		BuildID:                avroStats.BuildID,
+		JsonKeyStatsDataFormat: avroStats.JsonKeyStatsDataFormat,
+	}
+}
+
+// convertAvroToTextIndexMap converts []AvroTextIndexEntry back to map[int64]*TextIndexStats
+func convertAvroToTextIndexMap(entries []AvroTextIndexEntry) map[int64]*datapb.TextIndexStats {
+	indexMap := make(map[int64]*datapb.TextIndexStats)
+	for _, entry := range entries {
+		indexMap[entry.FieldID] = convertAvroToTextIndexStats(entry.Stats)
+	}
+	return indexMap
+}
+
+// convertAvroToJsonKeyIndexMap converts []AvroJsonKeyIndexEntry back to map[int64]*JsonKeyStats
+func convertAvroToJsonKeyIndexMap(entries []AvroJsonKeyIndexEntry) map[int64]*datapb.JsonKeyStats {
+	indexMap := make(map[int64]*datapb.JsonKeyStats)
+	for _, entry := range entries {
+		indexMap[entry.FieldID] = convertAvroToJsonKeyStats(entry.Stats)
+	}
+	return indexMap
+}
+
 // getProperAvroSchema returns the correct Avro schema for structured data
 func getProperAvroSchema() string {
 	return `{
@@ -1051,6 +1008,27 @@ func getProperAvroSchema() string {
 				{"name": "segment_id", "type": "long"},
 				{"name": "partition_id", "type": "long"},
 				{"name": "segment_level", "type": "long"},
+				{"name": "channel_name", "type": "string"},
+				{"name": "num_of_rows", "type": "long"},
+				{
+					"name": "start_position",
+					"type": {
+						"type": "record",
+						"name": "AvroMsgPosition",
+						"fields": [
+							{"name": "channel_name", "type": "string"},
+							{"name": "msg_id", "type": "bytes"},
+							{"name": "msg_group", "type": "string"},
+							{"name": "timestamp", "type": "long"}
+						]
+					}
+				},
+				{
+					"name": "dml_position",
+					"type": "AvroMsgPosition"
+				},
+				{"name": "storage_version", "type": "long"},
+				{"name": "is_sorted", "type": "boolean"},
 				{
 					"name": "binlog_files",
 					"type": {
@@ -1091,6 +1069,20 @@ func getProperAvroSchema() string {
 					}
 				},
 				{
+					"name": "statslog_files",
+					"type": {
+						"type": "array",
+						"items": "AvroFieldBinlog"
+					}
+				},
+				{
+					"name": "bm25_statslog_files",
+					"type": {
+						"type": "array",
+						"items": "AvroFieldBinlog"
+					}
+				},
+				{
 					"name": "index_files",
 					"type": {
 						"type": "array",
@@ -1123,6 +1115,63 @@ func getProperAvroSchema() string {
 								{"name": "num_rows", "type": "long"},
 								{"name": "current_index_version", "type": "int"},
 								{"name": "mem_size", "type": "long"}
+							]
+						}
+					}
+				},
+				{
+					"name": "text_index_files",
+					"type": {
+						"type": "array",
+						"items": {
+							"type": "record",
+							"name": "AvroTextIndexEntry",
+							"fields": [
+								{"name": "field_id", "type": "long"},
+								{
+									"name": "stats",
+									"type": {
+										"type": "record",
+										"name": "AvroTextIndexStats",
+										"fields": [
+											{"name": "field_id", "type": "long"},
+											{"name": "version", "type": "long"},
+											{"name": "files", "type": {"type": "array", "items": "string"}},
+											{"name": "log_size", "type": "long"},
+											{"name": "memory_size", "type": "long"},
+											{"name": "build_id", "type": "long"}
+										]
+									}
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "json_key_index_files",
+					"type": {
+						"type": "array",
+						"items": {
+							"type": "record",
+							"name": "AvroJsonKeyIndexEntry",
+							"fields": [
+								{"name": "field_id", "type": "long"},
+								{
+									"name": "stats",
+									"type": {
+										"type": "record",
+										"name": "AvroJsonKeyStats",
+										"fields": [
+											{"name": "field_id", "type": "long"},
+											{"name": "version", "type": "long"},
+											{"name": "files", "type": {"type": "array", "items": "string"}},
+											{"name": "log_size", "type": "long"},
+											{"name": "memory_size", "type": "long"},
+											{"name": "build_id", "type": "long"},
+											{"name": "json_key_stats_data_format", "type": "long"}
+										]
+									}
+								}
 							]
 						}
 					}

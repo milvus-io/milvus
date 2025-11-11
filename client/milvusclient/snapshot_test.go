@@ -237,35 +237,39 @@ func (s *SnapshotSuite) TestRestoreSnapshot() {
 	s.Run("success", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
-		rewriteData := true
+		expectedJobID := int64(12345)
 
-		s.mock.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+		s.mock.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
 			s.Equal(snapshotName, req.GetName())
 			s.Equal(collectionName, req.GetCollectionName())
-			s.Equal(rewriteData, req.GetRewriteData())
-			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+			return &milvuspb.RestoreSnapshotResponse{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				JobId:  expectedJobID,
+			}, nil
 		}).Once()
 
-		opt := NewRestoreSnapshotOption(snapshotName, collectionName).
-			WithRewriteData(rewriteData)
-		err := s.client.RestoreSnapshot(ctx, opt)
+		opt := NewRestoreSnapshotOption(snapshotName, collectionName)
+		jobID, err := s.client.RestoreSnapshot(ctx, opt)
 		s.NoError(err)
+		s.Equal(expectedJobID, jobID)
 	})
 
 	s.Run("failure", func() {
 		snapshotName := fmt.Sprintf("snapshot_%s", s.randString(6))
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
-		s.mock.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error")).Once()
+		s.mock.EXPECT().RestoreSnapshot(mock.Anything, mock.Anything).Return((*milvuspb.RestoreSnapshotResponse)(nil), errors.New("mocked error")).Once()
 
 		opt := NewRestoreSnapshotOption(snapshotName, collectionName)
-		err := s.client.RestoreSnapshot(ctx, opt)
+		jobID, err := s.client.RestoreSnapshot(ctx, opt)
 		s.Error(err)
+		s.Equal(int64(0), jobID)
 	})
 
 	s.Run("nil option", func() {
-		err := s.client.RestoreSnapshot(ctx, nil)
+		jobID, err := s.client.RestoreSnapshot(ctx, nil)
 		s.Error(err)
+		s.Equal(int64(0), jobID)
 	})
 }
 
@@ -319,17 +323,14 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 	s.Run("RestoreSnapshotOption", func() {
 		snapshotName := "test_snapshot"
 		collectionName := "restored_collection"
-		rewriteData := true
 		dbName := "test_db"
 
 		opt := NewRestoreSnapshotOption(snapshotName, collectionName).
-			WithRewriteData(rewriteData).
 			WithDbName(dbName)
 
 		req := opt.Request()
 		s.Equal(snapshotName, req.GetName())
 		s.Equal(collectionName, req.GetCollectionName())
-		s.Equal(rewriteData, req.GetRewriteData())
 		s.Equal(dbName, req.GetDbName())
 	})
 }

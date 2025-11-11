@@ -1207,6 +1207,14 @@ func (s *Server) ListSnapshots(ctx context.Context, req *milvuspb.ListSnapshotsR
 	return s.proxy.ListSnapshots(ctx, req)
 }
 
-func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
 	return s.proxy.RestoreSnapshot(ctx, req)
+}
+
+func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *milvuspb.GetRestoreSnapshotStateRequest) (*milvuspb.GetRestoreSnapshotStateResponse, error) {
+	return s.proxy.GetRestoreSnapshotState(ctx, req)
+}
+
+func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *milvuspb.ListRestoreSnapshotJobsRequest) (*milvuspb.ListRestoreSnapshotJobsResponse, error) {
+	return s.proxy.ListRestoreSnapshotJobs(ctx, req)
 }

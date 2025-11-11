@@ -390,3 +390,94 @@ func TestMixCoord_checkExpiredPOSIXDIR(t *testing.T) {
 		})
 	})
 }
+
+func TestMixCoord_SnapshotMethods(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("RestoreSnapshot", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.RestoreSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 1001,
+		}
+
+		mockey.PatchConvey("test RestoreSnapshot", t, func() {
+			expectedResp := &datapb.RestoreSnapshotResponse{
+				Status: merr.Success(),
+				JobId:  12345,
+			}
+			mockey.Mock((*datacoord.Server).RestoreSnapshot).Return(expectedResp, nil).Build()
+
+			resp, err := coord.RestoreSnapshot(ctx, req)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, int64(12345), resp.GetJobId())
+		})
+	})
+
+	t.Run("GetRestoreSnapshotState", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 12345,
+		}
+
+		mockey.PatchConvey("test GetRestoreSnapshotState", t, func() {
+			expectedResp := &datapb.GetRestoreSnapshotStateResponse{
+				Status: merr.Success(),
+				Info: &datapb.RestoreSnapshotInfo{
+					JobId:        12345,
+					SnapshotName: "test_snapshot",
+					CollectionId: 1001,
+					State:        datapb.RestoreSnapshotState_RestoreSnapshotCompleted,
+				},
+			}
+			mockey.Mock((*datacoord.Server).GetRestoreSnapshotState).Return(expectedResp, nil).Build()
+
+			resp, err := coord.GetRestoreSnapshotState(ctx, req)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.NotNil(t, resp.GetInfo())
+			assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotCompleted, resp.GetInfo().GetState())
+		})
+	})
+
+	t.Run("ListRestoreSnapshotJobs", func(t *testing.T) {
+		mockDataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{
+			datacoordServer: mockDataCoord,
+		}
+
+		req := &datapb.ListRestoreSnapshotJobsRequest{
+			CollectionName: "test_collection",
+		}
+
+		mockey.PatchConvey("test ListRestoreSnapshotJobs", t, func() {
+			expectedResp := &datapb.ListRestoreSnapshotJobsResponse{
+				Status: merr.Success(),
+				Jobs: []*datapb.RestoreSnapshotInfo{
+					{
+						JobId:        12345,
+						SnapshotName: "test_snapshot",
+						CollectionId: 1001,
+						State:        datapb.RestoreSnapshotState_RestoreSnapshotCompleted,
+					},
+				},
+			}
+			mockey.Mock((*datacoord.Server).ListRestoreSnapshotJobs).Return(expectedResp, nil).Build()
+
+			resp, err := coord.ListRestoreSnapshotJobs(ctx, req)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, 1, len(resp.GetJobs()))
+			assert.Equal(t, int64(12345), resp.GetJobs()[0].GetJobId())
+		})
+	})
+}

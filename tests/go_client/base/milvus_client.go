@@ -98,30 +98,39 @@ func (mc *MilvusClient) GetCompactionState(ctx context.Context, option client.Ge
 
 // CreateSnapshot creates a snapshot for the specified collection
 func (mc *MilvusClient) CreateSnapshot(ctx context.Context, option client.CreateSnapshotOption, callOptions ...grpc.CallOption) error {
-	err := mc.mClient.CreateSnapshot(ctx, option, callOptions...)
+	err := mc.Client.CreateSnapshot(ctx, option, callOptions...)
 	return err
 }
 
 // DropSnapshot drops a snapshot by name
 func (mc *MilvusClient) DropSnapshot(ctx context.Context, option client.DropSnapshotOption, callOptions ...grpc.CallOption) error {
-	err := mc.mClient.DropSnapshot(ctx, option, callOptions...)
+	err := mc.Client.DropSnapshot(ctx, option, callOptions...)
 	return err
 }
 
 // ListSnapshots lists all snapshots for the specified collection or all snapshots if no collection is specified
 func (mc *MilvusClient) ListSnapshots(ctx context.Context, option client.ListSnapshotsOption, callOptions ...grpc.CallOption) ([]string, error) {
-	snapshots, err := mc.mClient.ListSnapshots(ctx, option, callOptions...)
+	snapshots, err := mc.Client.ListSnapshots(ctx, option, callOptions...)
 	return snapshots, err
 }
 
 // DescribeSnapshot describes a snapshot by name
 func (mc *MilvusClient) DescribeSnapshot(ctx context.Context, option client.DescribeSnapshotOption, callOptions ...grpc.CallOption) (*milvuspb.DescribeSnapshotResponse, error) {
-	resp, err := mc.mClient.DescribeSnapshot(ctx, option, callOptions...)
+	resp, err := mc.Client.DescribeSnapshot(ctx, option, callOptions...)
 	return resp, err
 }
 
 // RestoreSnapshot restores a snapshot to a target collection
-func (mc *MilvusClient) RestoreSnapshot(ctx context.Context, option client.RestoreSnapshotOption, callOptions ...grpc.CallOption) error {
-	err := mc.mClient.RestoreSnapshot(ctx, option, callOptions...)
-	return err
+func (mc *MilvusClient) RestoreSnapshot(ctx context.Context, option client.RestoreSnapshotOption, callOptions ...grpc.CallOption) (int64, error) {
+	return mc.Client.RestoreSnapshot(ctx, option, callOptions...)
+}
+
+// GetRestoreSnapshotState gets the state of a restore snapshot job
+func (mc *MilvusClient) GetRestoreSnapshotState(ctx context.Context, option client.GetRestoreSnapshotStateOption, callOptions ...grpc.CallOption) (*milvuspb.RestoreSnapshotInfo, error) {
+	return mc.Client.GetRestoreSnapshotState(ctx, option, callOptions...)
+}
+
+// ListRestoreSnapshotJobs lists all restore snapshot jobs
+func (mc *MilvusClient) ListRestoreSnapshotJobs(ctx context.Context, option client.ListRestoreSnapshotJobsOption, callOptions ...grpc.CallOption) ([]*milvuspb.RestoreSnapshotInfo, error) {
+	return mc.Client.ListRestoreSnapshotJobs(ctx, option, callOptions...)
 }
