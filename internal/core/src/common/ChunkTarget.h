@@ -23,11 +23,13 @@
 namespace milvus {
 class ChunkTarget {
  public:
+    static constexpr size_t ALIGNED_SIZE = 4096;  // 4KB
+
     virtual void
     write(const void* data, size_t size) = 0;
 
-    virtual std::pair<char*, size_t>
-    get() = 0;
+    virtual std::tuple<char*, size_t, std::string>
+    release() = 0;
 
     virtual ~ChunkTarget() = default;
 
@@ -37,32 +39,33 @@ class ChunkTarget {
 
 class MmapChunkTarget : public ChunkTarget {
  public:
-    explicit MmapChunkTarget(std::string file_path)
-        : file_path_(std::move(file_path)) {
+    explicit MmapChunkTarget(std::string file_path, size_t cap)
+        : file_path_(std::move(file_path)), cap_(cap) {
         file_writer_ = std::make_unique<storage::FileWriter>(file_path_);
     }
 
     void
-    flush();
-
-    void
     write(const void* data, size_t size) override;
 
-    std::pair<char*, size_t>
-    get() override;
+    std::tuple<char*, size_t, std::string>
+    release() override;
 
     size_t
     tell() override;
 
  private:
+    void
+    flush();
+
     std::unique_ptr<storage::FileWriter> file_writer_{nullptr};
     std::string file_path_{};
-    size_t size_ = 0;
+    size_t cap_{0};
+    size_t size_{0};
 };
 
 class MemChunkTarget : public ChunkTarget {
  public:
-    MemChunkTarget(size_t cap) : cap_(cap) {
+    explicit MemChunkTarget(size_t cap) : cap_(cap) {
         auto m = mmap(nullptr,
                       cap,
                       PROT_READ | PROT_WRITE,
@@ -79,8 +82,8 @@ class MemChunkTarget : public ChunkTarget {
     void
     write(const void* data, size_t size) override;
 
-    std::pair<char*, size_t>
-    get() override;
+    std::tuple<char*, size_t, std::string>
+    release() override;
 
     size_t
     tell() override;
