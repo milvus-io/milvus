@@ -135,3 +135,52 @@ func TestConversion(t *testing.T) {
 		assert.Equal(t, "c>", string(Float32ToBFloat16Bytes(0.22222)))
 	})
 }
+
+func TestFlattenEmbeddingList(t *testing.T) {
+	t.Run("empty input", func(t *testing.T) {
+		result := FlattenEmbeddingList([][][]float32{})
+		assert.Nil(t, result)
+	})
+
+	t.Run("single embedding group", func(t *testing.T) {
+		input := [][][]float32{
+			{{0.1, 0.2}, {0.3, 0.4}},
+		}
+		result := FlattenEmbeddingList(input)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, []float32{0.1, 0.2, 0.3, 0.4}, result[0])
+	})
+
+	t.Run("multiple embedding groups", func(t *testing.T) {
+		input := [][][]float32{
+			{{0.1, 0.2}, {0.3, 0.4}},
+			{{0.5, 0.6}},
+		}
+		result := FlattenEmbeddingList(input)
+		assert.Equal(t, 2, len(result))
+		assert.Equal(t, []float32{0.1, 0.2, 0.3, 0.4}, result[0])
+		assert.Equal(t, []float32{0.5, 0.6}, result[1])
+	})
+
+	t.Run("empty embedding group", func(t *testing.T) {
+		input := [][][]float32{
+			{},
+			{{0.1, 0.2}},
+		}
+		result := FlattenEmbeddingList(input)
+		assert.Equal(t, 2, len(result))
+		assert.Equal(t, []float32{}, result[0])
+		assert.Equal(t, []float32{0.1, 0.2}, result[1])
+	})
+
+	t.Run("single vector per group", func(t *testing.T) {
+		input := [][][]float32{
+			{{0.1, 0.2, 0.3, 0.4}},
+			{{0.5, 0.6, 0.7, 0.8}},
+		}
+		result := FlattenEmbeddingList(input)
+		assert.Equal(t, 2, len(result))
+		assert.Equal(t, []float32{0.1, 0.2, 0.3, 0.4}, result[0])
+		assert.Equal(t, []float32{0.5, 0.6, 0.7, 0.8}, result[1])
+	})
+}
