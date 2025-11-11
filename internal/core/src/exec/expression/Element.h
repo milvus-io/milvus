@@ -216,7 +216,7 @@ class FlatVectorElement : public MultiElement {
     In(const ValueType& value) const override {
         if (std::holds_alternative<T>(value)) {
             for (const auto& v : values_) {
-                if (v == value)
+                if (v == std::get<T>(value))
                     return true;
             }
         }
