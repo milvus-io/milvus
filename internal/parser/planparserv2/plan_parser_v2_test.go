@@ -2188,6 +2188,10 @@ func TestExpr_GISFunctions(t *testing.T) {
 		`ST_DWITHIN(GeometryField, "POINT(0.5 0.5)", 2.0)`,
 		`st_dwithin(GeometryField, "POINT(1.0 1.0)", 1)`,
 
+		// ST_ISVALID tests
+		`st_isvalid(GeometryField)`,
+		`ST_ISVALID(GeometryField)`,
+
 		// Case insensitive tests
 		`St_Equals(GeometryField, "POINT(0 0)")`,
 		`sT_iNtErSeCts(GeometryField, "POINT(1 1)")`,
@@ -2221,6 +2225,7 @@ func TestExpr_GISFunctionsInvalidExpressions(t *testing.T) {
 		`st_dwithin(GeometryField, "POINT(0 0)")`,       // Missing distance parameter
 		`st_contains(GeometryField, "POINT(0 0)", 1.0)`, // Extra parameter
 
+
 		// Invalid distance parameter for ST_DWITHIN
 		`st_dwithin(GeometryField, "POINT(0 0)", "abc")`, // String parameter
 		`st_dwithin(GeometryField, "POINT(0 0)", "invalid")`,
@@ -2230,6 +2235,11 @@ func TestExpr_GISFunctionsInvalidExpressions(t *testing.T) {
 		// Non-existent fields
 		`st_equals(NonExistentField, "POINT(0 0)")`,
 		`st_dwithin(UnknownGeometryField, "POINT(0 0)", 5.0)`,
+
+		// ST_ISVALID invalid usage
+		`st_isvalid(Int64Field)`,           // 非几何字段
+		`st_isvalid()`,                     // 缺少参数
+		`st_isvalid(GeometryField, 1)`,     // 多余参数
 	}
 
 	for _, expr := range invalidExprs {
@@ -2246,6 +2256,7 @@ func TestExpr_GISFunctionsComplexExpressions(t *testing.T) {
 		`st_equals(GeometryField, "POINT(0 0)") and st_intersects(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")`,
 		`st_contains(GeometryField, "POINT(0.5 0.5)") AND st_within(GeometryField, "POLYGON((-1 -1, 1 -1, 1 1, -1 1, -1 -1))")`,
 		`st_dwithin(GeometryField, "POINT(0 0)", 5.0) and Int64Field > 100`,
+		`st_isvalid(GeometryField) and Int64Field > 0`,
 
 		// OR combinations
 		`st_equals(GeometryField, "POINT(0 0)") or st_equals(GeometryField, "POINT(1 1)")`,
@@ -2256,7 +2267,7 @@ func TestExpr_GISFunctionsComplexExpressions(t *testing.T) {
 		`not st_equals(GeometryField, "POINT(0 0)")`,
 		`!(st_intersects(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"))`,
 		`not (st_dwithin(GeometryField, "POINT(0 0)", 1.0))`,
-
+		`not st_isvalid(GeometryField)`,
 		// Mixed with other field types
 		`st_contains(GeometryField, "POINT(0 0)") and StringField == "test"`,
 		`st_dwithin(GeometryField, "POINT(0 0)", 5.0) or Int32Field in [1, 2, 3]`,
