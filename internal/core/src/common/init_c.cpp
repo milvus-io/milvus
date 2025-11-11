@@ -139,7 +139,6 @@ InitDefaultDeleteDumpBatchSize(int32_t val) {
         val);
 }
 
-
 void
 InitTrace(CTraceConfig* config) {
     auto traceConfig = milvus::tracer::TraceConfig{config->exporter,

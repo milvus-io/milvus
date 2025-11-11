@@ -767,7 +767,7 @@ class GISFunctionFilterExpr : public ITypeFilterExpr {
         : column_(cloumn),
           op_(op),
           geometry_wkt_(geometry_wkt),
-          distance_(distance) {};
+          distance_(distance){};
     std::string
     ToString() const override {
         if (op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {

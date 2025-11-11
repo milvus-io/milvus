@@ -294,8 +294,7 @@ class FileWriter {
     // for global configuration
     static WriteMode
         mode_;  // The write mode, which can be 'buffered' (default) or 'direct'.
-    static size_t
-        buffer_size_;
+    static size_t buffer_size_;
 
     // for rate limiter
     io::Priority priority_;

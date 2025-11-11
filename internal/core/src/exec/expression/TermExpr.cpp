@@ -278,8 +278,8 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor,
-         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -287,32 +287,32 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const ValueType& target_val) {
-            auto executor = [&](size_t offset) {
-                for (int i = 0; i < data[offset].length(); i++) {
-                    auto val = data[offset].template get_data<GetType>(i);
-                    if (val == target_val) {
-                        return true;
-                    }
+        auto executor = [&](size_t offset) {
+            for (int i = 0; i < data[offset].length(); i++) {
+                auto val = data[offset].template get_data<GetType>(i);
+                if (val == target_val) {
+                    return true;
                 }
-                return false;
-            };
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                    continue;
-                }
-                res[i] = executor(offset);
             }
-            processed_cursor += size;
+            return false;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+        processed_cursor += size;
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -373,8 +373,8 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor,
-         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const ArrayView* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -383,28 +383,28 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (term_set->Empty() || index >= data[offset].length()) {
-                    res[i] = false;
-                    continue;
-                }
-                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                    continue;
-                }
-                auto value = data[offset].get_data<GetType>(index);
-                res[i] = term_set->In(ValueType(value));
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-            processed_cursor += size;
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (term_set->Empty() || index >= data[offset].length()) {
+                res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            auto value = data[offset].get_data<GetType>(index);
+            res[i] = term_set->In(ValueType(value));
+        }
+        processed_cursor += size;
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -464,8 +464,8 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor,
-         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -474,39 +474,39 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const ValueType& target_val) {
-            auto executor = [&](size_t i) {
-                auto doc = data[i].doc();
-                auto array = doc.at_pointer(pointer).get_array();
-                if (array.error())
-                    return false;
-                for (auto it = array.begin(); it != array.end(); ++it) {
-                    auto val = (*it).template get<GetType>();
-                    if (val.error()) {
-                        return false;
-                    }
-                    if (val.value() == target_val) {
-                        return true;
-                    }
-                }
+        auto executor = [&](size_t i) {
+            auto doc = data[i].doc();
+            auto array = doc.at_pointer(pointer).get_array();
+            if (array.error())
                 return false;
-            };
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
+            for (auto it = array.begin(); it != array.end(); ++it) {
+                auto val = (*it).template get<GetType>();
+                if (val.error()) {
+                    return false;
                 }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
+                if (val.value() == target_val) {
+                    return true;
                 }
-                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                    continue;
-                }
-                res[i] = executor(offset);
             }
-            processed_cursor += size;
+            return false;
         };
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+        processed_cursor += size;
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
@@ -713,8 +713,8 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor,
-         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -723,46 +723,46 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const std::shared_ptr<MultiElement>& terms) {
-            auto executor = [&](size_t i) {
-                auto x = data[i].template at<GetType>(pointer);
-                if (x.error()) {
-                    if constexpr (std::is_same_v<GetType, std::int64_t>) {
-                        auto x = data[i].template at<double>(pointer);
-                        if (x.error()) {
-                            return false;
-                        }
-
-                        auto value = x.value();
-                        // if the term set is {1}, and the value is 1.1, we should not return true.
-                        return std::floor(value) == value &&
-                               terms->In(ValueType(x.value()));
+        auto executor = [&](size_t i) {
+            auto x = data[i].template at<GetType>(pointer);
+            if (x.error()) {
+                if constexpr (std::is_same_v<GetType, std::int64_t>) {
+                    auto x = data[i].template at<double>(pointer);
+                    if (x.error()) {
+                        return false;
                     }
-                    return false;
-                }
-                return terms->In(ValueType(x.value()));
-            };
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (terms->Empty()) {
-                    res[i] = false;
-                    continue;
-                }
 
-                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                    continue;
+                    auto value = x.value();
+                    // if the term set is {1}, and the value is 1.1, we should not return true.
+                    return std::floor(value) == value &&
+                           terms->In(ValueType(x.value()));
                 }
-                res[i] = executor(offset);
+                return false;
             }
-            processed_cursor += size;
+            return terms->In(ValueType(x.value()));
         };
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
+            }
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (terms->Empty()) {
+                res[i] = false;
+                continue;
+            }
+
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            res[i] = executor(offset);
+        }
+        processed_cursor += size;
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<milvus::Json>(execute_sub_batch,
@@ -905,8 +905,8 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor,
-         &bitmap_input]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &
+         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
             const T* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -914,23 +914,23 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& vals) {
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (size_t i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
-                    continue;
-                }
-                res[i] = vals->In(data[offset]);
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (size_t i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-            processed_cursor += size;
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[i + processed_cursor]) {
+                continue;
+            }
+            res[i] = vals->In(data[offset]);
+        }
+        processed_cursor += size;
+    };
     int64_t processed_size;
     if (has_offset_input_) {
         processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
