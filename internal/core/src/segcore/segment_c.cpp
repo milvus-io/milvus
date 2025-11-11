@@ -139,6 +139,23 @@ NewSegmentWithLoadInfo(CCollection collection,
     }
 }
 
+CStatus
+SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        // TODO unify trace context to op context after supported
+        auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        segment->Load(trace_ctx);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 void
 DeleteSegment(CSegmentInterface c_segment) {
     SCOPE_CGO_CALL_METRIC();

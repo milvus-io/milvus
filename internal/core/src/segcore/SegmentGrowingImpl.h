@@ -106,6 +106,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     FinishLoad() override;
 
+    void
+    Load(milvus::tracer::TraceContext& trace_ctx) override;
+
  private:
     // Build geometry cache for inserted data
     void

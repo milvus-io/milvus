@@ -893,7 +893,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-	indexedFieldInfos, fieldBinlogs, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
+	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
 	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 		return err
 	}
@@ -906,58 +906,62 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 	)
-	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
-		return err
-	}
-	loadFieldsIndexSpan := tr.RecordSpan()
-	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(loadFieldsIndexSpan.Milliseconds()))
+	// if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
+	// 	return err
+	// }
+	// loadFieldsIndexSpan := tr.RecordSpan()
+	// metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(loadFieldsIndexSpan.Milliseconds()))
 
-	// 2. complement raw data for the scalar fields without raw data
-	for _, info := range indexedFieldInfos {
-		fieldID := info.IndexInfo.FieldID
-		field, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			return err
-		}
-		if !segment.HasRawData(fieldID) || field.GetIsPrimaryKey() {
-			// Skip loading raw data for fields in column group when using storage v2
-			if loadInfo.GetStorageVersion() == storage.StorageV2 &&
-				!storagecommon.IsVectorDataType(field.GetDataType()) &&
-				field.GetDataType() != schemapb.DataType_Text {
-				log.Info("skip loading raw data for field in short column group",
-					zap.Int64("fieldID", fieldID),
-					zap.String("index", info.IndexInfo.GetIndexName()),
-				)
-				continue
-			}
+	// // 2. complement raw data for the scalar fields without raw data
+	// for _, info := range indexedFieldInfos {
+	// 	fieldID := info.IndexInfo.FieldID
+	// 	field, err := schemaHelper.GetFieldFromID(fieldID)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if !segment.HasRawData(fieldID) || field.GetIsPrimaryKey() {
+	// 		// Skip loading raw data for fields in column group when using storage v2
+	// 		if loadInfo.GetStorageVersion() == storage.StorageV2 &&
+	// 			!storagecommon.IsVectorDataType(field.GetDataType()) &&
+	// 			field.GetDataType() != schemapb.DataType_Text {
+	// 			log.Info("skip loading raw data for field in short column group",
+	// 				zap.Int64("fieldID", fieldID),
+	// 				zap.String("index", info.IndexInfo.GetIndexName()),
+	// 			)
+	// 			continue
+	// 		}
 
-			log.Info("field index doesn't include raw data, load binlog...",
-				zap.Int64("fieldID", fieldID),
-				zap.String("index", info.IndexInfo.GetIndexName()),
-			)
-			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
-				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
-				return err
-			}
-		}
+	// 		log.Info("field index doesn't include raw data, load binlog...",
+	// 			zap.Int64("fieldID", fieldID),
+	// 			zap.String("index", info.IndexInfo.GetIndexName()),
+	// 		)
+	// 		// for scalar index's raw data, only load to mmap not memory
+	// 		if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
+	// 			log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+	// 			return err
+	// 		}
+	// 	}
 
-		if !storagecommon.IsVectorDataType(field.GetDataType()) &&
-			!segment.HasFieldData(fieldID) &&
-			loadInfo.GetStorageVersion() != storage.StorageV2 {
-			// Lazy load raw data to avoid search failure after dropping index.
-			// storage v2 will load all scalar fields so we don't need to load raw data for them.
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
-				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
-				return err
-			}
-		}
+	// 	if !storagecommon.IsVectorDataType(field.GetDataType()) &&
+	// 		!segment.HasFieldData(fieldID) &&
+	// 		loadInfo.GetStorageVersion() != storage.StorageV2 {
+	// 		// Lazy load raw data to avoid search failure after dropping index.
+	// 		// storage v2 will load all scalar fields so we don't need to load raw data for them.
+	// 		if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
+	// 			log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+	// 			return err
+	// 		}
+	// 	}
+	// }
+	// complementScalarDataSpan := tr.RecordSpan()
+	// if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
+	// 	return err
+	// }
+	// loadRawDataSpan := tr.RecordSpan()
+
+	if err = segment.Load(ctx); err != nil {
+		return errors.Wrap(err, "At Load")
 	}
-	complementScalarDataSpan := tr.RecordSpan()
-	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
-		return err
-	}
-	loadRawDataSpan := tr.RecordSpan()
 
 	if err = segment.FinishLoad(); err != nil {
 		return errors.Wrap(err, "At FinishLoad")
@@ -993,9 +997,9 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
 	log.Info("Finish loading segment",
-		zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
-		zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
-		zap.Duration("loadRawDataSpan", loadRawDataSpan),
+		// zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
+		// zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
+		// zap.Duration("loadRawDataSpan", loadRawDataSpan),
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
@@ -1040,7 +1044,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			return err
 		}
 	} else {
-		if err := segment.LoadMultiFieldData(ctx); err != nil {
+		if err := segment.Load(ctx); err != nil {
 			return err
 		}
 		if err := segment.FinishLoad(); err != nil {

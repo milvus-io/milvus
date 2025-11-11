@@ -1368,6 +1368,10 @@ func (s *LocalSegment) FinishLoad() error {
 	return nil
 }
 
+func (s *LocalSegment) Load(ctx context.Context) error {
+	return s.csegment.Load(ctx)
+}
+
 type ReleaseScope int
 
 const (
