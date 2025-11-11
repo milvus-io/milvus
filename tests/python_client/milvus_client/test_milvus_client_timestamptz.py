@@ -446,7 +446,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
                                consistency_level="Strong", index_params=index_params)
         
         # step 2: alter collection properties
-        self.alter_collection_properties(client, collection_name, properties={"collection.timezone": "Asia/Shanghai"})
+        self.alter_collection_properties(client, collection_name, properties={"timezone": "Asia/Shanghai"})
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.insert(client, collection_name, rows)
         
