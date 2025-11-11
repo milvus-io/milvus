@@ -764,8 +764,11 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
         auto written = static_cast<size_t>(end_off - start_off);
         if (written != chunk_sizes[i]) {
             ThrowInfo(DataTypeInvalid,
-                      "The written size {} of field {} does not match the expected size {}",
-                      written, field_ids[i].get(), chunk_sizes[i]);
+                      "The written size {} of field {} does not match the "
+                      "expected size {}",
+                      written,
+                      field_ids[i].get(),
+                      chunk_sizes[i]);
         }
         auto aligned_size = (written + ChunkTarget::ALIGNED_SIZE - 1) &
                             ~(ChunkTarget::ALIGNED_SIZE - 1);
@@ -789,7 +792,6 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
             "created chunk for field {} with chunk offset: {}, chunk "
             "size: {}, file path: {}",
             field_ids[i].get(),
-            chunk_sizes[i],
             chunk_offsets[i],
             chunk_sizes[i],
             file_path);
