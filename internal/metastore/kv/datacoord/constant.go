@@ -28,6 +28,8 @@ const (
 	ImportJobPrefix                    = MetaPrefix + "/import-job"
 	ImportTaskPrefix                   = MetaPrefix + "/import-task"
 	PreImportTaskPrefix                = MetaPrefix + "/preimport-task"
+	CopySegmentJobPrefix               = MetaPrefix + "/copy-segment-job"
+	CopySegmentTaskPrefix              = MetaPrefix + "/copy-segment-task"
 	CompactionTaskPrefix               = MetaPrefix + "/compaction-task"
 	AnalyzeTaskPrefix                  = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix           = MetaPrefix + "/partition-stats"

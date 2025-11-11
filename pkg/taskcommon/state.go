@@ -96,3 +96,34 @@ func ToCompactionState(s State) datapb.CompactionTaskState {
 	}
 	return datapb.CompactionTaskState_unknown
 }
+
+func FromCopySegmentState(s datapb.CopySegmentTaskState) State {
+	switch s {
+	case datapb.CopySegmentTaskState_CopySegmentTaskPending:
+		return Init
+	case datapb.CopySegmentTaskState_CopySegmentTaskInProgress:
+		return InProgress
+	case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
+		return Finished
+	case datapb.CopySegmentTaskState_CopySegmentTaskFailed:
+		return Failed
+	}
+	return None
+}
+
+func ToCopySegmentState(s State) datapb.CopySegmentTaskState {
+	switch s {
+	case Init:
+		return datapb.CopySegmentTaskState_CopySegmentTaskPending
+	case InProgress:
+		return datapb.CopySegmentTaskState_CopySegmentTaskInProgress
+	case Finished:
+		return datapb.CopySegmentTaskState_CopySegmentTaskCompleted
+	case Failed:
+		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
+	case Retry:
+		// CopySegmentTask does not support Retry state, map to Failed
+		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
+	}
+	return datapb.CopySegmentTaskState_CopySegmentTaskNone
+}
