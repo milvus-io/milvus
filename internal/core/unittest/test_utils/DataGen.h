@@ -343,8 +343,7 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline std::string
-generateRandomPoint() {
+inline std::string generateRandomPoint() {
     return "POINT(" +
            std::to_string(static_cast<double>(rand()) / RAND_MAX * 360.0 -
                           180.0) +
