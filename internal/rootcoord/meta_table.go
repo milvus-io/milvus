@@ -377,12 +377,12 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	dbName := db.Name
-	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
 		return err
 	}
 
-	// Call back cipher plugin when creating database succeeded
-	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
+	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+		hookutil.RemoveEZByDBProperties(db.Properties) // ignore the error since create database failed
 		return err
 	}
 
