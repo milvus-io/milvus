@@ -2225,7 +2225,6 @@ func TestExpr_GISFunctionsInvalidExpressions(t *testing.T) {
 		`st_dwithin(GeometryField, "POINT(0 0)")`,       // Missing distance parameter
 		`st_contains(GeometryField, "POINT(0 0)", 1.0)`, // Extra parameter
 
-
 		// Invalid distance parameter for ST_DWITHIN
 		`st_dwithin(GeometryField, "POINT(0 0)", "abc")`, // String parameter
 		`st_dwithin(GeometryField, "POINT(0 0)", "invalid")`,
@@ -2237,9 +2236,9 @@ func TestExpr_GISFunctionsInvalidExpressions(t *testing.T) {
 		`st_dwithin(UnknownGeometryField, "POINT(0 0)", 5.0)`,
 
 		// ST_ISVALID invalid usage
-		`st_isvalid(Int64Field)`,           // 非几何字段
-		`st_isvalid()`,                     // 缺少参数
-		`st_isvalid(GeometryField, 1)`,     // 多余参数
+		`st_isvalid(Int64Field)`,
+		`st_isvalid()`,
+		`st_isvalid(GeometryField, 1)`,
 	}
 
 	for _, expr := range invalidExprs {
