@@ -18,6 +18,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -279,12 +280,15 @@ func (data *DeleteData) Size() int64 {
 }
 
 // BuildDeleteRecord builds an Arrow Record from primary keys and timestamps
-func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (Record, error) {
+func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint64, tsTo uint64, err error) {
+	tsFrom = math.MaxUint64
+	tsTo = 0
+
 	if len(pks) == 0 {
-		return nil, errors.New("empty primary keys")
+		return nil, 0, 0, errors.New("empty primary keys")
 	}
 	if len(pks) != len(tss) {
-		return nil, errors.New("length of pks and tss must be equal")
+		return nil, 0, 0, errors.New("length of pks and tss must be equal")
 	}
 
 	allocator := memory.DefaultAllocator
@@ -307,7 +311,7 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (Record, error) {
 		}
 		pkArray = builder.NewArray()
 	default:
-		return nil, errors.Newf("unsupported primary key type %T", pks[0])
+		return nil, 0, 0, errors.Newf("unsupported primary key type %T", pks[0])
 	}
 	defer pkArray.Release()
 
@@ -315,6 +319,12 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (Record, error) {
 	tsBuilder := array.NewInt64Builder(allocator)
 	defer tsBuilder.Release()
 	for _, ts := range tss {
+		if ts < tsFrom {
+			tsFrom = ts
+		}
+		if ts > tsTo {
+			tsTo = ts
+		}
 		tsBuilder.Append(int64(ts))
 	}
 	tsArray := tsBuilder.NewArray()
@@ -338,5 +348,5 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (Record, error) {
 		1: 1, // ts column
 	}
 
-	return NewSimpleArrowRecord(record, field2Col), nil
+	return NewSimpleArrowRecord(record, field2Col), tsFrom, tsTo, nil
 }
