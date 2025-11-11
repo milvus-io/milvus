@@ -72,6 +72,10 @@ class ChunkedColumnInterface {
     virtual PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
 
+    virtual void
+    PrefetchChunks(milvus::OpContext* op_ctx,
+                   const std::vector<int64_t>& chunk_ids) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(milvus::OpContext* op_ctx,
