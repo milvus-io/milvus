@@ -992,6 +992,16 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
 	runningGp, runningCtx := errgroup.WithContext(ctx)
+	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn("failed to query collection", zap.Error(err))
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	for i, ch := range req.GetDmlChannels() {
 		ch := ch
