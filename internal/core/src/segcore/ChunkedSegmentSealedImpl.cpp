@@ -384,12 +384,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 for (auto& [_, info] : load_info.field_infos) {
                     num_rows = info.row_count;
                 }
+                auto all_ts_chunks =
+                    timestamp_proxy_column->GetAllChunks(nullptr);
                 std::vector<Timestamp> timestamps(num_rows);
                 int64_t offset = 0;
-                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
-                    auto chunk = timestamp_proxy_column->GetChunk(nullptr, i);
+                for (int i = 0; i < all_ts_chunks.size(); i++) {
+                    auto chunk_data = all_ts_chunks[i].get();
                     auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk.get());
+                        static_cast<FixedWidthChunk*>(chunk_data);
                     auto span = fixed_chunk->Span();
                     for (size_t j = 0; j < span.row_count(); j++) {
                         auto ts = *(int64_t*)((char*)span.data() +
@@ -624,6 +626,19 @@ bool
 ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     return mmap_field_ids_.find(field_id) != mmap_field_ids_.end();
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::vector<int64_t>& chunk_ids) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(field_id)) {
+        column->PrefetchChunks(op_ctx, chunk_ids);
+    }
 }
 
 PinWrapper<SpanBase>
