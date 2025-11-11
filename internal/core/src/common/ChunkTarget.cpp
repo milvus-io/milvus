@@ -27,9 +27,9 @@ MemChunkTarget::write(const void* data, size_t size) {
     size_ += size;
 }
 
-std::pair<char*, size_t>
-MemChunkTarget::get() {
-    return {data_, cap_};
+std::tuple<char*, size_t, std::string>
+MemChunkTarget::release() {
+    return {data_, cap_, ""};
 }
 
 size_t
@@ -39,6 +39,11 @@ MemChunkTarget::tell() {
 
 void
 MmapChunkTarget::flush() {
+    if (cap_ > size_) {
+        std::string padding(cap_ - size_, 0);
+        file_writer_->Write(padding.data(), cap_ - size_);
+        size_ = cap_;
+    }
     file_writer_->Finish();
 }
 
@@ -48,17 +53,18 @@ MmapChunkTarget::write(const void* data, size_t size) {
     size_ += size;
 }
 
-std::pair<char*, size_t>
-MmapChunkTarget::get() {
+std::tuple<char*, size_t, std::string>
+MmapChunkTarget::release() {
     flush();
 
     auto file = File::Open(file_path_, O_RDWR);
-    auto m = mmap(nullptr, size_, PROT_READ, MAP_SHARED, file.Descriptor(), 0);
+    auto m = mmap(
+        nullptr, cap_, PROT_READ, MAP_SHARED, file.Descriptor(), 0);
     AssertInfo(m != MAP_FAILED,
                "failed to map: {}, map_size={}",
                strerror(errno),
-               size_);
-    return {static_cast<char*>(m), size_};
+               cap_);
+    return {static_cast<char*>(m), cap_, file_path_};
 }
 
 size_t
