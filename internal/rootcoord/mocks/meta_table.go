@@ -3285,17 +3285,17 @@ func (_c *IMetaTable_RemoveCollection_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// RemovePartition provides a mock function with given fields: ctx, dbID, collectionID, partitionID, ts
-func (_m *IMetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64) error {
-	ret := _m.Called(ctx, dbID, collectionID, partitionID, ts)
+// RemovePartition provides a mock function with given fields: ctx, collectionID, partitionID, ts
+func (_m *IMetaTable) RemovePartition(ctx context.Context, collectionID int64, partitionID int64, ts uint64) error {
+	ret := _m.Called(ctx, collectionID, partitionID, ts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemovePartition")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, int64, uint64) error); ok {
-		r0 = rf(ctx, dbID, collectionID, partitionID, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int64, uint64) error); ok {
+		r0 = rf(ctx, collectionID, partitionID, ts)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -3310,17 +3310,16 @@ type IMetaTable_RemovePartition_Call struct {
 
 // RemovePartition is a helper method to define mock.On call
 //   - ctx context.Context
-//   - dbID int64
 //   - collectionID int64
 //   - partitionID int64
 //   - ts uint64
-func (_e *IMetaTable_Expecter) RemovePartition(ctx interface{}, dbID interface{}, collectionID interface{}, partitionID interface{}, ts interface{}) *IMetaTable_RemovePartition_Call {
-	return &IMetaTable_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, dbID, collectionID, partitionID, ts)}
+func (_e *IMetaTable_Expecter) RemovePartition(ctx interface{}, collectionID interface{}, partitionID interface{}, ts interface{}) *IMetaTable_RemovePartition_Call {
+	return &IMetaTable_RemovePartition_Call{Call: _e.mock.On("RemovePartition", ctx, collectionID, partitionID, ts)}
 }
 
-func (_c *IMetaTable_RemovePartition_Call) Run(run func(ctx context.Context, dbID int64, collectionID int64, partitionID int64, ts uint64)) *IMetaTable_RemovePartition_Call {
+func (_c *IMetaTable_RemovePartition_Call) Run(run func(ctx context.Context, collectionID int64, partitionID int64, ts uint64)) *IMetaTable_RemovePartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(int64), args[4].(uint64))
+		run(args[0].(context.Context), args[1].(int64), args[2].(int64), args[3].(uint64))
 	})
 	return _c
 }
@@ -3330,7 +3329,7 @@ func (_c *IMetaTable_RemovePartition_Call) Return(_a0 error) *IMetaTable_RemoveP
 	return _c
 }
 
-func (_c *IMetaTable_RemovePartition_Call) RunAndReturn(run func(context.Context, int64, int64, int64, uint64) error) *IMetaTable_RemovePartition_Call {
+func (_c *IMetaTable_RemovePartition_Call) RunAndReturn(run func(context.Context, int64, int64, uint64) error) *IMetaTable_RemovePartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
