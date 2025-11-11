@@ -2135,16 +2135,17 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 	}
 
 	segmentInfo := &datapb.SegmentInfo{
-		CollectionID:              oldSegment.GetCollectionID(),
-		PartitionID:               oldSegment.GetPartitionID(),
-		InsertChannel:             oldSegment.GetInsertChannel(),
-		MaxRowNum:                 oldSegment.GetMaxRowNum(),
-		LastExpireTime:            oldSegment.GetLastExpireTime(),
-		StartPosition:             oldSegment.GetStartPosition(),
-		DmlPosition:               oldSegment.GetDmlPosition(),
-		IsImporting:               oldSegment.GetIsImporting(),
-		StorageVersion:            oldSegment.GetStorageVersion(),
-		State:                     oldSegment.GetState(),
+		CollectionID:   oldSegment.GetCollectionID(),
+		PartitionID:    oldSegment.GetPartitionID(),
+		InsertChannel:  oldSegment.GetInsertChannel(),
+		MaxRowNum:      oldSegment.GetMaxRowNum(),
+		LastExpireTime: oldSegment.GetLastExpireTime(),
+		StartPosition:  oldSegment.GetStartPosition(),
+		DmlPosition:    oldSegment.GetDmlPosition(),
+		IsImporting:    oldSegment.GetIsImporting(),
+		StorageVersion: oldSegment.GetStorageVersion(),
+		// only flushed segment can do sort stats
+		State:                     commonpb.SegmentState_Flushed,
 		Level:                     oldSegment.GetLevel(),
 		LastLevel:                 oldSegment.GetLastLevel(),
 		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),

@@ -581,7 +581,9 @@ func (s *taskScheduler) processFinished(task Task) bool {
 	client, exist := s.nodeManager.GetClientByID(task.GetNodeID())
 	if exist {
 		if !task.DropTaskOnWorker(s.ctx, client) {
-			return false
+			log.Ctx(s.ctx).Warn("drop task on worker failed, but ignore it",
+				zap.Int64("taskID", task.GetTaskID()), zap.Int64("nodeID", task.GetNodeID()))
+			return true
 		}
 	}
 	log.Ctx(s.ctx).Info("task has been finished", zap.Int64("taskID", task.GetTaskID()),
