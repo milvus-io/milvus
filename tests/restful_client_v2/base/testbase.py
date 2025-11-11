@@ -42,7 +42,8 @@ class TestBase(Base):
 
     def teardown_method(self):
         # Clean up collections
-        self.collection_client.api_key = self.api_key
+        if hasattr(self, 'api_key') and self.api_key:
+            self.collection_client.api_key = self.api_key
         all_collections = self.collection_client.collection_list()['data']
         if self.name in all_collections:
             logger.info(f"collection {self.name} exist, drop it")
@@ -68,7 +69,8 @@ class TestBase(Base):
 
 
         # Clean up databases created by this client
-        self.database_client.api_key = self.api_key
+        if hasattr(self, 'api_key') and self.api_key:
+            self.database_client.api_key = self.api_key
         for db_name in self.database_client.db_names[:]:  # Create a copy of the list to iterate
             logger.info(f"database {db_name} exist, drop it")
             try:
@@ -84,25 +86,19 @@ class TestBase(Base):
         self.endpoint = f"{endpoint}"
         self.api_key = f"{token}"
         self.invalid_api_key = "invalid_token"
+        Requests.update_uuid(_uuid)
+
         self.vector_client = VectorClient(self.endpoint, self.api_key)
-        self.vector_client.update_uuid(_uuid)
         self.collection_client = CollectionClient(self.endpoint, self.api_key)
-        self.collection_client.update_uuid(_uuid)
         self.partition_client = PartitionClient(self.endpoint, self.api_key)
-        self.partition_client.update_uuid(_uuid)
         self.index_client = IndexClient(self.endpoint, self.api_key)
-        self.index_client.update_uuid(_uuid)
         self.alias_client = AliasClient(self.endpoint, self.api_key)
-        self.alias_client.update_uuid(_uuid)
         self.user_client = UserClient(self.endpoint, self.api_key)
-        self.user_client.update_uuid(_uuid)
         self.role_client = RoleClient(self.endpoint, self.api_key)
-        self.role_client.update_uuid(_uuid)
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
-        self.import_job_client.update_uuid(_uuid)
         self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         self.database_client = DatabaseClient(self.endpoint, self.api_key)
-        self.database_client.update_uuid(_uuid)
+
         if token is None:
             self.vector_client.api_key = None
             self.collection_client.api_key = None
