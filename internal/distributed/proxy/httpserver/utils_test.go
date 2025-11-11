@@ -1280,7 +1280,7 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 	}...)
 
 	for _, testcase := range testCases {
-		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim, false)
 		assert.Nil(t, err)
 		assert.Equal(t, testcase.placehoderValue(), phv.GetValues(),
 			fmt.Sprintf("check equal fail, data: %s, type: %s, dim: %d", testcase.requestBody, testcase.dataType, testcase.dim))
@@ -1308,7 +1308,7 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 			},
 		},
 	} {
-		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		phv, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim, false)
 		assert.Nil(t, err)
 		assert.NotEqual(t, testcase.placehoderValue(), phv.GetValues(),
 			fmt.Sprintf("check not equal fail, data: %s, type: %s, dim: %d", testcase.requestBody, testcase.dataType, testcase.dim))
@@ -1345,7 +1345,7 @@ func TestConvertQueries2Placeholder(t *testing.T) {
 			},
 		},
 	} {
-		_, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim)
+		_, err := convertQueries2Placeholder(testcase.requestBody, testcase.dataType, testcase.dim, false)
 		assert.NotNil(t, err)
 	}
 }
