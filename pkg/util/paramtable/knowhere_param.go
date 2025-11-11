@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
@@ -119,6 +122,7 @@ func (p *knowhereConfig) UpdateIndexParams(indexType string, stage string, index
 	overrideIndexType := GetKeyFromSlice(indexParams, OverrideIndexTypeKey)
 	if overrideIndexType != "" {
 		overrideIndexParams := p.getIndexParam(overrideIndexType, stage)
+		log.Info("override index params", zap.String("overrideIndexType", overrideIndexType), zap.Any("overrideIndexParams", overrideIndexParams))
 		for key, val := range overrideIndexParams {
 			indexParams = append(indexParams,
 				&commonpb.KeyValuePair{
