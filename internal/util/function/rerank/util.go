@@ -41,6 +41,8 @@ type columns struct {
 	size   int64
 	ids    any
 	scores []float32
+
+	nqOffset int64
 }
 
 type rerankInputs struct {
@@ -101,6 +103,7 @@ func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputF
 				cols[i][retIdx].size = size
 				cols[i][retIdx].ids = getIds(searchResult.Ids, start, size)
 				cols[i][retIdx].scores = searchResult.Scores[start : start+size]
+				cols[i][retIdx].nqOffset = start
 			}
 			for _, fieldId := range inputFieldIds {
 				fieldData, exist := multipIdField[retIdx][fieldId]
