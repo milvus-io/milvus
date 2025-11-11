@@ -28,6 +28,7 @@ var (
 		Deleted:       false,
 		CreateTime:    1,
 		SerializeSize: 0,
+		IndexType:     "HNSW",
 	}
 
 	indexModel2 = &SegmentIndex{
@@ -45,6 +46,7 @@ var (
 		CreatedUTCTime:      1,
 		IndexFileKeys:       nil,
 		IndexSerializedSize: 0,
+		IndexType:           "HNSW",
 	}
 )
 
