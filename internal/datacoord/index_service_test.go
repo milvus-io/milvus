@@ -388,6 +388,105 @@ func TestServer_CreateIndex(t *testing.T) {
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
+
+	t.Run("preserve index ID with valid ID", func(t *testing.T) {
+		// Reset catalog and allocator
+		s.meta.catalog = catalog
+		s.meta.indexMeta.catalog = catalog
+		s.allocator = mock0Allocator
+		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
+
+		preservedIndexID := int64(12345)
+		req := &indexpb.CreateIndexRequest{
+			CollectionID:    collID,
+			FieldID:         fieldID,
+			IndexName:       "preserved_index",
+			TypeParams:      typeParams,
+			IndexParams:     indexParams,
+			Timestamp:       100,
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+			PreserveIndexId: true,
+			IndexId:         preservedIndexID,
+		}
+
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		// Verify the index was created with the preserved ID
+		indexes := s.meta.indexMeta.GetFieldIndexes(collID, fieldID, "preserved_index")
+		assert.Equal(t, 1, len(indexes))
+		assert.Equal(t, preservedIndexID, indexes[0].IndexID)
+	})
+
+	t.Run("preserve index ID with invalid ID (zero)", func(t *testing.T) {
+		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
+
+		req := &indexpb.CreateIndexRequest{
+			CollectionID:    collID,
+			FieldID:         fieldID,
+			IndexName:       "invalid_preserved_index",
+			TypeParams:      typeParams,
+			IndexParams:     indexParams,
+			Timestamp:       100,
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+			PreserveIndexId: true,
+			IndexId:         0, // Invalid ID
+		}
+
+		resp, err := s.CreateIndex(ctx, req)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.Contains(t, resp.GetReason(), "index_id must be positive")
+	})
+
+	t.Run("preserve index ID with invalid ID (negative)", func(t *testing.T) {
+		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
+
+		req := &indexpb.CreateIndexRequest{
+			CollectionID:    collID,
+			FieldID:         fieldID,
+			IndexName:       "negative_preserved_index",
+			TypeParams:      typeParams,
+			IndexParams:     indexParams,
+			Timestamp:       100,
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+			PreserveIndexId: true,
+			IndexId:         -100, // Invalid negative ID
+		}
+
+		resp, err := s.CreateIndex(ctx, req)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.Contains(t, resp.GetReason(), "index_id must be positive")
+	})
+
+	t.Run("normal index creation without preserve", func(t *testing.T) {
+		// Verify normal path still works (without PreserveIndexId)
+		s.meta.catalog = catalog
+		s.meta.indexMeta.catalog = catalog
+		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
+
+		req := &indexpb.CreateIndexRequest{
+			CollectionID:    collID,
+			FieldID:         fieldID,
+			IndexName:       "normal_index",
+			TypeParams:      typeParams,
+			IndexParams:     indexParams,
+			Timestamp:       100,
+			IsAutoIndex:     false,
+			UserIndexParams: indexParams,
+			PreserveIndexId: false, // Normal allocation
+		}
+
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		// Verify the index was created with an allocated ID (not zero)
+		indexes := s.meta.indexMeta.GetFieldIndexes(collID, fieldID, "normal_index")
+		assert.Equal(t, 1, len(indexes))
+		assert.NotEqual(t, int64(0), indexes[0].IndexID)
+	})
 }
 
 func TestServer_AlterIndex(t *testing.T) {
@@ -2998,4 +3097,134 @@ func TestJsonIndex(t *testing.T) {
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.Error(t, merr.CheckRPCCall(resp, err))
+}
+
+func TestServer_CreateIndex_PreserveIndexID(t *testing.T) {
+	initStreamingSystem(t)
+	// Common setup for all sub-tests
+	var (
+		collID  = UniqueID(1)
+		fieldID = UniqueID(10)
+		ctx     = context.Background()
+	)
+
+	// Create mock catalog
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	// Create mock allocator
+	mockAllocator := newMockAllocator(t)
+
+	// Create collections map
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(collID, &collectionInfo{
+		ID:         collID,
+		Partitions: nil,
+	})
+
+	// Create index meta
+	indexMeta := newSegmentIndexMeta(catalog)
+
+	// Create server with all necessary components
+	s := &Server{
+		meta: &meta{
+			catalog:     catalog,
+			collections: collections,
+			indexMeta:   indexMeta,
+		},
+		allocator:       mockAllocator,
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+	RegisterDDLCallbacks(s)
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// Create mock broker with schema
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(
+		&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Name:   "test_collection",
+				AutoID: false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      fieldID,
+						Name:         "test_field",
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_FloatVector,
+					},
+				},
+			},
+			CollectionID: collID,
+		}, nil).Maybe()
+
+	s.broker = broker.NewCoordinatorBroker(mixCoord)
+
+	t.Run("preserve index ID with negative ID should fail", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    "test_index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "IVF_FLAT",
+				},
+			},
+			Timestamp:       100,
+			PreserveIndexId: true,
+			IndexId:         -1, // Invalid ID
+		}
+
+		// Test that negative ID is rejected
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, int32(0), resp.GetErrorCode())
+		assert.Contains(t, resp.GetReason(), "index_id must be positive")
+	})
+
+	t.Run("preserve index ID with zero ID should fail", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    "test_index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "IVF_FLAT",
+				},
+			},
+			Timestamp:       100,
+			PreserveIndexId: true,
+			IndexId:         0, // Invalid ID
+		}
+
+		// Test that zero ID is rejected
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, int32(0), resp.GetErrorCode())
+		assert.Contains(t, resp.GetReason(), "index_id must be positive")
+	})
+
+	t.Run("preserve index ID with positive ID should be accepted", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    "test_index",
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "IVF_FLAT",
+				},
+			},
+			Timestamp:       100,
+			PreserveIndexId: true,
+			IndexId:         12345, // Valid ID
+		}
+
+		resp, err := s.CreateIndex(ctx, req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+	})
 }

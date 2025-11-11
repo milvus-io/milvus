@@ -1651,8 +1651,22 @@ func (coord *MixCoordMock) DescribeSnapshot(ctx context.Context, req *datapb.Des
 	}, nil
 }
 
-func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
+func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+	return &datapb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	return &datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	return &datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+	}, nil
 }
 
 func (coord *MixCoordMock) Search() {

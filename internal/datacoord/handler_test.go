@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1522,23 +1521,14 @@ func TestGetDataVChanPositions(t *testing.T) {
 func TestGetSnapshotTs(t *testing.T) {
 	// Create a minimal server handler without full server initialization
 	handler := &ServerHandler{
-		s: &Server{
-			channelManager: &ChannelManagerImpl{},
-		},
+		s: &Server{},
 	}
 
-	// Mock channel manager
-	mockChannels := []RWChannel{
-		&channelMeta{Name: "ch1", CollectionID: 100},
-		&channelMeta{Name: "ch2", CollectionID: 100},
-	}
-
-	// Setup mocks
-	mock1 := mockey.Mock((*ChannelManagerImpl).GetChannelsByCollectionID).To(func(cm *ChannelManagerImpl, collectionID int64) []RWChannel {
-		if collectionID == 100 {
-			return mockChannels
-		}
-		return nil
+	mock1 := mockey.Mock((*Server).getChannelsByCollectionID).To(func(s *Server, ctx context.Context, collectionID int64) ([]RWChannel, error) {
+		return []RWChannel{
+			&channelMeta{Name: "ch1", CollectionID: 100},
+			&channelMeta{Name: "ch2", CollectionID: 100},
+		}, nil
 	}).Build()
 	defer mock1.UnPatch()
 
@@ -1559,6 +1549,190 @@ func TestGetSnapshotTs(t *testing.T) {
 	assert.Equal(t, uint64(500), ts) // Should return the smallest timestamp
 }
 
+func TestGetDeltaLogFromCompactTo(t *testing.T) {
+	t.Run("no compaction children", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add a segment with no compaction children
+		seg := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1001,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Flushed,
+		})
+		err := svr.meta.AddSegment(context.TODO(), seg)
+		require.NoError(t, err)
+
+		// Should return empty delta logs
+		deltaLogs, err := svr.handler.GetDeltaLogFromCompactTo(context.Background(), 1001)
+		assert.NoError(t, err)
+		assert.Empty(t, deltaLogs)
+	})
+
+	t.Run("segment not found", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Query non-existent segment
+		_, err := svr.handler.GetDeltaLogFromCompactTo(context.Background(), 9999)
+		assert.Error(t, err)
+	})
+
+	t.Run("single level compaction", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Create parent segment
+		parent := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1000,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Dropped,
+		})
+		err := svr.meta.AddSegment(context.TODO(), parent)
+		require.NoError(t, err)
+
+		// Create child segment with delta logs
+		child := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1000},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), child)
+		require.NoError(t, err)
+
+		// Should return child's delta logs
+		deltaLogs, err := svr.handler.GetDeltaLogFromCompactTo(context.Background(), 1000)
+		assert.NoError(t, err)
+		assert.Len(t, deltaLogs, 1)
+		assert.Equal(t, int64(0), deltaLogs[0].FieldID)
+	})
+
+	t.Run("multi-level compaction", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Create compaction chain: seg1 -> seg2 -> seg3
+		seg1 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1001,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Dropped,
+		})
+		err := svr.meta.AddSegment(context.TODO(), seg1)
+		require.NoError(t, err)
+
+		seg2 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1002,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Dropped,
+			CompactionFrom: []int64{1001},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 2, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), seg2)
+		require.NoError(t, err)
+
+		seg3 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1003,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1002},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 3, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), seg3)
+		require.NoError(t, err)
+
+		// Should return all delta logs from the compaction chain
+		deltaLogs, err := svr.handler.GetDeltaLogFromCompactTo(context.Background(), 1001)
+		assert.NoError(t, err)
+		assert.Len(t, deltaLogs, 2) // seg2 and seg3 delta logs
+	})
+
+	t.Run("multi-child compaction", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Create parent segment
+		parent := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1000,
+			CollectionID: 100,
+			PartitionID:  10,
+			State:        commonpb.SegmentState_Dropped,
+		})
+		err := svr.meta.AddSegment(context.TODO(), parent)
+		require.NoError(t, err)
+
+		// Create multiple children from the same parent
+		child1 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1000},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), child1)
+		require.NoError(t, err)
+
+		child2 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1002,
+			CollectionID:   100,
+			PartitionID:    10,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1000},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 2, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), child2)
+		require.NoError(t, err)
+
+		// Should return delta logs from both children
+		deltaLogs, err := svr.handler.GetDeltaLogFromCompactTo(context.Background(), 1000)
+		assert.NoError(t, err)
+		assert.Len(t, deltaLogs, 2)
+	})
+}
+
 func TestGenSnapshot(t *testing.T) {
 	schema := newTestSchema()
 
@@ -1568,8 +1742,26 @@ func TestGenSnapshot(t *testing.T) {
 		indexMeta: mockIndexMeta,
 	}
 
-	// Create handler with minimal server
-	mockBroker := broker.NewCoordinatorBroker(nil) // Create real broker instance for mocking
+	// Create mock mixCoord
+	mockMixCoord := mocks2.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:           merr.Success(),
+		Schema:           schema,
+		ShardsNum:        2,
+		NumPartitions:    1,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		Properties:       []*commonpb.KeyValuePair{},
+		CollectionID:     200,
+	}, nil).Maybe()
+
+	mockMixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:         merr.Success(),
+		PartitionIDs:   []int64{0, 1},
+		PartitionNames: []string{"_default", "partition1"},
+	}, nil).Maybe()
+
+	// Create handler with mock broker
+	mockBroker := broker.NewCoordinatorBroker(mockMixCoord)
 	handler := &ServerHandler{
 		s: &Server{
 			broker: mockBroker,
@@ -1577,34 +1769,11 @@ func TestGenSnapshot(t *testing.T) {
 		},
 	}
 
-	// Setup mocks
+	// Setup mocks for other methods
 	mock1 := mockey.Mock((*ServerHandler).GetSnapshotTs).To(func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) (uint64, error) {
 		return uint64(12345), nil
 	}).Build()
 	defer mock1.UnPatch()
-
-	mock2 := mockey.Mock(mockey.GetMethod(mockBroker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-		if collectionID == 200 {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:           merr.Success(),
-				Schema:           schema,
-				ShardsNum:        2,
-				NumPartitions:    1,
-				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-				Properties:       []*commonpb.KeyValuePair{},
-			}, nil
-		}
-		return nil, errors.New("unexpected parameters")
-	}).Build()
-	defer mock2.UnPatch()
-
-	mock3 := mockey.Mock(mockey.GetMethod(mockBroker, "ShowPartitionsInternal")).To(func(ctx context.Context, collectionID int64) ([]int64, error) {
-		if collectionID == 200 {
-			return []int64{0, 1}, nil
-		}
-		return nil, errors.New("unexpected collection ID")
-	}).Build()
-	defer mock3.UnPatch()
 
 	mock4 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 		return []*model.Index{
@@ -1626,6 +1795,14 @@ func TestGenSnapshot(t *testing.T) {
 			PartitionID:   0,
 			State:         commonpb.SegmentState_Flushed,
 			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogSize: 100},
+					},
+				},
+			},
 		})
 		return []*SegmentInfo{seg}
 	}).Build()
@@ -1638,8 +1815,15 @@ func TestGenSnapshot(t *testing.T) {
 				CollectionID: 200,
 				PartitionID:  0,
 				State:        commonpb.SegmentState_Flushed,
-				Binlogs:      []*datapb.FieldBinlog{},
-				Deltalogs:    []*datapb.FieldBinlog{},
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{LogID: 1, LogSize: 100},
+						},
+					},
+				},
+				Deltalogs: []*datapb.FieldBinlog{},
 			})
 		}
 		return nil
@@ -1651,8 +1835,13 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock7.UnPatch()
 
-	// Test GenSanpshot
-	snapshotData, err := handler.GenSanpshot(context.Background(), 200)
+	mock8 := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
+		return nil, false // No compaction children
+	}).Build()
+	defer mock8.UnPatch()
+
+	// Test GenSnapshot
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
 	assert.NoError(t, err)
 	assert.NotNil(t, snapshotData)
 	assert.Equal(t, int64(200), snapshotData.SnapshotInfo.CollectionId)

@@ -71,7 +71,7 @@ func createTestSnapshotDataForMeta() *SnapshotData {
 
 func createTestSnapshotDataInfo() *SnapshotDataInfo {
 	return &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: createTestSnapshotInfoForMeta(),
 		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
 		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
 	}
@@ -126,8 +126,8 @@ func TestSnapshotMeta_ListSnapshots_Success(t *testing.T) {
 	snapshot2.SnapshotInfo.PartitionIds = []int64{3, 4}
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{SnapshotData: snapshot1})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{SnapshotData: snapshot2})
+	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -153,8 +153,8 @@ func TestSnapshotMeta_ListSnapshots_AllCollections(t *testing.T) {
 	snapshot2.SnapshotInfo.Id = 2
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{SnapshotData: snapshot1})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{SnapshotData: snapshot2})
+	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -191,14 +191,14 @@ func TestSnapshotMeta_GetSnapshot_Success(t *testing.T) {
 	snapshotData := createTestSnapshotDataForMeta()
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{SnapshotData: snapshotData})
+	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	result, err := sm.GetSnapshot(ctx, snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Equal(t, snapshotData, result)
+	assert.Equal(t, snapshotData.SnapshotInfo, result)
 }
 
 func TestSnapshotMeta_GetSnapshot_NotFound(t *testing.T) {
@@ -226,14 +226,14 @@ func TestSnapshotMeta_GetSnapshotByName_Success(t *testing.T) {
 	snapshotData := createTestSnapshotDataForMeta()
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{SnapshotData: snapshotData})
+	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	result, err := sm.getSnapshotByName(ctx, snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Equal(t, snapshotData, result)
+	assert.Equal(t, snapshotData.SnapshotInfo, result)
 }
 
 func TestSnapshotMeta_GetSnapshotByName_NotFound(t *testing.T) {
@@ -270,16 +270,16 @@ func TestSnapshotMeta_GetSnapshotByName_MultipleSnapshots(t *testing.T) {
 	snapshot3.SnapshotInfo.Id = 3
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{SnapshotData: snapshot1})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{SnapshotData: snapshot2})
-	sm.snapshotID2DataInfo.Insert(3, &SnapshotDataInfo{SnapshotData: snapshot3})
+	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm.snapshotID2DataInfo.Insert(3, &SnapshotDataInfo{snapshotInfo: snapshot3.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	result, err := sm.getSnapshotByName(ctx, targetName)
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Equal(t, snapshot2, result)
+	assert.Equal(t, snapshot2.SnapshotInfo, result)
 }
 
 // --- GetSnapshotBySegment Tests ---
@@ -290,20 +290,29 @@ func TestSnapshotMeta_GetSnapshotBySegment_Success(t *testing.T) {
 	collectionID := typeutil.UniqueID(100)
 	segmentID := typeutil.UniqueID(1001)
 
+	snapshotInfo1 := createTestSnapshotInfoForMeta()
+	snapshotInfo1.CollectionId = 100
+	snapshotInfo1.Id = 1
 	dataInfo1 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo1,
 		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
 		IndexIDs:     typeutil.NewUniqueSet(2001),
 	}
 
+	snapshotInfo2 := createTestSnapshotInfoForMeta()
+	snapshotInfo2.CollectionId = 100
+	snapshotInfo2.Id = 2
 	dataInfo2 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo2,
 		SegmentIDs:   typeutil.NewUniqueSet(1003, 1004),
 		IndexIDs:     typeutil.NewUniqueSet(2002),
 	}
 
+	snapshotInfo3 := createTestSnapshotInfoForMeta()
+	snapshotInfo3.CollectionId = 200 // Different collection
+	snapshotInfo3.Id = 3
 	dataInfo3 := &SnapshotDataInfo{
-		CollectionID: 200, // Different collection
+		snapshotInfo: snapshotInfo3,
 		SegmentIDs:   typeutil.NewUniqueSet(1001),
 		IndexIDs:     typeutil.NewUniqueSet(2003),
 	}
@@ -327,8 +336,11 @@ func TestSnapshotMeta_GetSnapshotBySegment_EmptyResult(t *testing.T) {
 	collectionID := UniqueID(100)
 	segmentID := UniqueID(9999) // Non-existent segment
 
+	snapshotInfo := createTestSnapshotInfoForMeta()
+	snapshotInfo.CollectionId = 100
+	snapshotInfo.Id = 1
 	dataInfo := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo,
 		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
 		IndexIDs:     typeutil.NewUniqueSet(2001),
 	}
@@ -349,14 +361,20 @@ func TestSnapshotMeta_GetSnapshotBySegment_MultipleMatches(t *testing.T) {
 	collectionID := UniqueID(100)
 	segmentID := UniqueID(1001)
 
+	snapshotInfo1 := createTestSnapshotInfoForMeta()
+	snapshotInfo1.CollectionId = 100
+	snapshotInfo1.Id = 1
 	dataInfo1 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo1,
 		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
 		IndexIDs:     typeutil.NewUniqueSet(2001),
 	}
 
+	snapshotInfo2 := createTestSnapshotInfoForMeta()
+	snapshotInfo2.CollectionId = 100
+	snapshotInfo2.Id = 2
 	dataInfo2 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo2,
 		SegmentIDs:   typeutil.NewUniqueSet(1001, 1003),
 		IndexIDs:     typeutil.NewUniqueSet(2002),
 	}
@@ -382,20 +400,29 @@ func TestSnapshotMeta_GetSnapshotByIndex_Success(t *testing.T) {
 	collectionID := UniqueID(100)
 	indexID := UniqueID(2001)
 
+	snapshotInfo1 := createTestSnapshotInfoForMeta()
+	snapshotInfo1.CollectionId = 100
+	snapshotInfo1.Id = 1
 	dataInfo1 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo1,
 		SegmentIDs:   typeutil.NewUniqueSet(1001),
 		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
 	}
 
+	snapshotInfo2 := createTestSnapshotInfoForMeta()
+	snapshotInfo2.CollectionId = 100
+	snapshotInfo2.Id = 2
 	dataInfo2 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo2,
 		SegmentIDs:   typeutil.NewUniqueSet(1002),
 		IndexIDs:     typeutil.NewUniqueSet(2003, 2004),
 	}
 
+	snapshotInfo3 := createTestSnapshotInfoForMeta()
+	snapshotInfo3.CollectionId = 200 // Different collection
+	snapshotInfo3.Id = 3
 	dataInfo3 := &SnapshotDataInfo{
-		CollectionID: 200, // Different collection
+		snapshotInfo: snapshotInfo3,
 		SegmentIDs:   typeutil.NewUniqueSet(1003),
 		IndexIDs:     typeutil.NewUniqueSet(2001),
 	}
@@ -419,8 +446,11 @@ func TestSnapshotMeta_GetSnapshotByIndex_EmptyResult(t *testing.T) {
 	collectionID := UniqueID(100)
 	indexID := UniqueID(9999) // Non-existent index
 
+	snapshotInfo := createTestSnapshotInfoForMeta()
+	snapshotInfo.CollectionId = 100
+	snapshotInfo.Id = 1
 	dataInfo := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo,
 		SegmentIDs:   typeutil.NewUniqueSet(1001),
 		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
 	}
@@ -441,14 +471,20 @@ func TestSnapshotMeta_GetSnapshotByIndex_MultipleMatches(t *testing.T) {
 	collectionID := UniqueID(100)
 	indexID := UniqueID(2001)
 
+	snapshotInfo1 := createTestSnapshotInfoForMeta()
+	snapshotInfo1.CollectionId = 100
+	snapshotInfo1.Id = 1
 	dataInfo1 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo1,
 		SegmentIDs:   typeutil.NewUniqueSet(1001),
 		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
 	}
 
+	snapshotInfo2 := createTestSnapshotInfoForMeta()
+	snapshotInfo2.CollectionId = 100
+	snapshotInfo2.Id = 2
 	dataInfo2 := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo2,
 		SegmentIDs:   typeutil.NewUniqueSet(1002),
 		IndexIDs:     typeutil.NewUniqueSet(2001, 2003),
 	}
@@ -556,12 +592,9 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
 	sm := createTestSnapshotMetaWithTempDir(t)
-	snapshotInfo := &datapb.SnapshotInfo{
-		Id:           1,
-		CollectionId: 100,
-		Name:         "test_snapshot",
-	}
 	snapshotData := createTestSnapshotDataForMeta()
+	// Use the SnapshotInfo from snapshotData for catalog.ListSnapshots
+	snapshotInfo := snapshotData.SnapshotInfo
 
 	// Mock catalog.ListSnapshots
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).To(func(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
@@ -571,8 +604,8 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 
 	// Mock SnapshotReader.ReadSnapshot
 	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64, includeSegments bool) (*SnapshotData, error) {
-		assert.Equal(t, int64(100), collectionID)
-		assert.Equal(t, int64(1), snapshotID)
+		assert.Equal(t, snapshotInfo.CollectionId, collectionID)
+		assert.Equal(t, snapshotInfo.Id, snapshotID)
 		assert.True(t, includeSegments)
 		return snapshotData, nil
 	}).Build()
@@ -584,9 +617,9 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	// Verify snapshot was inserted into map
-	value, exists := sm.snapshotID2DataInfo.Get(1)
+	value, exists := sm.snapshotID2DataInfo.Get(snapshotData.SnapshotInfo.Id)
 	assert.True(t, exists)
-	assert.Equal(t, snapshotData, value.SnapshotData)
+	assert.Equal(t, snapshotData.SnapshotInfo, value.snapshotInfo)
 }
 
 func TestSnapshotMeta_Reload_CatalogError_WithMockey(t *testing.T) {
@@ -640,11 +673,10 @@ func TestSnapshotMeta_SaveSnapshot_Success_WithMockey(t *testing.T) {
 	// Verify snapshot data info was inserted
 	dataInfo, exists := sm.snapshotID2DataInfo.Get(snapshotData.SnapshotInfo.GetId())
 	assert.True(t, exists)
-	assert.Equal(t, int64(100), dataInfo.CollectionID)
+	assert.Equal(t, int64(100), dataInfo.snapshotInfo.CollectionId)
 	assert.True(t, dataInfo.SegmentIDs.Contain(1001))
 	assert.True(t, dataInfo.IndexIDs.Contain(2001))
-	// Verify segments were cleared from snapshot data
-	assert.Nil(t, snapshotData.Segments)
+	// Verify S3Location was set
 	assert.Equal(t, metadataFilePath, snapshotData.SnapshotInfo.S3Location)
 }
 
@@ -708,7 +740,7 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	snapshotData.SnapshotInfo.Name = snapshotName
 
 	// Insert snapshot into map
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{SnapshotData: snapshotData})
+	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Mock catalog.DropSnapshot
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
@@ -760,7 +792,7 @@ func TestSnapshotMeta_DropSnapshot_CatalogError_WithMockey(t *testing.T) {
 	expectedErr := errors.New("catalog drop failed")
 
 	// Insert snapshot into map
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{SnapshotData: snapshotData})
+	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Mock catalog.DropSnapshot to return error
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
@@ -786,7 +818,7 @@ func TestSnapshotMeta_DropSnapshot_WriterError_WithMockey(t *testing.T) {
 	expectedErr := errors.New("writer drop failed")
 
 	// Insert snapshot into map
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{SnapshotData: snapshotData})
+	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Mock catalog.DropSnapshot
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
@@ -815,7 +847,7 @@ func TestSnapshotDataInfo_Creation(t *testing.T) {
 	dataInfo := createTestSnapshotDataInfo()
 
 	// Assert
-	assert.Equal(t, int64(100), dataInfo.CollectionID)
+	assert.Equal(t, int64(100), dataInfo.snapshotInfo.CollectionId)
 	assert.True(t, dataInfo.SegmentIDs.Contain(1001))
 	assert.True(t, dataInfo.SegmentIDs.Contain(1002))
 	assert.True(t, dataInfo.IndexIDs.Contain(2001))
@@ -826,14 +858,16 @@ func TestSnapshotDataInfo_Creation(t *testing.T) {
 
 func TestSnapshotDataInfo_EmptySets(t *testing.T) {
 	// Arrange & Act
+	snapshotInfo := createTestSnapshotInfoForMeta()
+	snapshotInfo.CollectionId = 100
 	dataInfo := &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotInfo,
 		SegmentIDs:   typeutil.NewUniqueSet(),
 		IndexIDs:     typeutil.NewUniqueSet(),
 	}
 
 	// Assert
-	assert.Equal(t, int64(100), dataInfo.CollectionID)
+	assert.Equal(t, int64(100), dataInfo.snapshotInfo.CollectionId)
 	assert.Equal(t, 0, dataInfo.SegmentIDs.Len())
 	assert.Equal(t, 0, dataInfo.IndexIDs.Len())
 	assert.False(t, dataInfo.SegmentIDs.Contain(1001))
@@ -852,10 +886,9 @@ func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
 
 	// Act - simulate concurrent operations
 	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{
-		CollectionID: 100,
+		snapshotInfo: snapshotData.SnapshotInfo,
 		SegmentIDs:   typeutil.NewUniqueSet(1001),
 		IndexIDs:     typeutil.NewUniqueSet(2001),
-		SnapshotData: snapshotData,
 	})
 
 	// These operations should work concurrently
@@ -911,8 +944,8 @@ func TestSnapshotMeta_ListSnapshots_FilterByPartition(t *testing.T) {
 	snapshot2.SnapshotInfo.PartitionIds = []int64{2, 4} // Has partition 2
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{SnapshotData: snapshot1})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{SnapshotData: snapshot2})
+	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -940,8 +973,8 @@ func TestSnapshotMeta_ListSnapshots_FilterByCollection(t *testing.T) {
 	snapshot2.SnapshotInfo.CollectionId = 200
 
 	sm := createTestSnapshotMeta()
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{SnapshotData: snapshot1})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{SnapshotData: snapshot2})
+	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)

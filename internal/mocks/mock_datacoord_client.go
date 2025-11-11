@@ -2670,6 +2670,80 @@ func (_c *MockDataCoordClient_GetRecoveryInfoV2_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// GetRestoreSnapshotState provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) GetRestoreSnapshotState(ctx context.Context, in *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRestoreSnapshotState")
+	}
+
+	var r0 *datapb.GetRestoreSnapshotStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) *datapb.GetRestoreSnapshotStateResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetRestoreSnapshotStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_GetRestoreSnapshotState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRestoreSnapshotState'
+type MockDataCoordClient_GetRestoreSnapshotState_Call struct {
+	*mock.Call
+}
+
+// GetRestoreSnapshotState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.GetRestoreSnapshotStateRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) GetRestoreSnapshotState(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_GetRestoreSnapshotState_Call {
+	return &MockDataCoordClient_GetRestoreSnapshotState_Call{Call: _e.mock.On("GetRestoreSnapshotState",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_GetRestoreSnapshotState_Call) Run(run func(ctx context.Context, in *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption)) *MockDataCoordClient_GetRestoreSnapshotState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetRestoreSnapshotStateRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetRestoreSnapshotState_Call) Return(_a0 *datapb.GetRestoreSnapshotStateResponse, _a1 error) *MockDataCoordClient_GetRestoreSnapshotState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_GetRestoreSnapshotState_Call) RunAndReturn(run func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error)) *MockDataCoordClient_GetRestoreSnapshotState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentIndexState provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) GetSegmentIndexState(ctx context.Context, in *indexpb.GetSegmentIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetSegmentIndexStateResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -3336,6 +3410,80 @@ func (_c *MockDataCoordClient_ListIndexes_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// ListRestoreSnapshotJobs provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) ListRestoreSnapshotJobs(ctx context.Context, in *datapb.ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRestoreSnapshotJobs")
+	}
+
+	var r0 *datapb.ListRestoreSnapshotJobsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) *datapb.ListRestoreSnapshotJobsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ListRestoreSnapshotJobsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataCoordClient_ListRestoreSnapshotJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRestoreSnapshotJobs'
+type MockDataCoordClient_ListRestoreSnapshotJobs_Call struct {
+	*mock.Call
+}
+
+// ListRestoreSnapshotJobs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.ListRestoreSnapshotJobsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataCoordClient_Expecter) ListRestoreSnapshotJobs(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_ListRestoreSnapshotJobs_Call {
+	return &MockDataCoordClient_ListRestoreSnapshotJobs_Call{Call: _e.mock.On("ListRestoreSnapshotJobs",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataCoordClient_ListRestoreSnapshotJobs_Call) Run(run func(ctx context.Context, in *datapb.ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption)) *MockDataCoordClient_ListRestoreSnapshotJobs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.ListRestoreSnapshotJobsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataCoordClient_ListRestoreSnapshotJobs_Call) Return(_a0 *datapb.ListRestoreSnapshotJobsResponse, _a1 error) *MockDataCoordClient_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoordClient_ListRestoreSnapshotJobs_Call) RunAndReturn(run func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error)) *MockDataCoordClient_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListSnapshots provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) ListSnapshots(ctx context.Context, in *datapb.ListSnapshotsRequest, opts ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -3707,7 +3855,7 @@ func (_c *MockDataCoordClient_ReportDataNodeTtMsgs_Call) RunAndReturn(run func(c
 }
 
 // RestoreSnapshot provides a mock function with given fields: ctx, in, opts
-func (_m *MockDataCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockDataCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -3721,16 +3869,16 @@ func (_m *MockDataCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.R
 		panic("no return value specified for RestoreSnapshot")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *datapb.RestoreSnapshotResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) *datapb.RestoreSnapshotResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*datapb.RestoreSnapshotResponse)
 		}
 	}
 
@@ -3770,12 +3918,12 @@ func (_c *MockDataCoordClient_RestoreSnapshot_Call) Run(run func(ctx context.Con
 	return _c
 }
 
-func (_c *MockDataCoordClient_RestoreSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoordClient_RestoreSnapshot_Call {
+func (_c *MockDataCoordClient_RestoreSnapshot_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MockDataCoordClient_RestoreSnapshot_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataCoordClient_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockDataCoordClient_RestoreSnapshot_Call {
+func (_c *MockDataCoordClient_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error)) *MockDataCoordClient_RestoreSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

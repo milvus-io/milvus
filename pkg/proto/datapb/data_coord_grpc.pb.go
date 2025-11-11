@@ -80,6 +80,8 @@ const (
 	DataCoord_ListSnapshots_FullMethodName               = "/milvus.proto.data.DataCoord/ListSnapshots"
 	DataCoord_DescribeSnapshot_FullMethodName            = "/milvus.proto.data.DataCoord/DescribeSnapshot"
 	DataCoord_RestoreSnapshot_FullMethodName             = "/milvus.proto.data.DataCoord/RestoreSnapshot"
+	DataCoord_GetRestoreSnapshotState_FullMethodName     = "/milvus.proto.data.DataCoord/GetRestoreSnapshotState"
+	DataCoord_ListRestoreSnapshotJobs_FullMethodName     = "/milvus.proto.data.DataCoord/ListRestoreSnapshotJobs"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -152,7 +154,9 @@ type DataCoordClient interface {
 	DropSnapshot(ctx context.Context, in *DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
 	DescribeSnapshot(ctx context.Context, in *DescribeSnapshotRequest, opts ...grpc.CallOption) (*DescribeSnapshotResponse, error)
-	RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error)
+	GetRestoreSnapshotState(ctx context.Context, in *GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*GetRestoreSnapshotStateResponse, error)
+	ListRestoreSnapshotJobs(ctx context.Context, in *ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*ListRestoreSnapshotJobsResponse, error)
 }
 
 type dataCoordClient struct {
@@ -660,9 +664,27 @@ func (c *dataCoordClient) DescribeSnapshot(ctx context.Context, in *DescribeSnap
 	return out, nil
 }
 
-func (c *dataCoordClient) RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
+func (c *dataCoordClient) RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error) {
+	out := new(RestoreSnapshotResponse)
 	err := c.cc.Invoke(ctx, DataCoord_RestoreSnapshot_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) GetRestoreSnapshotState(ctx context.Context, in *GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*GetRestoreSnapshotStateResponse, error) {
+	out := new(GetRestoreSnapshotStateResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetRestoreSnapshotState_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) ListRestoreSnapshotJobs(ctx context.Context, in *ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*ListRestoreSnapshotJobsResponse, error) {
+	out := new(ListRestoreSnapshotJobsResponse)
+	err := c.cc.Invoke(ctx, DataCoord_ListRestoreSnapshotJobs_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -739,7 +761,9 @@ type DataCoordServer interface {
 	DropSnapshot(context.Context, *DropSnapshotRequest) (*commonpb.Status, error)
 	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
 	DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error)
-	RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*commonpb.Status, error)
+	RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error)
+	GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error)
+	ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -911,8 +935,14 @@ func (UnimplementedDataCoordServer) ListSnapshots(context.Context, *ListSnapshot
 func (UnimplementedDataCoordServer) DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeSnapshot not implemented")
 }
-func (UnimplementedDataCoordServer) RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*commonpb.Status, error) {
+func (UnimplementedDataCoordServer) RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RestoreSnapshot not implemented")
+}
+func (UnimplementedDataCoordServer) GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRestoreSnapshotState not implemented")
+}
+func (UnimplementedDataCoordServer) ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRestoreSnapshotJobs not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1934,6 +1964,42 @@ func _DataCoord_RestoreSnapshot_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_GetRestoreSnapshotState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRestoreSnapshotStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetRestoreSnapshotState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetRestoreSnapshotState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetRestoreSnapshotState(ctx, req.(*GetRestoreSnapshotStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_ListRestoreSnapshotJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRestoreSnapshotJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).ListRestoreSnapshotJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_ListRestoreSnapshotJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).ListRestoreSnapshotJobs(ctx, req.(*ListRestoreSnapshotJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2164,6 +2230,14 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestoreSnapshot",
 			Handler:    _DataCoord_RestoreSnapshot_Handler,
+		},
+		{
+			MethodName: "GetRestoreSnapshotState",
+			Handler:    _DataCoord_GetRestoreSnapshotState_Handler,
+		},
+		{
+			MethodName: "ListRestoreSnapshotJobs",
+			Handler:    _DataCoord_ListRestoreSnapshotJobs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

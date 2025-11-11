@@ -4674,6 +4674,9 @@ type dataCoordConfig struct {
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
+	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
+	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
+	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5684,6 +5687,34 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		},
 	}
 	p.ImportMemoryLimitPerSlot.Init(base.mgr)
+
+	p.MaxSegmentsPerCopyTask = ParamItem{
+		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
+		Version:      "2.5.0",
+		Doc:          "Maximum number of segments that can be grouped into a single copy task during snapshot restore.",
+		DefaultValue: "100",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxSegmentsPerCopyTask.Init(base.mgr)
+
+	p.CopySegmentCheckInterval = ParamItem{
+		Key:          "dataCoord.copySegmentCheckInterval",
+		Version:      "2.6.6",
+		Doc:          "The interval for copy segment job checker to monitor and drive job state transitions, measured in seconds.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+	}
+	p.CopySegmentCheckInterval.Init(base.mgr)
+
+	p.CopySegmentTaskRetention = ParamItem{
+		Key:          "dataCoord.copySegmentTaskRetention",
+		Version:      "2.6.6",
+		Doc:          "The retention period in seconds for copy segment jobs and tasks in Completed or Failed state.",
+		DefaultValue: "10800",
+		PanicIfEmpty: false,
+	}
+	p.CopySegmentTaskRetention.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

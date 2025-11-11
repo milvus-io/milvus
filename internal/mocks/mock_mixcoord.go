@@ -4989,6 +4989,65 @@ func (_c *MixCoord_GetReplicas_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
+// GetRestoreSnapshotState provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetRestoreSnapshotState(_a0 context.Context, _a1 *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRestoreSnapshotState")
+	}
+
+	var r0 *datapb.GetRestoreSnapshotStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest) *datapb.GetRestoreSnapshotStateResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetRestoreSnapshotStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetRestoreSnapshotState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRestoreSnapshotState'
+type MixCoord_GetRestoreSnapshotState_Call struct {
+	*mock.Call
+}
+
+// GetRestoreSnapshotState is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.GetRestoreSnapshotStateRequest
+func (_e *MixCoord_Expecter) GetRestoreSnapshotState(_a0 interface{}, _a1 interface{}) *MixCoord_GetRestoreSnapshotState_Call {
+	return &MixCoord_GetRestoreSnapshotState_Call{Call: _e.mock.On("GetRestoreSnapshotState", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetRestoreSnapshotState_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetRestoreSnapshotStateRequest)) *MixCoord_GetRestoreSnapshotState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetRestoreSnapshotStateRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetRestoreSnapshotState_Call) Return(_a0 *datapb.GetRestoreSnapshotStateResponse, _a1 error) *MixCoord_GetRestoreSnapshotState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetRestoreSnapshotState_Call) RunAndReturn(run func(context.Context, *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error)) *MixCoord_GetRestoreSnapshotState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentIndexState provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetSegmentIndexState(_a0 context.Context, _a1 *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6482,6 +6541,65 @@ func (_c *MixCoord_ListResourceGroups_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// ListRestoreSnapshotJobs provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ListRestoreSnapshotJobs(_a0 context.Context, _a1 *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRestoreSnapshotJobs")
+	}
+
+	var r0 *datapb.ListRestoreSnapshotJobsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest) *datapb.ListRestoreSnapshotJobsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ListRestoreSnapshotJobsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ListRestoreSnapshotJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRestoreSnapshotJobs'
+type MixCoord_ListRestoreSnapshotJobs_Call struct {
+	*mock.Call
+}
+
+// ListRestoreSnapshotJobs is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.ListRestoreSnapshotJobsRequest
+func (_e *MixCoord_Expecter) ListRestoreSnapshotJobs(_a0 interface{}, _a1 interface{}) *MixCoord_ListRestoreSnapshotJobs_Call {
+	return &MixCoord_ListRestoreSnapshotJobs_Call{Call: _e.mock.On("ListRestoreSnapshotJobs", _a0, _a1)}
+}
+
+func (_c *MixCoord_ListRestoreSnapshotJobs_Call) Run(run func(_a0 context.Context, _a1 *datapb.ListRestoreSnapshotJobsRequest)) *MixCoord_ListRestoreSnapshotJobs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.ListRestoreSnapshotJobsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ListRestoreSnapshotJobs_Call) Return(_a0 *datapb.ListRestoreSnapshotJobsResponse, _a1 error) *MixCoord_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ListRestoreSnapshotJobs_Call) RunAndReturn(run func(context.Context, *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error)) *MixCoord_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListSnapshots provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ListSnapshots(_a0 context.Context, _a1 *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7541,23 +7659,23 @@ func (_c *MixCoord_RestoreRBAC_Call) RunAndReturn(run func(context.Context, *mil
 }
 
 // RestoreSnapshot provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) RestoreSnapshot(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+func (_m *MixCoord) RestoreSnapshot(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RestoreSnapshot")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *datapb.RestoreSnapshotResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest) *datapb.RestoreSnapshotResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*datapb.RestoreSnapshotResponse)
 		}
 	}
 
@@ -7589,12 +7707,12 @@ func (_c *MixCoord_RestoreSnapshot_Call) Run(run func(_a0 context.Context, _a1 *
 	return _c
 }
 
-func (_c *MixCoord_RestoreSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_RestoreSnapshot_Call {
+func (_c *MixCoord_RestoreSnapshot_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MixCoord_RestoreSnapshot_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest) (*commonpb.Status, error)) *MixCoord_RestoreSnapshot_Call {
+func (_c *MixCoord_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error)) *MixCoord_RestoreSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

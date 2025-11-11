@@ -41,6 +41,7 @@ type Broker interface {
 	ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error)
 	ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error)
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
+	ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error)
 }
 
 type coordinatorBroker struct {
@@ -75,6 +76,15 @@ func (b *coordinatorBroker) DescribeCollectionInternal(ctx context.Context, coll
 }
 
 func (b *coordinatorBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
+	resp, err := b.ShowPartitions(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.GetPartitionIDs(), nil
+}
+
+func (b *coordinatorBroker) ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
@@ -94,7 +104,7 @@ func (b *coordinatorBroker) ShowPartitionsInternal(ctx context.Context, collecti
 		return nil, err
 	}
 
-	return resp.GetPartitionIDs(), nil
+	return resp, nil
 }
 
 func (b *coordinatorBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {

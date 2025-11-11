@@ -90,6 +90,13 @@ type Cluster interface {
 	QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error)
 	// DropExternalCollectionTask drops an external collection task
 	DropExternalCollectionTask(nodeID int64, taskID int64) error
+
+	// CreateCopySegment creates a copy segment task
+	CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error
+	// QueryCopySegment queries the status of a copy segment task
+	QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error)
+	// DropCopySegment drops a copy segment task
+	DropCopySegment(nodeID int64, taskID int64) error
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -685,5 +692,72 @@ func (c *cluster) DropExternalCollectionTask(nodeID int64, taskID int64) error {
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.ExternalCollection)
+	return c.dropTask(nodeID, properties)
+}
+
+func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskID())
+	properties.AppendType(taskcommon.CopySegment)
+	properties.AppendTaskSlot(in.GetTaskSlot())
+	return c.createTask(nodeID, in, properties)
+}
+
+func (c *cluster) QueryCopySegment(nodeID int64, in *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
+	reqProperties := taskcommon.NewProperties(nil)
+	reqProperties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	reqProperties.AppendTaskID(in.GetTaskID())
+	reqProperties.AppendType(taskcommon.CopySegment)
+	resp, err := c.queryTask(nodeID, reqProperties)
+	if err != nil {
+		return nil, err
+	}
+
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+
+	defaultResult := &datapb.QueryCopySegmentResponse{
+		State:  taskcommon.ToCopySegmentState(state),
+		Reason: reason,
+	}
+	payloadResultF := func() (*datapb.QueryCopySegmentResponse, error) {
+		result := &datapb.QueryCopySegmentResponse{}
+		err = proto.Unmarshal(resp.GetPayload(), result)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	switch state {
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
+	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		log.Warn("the copy segment result payload must not be empty",
+			zap.Int64("taskID", in.GetTaskID()), zap.String("state", state.String()))
+		panic("the copy segment result payload must not be empty with Finished/Failed state")
+	default:
+		panic("should not happen")
+	}
+}
+
+func (c *cluster) DropCopySegment(nodeID int64, taskID int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskcommon.CopySegment)
 	return c.dropTask(nodeID, properties)
 }

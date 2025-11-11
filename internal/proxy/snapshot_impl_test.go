@@ -389,7 +389,9 @@ func TestProxy_RestoreSnapshot_Success(t *testing.T) {
 	// Mock successful enqueue and task completion
 	mock1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
 		if rst, ok := t.(*restoreSnapshotTask); ok {
-			rst.result = merr.Success()
+			rst.result = &milvuspb.RestoreSnapshotResponse{
+				Status: merr.Success(),
+			}
 		}
 		return nil
 	}).Build()
@@ -402,7 +404,7 @@ func TestProxy_RestoreSnapshot_Success(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.True(t, merr.Ok(result))
+	assert.True(t, merr.Ok(result.GetStatus()))
 }
 
 func TestProxy_RestoreSnapshot_EnqueueFailure(t *testing.T) {
@@ -426,8 +428,8 @@ func TestProxy_RestoreSnapshot_EnqueueFailure(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.False(t, merr.Ok(result))
-	assert.Contains(t, result.GetReason(), "enqueue failed")
+	assert.False(t, merr.Ok(result.GetStatus()))
+	assert.Contains(t, result.GetStatus().GetReason(), "enqueue failed")
 }
 
 func TestProxy_RestoreSnapshot_WaitToFinishFailure(t *testing.T) {
@@ -453,8 +455,8 @@ func TestProxy_RestoreSnapshot_WaitToFinishFailure(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.False(t, merr.Ok(result))
-	assert.Contains(t, result.GetReason(), "task execution failed")
+	assert.False(t, merr.Ok(result.GetStatus()))
+	assert.Contains(t, result.GetStatus().GetReason(), "task execution failed")
 }
 
 // Test task creation and basic properties

@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1014,6 +1015,211 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		}
 		err := task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
+	})
+
+	t.Run("preserve field IDs with system fields", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		preservedDynamicFieldID := int64(100)
+		preservedNamespaceFieldID := int64(101)
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					FieldID:      1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     MetaFieldName,
+					FieldID:  preservedDynamicFieldID,
+					DataType: schemapb.DataType_JSON,
+				},
+				{
+					Name:     NamespaceFieldName,
+					FieldID:  preservedNamespaceFieldID,
+					DataType: schemapb.DataType_VarChar,
+				},
+				{
+					Name:     TimeStampFieldName,
+					FieldID:  TimeStampField,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     RowIDFieldName,
+					FieldID:  RowIDField,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:            &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName:  collectionName,
+				Schema:          marshaledSchema,
+				PreserveFieldId: true,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Unmarshal the schema to verify
+		var resultSchema schemapb.CollectionSchema
+		err = proto.Unmarshal(task.Req.Schema, &resultSchema)
+		assert.NoError(t, err)
+
+		// Verify that system fields TimeStampFieldName and RowIDFieldName are re-added by appendSysFields
+		hasTimestamp := false
+		hasRowID := false
+		hasMeta := false
+		hasNamespace := false
+		hasUserField := false
+		var metaFieldID int64
+		var namespaceFieldID int64
+
+		for _, field := range resultSchema.Fields {
+			if field.Name == TimeStampFieldName {
+				hasTimestamp = true
+			}
+			if field.Name == RowIDFieldName {
+				hasRowID = true
+			}
+			if field.Name == MetaFieldName {
+				hasMeta = true
+				metaFieldID = field.FieldID
+			}
+			if field.Name == NamespaceFieldName {
+				hasNamespace = true
+				namespaceFieldID = field.FieldID
+			}
+			if field.Name == field1 {
+				hasUserField = true
+			}
+		}
+
+		assert.True(t, hasTimestamp, "TimeStampFieldName should be re-added by appendSysFields")
+		assert.True(t, hasRowID, "RowIDFieldName should be re-added by appendSysFields")
+		assert.True(t, hasMeta, "MetaFieldName should be preserved")
+		assert.True(t, hasNamespace, "NamespaceFieldName should be preserved")
+		assert.True(t, hasUserField, "User field should be present")
+		assert.Equal(t, preservedDynamicFieldID, metaFieldID, "Dynamic field ID should be preserved")
+		assert.Equal(t, preservedNamespaceFieldID, namespaceFieldID, "Namespace field ID should be preserved")
+	})
+
+	t.Run("preserve field IDs without system fields", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+		field2 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					FieldID:      10,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+				{
+					Name:     field2,
+					FieldID:  20,
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:            &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName:  collectionName,
+				Schema:          marshaledSchema,
+				PreserveFieldId: true,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Unmarshal the schema to verify
+		var resultSchema schemapb.CollectionSchema
+		err = proto.Unmarshal(task.Req.Schema, &resultSchema)
+		assert.NoError(t, err)
+
+		// Verify that user fields keep their IDs
+		for _, field := range resultSchema.Fields {
+			if field.Name == field1 {
+				assert.Equal(t, int64(10), field.FieldID, "User field ID should be preserved")
+			}
+			if field.Name == field2 {
+				assert.Equal(t, int64(20), field.FieldID, "User field ID should be preserved")
+			}
+		}
+	})
+
+	t.Run("normal case without preserve field IDs", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		field1 := funcutil.GenRandomStr()
+
+		schema := &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         field1,
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		}
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:            &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName:  collectionName,
+				Schema:          marshaledSchema,
+				PreserveFieldId: false,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+		}
+
+		err = task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Use task.schema which is the internal schema after prepareSchema
+		assert.NotNil(t, task.body.CollectionSchema, "Schema should be set")
+
+		// Verify that user fields have been assigned IDs >= StartOfUserFieldID (100)
+		for _, field := range task.body.CollectionSchema.Fields {
+			if field.Name == field1 {
+				assert.GreaterOrEqual(t, field.FieldID, int64(100), "User field ID should be >= StartOfUserFieldID (100)")
+			}
+		}
 	})
 }
 

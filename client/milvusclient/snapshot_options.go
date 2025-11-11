@@ -149,7 +149,6 @@ type restoreSnapshotOption struct {
 	dbName         string
 	name           string
 	collectionName string
-	rewriteData    bool
 }
 
 func (opt *restoreSnapshotOption) Request() *milvuspb.RestoreSnapshotRequest {
@@ -158,13 +157,7 @@ func (opt *restoreSnapshotOption) Request() *milvuspb.RestoreSnapshotRequest {
 		Name:           opt.name,
 		DbName:         opt.dbName,
 		CollectionName: opt.collectionName,
-		RewriteData:    opt.rewriteData,
 	}
-}
-
-func (opt *restoreSnapshotOption) WithRewriteData(rewrite bool) *restoreSnapshotOption {
-	opt.rewriteData = rewrite
-	return opt
 }
 
 func (opt *restoreSnapshotOption) WithDbName(dbName string) *restoreSnapshotOption {
@@ -178,4 +171,53 @@ func NewRestoreSnapshotOption(name string, collectionName string) *restoreSnapsh
 		name:           name,
 		collectionName: collectionName,
 	}
+}
+
+// GetRestoreSnapshotStateOption interface for getting restore snapshot state options
+type GetRestoreSnapshotStateOption interface {
+	Request() *milvuspb.GetRestoreSnapshotStateRequest
+}
+
+type getRestoreSnapshotStateOption struct {
+	jobID int64
+}
+
+func (opt *getRestoreSnapshotStateOption) Request() *milvuspb.GetRestoreSnapshotStateRequest {
+	return &milvuspb.GetRestoreSnapshotStateRequest{
+		Base:  &commonpb.MsgBase{},
+		JobId: opt.jobID,
+	}
+}
+
+// NewGetRestoreSnapshotStateOption creates a new GetRestoreSnapshotStateOption
+func NewGetRestoreSnapshotStateOption(jobID int64) *getRestoreSnapshotStateOption {
+	return &getRestoreSnapshotStateOption{
+		jobID: jobID,
+	}
+}
+
+// ListRestoreSnapshotJobsOption interface for listing restore snapshot jobs options
+type ListRestoreSnapshotJobsOption interface {
+	Request() *milvuspb.ListRestoreSnapshotJobsRequest
+}
+
+type listRestoreSnapshotJobsOption struct {
+	collectionName string
+}
+
+func (opt *listRestoreSnapshotJobsOption) Request() *milvuspb.ListRestoreSnapshotJobsRequest {
+	return &milvuspb.ListRestoreSnapshotJobsRequest{
+		Base:           &commonpb.MsgBase{},
+		CollectionName: opt.collectionName,
+	}
+}
+
+func (opt *listRestoreSnapshotJobsOption) WithCollectionName(collectionName string) *listRestoreSnapshotJobsOption {
+	opt.collectionName = collectionName
+	return opt
+}
+
+// NewListRestoreSnapshotJobsOption creates a new ListRestoreSnapshotJobsOption
+func NewListRestoreSnapshotJobsOption() *listRestoreSnapshotJobsOption {
+	return &listRestoreSnapshotJobsOption{}
 }

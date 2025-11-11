@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -2512,5 +2513,230 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		seg2After := meta.GetSegment(ctx, seg2.ID)
 		assert.NotNil(t, seg2After)
 		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
+}
+=======
+func TestGetSegmentInfo_WithCompaction(t *testing.T) {
+	t.Run("use handler.GetDeltaLogFromCompactTo", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		collID := int64(100)
+		partID := int64(10)
+
+		// Add collection
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         collID,
+			Partitions: []int64{partID},
+		})
+
+		// Create parent segment
+		parent := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1000,
+			CollectionID: collID,
+			PartitionID:  partID,
+			State:        commonpb.SegmentState_Dropped,
+		})
+		err := svr.meta.AddSegment(context.TODO(), parent)
+		require.NoError(t, err)
+
+		// Create child segment with delta logs
+		child := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1000},
+			NumOfRows:      100,
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), child)
+		require.NoError(t, err)
+
+		// Test GetSegmentInfo
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{1000},
+			IncludeUnHealthy: true,
+		}
+
+		resp, err := svr.GetSegmentInfo(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetInfos(), 1)
+
+		// Verify delta logs were merged from child
+		info := resp.GetInfos()[0]
+		assert.Equal(t, int64(1000), info.GetID())
+		assert.NotEmpty(t, info.GetDeltalogs())
+	})
+}
+
+func TestGetRestoreSnapshotState(t *testing.T) {
+	t.Run("job not found", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 999,
+		}
+
+		resp, err := svr.GetRestoreSnapshotState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("job in progress", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add a copy job
+		job := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:          100,
+				CollectionId:   1,
+				State:          datapb.CopySegmentJobState_CopySegmentJobExecuting,
+				TotalSegments:  10,
+				CopiedSegments: 5,
+				SnapshotName:   "test_snapshot",
+				StartTs:        uint64(time.Now().UnixNano()),
+			},
+			tr: timerecord.NewTimeRecorder("test job"),
+		}
+		err := svr.copySegmentMeta.AddJob(context.TODO(), job)
+		require.NoError(t, err)
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 100,
+		}
+
+		resp, err := svr.GetRestoreSnapshotState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetInfo())
+		assert.Equal(t, int64(100), resp.GetInfo().GetJobId())
+		assert.Equal(t, "test_snapshot", resp.GetInfo().GetSnapshotName())
+		assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotExecuting, resp.GetInfo().GetState())
+		assert.Equal(t, int32(50), resp.GetInfo().GetProgress()) // 5/10 * 100 = 50%
+	})
+
+	t.Run("job completed", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		startTime := time.Now()
+		endTime := startTime.Add(10 * time.Second)
+
+		job := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:          200,
+				CollectionId:   1,
+				State:          datapb.CopySegmentJobState_CopySegmentJobCompleted,
+				TotalSegments:  10,
+				CopiedSegments: 10,
+				SnapshotName:   "completed_snapshot",
+				StartTs:        uint64(startTime.UnixNano()),
+				CompleteTs:     uint64(endTime.UnixNano()),
+			},
+			tr: timerecord.NewTimeRecorder("completed job"),
+		}
+		err := svr.copySegmentMeta.AddJob(context.TODO(), job)
+		require.NoError(t, err)
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 200,
+		}
+
+		resp, err := svr.GetRestoreSnapshotState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetInfo())
+		assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotCompleted, resp.GetInfo().GetState())
+		assert.Equal(t, int32(100), resp.GetInfo().GetProgress()) // 10/10 * 100 = 100%
+		assert.Greater(t, resp.GetInfo().GetTimeCost(), uint64(0))
+	})
+}
+
+func TestListRestoreSnapshotJobs(t *testing.T) {
+	t.Run("list all jobs", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add multiple jobs
+		for i := 1; i <= 3; i++ {
+			job := &copySegmentJob{
+				CopySegmentJob: &datapb.CopySegmentJob{
+					JobId:          int64(100 + i),
+					CollectionId:   1,
+					State:          datapb.CopySegmentJobState_CopySegmentJobExecuting,
+					TotalSegments:  int64(i * 10),
+					CopiedSegments: int64(i * 5),
+					SnapshotName:   fmt.Sprintf("snapshot_%d", i),
+				},
+				tr: timerecord.NewTimeRecorder(fmt.Sprintf("job_%d", i)),
+			}
+			err := svr.copySegmentMeta.AddJob(context.TODO(), job)
+			require.NoError(t, err)
+		}
+
+		req := &datapb.ListRestoreSnapshotJobsRequest{}
+
+		resp, err := svr.ListRestoreSnapshotJobs(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetJobs(), 3)
+	})
+
+	t.Run("filter by collection name", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add collection with schema
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 100,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+			},
+		})
+
+		// Add jobs for different collections
+		job1 := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:        201,
+				CollectionId: 100,
+				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+				SnapshotName: "snapshot_1",
+			},
+			tr: timerecord.NewTimeRecorder("job_1"),
+		}
+		err := svr.copySegmentMeta.AddJob(context.TODO(), job1)
+		require.NoError(t, err)
+
+		job2 := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:        202,
+				CollectionId: 200,
+				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+				SnapshotName: "snapshot_2",
+			},
+			tr: timerecord.NewTimeRecorder("job_2"),
+		}
+		err = svr.copySegmentMeta.AddJob(context.TODO(), job2)
+		require.NoError(t, err)
+
+		req := &datapb.ListRestoreSnapshotJobsRequest{
+			CollectionName: "test_collection",
+		}
+
+		resp, err := svr.ListRestoreSnapshotJobs(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(201), resp.GetJobs()[0].GetJobId())
+>>>>>>> 956f3635f6 (feat: Implement copy segment mechanism for snapshot restore)
 	})
 }

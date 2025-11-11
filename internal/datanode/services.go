@@ -52,6 +52,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// importStateV2ToCopySegmentTaskState converts ImportTaskStateV2 to CopySegmentTaskState
+func importStateV2ToCopySegmentTaskState(state datapb.ImportTaskStateV2) datapb.CopySegmentTaskState {
+	switch state {
+	case datapb.ImportTaskStateV2_Pending:
+		return datapb.CopySegmentTaskState_CopySegmentTaskPending
+	case datapb.ImportTaskStateV2_InProgress:
+		return datapb.CopySegmentTaskState_CopySegmentTaskInProgress
+	case datapb.ImportTaskStateV2_Completed:
+		return datapb.CopySegmentTaskState_CopySegmentTaskCompleted
+	case datapb.ImportTaskStateV2_Failed, datapb.ImportTaskStateV2_Retry:
+		return datapb.CopySegmentTaskState_CopySegmentTaskFailed
+	default:
+		return datapb.CopySegmentTaskState_CopySegmentTaskNone
+	}
+}
+
 // WatchDmChannels is not in use
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	log.Ctx(ctx).Warn("DataNode WatchDmChannels is not in use")
@@ -505,6 +521,126 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 	return merr.Success(), nil
 }
 
+func (node *DataNode) CopySegment(ctx context.Context, req *datapb.CopySegmentRequest) (*commonpb.Status, error) {
+	// Extract collection ID from first target (all targets should have same collection)
+	var collectionID int64
+	if len(req.GetTargets()) > 0 {
+		collectionID = req.GetTargets()[0].GetCollectionId()
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("jobID", req.GetJobID()),
+		zap.Int64("collectionID", collectionID),
+		zap.Int("sourceSegmentCount", len(req.GetSources())),
+		zap.Int("targetSegmentCount", len(req.GetTargets())),
+	)
+
+	log.Info("datanode receive copy segment request")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		log.Error("create chunk manager failed",
+			zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+			zap.Error(err),
+		)
+		return merr.Status(err), nil
+	}
+
+	task := importv2.NewCopySegmentTask(req, node.importTaskMgr, cm)
+	node.importTaskMgr.Add(task)
+
+	log.Info("datanode added copy segment task")
+	return merr.Success(), nil
+}
+
+func (node *DataNode) QueryCopySegment(ctx context.Context, req *datapb.QueryCopySegmentRequest) (*datapb.QueryCopySegmentResponse, error) {
+	log := log.Ctx(ctx).WithRateGroup("datanode.QueryCopySegment", 1, 60)
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &datapb.QueryCopySegmentResponse{Status: merr.Status(err)}, nil
+	}
+
+	task := node.importTaskMgr.Get(req.GetTaskID())
+	if task == nil {
+		return &datapb.QueryCopySegmentResponse{
+			Status: merr.Status(importv2.WrapTaskNotFoundError(req.GetTaskID())),
+		}, nil
+	}
+
+	logFields := []zap.Field{
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("jobID", task.GetJobID()),
+		zap.String("state", task.GetState().String()),
+		zap.String("reason", task.GetReason()),
+		zap.Int64("nodeID", node.GetNodeID()),
+	}
+
+	if task.GetState() == datapb.ImportTaskStateV2_InProgress {
+		log.RatedInfo(30, "datanode query copy segment", logFields...)
+	} else {
+		log.Info("datanode query copy segment", logFields...)
+	}
+
+	// Collect segment results from CopySegmentTask
+	var segmentResults []*datapb.CopySegmentResult
+	if copyTask, ok := task.(*importv2.CopySegmentTask); ok {
+		for _, result := range copyTask.GetSegmentResults() {
+			segmentResults = append(segmentResults, result)
+		}
+	}
+
+	return &datapb.QueryCopySegmentResponse{
+		Status:         merr.Success(),
+		TaskID:         task.GetTaskID(),
+		State:          importStateV2ToCopySegmentTaskState(task.GetState()),
+		Reason:         task.GetReason(),
+		SegmentResults: segmentResults,
+		Slots:          task.GetSlots(),
+	}, nil
+}
+
+func (node *DataNode) DropCopySegment(ctx context.Context, req *datapb.DropCopySegmentRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("jobID", req.GetJobID()),
+		zap.Int64("nodeID", node.GetNodeID()),
+	)
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	// Check task state before removal
+	task := node.importTaskMgr.Get(req.GetTaskID())
+	if task != nil {
+		// If the task is a failed CopySegmentTask, cleanup copied files
+		if copyTask, ok := task.(*importv2.CopySegmentTask); ok {
+			taskState := copyTask.GetState()
+			if taskState == datapb.ImportTaskStateV2_Failed {
+				log.Info("task failed, triggering cleanup of copied files",
+					zap.String("state", taskState.String()),
+					zap.String("reason", copyTask.GetReason()))
+
+				// Call task's cleanup method
+				copyTask.CleanupCopiedFiles()
+			}
+		}
+	}
+
+	// Remove task from manager
+	node.importTaskMgr.Remove(req.GetTaskID())
+
+	log.Info("datanode drop copy segment done")
+
+	return merr.Success(), nil
+}
+
 func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QuerySlotResponse{
@@ -627,6 +763,12 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.createExternalCollectionTask(ctx, req)
+	case taskcommon.CopySegment:
+		req := &datapb.CopySegmentRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.CopySegment(ctx, req)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("CreateTask failed", zap.Error(err))
@@ -762,6 +904,18 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(info.State)
 		resProperties.AppendReason(info.FailReason)
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.CopySegment:
+		resp, err := node.QueryCopySegment(ctx, &datapb.QueryCopySegmentRequest{
+			ClusterID: clusterID,
+			TaskID:    taskID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		resProperties := taskcommon.NewProperties(nil)
+		resProperties.AppendTaskState(taskcommon.FromCopySegmentState(resp.GetState()))
+		resProperties.AppendReason(resp.GetReason())
+		return wrapQueryTaskResult(resp, resProperties)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
@@ -789,6 +943,8 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	switch taskType {
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
+	case taskcommon.CopySegment:
+		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:
 		return node.DropCompactionPlan(ctx, &datapb.DropCompactionPlanRequest{PlanID: taskID})
 	case taskcommon.Index, taskcommon.Stats, taskcommon.Analyze:

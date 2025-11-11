@@ -27,6 +27,7 @@ const (
 	Stats              Type = "Stats"
 	Analyze            Type = "Analyze"
 	ExternalCollection Type = "ExternalCollection"
+	CopySegment        Type = "CopySegment"
 )
 
 var TypeList = []Type{
@@ -37,4 +38,5 @@ var TypeList = []Type{
 	Stats,
 	Analyze,
 	ExternalCollection,
+	CopySegment,
 }

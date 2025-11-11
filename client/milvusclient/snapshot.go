@@ -90,15 +90,65 @@ func (c *Client) DescribeSnapshot(ctx context.Context, opt DescribeSnapshotOptio
 	return resp, err
 }
 
-// RestoreSnapshot restores a snapshot to a target collection
-func (c *Client) RestoreSnapshot(ctx context.Context, opt RestoreSnapshotOption, callOptions ...grpc.CallOption) error {
+// RestoreSnapshot restores a snapshot to a target collection and returns the job ID for tracking
+func (c *Client) RestoreSnapshot(ctx context.Context, opt RestoreSnapshotOption, callOptions ...grpc.CallOption) (int64, error) {
 	if opt == nil {
-		return merr.WrapErrParameterInvalid("RestoreSnapshotOption", "nil", "option cannot be nil")
+		return 0, merr.WrapErrParameterInvalid("RestoreSnapshotOption", "nil", "option cannot be nil")
 	}
 	req := opt.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	var jobID int64
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.RestoreSnapshot(ctx, req, callOptions...)
-		return merr.CheckRPCCall(resp, err)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		jobID = resp.GetJobId()
+		return nil
 	})
+
+	return jobID, err
+}
+
+// GetRestoreSnapshotState gets the state of a restore snapshot job
+func (c *Client) GetRestoreSnapshotState(ctx context.Context, opt GetRestoreSnapshotStateOption, callOptions ...grpc.CallOption) (*milvuspb.RestoreSnapshotInfo, error) {
+	if opt == nil {
+		return nil, merr.WrapErrParameterInvalid("GetRestoreSnapshotStateOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+
+	var info *milvuspb.RestoreSnapshotInfo
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.GetRestoreSnapshotState(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		info = resp.GetInfo()
+		return nil
+	})
+
+	return info, err
+}
+
+// ListRestoreSnapshotJobs lists all restore snapshot jobs, optionally filtered by collection name
+func (c *Client) ListRestoreSnapshotJobs(ctx context.Context, opt ListRestoreSnapshotJobsOption, callOptions ...grpc.CallOption) ([]*milvuspb.RestoreSnapshotInfo, error) {
+	if opt == nil {
+		return nil, merr.WrapErrParameterInvalid("ListRestoreSnapshotJobsOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+
+	var jobs []*milvuspb.RestoreSnapshotInfo
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.ListRestoreSnapshotJobs(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		jobs = resp.GetJobs()
+		return nil
+	})
+
+	return jobs, err
 }
