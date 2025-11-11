@@ -261,6 +261,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 			Fields:            model.MarshalFieldModels(colMeta.Fields),
 			StructArrayFields: model.MarshalStructArrayFieldModels(colMeta.StructArrayFields),
 			Functions:         model.MarshalFunctionModels(colMeta.Functions),
+			Properties:        colMeta.Properties,
 		},
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
