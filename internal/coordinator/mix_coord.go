@@ -1244,8 +1244,16 @@ func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.Describ
 	return s.datacoordServer.DescribeSnapshot(ctx, req)
 }
 
-func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	return s.datacoordServer.RestoreSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	return s.datacoordServer.GetRestoreSnapshotState(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	return s.datacoordServer.ListRestoreSnapshotJobs(ctx, req)
 }
 
 func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
