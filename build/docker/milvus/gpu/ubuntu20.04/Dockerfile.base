@@ -20,7 +20,7 @@ FROM nvidia/cuda:11.8.0-runtime-ubuntu20.04
 ENV TZ=UTC
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 libzstd-dev uuid-dev libaio-dev libboost-program-options-dev libboost-filesystem-dev && \
+    apt-get install -y --no-install-recommends curl libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 libzstd-dev uuid-dev libaio-dev libboost-program-options-dev libboost-filesystem-dev tzdata && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 

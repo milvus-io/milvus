@@ -15,7 +15,7 @@ FROM rockylinux/rockylinux:8
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 
-RUN dnf install -y wget libgomp libaio libatomic
+RUN dnf install -y wget libgomp libaio libatomic tzdata
 
 # install openblas-devel
 RUN dnf -y install dnf-plugins-core && \
