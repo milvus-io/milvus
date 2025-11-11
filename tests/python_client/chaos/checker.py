@@ -1243,23 +1243,20 @@ class PartialUpdateChecker(Checker):
         half = rows // 2
         num_fields = len(schema.fields)
 
-        pk_old = [d[pk_field_name] for d in self.data[:half]]
-
         # Generate a fresh full batch (used for inserts and as a source of values)
         full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
 
         # Choose subset fields to update: always include PK + one non-PK field if available
         num = count % num_fields
         desired_fields = [pk_field_name, schema.fields[num if num != 0 else 1].name]
-        partial_rows = cf.gen_row_data_by_schema(nb=half, schema=schema,
+        partial_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema,
                                                  desired_field_names=desired_fields)
 
-        # Override PKs for partial updates to target existing rows
-        for i in range(half):
-            partial_rows[i][pk_field_name] = pk_old[i]
-
-        # Assemble final batch: first half partial updates, second half full inserts
-        self.data = partial_rows + full_rows[half:]
+        # if count is even, use partial update; if count is odd, use full insert
+        if count % 2 == 0:
+            self.data = partial_rows
+        else:
+            self.data = full_rows
         res, result = self.partial_update_entities()
         return res, result
 
