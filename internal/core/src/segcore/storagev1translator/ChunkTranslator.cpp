@@ -184,9 +184,12 @@ ChunkTranslator::get_cells(
             chunk = create_chunk(field_meta_, array_vec);
         } else {
             // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
-            auto filepath = std::filesystem::path(mmap_dir_path_) /
-                            fmt::format("seg_{}_fid_{}_cid_{}", segment_id_, field_id_, cid);
-            std::filesystem::create_directories(std::filesystem::path(mmap_dir_path_));
+            auto filepath =
+                std::filesystem::path(mmap_dir_path_) /
+                fmt::format(
+                    "seg_{}_fid_{}_cid_{}", segment_id_, field_id_, cid);
+            std::filesystem::create_directories(
+                std::filesystem::path(mmap_dir_path_));
 
             LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
                      segment_id_,

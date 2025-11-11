@@ -338,9 +338,13 @@ GroupChunkTranslator::load_group_chunk(
     } else {
         std::filesystem::path filepath;
         filepath = std::filesystem::path(column_group_info_.mmap_dir_path) /
-                   fmt::format("seg_{}_cg_{}_cid_{}", segment_id_, column_group_info_.field_id, cid);
+                   fmt::format("seg_{}_cg_{}_cid_{}",
+                               segment_id_,
+                               column_group_info_.field_id,
+                               cid);
         std::filesystem::create_directories(filepath.parent_path());
-        chunks = create_group_chunk(field_ids, field_metas, array_vecs, filepath.string());
+        chunks = create_group_chunk(
+            field_ids, field_metas, array_vecs, filepath.string());
     }
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
