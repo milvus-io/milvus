@@ -281,7 +281,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 		}
 
 		// Create Arrow record from collected deletes
-		record, err := storage.BuildDeleteRecord(deletes.pks, deletes.tss)
+		record, tsFrom, tsTo, err := storage.BuildDeleteRecord(deletes.pks, deletes.tss)
 		if err != nil {
 			log.Warn("L0 compaction build delete record fail", zap.Int64("segmentID", segmentID), zap.Error(err))
 			return nil, err
@@ -308,7 +308,17 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			Channel:   t.plan.GetChannel(),
 			Deltalogs: []*datapb.FieldBinlog{
 				{
-					Binlogs:     []*datapb.Binlog{{LogPath: path, LogSize: int64(writer.GetWrittenUncompressed())}},
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:       path,
+							LogID:         logID,
+							LogSize:       int64(writer.GetWrittenUncompressed()),
+							MemorySize:    int64(writer.GetWrittenUncompressed()),
+							EntriesNum:    int64(len(deletes.pks)),
+							TimestampFrom: tsFrom,
+							TimestampTo:   tsTo,
+						},
+					},
 					ChildFields: childFields,
 				},
 			},

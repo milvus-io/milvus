@@ -1340,15 +1340,18 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 	log.Info("loading delta...")
 
 	var rowNums int64
-	for _, deltaLog := range deltaLogs {
-		for _, bLog := range deltaLog.GetBinlogs() {
-			// the segment has applied the delta logs, skip it
-			if bLog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
-				bLog.GetTimestampTo() < segment.LastDeltaTimestamp() {
-				continue
-			}
-			rowNums += bLog.GetEntriesNum()
+	valid := func(binlog *datapb.Binlog, _ int) bool {
+		// the segment has applied the delta logs, skip it
+		if binlog.GetTimestampTo() > 0 && // this field may be missed in legacy versions
+			binlog.GetTimestampTo() < segment.LastDeltaTimestamp() {
+			return false
 		}
+		return true
+	}
+	for _, deltaLog := range deltaLogs {
+		rowNums += lo.SumBy(lo.Filter(deltaLog.GetBinlogs(), valid), func(binlog *datapb.Binlog) int64 {
+			return binlog.GetEntriesNum()
+		})
 	}
 
 	collection := loader.manager.Collection.Get(segment.Collection())
@@ -1390,7 +1393,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				),
 			)
 		}
-		paths := lo.Map(deltalog.Binlogs, func(binlog *datapb.Binlog, _ int) string {
+		paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
 			return binlog.GetLogPath()
 		})
 		reader, err := storage.NewDeltalogReader(pkField, paths, opts...)
