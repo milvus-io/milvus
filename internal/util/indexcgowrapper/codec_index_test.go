@@ -293,7 +293,7 @@ func genStringIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				common.IndexTypeKey: "marisa-trie",
+				common.IndexTypeKey: "Trie",
 			},
 		},
 	}
