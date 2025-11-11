@@ -163,6 +163,40 @@ func SparseFloatBytesToMap(b []byte) map[uint32]float32 {
 	return values
 }
 
+// FlattenEmbeddingList flattens a 3-dimensional [][][]float32 array by one level
+// It merges the innermost []float32 arrays within each embedding list into a single []float32
+// Input:  [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6]]]
+// Output: [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6]]
+func FlattenEmbeddingList(embeddingList [][][]float32) [][]float32 {
+	if len(embeddingList) == 0 {
+		return nil
+	}
+
+	result := make([][]float32, 0, len(embeddingList))
+	for _, embeddingGroup := range embeddingList {
+		if len(embeddingGroup) == 0 {
+			result = append(result, []float32{})
+			continue
+		}
+
+		// Calculate total length for pre-allocation
+		totalLen := 0
+		for _, vec := range embeddingGroup {
+			totalLen += len(vec)
+		}
+
+		// Merge all vectors in this embedding group into a single vector
+		merged := make([]float32, 0, totalLen)
+		for _, vec := range embeddingGroup {
+			merged = append(merged, vec...)
+		}
+
+		result = append(result, merged)
+	}
+
+	return result
+}
+
 // Float32ArrayToBytes serialize vector into byte slice, used in search placeholder
 // LittleEndian is used for convention
 func Float32ArrayToBytes(fv []float32) []byte {
