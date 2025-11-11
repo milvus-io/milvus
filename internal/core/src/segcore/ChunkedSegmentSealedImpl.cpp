@@ -2814,33 +2814,8 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
                                    index_info_ptr,
                                    num_rows]() mutable -> void {
             // Convert proto FieldIndexInfo to LoadIndexInfo
-            LoadIndexInfo load_index_info;
-            load_index_info.field_id = field_id.get();
-
-            // Get field type from schema
-            const auto& field_meta = get_schema()[field_id];
-            load_index_info.field_type = field_meta.get_data_type();
-
-            // Set index metadata
-            load_index_info.index_id = index_info_ptr->indexid();
-            load_index_info.index_build_id = index_info_ptr->buildid();
-            load_index_info.index_version = index_info_ptr->index_version();
-            load_index_info.index_store_version =
-                index_info_ptr->index_store_version();
-            load_index_info.index_engine_version = static_cast<IndexVersion>(
-                index_info_ptr->current_index_version());
-            load_index_info.index_size = index_info_ptr->index_size();
-            load_index_info.num_rows = index_info_ptr->num_rows();
-
-            // Copy index file paths
-            for (const auto& file_path : index_info_ptr->index_file_paths()) {
-                load_index_info.index_files.push_back(file_path);
-            }
-
-            // Set index params
-            for (const auto& kv_pair : index_info_ptr->index_params()) {
-                load_index_info.index_params[kv_pair.key()] = kv_pair.value();
-            }
+            auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
+                index_info_ptr);
 
             LOG_INFO("Loading index for segment {} field {} with {} files",
                      id_,
