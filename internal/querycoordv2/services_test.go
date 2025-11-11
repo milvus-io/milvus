@@ -857,6 +857,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 func (suite *ServiceSuite) TestTransferReplica() {
 	ctx := context.Background()
+	suite.loadAll()
 	server := suite.server
 
 	err := server.meta.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
@@ -882,7 +883,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          2,
 	})
 	suite.NoError(err)
-	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+	suite.ErrorIs(merr.Error(resp), merr.ErrCollectionNotLoaded)
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rgg",
@@ -910,22 +911,6 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
-
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  1,
-		ID:            111,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(1)))
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  1,
-		ID:            222,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(2)))
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  1,
-		ID:            333,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(3)))
 
 	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1001,
@@ -958,62 +943,45 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.server.meta.HandleNodeUp(ctx, 1004)
 	suite.server.meta.HandleNodeUp(ctx, 1005)
 
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  2,
-		ID:            444,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(3)))
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  2,
-		ID:            555,
-		ResourceGroup: "rg2",
-	}, typeutil.NewUniqueSet(4)))
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg2",
-		CollectionID:        2,
+		CollectionID:        1001,
 		NumReplica:          1,
 	})
-	suite.NoError(err)
-	// we support dynamically increase replica num in resource group now.
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg1",
-		CollectionID:        1,
+		CollectionID:        1001,
 		NumReplica:          1,
 	})
-	suite.NoError(err)
-	// we support transfer replica to resource group load same collection.
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 
-	replicaNum := len(suite.server.meta.ReplicaManager.GetByCollection(ctx, 1))
+	replicaNum := len(suite.server.meta.ReplicaManager.GetByCollection(ctx, 1001))
 	suite.Equal(3, replicaNum)
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
-		CollectionID:        1,
-		NumReplica:          2,
+		CollectionID:        1001,
+		NumReplica:          1,
 	})
-	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rg1",
 		TargetResourceGroup: "rg3",
-		CollectionID:        1,
+		CollectionID:        1001,
 		NumReplica:          1,
 	})
-	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
-	suite.Len(suite.server.meta.GetByResourceGroup(ctx, "rg3"), 3)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 
 	// server unhealthy
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
-		CollectionID:        1,
+		CollectionID:        1001,
 		NumReplica:          2,
 	})
 	suite.NoError(err)
