@@ -11,7 +11,7 @@ Version:          %{version}
 Release:          %{release}
 Summary:          Milvus V2 RPM
 License:          Apache License 2.0
-Requires(preun):  libstdc++ libgomp tbb-devel
+Requires(preun):  libstdc++ libgomp tbb-devel tzdata
 # tbb-devel actually provides it, but not defined
 Provides:         libtbb.so()(64bit)
 BuildArch:        x86_64

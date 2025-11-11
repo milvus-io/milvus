@@ -17,7 +17,7 @@ ARG TARGETARCH
 
 RUN dnf install -y make cmake automake gcc gcc-c++ curl zip unzip tar git which \
     libaio libuuid-devel wget python3 python3-pip \
-    pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool
+    pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool tzdata
 
 # install openblas-devel texinfo ninja
 RUN dnf -y update && \
