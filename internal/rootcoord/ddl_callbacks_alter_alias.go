@@ -32,7 +32,7 @@ func (c *Core) broadcastCreateAlias(ctx context.Context, req *milvuspb.CreateAli
 	req.DbName = strings.TrimSpace(req.DbName)
 	req.Alias = strings.TrimSpace(req.Alias)
 	req.CollectionName = strings.TrimSpace(req.CollectionName)
-	broadcaster, err := startBroadcastWithAlterAliasLock(ctx, req.GetDbName(), req.GetCollectionName(), req.GetAlias())
+	broadcaster, err := startBroadcastWithDatabaseLock(ctx, req.GetDbName())
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (c *Core) broadcastAlterAlias(ctx context.Context, req *milvuspb.AlterAlias
 	req.DbName = strings.TrimSpace(req.DbName)
 	req.Alias = strings.TrimSpace(req.Alias)
 	req.CollectionName = strings.TrimSpace(req.CollectionName)
-	broadcaster, err := startBroadcastWithAlterAliasLock(ctx, req.GetDbName(), req.GetCollectionName(), req.GetAlias())
+	broadcaster, err := startBroadcastWithDatabaseLock(ctx, req.GetDbName())
 	if err != nil {
 		return err
 	}

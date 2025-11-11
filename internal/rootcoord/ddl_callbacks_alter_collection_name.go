@@ -36,10 +36,8 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 
 	// StartBroadcastWithResourceKeys will deduplicate the resource keys itself, so it's safe to add all the resource keys here.
 	rks := []message.ResourceKey{
-		message.NewSharedDBNameResourceKey(req.GetNewDBName()),
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetOldName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetNewDBName(), req.GetNewName()),
+		message.NewExclusiveDBNameResourceKey(req.GetNewDBName()),
+		message.NewExclusiveDBNameResourceKey(req.GetDbName()),
 	}
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, rks...)
 	if err != nil {
