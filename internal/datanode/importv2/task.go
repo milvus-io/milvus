@@ -32,6 +32,7 @@ const (
 	ImportTaskType      TaskType = 1
 	L0PreImportTaskType TaskType = 2
 	L0ImportTaskType    TaskType = 3
+	CopySegmentTaskType TaskType = 4
 )
 
 var ImportTaskTypeName = map[TaskType]string{
@@ -39,6 +40,7 @@ var ImportTaskTypeName = map[TaskType]string{
 	1: "ImportTask",
 	2: "L0PreImportTaskType",
 	3: "L0ImportTaskType",
+	4: "CopySegmentTask",
 }
 
 func (t TaskType) String() string {
@@ -77,6 +79,8 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 			t.(*L0PreImportTask).PreImportTask.State = state
 		case L0ImportTaskType:
 			t.(*L0ImportTask).ImportTaskV2.State = state
+		case CopySegmentTaskType:
+			t.(*CopySegmentTask).state = state
 		}
 	}
 }
@@ -92,6 +96,8 @@ func UpdateReason(reason string) UpdateAction {
 			t.(*L0PreImportTask).PreImportTask.Reason = reason
 		case L0ImportTaskType:
 			t.(*L0ImportTask).ImportTaskV2.Reason = reason
+		case CopySegmentTaskType:
+			t.(*CopySegmentTask).reason = reason
 		}
 	}
 }
@@ -151,6 +157,22 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 	}
 }
 
+// UpdateSegmentResult updates segment result for CopySegmentTask
+// This includes both binlog information and index metadata
+//
+// Note: In CopySegmentTask, each source segment maps to a unique target segment (1:1),
+// so each segment is only updated once. No merging is needed.
+func UpdateSegmentResult(result *datapb.CopySegmentResult) UpdateAction {
+	return func(task Task) {
+		if it, ok := task.(*CopySegmentTask); ok {
+			segment := result.GetSegmentId()
+			// Directly replace the segment result since each segment is only updated once
+			// The initial empty result was created in NewCopySegmentTask()
+			it.segmentResults[segment] = result
+		}
+	}
+}
+
 type Task interface {
 	Execute() []*conc.Future[any]
 	GetJobID() int64
@@ -172,8 +194,6 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 	res := []zap.Field{
 		zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("jobID", task.GetJobID()),
-		zap.Int64("collectionID", task.GetCollectionID()),
-		zap.String("type", task.GetType().String()),
 	}
 	res = append(res, fields...)
 	return res
