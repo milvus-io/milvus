@@ -144,5 +144,5 @@ func (t *partitionTombstone) ConfirmCanBeRemoved(ctx context.Context) (bool, err
 }
 
 func (t *partitionTombstone) Remove(ctx context.Context) error {
-	return t.meta.RemoveCollection(ctx, t.collectionID, 0)
+	return t.meta.RemovePartition(ctx, t.collectionID, t.partitionID, 0)
 }
