@@ -155,6 +155,10 @@ func (v *BasePlanVisitor) VisitJSONContainsAny(ctx *JSONContainsAnyContext) inte
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitSTIsValid(ctx *STIsValidContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitBitXor(ctx *BitXorContext) interface{} {
 	return v.VisitChildren(ctx)
 }
