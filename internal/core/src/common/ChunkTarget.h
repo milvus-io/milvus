@@ -25,14 +25,28 @@ class ChunkTarget {
  public:
     static constexpr size_t ALIGNED_SIZE = 4096;  // 4KB
 
+    virtual ~ChunkTarget() = default;
+
+    /**
+     * @brief write data to the target at the current position
+     * @param data the data to write
+     * @param size the size of the data to write
+     */
     virtual void
     write(const void* data, size_t size) = 0;
 
+    /**
+     * @brief release the data pointer to the caller
+     * @note no write() should be called after release()
+     * @return the data pointer
+     */
     virtual char*
     release() = 0;
 
-    virtual ~ChunkTarget() = default;
-
+    /**
+     * @brief get the current position of the target
+     * @return the current position
+     */
     virtual size_t
     tell() = 0;
 };
