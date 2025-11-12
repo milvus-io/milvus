@@ -699,8 +699,8 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, std::move(mmap_file_raii));
         case milvus::DataType::VECTOR_ARRAY:
             return std::make_unique<VectorArrayChunk>(
-                row_nums,
                 dim,
+                row_nums,
                 data,
                 size,
                 field_meta.get_element_type(),
