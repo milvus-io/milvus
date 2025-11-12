@@ -100,7 +100,6 @@ class ChunkWriter final : public ChunkWriterBase {
         return {size, row_nums};
     }
 
-    // you should write all data to target_ in one call
     void
     write_to_target(const arrow::ArrayVector& array_vec,
                     const std::shared_ptr<ChunkTarget>& target) override {
