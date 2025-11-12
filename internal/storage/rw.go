@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 
 	"github.com/samber/lo"
@@ -423,6 +424,13 @@ func NewDeltalogReader(
 				},
 			},
 		}
+		bucketName := rwOptions.storageConfig.BucketName
+		paths = lo.Map(paths, func(path string, _ int) string {
+			if rwOptions.storageConfig.StorageType != "local" {
+				return filepath.Join(bucketName, path)
+			}
+			return path
+		})
 		return &IterativeRecordReader{
 			iterate: func() (RecordReader, error) {
 				if pathPos >= len(paths) {
