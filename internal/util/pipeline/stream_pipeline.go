@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -100,7 +101,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	var err error
 	if position == nil {
 		log.Error("seek stream to nil position")
-		return ErrNilPosition
+		return merr.WrapErrServiceInternalMsg("SeekToNilPosition")
 	}
 
 	start := time.Now()
@@ -112,7 +113,7 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 	if err != nil {
 		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
 		p.dispatcher.Deregister(p.vChannel)
-		return WrapErrRegDispather(err)
+		return merr.Wrap(err, "FailToRegisterDispather")
 	}
 
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())

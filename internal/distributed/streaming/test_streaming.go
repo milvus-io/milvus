@@ -21,7 +21,6 @@ package streaming
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var expectErr = make(chan error, 10)
@@ -109,7 +109,7 @@ func (n *noopBalancer) DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) err
 type noopLocal struct{}
 
 func (n *noopLocal) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
-	return 0, errors.New("not implemented")
+	return 0, merr.WrapErrServiceInternalMsg("not implemented")
 }
 
 func (n *noopLocal) GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {

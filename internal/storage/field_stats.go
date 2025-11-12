@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -67,7 +66,7 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	} else {
-		return errors.New("invalid fieldStats, no fieldID")
+		return merr.WrapErrStorageMsg("invalid fieldStats, no fieldID")
 	}
 
 	stats.Type = schemapb.DataType_Int64
@@ -471,7 +470,7 @@ func (sr *FieldStatsReader) GetFieldStatsList() ([]*FieldStats, error) {
 		stats := &FieldStats{}
 		errNew := json.Unmarshal(sr.buffer, &stats)
 		if errNew != nil {
-			return nil, merr.WrapErrParameterInvalid("valid JSON", string(sr.buffer), err.Error())
+			return nil, merr.WrapErrServiceInternalErr(err, "invalid JSON:%s", string(sr.buffer))
 		}
 		return []*FieldStats{stats}, nil
 	}

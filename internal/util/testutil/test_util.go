@@ -352,7 +352,7 @@ func CreateFieldWithDefaultValue(dataType schemapb.DataType, id int64, nullable 
 		}
 	default:
 		msg := fmt.Sprintf("type (%s) not support default_value", field.GetDataType().String())
-		return nil, merr.WrapErrParameterInvalidMsg(msg)
+		return nil, merr.WrapErrServiceInternal(msg)
 	}
 	return field, nil
 }
@@ -392,13 +392,13 @@ func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType
 		indicesField, ok1 := stType.FieldByName("indices")
 		valuesField, ok2 := stType.FieldByName("values")
 		if !ok1 || !ok2 {
-			return nil, merr.WrapErrParameterInvalidMsg("Indices type or values type is missed for sparse vector")
+			return nil, merr.WrapErrServiceInternal("Indices type or values type is missed for sparse vector")
 		}
 
 		indicesList, ok1 := indicesField.Type.(*arrow.ListType)
 		valuesList, ok2 := valuesField.Type.(*arrow.ListType)
 		if !ok1 || !ok2 {
-			return nil, merr.WrapErrParameterInvalidMsg("Indices type and values type of sparse vector should be list")
+			return nil, merr.WrapErrServiceInternal("Indices type and values type of sparse vector should be list")
 		}
 		indexType := indicesList.Elem().ID()
 		valueType := valuesList.Elem().ID()
@@ -487,7 +487,7 @@ func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType
 		return builder.NewStructArray(), nil
 	}
 
-	return nil, merr.WrapErrParameterInvalidMsg("Invalid arrow data type for sparse vector")
+	return nil, merr.WrapErrServiceInternal("Invalid arrow data type for sparse vector")
 }
 
 func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.InsertData, useNullType bool) ([]arrow.Array, error) {
@@ -934,7 +934,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			})
 			fixedSizeBuilder, ok := listBuilder.ValueBuilder().(*array.FixedSizeBinaryBuilder)
 			if !ok {
-				return nil, fmt.Errorf("unexpected list value builder for VectorArray field %s: %T", field.GetName(), listBuilder.ValueBuilder())
+				return nil, merr.WrapErrServiceInternalMsg("unexpected list value builder for VectorArray field %s: %T", field.GetName(), listBuilder.ValueBuilder())
 			}
 
 			vectorArrayData.Dim = dim
@@ -943,10 +943,10 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 
 			appendBinarySlice := func(data []byte, stride int) error {
 				if stride == 0 {
-					return fmt.Errorf("zero stride for VectorArray field %s", field.GetName())
+					return merr.WrapErrServiceInternalMsg("zero stride for VectorArray field %s", field.GetName())
 				}
 				if len(data)%stride != 0 {
-					return fmt.Errorf("vector array data length %d is not divisible by stride %d for field %s", len(data), stride, field.GetName())
+					return merr.WrapErrServiceInternalMsg("vector array data length %d is not divisible by stride %d for field %s", len(data), stride, field.GetName())
 				}
 				for offset := 0; offset < len(data); offset += stride {
 					fixedSizeBuilder.Append(data[offset : offset+stride])
@@ -966,14 +966,14 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 				case schemapb.DataType_FloatVector:
 					floatArray := vectorField.GetFloatVector()
 					if floatArray == nil {
-						return nil, fmt.Errorf("expected FloatVector data for field %s", field.GetName())
+						return nil, merr.WrapErrServiceInternalMsg("expected FloatVector data for field %s", field.GetName())
 					}
 					data := floatArray.GetData()
 					if len(data) == 0 {
 						continue
 					}
 					if len(data)%int(dim) != 0 {
-						return nil, fmt.Errorf("float vector data length %d is not divisible by dim %d for field %s", len(data), dim, field.GetName())
+						return nil, merr.WrapErrServiceInternalMsg("float vector data length %d is not divisible by dim %d for field %s", len(data), dim, field.GetName())
 					}
 					for offset := 0; offset < len(data); offset += int(dim) {
 						vectorBytes := make([]byte, bytesPerVector)
@@ -1016,7 +1016,7 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 						return nil, err
 					}
 				default:
-					return nil, fmt.Errorf("unsupported element type in VectorArray: %s", elementType.String())
+					return nil, merr.WrapErrServiceInternalMsg("unsupported element type in VectorArray: %s", elementType.String())
 				}
 			}
 

@@ -19,11 +19,10 @@
 package rerank
 
 import (
-	"fmt"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -70,22 +69,22 @@ func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.Functio
 	})
 
 	if len(funcSchema.GetOutputFieldNames()) != 0 {
-		return nil, fmt.Errorf("Rerank function output field names should be empty")
+		return nil, merr.WrapErrFunctionFailedMsg("Rerank function output field names should be empty")
 	}
 
 	for _, name := range funcSchema.GetInputFieldNames() {
 		if name == "" {
-			return nil, fmt.Errorf("Rerank input field name cannot be empty string")
+			return nil, merr.WrapErrFunctionFailedMsg("Rerank input field name cannot be empty string")
 		}
 		if lo.Count(funcSchema.GetInputFieldNames(), name) > 1 {
-			return nil, fmt.Errorf("Each function input field should be used exactly once in the same function, input field: %s", name)
+			return nil, merr.WrapErrFunctionFailedMsg("Each function input field should be used exactly once in the same function, input field: %s", name)
 		}
 		inputField, ok := nameMap[name]
 		if !ok {
-			return nil, fmt.Errorf("Function input field not found: %s", name)
+			return nil, merr.WrapErrFunctionFailedMsg("Function input field not found: %s", name)
 		}
 		if inputField.GetNullable() {
-			return nil, fmt.Errorf("Function input field cannot be nullable: field %s", inputField.GetName())
+			return nil, merr.WrapErrFunctionFailedMsg("Function input field cannot be nullable: field %s", inputField.GetName())
 		}
 		base.inputFieldIDs = append(base.inputFieldIDs, inputField.FieldID)
 		base.inputFieldTypes = append(base.inputFieldTypes, inputField.DataType)

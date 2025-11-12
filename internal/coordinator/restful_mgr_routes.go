@@ -297,10 +297,10 @@ func (s *mixCoordImpl) getQueryNodes(ctx context.Context) (*querypb.ListQueryNod
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list query nodes: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to list query nodes")
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		return nil, fmt.Errorf("failed to list query nodes: %s", resp.GetStatus().GetReason())
+		return nil, merr.WrapErrServiceInternalMsg("failed to list query nodes: %s", resp.GetStatus().GetReason())
 	}
 	return resp, nil
 }
@@ -513,7 +513,7 @@ func (s *mixCoordImpl) getQueryCoordChannelBalanceActive(ctx context.Context) (b
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		return channelActivate, fmt.Errorf("%s", resp.GetStatus().GetReason())
+		return channelActivate, merr.WrapErrServiceInternalMsg("%s", resp.GetStatus().GetReason())
 	}
 
 	return channelActivate && resp.IsActive, nil
@@ -527,7 +527,7 @@ func (s *mixCoordImpl) getQueryCoordBalanceActive(ctx context.Context) (bool, er
 		return false, err
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		return false, fmt.Errorf("%s", resp.GetStatus().GetReason())
+		return false, merr.WrapErrServiceInternalMsg("%s", resp.GetStatus().GetReason())
 	}
 	return resp.IsActive, nil
 }
@@ -556,31 +556,17 @@ func (s *mixCoordImpl) getBatchBalanceStatus(w http.ResponseWriter, req *http.Re
 func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context, status string) error {
 	// Call the appropriate MixCoord method based on the status.
 	var err error
-	var errMsg string
-
 	switch status {
 	case "suspended":
 		err = s.queryCoordServer.SuspendChannelBalance(ctx)
-		errMsg = "failed to suspend balance"
 	case "resumed", "active":
 		err = s.queryCoordServer.ResumeChannelBalance(ctx)
-		errMsg = "failed to resume balance"
 	default:
 		// If the status is not recognized, return an informative error immediately.
 		// This avoids proceeding with an invalid state.
-		err = fmt.Errorf("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
+		err = merr.WrapErrServiceInternalMsg("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
 	}
-
-	// --- Unified Error Handling ---
-	// After the switch, we handle potential errors from the called method.
-
-	// First, check if there was a low-level error during the method execution (e.g., network issue).
-	if err != nil {
-		// Wrap the original error with more context.
-		return fmt.Errorf("%s: %w", errMsg, err)
-	}
-	// If no errors were encountered, the operation was successful. Return nil to indicate success.
-	return nil
+	return err
 }
 
 // controlBatchBalanceStatus handles PUT requests to suspend or resume balance.
@@ -940,7 +926,6 @@ func (s *mixCoordImpl) handleGetBatchNodeStatus(w http.ResponseWriter, req *http
 func (s *mixCoordImpl) handleQueryNodeStatusUpdate(ctx context.Context, nodeID int64, status string) error {
 	var resp *commonpb.Status
 	var err error
-	var errMsg string
 
 	switch status {
 	case "suspended":
@@ -948,21 +933,17 @@ func (s *mixCoordImpl) handleQueryNodeStatusUpdate(ctx context.Context, nodeID i
 			Base:   commonpbutil.NewMsgBase(),
 			NodeID: nodeID,
 		})
-		errMsg = "failed to suspend node"
+		err = merr.Wrap(err, "failed to suspend node")
 	case "resumed", "active":
 		resp, err = s.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 			Base:   commonpbutil.NewMsgBase(),
 			NodeID: nodeID,
 		})
-		errMsg = "failed to resume node"
+		err = merr.Wrap(err, "failed to resume node")
 	default:
-		errMsg = "invalid status value. Use 'suspended', 'resumed' or 'active'"
-		err = fmt.Errorf("%s", errMsg)
+		err = merr.WrapErrServiceInternalMsg("invalid status value. Use 'suspended', 'resumed' or 'active'")
 	}
 	err = merr.CheckRPCCall(resp, err)
-	if err != nil {
-		err = fmt.Errorf("%s: %w", errMsg, err)
-	}
 	return err
 }
 

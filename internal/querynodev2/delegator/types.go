@@ -1,11 +1,6 @@
 package delegator
 
 import (
-	"fmt"
-	"time"
-
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -48,12 +43,4 @@ const (
 type TSafeUpdater interface {
 	RegisterChannel(string) chan Timestamp
 	UnregisterChannel(string) error
-}
-
-// ErrTsLagTooLarge serviceable and guarantee lag too large.
-var ErrTsLagTooLarge = errors.New("Timestamp lag too large")
-
-// WrapErrTsLagTooLarge wraps ErrTsLagTooLarge with lag and max value.
-func WrapErrTsLagTooLarge(duration time.Duration, maxLag time.Duration) error {
-	return fmt.Errorf("%w lag(%s) max(%s)", ErrTsLagTooLarge, duration, maxLag)
 }

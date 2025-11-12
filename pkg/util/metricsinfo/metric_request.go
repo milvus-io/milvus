@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -146,7 +146,7 @@ func (mr *MetricsRequest) ExecuteMetricsRequest(ctx context.Context, req *milvus
 	if !ok {
 		mr.lock.Unlock()
 		log.Warn("unimplemented metric request type", zap.String("req_type", reqType))
-		return "", errors.New(MsgUnimplementedMetric)
+		return "", merr.WrapErrServiceInternalMsg(MsgUnimplementedMetric)
 	}
 	mr.lock.Unlock()
 
@@ -179,7 +179,7 @@ func ParseMetricRequestType(jsonRet gjson.Result) (string, error) {
 		return v.String(), nil
 	}
 
-	return "", fmt.Errorf("%s or %s not found in request", MetricTypeKey, MetricRequestTypeKey)
+	return "", merr.WrapErrParameterInvalidMsg("%s or %s not found in request", MetricTypeKey, MetricRequestTypeKey)
 }
 
 func ParseMetricProcessInRole(jsonRet gjson.Result) (string, error) {
@@ -188,7 +188,7 @@ func ParseMetricProcessInRole(jsonRet gjson.Result) (string, error) {
 		return v.String(), nil
 	}
 
-	return "", fmt.Errorf("%s not found in request", MetricRequestProcessInRoleKey)
+	return "", merr.WrapErrParameterInvalidMsg("%s not found in request", MetricRequestProcessInRoleKey)
 }
 
 func GetCollectionIDFromRequest(jsonReq gjson.Result) int64 {
@@ -205,7 +205,7 @@ func ConstructRequestByMetricType(metricType string) (*milvuspb.GetMetricsReques
 	m[MetricTypeKey] = metricType
 	binary, err := json.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct request by metric type %s: %s", metricType, err.Error())
+		return nil, merr.WrapErrParameterInvalidErr(err, "failed to construct request by metric type %s", metricType)
 	}
 	// TODO:: switch metricType to different msgType and return err when metricType is not supported
 	return &milvuspb.GetMetricsRequest{
@@ -219,7 +219,7 @@ func ConstructRequestByMetricType(metricType string) (*milvuspb.GetMetricsReques
 func ConstructGetMetricsRequest(m map[string]interface{}) (*milvuspb.GetMetricsRequest, error) {
 	binary, err := json.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct request: %s", err.Error())
+		return nil, merr.WrapErrParameterInvalidErr(err, "failed to construct request")
 	}
 
 	return &milvuspb.GetMetricsRequest{

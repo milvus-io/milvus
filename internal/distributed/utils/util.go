@@ -6,12 +6,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -80,7 +80,7 @@ func CreateCertPoolforClient(caFile string, nodeType string) (*x509.CertPool, er
 
 	if !certPool.AppendCertsFromPEM(b) {
 		log.Error("credentials: failed to append certificates")
-		return nil, errors.New("failed to append certificates") // Cert pool is invalid, return nil and the error
+		return nil, merr.WrapErrServiceInternalMsg("failed to append certificates") // Cert pool is invalid, return nil and the error
 	}
 	return certPool, err
 }

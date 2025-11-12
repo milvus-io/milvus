@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -284,7 +285,7 @@ func (m *SimpleLimiter) updateLimiterNode(req *proxypb.Limiter, node *rlinternal
 	for _, rate := range req.GetRates() {
 		limit, ok := curLimiters.Get(rate.GetRt())
 		if !ok {
-			return fmt.Errorf("unregister rateLimiter for rateType %s", rate.GetRt().String())
+			return merr.WrapErrServiceInternalMsg("unregistered rateLimiter for rateType %s", rate.GetRt().String())
 		}
 		limit.SetLimit(ratelimitutil.Limit(rate.GetR()))
 		setRateGaugeByRateType(rate.GetRt(), paramtable.GetNodeID(), sourceID, rate.GetR())

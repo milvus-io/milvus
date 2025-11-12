@@ -72,7 +72,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
+		return nil, merr.WrapErrImportSysFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
 	}
 	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
@@ -87,7 +87,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	}
 	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
+		return nil, merr.WrapErrImportSysFailedErr(err, "new parquet file reader failed")
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)

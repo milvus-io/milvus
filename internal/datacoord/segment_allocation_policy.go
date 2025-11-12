@@ -23,12 +23,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -38,7 +38,7 @@ type calUpperLimitPolicy func(schema *schemapb.CollectionSchema) (int, error)
 
 func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
 	if schema == nil {
-		return -1, errors.New("nil schema")
+		return -1, merr.WrapErrServiceInternalMsg("nil schema")
 	}
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	if err != nil {
@@ -46,7 +46,7 @@ func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
 	}
 	// check zero value, preventing panicking
 	if sizePerRecord == 0 {
-		return -1, errors.New("zero size record schema found")
+		return -1, merr.WrapErrServiceInternalMsg("zero size record schema found")
 	}
 	threshold := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 	return int(threshold / float64(sizePerRecord)), nil

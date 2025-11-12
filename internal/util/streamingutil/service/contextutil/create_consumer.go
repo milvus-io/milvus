@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -31,21 +31,21 @@ func WithCreateConsumer(ctx context.Context, req *streamingpb.CreateConsumerRequ
 func GetCreateConsumer(ctx context.Context) (*streamingpb.CreateConsumerRequest, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, errors.New("create consumer metadata not found from incoming context")
+		return nil, merr.WrapErrServiceInternalMsg("create consumer metadata not found from incoming context")
 	}
 	msg := md.Get(createConsumerKey)
 	if len(msg) == 0 {
-		return nil, errors.New("create consumer metadata not found")
+		return nil, merr.WrapErrServiceInternalMsg("create consumer metadata not found")
 	}
 
 	bytes, err := base64.StdEncoding.DecodeString(msg[0])
 	if err != nil {
-		return nil, errors.Wrap(err, "decode create consumer metadata failed")
+		return nil, merr.WrapErrServiceInternalErr(err, "decode create consumer metadata failed")
 	}
 
 	req := &streamingpb.CreateConsumerRequest{}
 	if err := proto.Unmarshal(bytes, req); err != nil {
-		return nil, errors.Wrap(err, "unmarshal create consumer request failed")
+		return nil, merr.WrapErrSerializationFailed(err, "unmarshal create consumer request failed")
 	}
 	return req, nil
 }

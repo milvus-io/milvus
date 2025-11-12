@@ -58,7 +58,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	// See: https://godoc.org/google.golang.org/grpc/metadata#New
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
+		return nil, merr.WrapErrParameterInvalidMsg("auth check failure, due to occurs inner error: missing metadata")
 	}
 	if globalMetaCache == nil {
 		return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")

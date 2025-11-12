@@ -1,9 +1,8 @@
 package indexparamcheck
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -17,18 +16,18 @@ func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, elementType schem
 
 func (c *BITMAPChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	if field.IsPrimaryKey {
-		return errors.New("create bitmap index on primary key not supported")
+		return merr.WrapErrParameterInvalidMsg("create bitmap index on primary key not supported")
 	}
 	mainType := field.GetDataType()
 	elemType := field.GetElementType()
 	if !typeutil.IsBoolType(mainType) && !typeutil.IsIntegerType(mainType) &&
 		!typeutil.IsStringType(mainType) && !typeutil.IsArrayType(mainType) {
-		return errors.New("bitmap index are only supported on bool, int, string and array field")
+		return merr.WrapErrParameterInvalidMsg("bitmap index are only supported on bool, int, string and array field")
 	}
 	if typeutil.IsArrayType(mainType) {
 		if !typeutil.IsBoolType(elemType) && !typeutil.IsIntegerType(elemType) &&
 			!typeutil.IsStringType(elemType) {
-			return errors.New("bitmap index are only supported on bool, int, string for array field")
+			return merr.WrapErrParameterInvalidMsg("bitmap index are only supported on bool, int, string for array field")
 		}
 	}
 	return nil

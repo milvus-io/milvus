@@ -1,14 +1,13 @@
 package backend
 
 import (
-	"fmt"
-
 	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Backend interface {
@@ -22,7 +21,7 @@ type Backend interface {
 
 func NewBackend(cfg *configs.MilvusConfig, version string) (Backend, error) {
 	if cfg.MetaStoreCfg.MetaStoreType.GetValue() != util.MetaStoreTypeEtcd {
-		return nil, fmt.Errorf("%s is not supported now", cfg.MetaStoreCfg.MetaStoreType.GetValue())
+		return nil, merr.WrapErrServiceInternalMsg("%s is not supported now", cfg.MetaStoreCfg.MetaStoreType.GetValue())
 	}
 	v, err := semver.Parse(version)
 	if err != nil {
@@ -33,5 +32,5 @@ func NewBackend(cfg *configs.MilvusConfig, version string) (Backend, error) {
 	} else if versions.Range22x(v) {
 		return newEtcd220(cfg)
 	}
-	return nil, fmt.Errorf("version not supported: %s", version)
+	return nil, merr.WrapErrServiceInternalMsg("version not supported: %s", version)
 }

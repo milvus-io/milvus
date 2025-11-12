@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var errDelayFlush = errors.New("delay flush")
@@ -98,7 +99,7 @@ func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
 		w.Logger().Info("flush segment canceled", zap.Error(w.ctx.Err()))
 		return w.ctx.Err()
 	case <-w.wal.Available():
-		return errors.New("wal is unavailable")
+		return merr.WrapErrServiceInternalMsg("wal is unavailable")
 	}
 }
 

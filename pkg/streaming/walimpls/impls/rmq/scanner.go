@@ -1,13 +1,12 @@
 package rmq
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/client"
 	"github.com/milvus-io/milvus/pkg/v2/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var _ walimpls.ScannerImpls = (*scannerImpl)(nil)
@@ -62,7 +61,7 @@ func (s *scannerImpl) executeConsume() (err error) {
 			return nil
 		case msg, ok := <-s.consumer.Chan():
 			if !ok {
-				return errors.New("mq consumer unexpected channel closed")
+				return merr.WrapErrServiceInternalMsg("mq consumer unexpected channel closed")
 			}
 			msgID := rmqID(msg.ID().(*server.RmqID).MessageID)
 			// record the last message id to avoid repeated consume message.

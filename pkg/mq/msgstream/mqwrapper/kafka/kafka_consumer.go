@@ -4,7 +4,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/zap"
 
@@ -158,7 +157,7 @@ func (kc *Consumer) Chan() <-chan common.Message {
 
 func (kc *Consumer) Seek(id common.MessageID, inclusive bool) error {
 	if kc.hasAssign {
-		return errors.New("kafka consumer is already assigned, can not seek again")
+		return merr.WrapErrServiceInternalMsg("kafka consumer is already assigned, can not seek again")
 	}
 
 	offset := kafka.Offset(id.(*KafkaID).MessageID)

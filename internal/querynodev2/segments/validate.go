@@ -30,7 +30,7 @@ import (
 func validate(ctx context.Context, manager *Manager, collectionID int64, partitionIDs []int64, segmentIDs []int64, segmentFilter ...SegmentFilter) ([]Segment, error) {
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
+		return nil, merr.WrapErrCollectionIDNotFound(collectionID)
 	}
 
 	// validate segment

@@ -139,18 +139,18 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 		header := schemaMsg.SchemaChangeMessage.Header()
 		if header.GetCollectionId() != fNode.collectionID {
-			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+			return merr.WrapErrCollectionIDNotFound(header.GetCollectionId())
 		}
 		return nil
 	case commonpb.MsgType_AlterCollection:
 		putCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
 		header := putCollectionMsg.AlterCollectionMessage.Header()
 		if header.GetCollectionId() != fNode.collectionID {
-			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+			return merr.WrapErrCollectionIDNotFound(header.GetCollectionId())
 		}
 		return nil
 	default:
-		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
+		return merr.WrapErrServiceInternal("msgType is neither Insert nor Delete")
 	}
 	return nil
 }

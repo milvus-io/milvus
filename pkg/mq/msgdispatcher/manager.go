@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -86,7 +87,7 @@ func NewDispatcherManager(pchannel string, role string, nodeID int64, factory ms
 func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
 	t := newTarget(streamConfig, c.includeSkipWhenSplit)
 	if _, ok := c.registeredTargets.GetOrInsert(t.vchannel, t); ok {
-		return nil, fmt.Errorf("vchannel %s already exists in the dispatcher", t.vchannel)
+		return nil, merr.WrapErrServiceInternalMsg("vchannel %s already exists in the dispatcher", t.vchannel)
 	}
 	log.Ctx(ctx).Info("target register done", zap.String("vchannel", t.vchannel))
 	return t.ch, nil

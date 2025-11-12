@@ -18,7 +18,6 @@ package proxyutil
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -213,11 +212,10 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 				if errors.Is(err, merr.ErrServiceUnimplemented) {
 					return nil
 				}
-
-				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "InvalidateCollectionMetaCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.WrapErrServiceInternalMsg("InvalidateCollectionMetaCache failed, proxyID = %d, reason = %s", k, sta.GetReason())
 			}
 			return nil
 		})
@@ -239,10 +237,10 @@ func (p *ProxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 		group.Go(func() error {
 			sta, err := v.InvalidateCredentialCache(ctx, request)
 			if err != nil {
-				return fmt.Errorf("InvalidateCredentialCache failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "InvalidateCredentialCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("InvalidateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.WrapErrServiceInternalMsg("InvalidateCollectionMetaCache failed, proxyID = %d, reason = %s", k, sta.GetReason())
 			}
 			return nil
 		})
@@ -265,10 +263,10 @@ func (p *ProxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 		group.Go(func() error {
 			sta, err := v.UpdateCredentialCache(ctx, request)
 			if err != nil {
-				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "UpdateCredentialCache failed, proxyID = %d", k)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.WrapErrServiceInternalErr(err, "UpdateCredentialCache failed, proxyID = %d, reason = %s", k, sta.GetReason())
 			}
 			return nil
 		})
@@ -290,7 +288,7 @@ func (p *ProxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 		group.Go(func() error {
 			status, err := v.RefreshPolicyInfoCache(ctx, req)
 			if err != nil {
-				return fmt.Errorf("RefreshPolicyInfoCache failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "RefreshPolicyInfoCache failed, proxyID = %d", k)
 			}
 			if status.GetErrorCode() != commonpb.ErrorCode_Success {
 				return merr.Error(status)
@@ -322,10 +320,10 @@ func (p *ProxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 		group.Go(func() error {
 			rsp, err := v.GetProxyMetrics(ctx, req)
 			if err != nil {
-				return fmt.Errorf("GetMetrics failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "GetMetrics failed, proxyID = %d", k)
 			}
 			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("GetMetrics failed, proxyID = %d, err = %s", k, rsp.GetStatus().GetReason())
+				return merr.WrapErrServiceInternalMsg("GetMetrics failed, proxyID = %d, reason = %s", k, rsp.GetStatus().GetReason())
 			}
 			metricRspsMu.Lock()
 			metricRsps = append(metricRsps, rsp)
@@ -354,10 +352,10 @@ func (p *ProxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 		group.Go(func() error {
 			sta, err := v.SetRates(ctx, request)
 			if err != nil {
-				return fmt.Errorf("SetRates failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "SetRates failed, proxyID = %d", k)
 			}
 			if sta.GetErrorCode() != commonpb.ErrorCode_Success {
-				return fmt.Errorf("SetRates failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.WrapErrServiceInternalMsg("SetRates failed, proxyID = %d, reason = %s", k, sta.GetReason())
 			}
 			return nil
 		})
@@ -406,10 +404,10 @@ func (p *ProxyClientManager) InvalidateShardLeaderCache(ctx context.Context, req
 					log.Warn("InvalidateShardLeaderCache failed due to proxy service not found", zap.Error(err))
 					return nil
 				}
-				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, err)
+				return merr.WrapErrServiceInternalErr(err, "InvalidateShardLeaderCache failed, proxyID = %d, reason = %s", k, sta.GetReason())
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, sta.Reason)
+				return merr.WrapErrServiceInternalMsg("InvalidateShardLeaderCache failed, proxyID = %d, reason = %s", k, sta.GetReason())
 			}
 			return nil
 		})

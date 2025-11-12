@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -203,12 +203,12 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 		return nil
 	}
 	if len(in.Timestamps) != len(in.ChannelNames) {
-		return errors.New("invalid TimeTickMsg, timestamp and channelname size mismatch")
+		return merr.WrapErrServiceInternalMsg("invalid TimeTickMsg, timestamp and channelname size mismatch")
 	}
 
 	prev, ok := t.sess2ChanTsMap[in.Base.SourceID]
 	if !ok {
-		return fmt.Errorf("skip ChannelTimeTickMsg from un-recognized session %d", in.Base.SourceID)
+		return merr.WrapErrServiceInternalMsg("skip ChannelTimeTickMsg from un-recognized session %d", in.Base.SourceID)
 	}
 
 	if in.Base.SourceID == t.sourceID {

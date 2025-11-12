@@ -3,7 +3,6 @@ package resolver
 import (
 	"time"
 
-	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/resolver"
@@ -11,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -69,7 +69,7 @@ type builderImpl struct {
 // So build operation just register a new watcher into the existed resolver to share the resolver result.
 func (b *builderImpl) Build(_ resolver.Target, cc resolver.ClientConn, _ resolver.BuildOptions) (resolver.Resolver, error) {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, errors.New("builder is closed")
+		return nil, merr.WrapErrServiceInternalMsg("builder is closed")
 	}
 	defer b.lifetime.Done()
 

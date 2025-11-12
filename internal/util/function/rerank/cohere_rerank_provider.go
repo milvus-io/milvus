@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type cohereProvider struct {
@@ -65,7 +65,7 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 		case models.MaxTKsPerDocParamKey:
 			maxTokensPerDoc, err := strconv.Atoi(param.Value)
 			if err != nil {
-				return nil, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxTKsPerDocParamKey, param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "[%s param's value: %s] is not a valid number", models.MaxTKsPerDocParamKey, param.Value)
 			} else {
 				modelParams[models.MaxTKsPerDocParamKey] = maxTokensPerDoc
 			}
@@ -73,7 +73,7 @@ func newCohereProvider(params []*commonpb.KeyValuePair, conf map[string]string, 
 		}
 	}
 	if modelName == "" {
-		return nil, fmt.Errorf("cohere rerank model name is required")
+		return nil, merr.WrapErrFunctionFailedMsg("cohere rerank model name is required")
 	}
 	provider := cohereProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},

@@ -20,11 +20,11 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -46,19 +46,19 @@ func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	}
 
 	if len(base.GetInputFieldNames()) != 0 {
-		return nil, fmt.Errorf("The rrf function does not support input parameters, but got %s", base.GetInputFieldNames())
+		return nil, merr.WrapErrFunctionFailedMsg("The rrf function does not support input parameters, but got %s", base.GetInputFieldNames())
 	}
 
 	k := float64(defaultRRFParamsValue)
 	for _, param := range funcSchema.Params {
 		if strings.ToLower(param.Key) == RRFParamsKey {
 			if k, err = strconv.ParseFloat(param.Value, 64); err != nil {
-				return nil, fmt.Errorf("Param k:%s is not a number", param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "Param k:%s is not a number", param.Value)
 			}
 		}
 	}
 	if k <= 0 || k >= 16384 {
-		return nil, fmt.Errorf("The rank params k should be in range (0, %d)", 16384)
+		return nil, merr.WrapErrFunctionFailedMsg("The rank params k should be in range (0, %d)", 16384)
 	}
 	if base.pkType == schemapb.DataType_Int64 {
 		return &RRFFunction[int64]{RerankBase: *base, k: float32(k)}, nil

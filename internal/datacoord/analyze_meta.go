@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
@@ -117,7 +117,7 @@ func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {
 
 	t, ok := m.tasks[taskID]
 	if !ok {
-		return fmt.Errorf("there is no task with taskID: %d", taskID)
+		return merr.WrapErrServiceInternalMsg("there is no task with taskID: %d", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
@@ -134,7 +134,7 @@ func (m *analyzeMeta) BuildingTask(taskID int64) error {
 
 	t, ok := m.tasks[taskID]
 	if !ok {
-		return fmt.Errorf("there is no task with taskID: %d", taskID)
+		return merr.WrapErrServiceInternalMsg("there is no task with taskID: %d", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
@@ -150,7 +150,7 @@ func (m *analyzeMeta) UpdateState(taskID int64, state indexpb.JobState, failReas
 
 	t, ok := m.tasks[taskID]
 	if !ok {
-		return fmt.Errorf("there is no task with taskID: %d", taskID)
+		return merr.WrapErrServiceInternalMsg("there is no task with taskID: %d", taskID)
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
@@ -168,7 +168,7 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *workerpb.AnalyzeResult) e
 
 	t, ok := m.tasks[taskID]
 	if !ok {
-		return fmt.Errorf("there is no task with taskID: %d", taskID)
+		return merr.WrapErrServiceInternalMsg("there is no task with taskID: %d", taskID)
 	}
 
 	log.Info("finish task meta...", zap.Int64("taskID", taskID), zap.String("state", result.GetState().String()),

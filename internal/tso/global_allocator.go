@@ -33,11 +33,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -110,7 +110,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 	var physical, logical int64
 	if count == 0 {
-		return 0, errors.New("tso count should be positive")
+		return 0, merr.WrapErrServiceInternalMsg("tso count should be positive")
 	}
 
 	maxRetryCount := 10
@@ -134,7 +134,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 		}
 		return tsoutil.ComposeTS(physical, logical), nil
 	}
-	return 0, errors.New("can not get timestamp")
+	return 0, merr.WrapErrServiceInternalMsg("can not get timestamp")
 }
 
 // Alloc allocates a batch of timestamps. What is returned is the starting timestamp.

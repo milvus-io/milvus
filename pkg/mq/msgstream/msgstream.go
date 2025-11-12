@@ -22,13 +22,13 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -210,39 +210,39 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 	properties := msg.Properties()
 	vchannel, ok := properties[common.ChannelTypeKey]
 	if !ok {
-		return nil, errors.New("get channel name from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("get channel name from msg properties failed")
 	}
 
 	collID, ok := properties[common.CollectionIDTypeKey]
 	if !ok {
-		return nil, errors.New("get collection ID from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("get collection ID from msg properties failed")
 	}
 
 	tsStr, ok := properties[common.TimestampTypeKey]
 	if !ok {
-		return nil, errors.New("get minTs from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("get minTs from msg properties failed")
 	}
 
 	timestamp, err := strconv.ParseUint(tsStr, 10, 64)
 	if err != nil {
 		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
-		return nil, errors.New("parse minTs from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("parse minTs from msg properties failed")
 	}
 
 	idStr, ok := properties[common.MsgIdTypeKey]
 	if !ok {
-		return nil, errors.New("get msgType from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("get msgType from msg properties failed")
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
-		return nil, errors.New("parse minTs from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("parse minTs from msg properties failed")
 	}
 
 	val, ok := properties[common.MsgTypeKey]
 	if !ok {
-		return nil, errors.New("get msgType from msg properties failed")
+		return nil, merr.WrapErrSerializationFailedMsg("get msgType from msg properties failed")
 	}
 	msgType := commonpb.MsgType(commonpb.MsgType_value[val])
 

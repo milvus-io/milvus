@@ -17,18 +17,17 @@
 package typeutil
 
 import (
-	"fmt"
 	"hash/crc32"
 	"math"
 	"strconv"
 	"strings"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const substringLengthForCRC = 100
@@ -131,10 +130,10 @@ func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]ui
 				hashValues = append(hashValues, value%numPartitions)
 			}
 		default:
-			return nil, errors.New("currently only support DataType Int64 or VarChar as partition key Field")
+			return nil, merr.WrapErrServiceInternalMsg("currently only support DataType Int64 or VarChar as partition key Field")
 		}
 	default:
-		return nil, errors.New("currently not support vector field as partition keys")
+		return nil, merr.WrapErrServiceInternalMsg("currently not support vector field as partition keys")
 	}
 
 	return hashValues, nil
@@ -148,14 +147,14 @@ func RearrangePartitionsForPartitionKey(partitions map[string]int64) ([]string, 
 	for partitionName, partitionID := range partitions {
 		splits := strings.Split(partitionName, "_")
 		if len(splits) < 2 {
-			return nil, nil, fmt.Errorf("bad default partion name in partition key mode: %s", partitionName)
+			return nil, nil, merr.WrapErrServiceInternalMsg("bad default partion name in partition key mode: %s", partitionName)
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {
 			return nil, nil, err
 		}
 		if (index >= int64(len(partitions))) || (index < 0) {
-			return nil, nil, fmt.Errorf("illegal partition index in partition key mode: %s", partitionName)
+			return nil, nil, merr.WrapErrServiceInternalMsg("illegal partition index in partition key mode: %s", partitionName)
 		}
 
 		partitionNames[index] = partitionName

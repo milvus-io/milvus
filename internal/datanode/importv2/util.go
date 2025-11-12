@@ -153,7 +153,7 @@ func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, parti
 	})
 
 	if len(candidates) == 0 {
-		return 0, fmt.Errorf("no candidate segments found for channel %s and partition %d",
+		return 0, merr.WrapErrImportFailedMsg("no candidate segments found for channel %s and partition %d",
 			vchannel, partitionID)
 	}
 
@@ -277,9 +277,8 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				continue
 			}
 			if tempData.RowNum() > 0 && tempData.RowNum() != rowNum {
-				return merr.WrapErrImportFailed(
-					fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, other fields with '%d' rows",
-						field.GetName(), tempData.RowNum(), rowNum))
+				return merr.WrapErrImportFailedMsg("imported rows are not aligned, field '%s' with '%d' rows, other fields with '%d' rows",
+					field.GetName(), tempData.RowNum(), rowNum)
 			}
 		}
 
@@ -393,7 +392,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				}
 			}
 		default:
-			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
+			return merr.WrapErrImportFailedMsg("Unexpected data type: %d, cannot be filled with default value", dataType)
 		}
 
 		if err != nil {
@@ -535,7 +534,7 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 					},
 				}
 			default:
-				return fmt.Errorf("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
+				return merr.WrapErrImportFailedMsg("unsupported output data type for embedding function: %s", outputField.GetDataType().String())
 			}
 		}
 	}

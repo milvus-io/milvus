@@ -3,9 +3,8 @@ package walimpls
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // OpenOption is the option for allocating wal impls instance.
@@ -16,13 +15,13 @@ type OpenOption struct {
 // Validate validates the OpenOption.
 func (oo OpenOption) Validate() error {
 	if oo.Channel.Name == "" {
-		return errors.New("channel name is empty")
+		return merr.WrapErrServiceInternalMsg("channel name is empty")
 	}
 	if oo.Channel.Term < 0 {
-		return errors.New("channel term is negative")
+		return merr.WrapErrServiceInternalMsg("channel term is negative")
 	}
 	if oo.Channel.AccessMode != types.AccessModeRO && oo.Channel.AccessMode != types.AccessModeRW {
-		return errors.New("undefined access mode")
+		return merr.WrapErrServiceInternalMsg("undefined access mode")
 	}
 	return nil
 }

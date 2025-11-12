@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -394,7 +393,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("delegator received search request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrServiceInternalMsg("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -517,14 +516,14 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	log := sd.getLogger(ctx)
 	if !sd.Serviceable() {
-		return errors.New("delegator is not serviceable")
+		return merr.WrapErrServiceInternalMsg("delegator is not serviceable")
 	}
 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		log.Warn("deletgator received query request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return merr.WrapErrServiceInternalMsg("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -600,7 +599,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		log.Warn("delegator received query request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrServiceInternalMsg("dml channel not match, delegator channel %s, search channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -712,7 +711,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		log.Warn("delegator received GetStatistics request not belongs to it",
 			zap.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, fmt.Errorf("dml channel not match, delegator channel %s, GetStatistics channels %v", sd.vchannelName, req.GetDmlChannels())
+		return nil, merr.WrapErrServiceInternalMsg("dml channel not match, delegator channel %s, GetStatistics channels %v", sd.vchannelName, req.GetDmlChannels())
 	}
 
 	// wait tsafe
@@ -850,11 +849,11 @@ func executeSubTasks[T any, R interface {
 				} else {
 					segments = []int64{}
 				}
-				err = fmt.Errorf("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+				err = merr.WrapErrServiceInternalMsg("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
 			} else {
 				result, err = execute(ctx, task.req, task.worker)
 				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-					err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+					err = merr.WrapErrServiceInternalMsg("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
 				}
 			}
 
@@ -985,7 +984,8 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 			zap.Duration("lag", lag),
 			zap.Duration("maxTsLag", maxLag),
 		)
-		return 0, WrapErrTsLagTooLarge(lag, maxLag)
+
+		return 0, merr.WrapErrServiceInternalMsg("Timestamp lag too large, lag(%v) max(%v)", lag, maxLag)
 	}
 
 	ch := make(chan struct{})
@@ -1236,7 +1236,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 
 	collection := manager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, fmt.Errorf("collection(%d) not found in manager", collectionID)
+		return nil, merr.WrapErrServiceInternalMsg("collection(%d) not found in manager", collectionID)
 	}
 
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
@@ -1323,7 +1323,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	analyzer, ok := sd.analyzerRunners[req.GetFieldId()]
 	if !ok {
-		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25/minhash input field", req.GetFieldId())
+		return nil, merr.WrapErrServiceInternalMsg("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25 input field", req.GetFieldId())
 	}
 
 	var result [][]*milvuspb.AnalyzerToken
@@ -1337,7 +1337,7 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 	} else {
 		analyzerNames := req.GetAnalyzerNames()
 		if len(analyzerNames) == 0 {
-			return nil, merr.WrapErrAsInputError(fmt.Errorf("analyzer names must be set for multi analyzer"))
+			return nil, merr.WrapErrParameterInvalidMsg("analyzer names must be set for multi analyzer")
 		}
 
 		if len(analyzerNames) == 1 && len(texts) > 1 {

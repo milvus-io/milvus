@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -215,7 +216,7 @@ func JSONToMap(mStr string) (map[string]string, error) {
 	buffer := make(map[string]any)
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal params failed, %w", err)
+		return nil, merr.WrapErrSerializationFailed(err, "unmarshal params failed")
 	}
 	ret := make(map[string]string)
 	for key, value := range buffer {
@@ -238,7 +239,7 @@ func JSONToRoleDetails(mStr string) (map[string](map[string]([](map[string]strin
 	buffer := make(map[string](map[string]([](map[string]string))), 0)
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal `builtinRoles.Roles` failed, %w", err)
+		return nil, merr.WrapErrSerializationFailed(err, "unmarshal `builtinRoles.Roles` failed")
 	}
 	ret := make(map[string](map[string]([](map[string]string))), 0)
 	for role, privilegesJSON := range buffer {
@@ -262,11 +263,6 @@ func RoleDetailsToJSON(m map[string](map[string]([](map[string]string)))) []byte
 	return bs
 }
 
-const (
-	// PulsarMaxMessageSizeKey is the key of config item
-	PulsarMaxMessageSizeKey = "maxMessageSize"
-)
-
 // GetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
 func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, error) {
 	for _, kv := range kvs {
@@ -275,7 +271,7 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 		}
 	}
 
-	return "", fmt.Errorf("key %s not found", key)
+	return "", merr.WrapErrParameterInvalidMsg("key %s not found", key)
 }
 
 // TryGetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
@@ -334,19 +330,6 @@ func KeyValuePair2Map(datas []*commonpb.KeyValuePair) map[string]string {
 	}
 
 	return results
-}
-
-func ConvertToKeyValuePairPointer(datas []commonpb.KeyValuePair) []*commonpb.KeyValuePair {
-	var kvs []*commonpb.KeyValuePair
-	for i := 0; i < len(datas); i++ {
-		kvs = append(kvs, &datas[i])
-	}
-	return kvs
-}
-
-// GenChannelSubName generate subName to watch channel
-func GenChannelSubName(prefix string, collectionID int64, nodeID int64) string {
-	return fmt.Sprintf("%s-%d-%d", prefix, collectionID, nodeID)
 }
 
 // CheckPortAvailable check if a port is available to be listened on
@@ -410,17 +393,6 @@ func GetVirtualChannel(pchannel string, collectionID int64, idx int) string {
 	return fmt.Sprintf("%s_%dv%d", pchannel, collectionID, idx)
 }
 
-// ConvertChannelName assembles channel name according to parameters.
-func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
-	if tokenFrom == "" {
-		return "", errors.New("the tokenFrom is empty")
-	}
-	if !strings.Contains(chanName, tokenFrom) {
-		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
-	}
-	return strings.Replace(chanName, tokenFrom, tokenTo, 1), nil
-}
-
 func GetCollectionIDFromVChannel(vChannelName string) int64 {
 	re := regexp.MustCompile(`.*_(\d+)v\d+`)
 	matches := re.FindStringSubmatch(vChannelName)
@@ -445,58 +417,58 @@ func getNumRowsOfArrayVectorField(datas interface{}) uint64 {
 
 func GetNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(fDatas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of float data should divide the dim(%d)", l, dim)
 	}
 	return uint64(int64(l) / dim), nil
 }
 
 func GetNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	if dim%8 != 0 {
-		return 0, fmt.Errorf("dim(%d) should divide 8", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should divide 8", dim)
 	}
 	l := len(bDatas)
 	if (8*int64(l))%dim != 0 {
-		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
 	}
 	return uint64((8 * int64(l)) / dim), nil
 }
 
 func GetNumRowsOfFloat16VectorField(f16Datas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(f16Datas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float16 data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of float16 data should divide the dim(%d)", l, dim)
 	}
 	return uint64((int64(l)) / dim / 2), nil
 }
 
 func GetNumRowsOfBFloat16VectorField(bf16Datas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(bf16Datas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of bfloat data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of bfloat data should divide the dim(%d)", l, dim)
 	}
 	return uint64((int64(l)) / dim / 2), nil
 }
 
 func GetNumRowsOfInt8VectorField(iDatas []byte, dim int64) (uint64, error) {
 	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+		return 0, merr.WrapErrParameterInvalidMsg("dim(%d) should be greater than 0", dim)
 	}
 	l := len(iDatas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of int8 data should divide the dim(%d)", l, dim)
+		return 0, merr.WrapErrParameterInvalidMsg("the length(%d) of int8 data should divide the dim(%d)", l, dim)
 	}
 	return uint64(int64(l) / dim), nil
 }
@@ -599,7 +571,7 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 		}
 	default:
-		return 0, fmt.Errorf("%s is not supported now", fieldSchema.GetDataType())
+		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldSchema.GetDataType())
 	}
 
 	return fieldNumRows, nil
@@ -634,7 +606,7 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.ScalarField_GeometryData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetGeometryData().Data)
 		default:
-			return 0, fmt.Errorf("%s is not supported now", scalarType)
+			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", scalarType)
 		}
 	case *schemapb.FieldData_Vectors:
 		if len(fieldData.GetValidData()) > 0 {
@@ -677,10 +649,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.VectorField_VectorArray:
 			fieldNumRows = getNumRowsOfArrayVectorField(vectorField.GetVectorArray().Data)
 		default:
-			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
+			return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", vectorFieldType)
 		}
 	default:
-		return 0, fmt.Errorf("%s is not supported now", fieldType)
+		return 0, merr.WrapErrParameterInvalidMsg("%s is not supported now", fieldType)
 	}
 
 	return fieldNumRows, nil
@@ -737,7 +709,7 @@ func EncodeUserRoleCache(user string, role string) string {
 func DecodeUserRoleCache(cache string) (string, string, error) {
 	index := strings.LastIndex(cache, "/")
 	if index == -1 {
-		return "", "", fmt.Errorf("invalid param, cache: [%s]", cache)
+		return "", "", merr.WrapErrParameterInvalidMsg("invalid param, cache: [%s]", cache)
 	}
 	user := cache[:index]
 	role := cache[index+1:]

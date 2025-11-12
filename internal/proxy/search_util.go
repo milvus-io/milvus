@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
@@ -332,20 +331,18 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 
 	// iteratorV1 and iteratorV2 should be set together for compatibility
 	if !isIterator {
-		return nil, fmt.Errorf("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
+		return nil, merr.WrapErrParameterMissingMsg("both %s and %s must be set in the SDK", IteratorField, SearchIterV2Key)
 	}
 
 	// disable groupBy when doing iteratorV2
 	// same behavior with V1
 	if isIteratorV2 && groupByFieldId > 0 {
-		return nil, merr.WrapErrParameterInvalid("", "",
-			"GroupBy is not permitted when using a search iterator")
+		return nil, merr.WrapErrParameterInvalidMsg("GroupBy is not permitted when using a search iterator")
 	}
 
 	// disable offset when doing iteratorV2
 	if isIteratorV2 && offset > 0 {
-		return nil, merr.WrapErrParameterInvalid("", "",
-			"Setting an offset is not permitted when using a search iterator v2")
+		return nil, merr.WrapErrParameterInvalidMsg("Setting an offset is not permitted when using a search iterator v2")
 	}
 
 	// parse token, generate if not exist
@@ -359,22 +356,22 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	} else {
 		// Validate existing token is a valid UUID
 		if _, err := uuid.Parse(token); err != nil {
-			return nil, errors.New("invalid token format")
+			return nil, merr.WrapErrParameterInvalidMsg("invalid token format")
 		}
 	}
 
 	// parse batch size, required non-zero value
 	batchSizeStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterBatchSizeKey, searchParamsPair)
 	if batchSizeStr == "" {
-		return nil, errors.New("batch size is required")
+		return nil, merr.WrapErrParameterInvalidMsg("batch size is required")
 	}
 	batchSize, err := strconv.ParseInt(batchSizeStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("batch size is invalid, %w", err)
+		return nil, merr.WrapErrParameterInvalidErr(err, "batch size is invalid")
 	}
 	// use the same validation logic as topk
 	if err := validateLimit(batchSize); err != nil {
-		return nil, fmt.Errorf("batch size is invalid, %w", err)
+		return nil, merr.WrapErrParameterInvalidErr(err, "batch size is invalid")
 	}
 	*queryTopK = batchSize // for compatibility
 
@@ -389,7 +386,7 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 	if lastBoundStr != "" {
 		lastBound, err := strconv.ParseFloat(lastBoundStr, 32)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse input last bound, %w", err)
+			return nil, merr.WrapErrParameterInvalidErr(err, "failed to parse input last bound")
 		}
 		lastBoundFloat32 := float32(lastBound)
 		planIteratorV2Info.LastBound = &lastBoundFloat32 // escape pointer
@@ -406,14 +403,14 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		if externalLimit <= 0 {
-			return nil, fmt.Errorf("%s is required", TopKKey)
+			return nil, merr.WrapErrParameterMissingMsg("%s is required", TopKKey)
 		}
 		topK = externalLimit
 	} else {
 		topKInParam, err := strconv.ParseInt(topKStr, 0, 64)
 		if err != nil {
 			if externalLimit <= 0 {
-				return nil, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+				return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", TopKKey, topKStr)
 			}
 			topK = externalLimit
 		} else {
@@ -433,7 +430,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			// 2. GetAsInt64 has cached inside, no need to worry about cpu cost for parsing here
 			topK = Params.QuotaConfig.TopKLimit.GetAsInt64()
 		} else {
-			return nil, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
+			return nil, merr.WrapErrParameterInvalidErr(err, "%s [%d] is invalid", TopKKey, topK)
 		}
 	}
 
@@ -444,12 +441,12 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if err == nil {
 			offset, err = strconv.ParseInt(offsetStr, 0, 64)
 			if err != nil {
-				return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+				return nil, merr.WrapErrParameterInvalidErr(err, "%s [%s] is invalid", OffsetKey, offsetStr)
 			}
 
 			if offset != 0 {
 				if err := validateLimit(offset); err != nil {
-					return nil, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+					return nil, merr.WrapErrParameterInvalidErr(err, "%s [%d] is invalid", OffsetKey, offset)
 				}
 			}
 		}
@@ -457,7 +454,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	queryTopK := topK + offset
 	if err := validateLimit(queryTopK); err != nil {
-		return nil, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
+		return nil, merr.WrapErrParameterInvalidErr(err, "%s+%s [%d] is invalid", OffsetKey, TopKKey, queryTopK)
 	}
 
 	// 2. parse metrics type
@@ -479,11 +476,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidErr(err, "%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidErr(err, "%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	// 4. parse search param str
@@ -510,7 +507,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		if jsonPath != "" {
 			jsonPath, err = typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, groupByFieldId)
 			if err != nil {
-				return nil, err
+				return nil, merr.WrapErrParameterInvalidErr(err, "parse nested path '%s' failed", jsonPath)
 			}
 		}
 	}
@@ -527,7 +524,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 
 	planSearchIteratorV2Info, err := parseSearchIteratorV2Info(searchParamsPair, groupByFieldId, isIterator, offset, &queryTopK)
 	if err != nil {
-		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
+		return nil, merr.WrapErrParameterInvalidErr(err, "parse iterator v2 info failed")
 	}
 
 	// 7. check search for embedding list
@@ -591,7 +588,7 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 	for _, name := range outputFields {
 		id, ok := schema.MapFieldID(name)
 		if !ok {
-			return nil, fmt.Errorf("Field %s not exist", name)
+			return nil, merr.WrapErrParameterInvalidMsg("Field %s not exist", name)
 		}
 		outputFieldIDs = append(outputFieldIDs, id)
 	}
@@ -653,7 +650,7 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 			pattern := fmt.Sprintf("^%s$", partitionName)
 			re, err := regexp.Compile(pattern)
 			if err != nil {
-				return nil, fmt.Errorf("invalid partition: %s", partitionName)
+				return nil, merr.WrapErrParameterInvalidErr(err, "invalid partition: %s", partitionName)
 			}
 			var found bool
 			for name, pID := range partitionsMap {
@@ -663,13 +660,13 @@ func getPartitionIDs(ctx context.Context, dbName string, collectionName string, 
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("partition name %s not found", partitionName)
+				return nil, merr.WrapErrParameterInvalidMsg("partition name %s not found", partitionName)
 			}
 		} else {
 			partitionID, found := partitionsMap[partitionName]
 			if !found {
 				// TODO change after testcase updated: return nil, merr.WrapErrPartitionNotFound(partitionName)
-				return nil, fmt.Errorf("partition name %s not found", partitionName)
+				return nil, merr.WrapErrParameterInvalidMsg("partition name %s not found", partitionName)
 			}
 			partitionsSet.Insert(partitionID)
 		}
@@ -822,17 +819,14 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 	} else {
 		groupSize, err = strconv.ParseInt(groupSizeStr, 0, 64)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				fmt.Sprintf("failed to parse input group size:%s", groupSizeStr))
+			return nil, merr.WrapErrParameterInvalidMsg("failed to parse input group size:%s", groupSizeStr)
 		}
 		if groupSize <= 0 {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				fmt.Sprintf("input group size:%d is negative, failed to do search_groupby", groupSize))
+			return nil, merr.WrapErrParameterInvalidMsg("input group size:%d is negative, failed to do search_groupby", groupSize)
 		}
 	}
 	if groupSize > Params.QuotaConfig.MaxGroupSize.GetAsInt64() {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			fmt.Sprintf("input group size:%d exceeds configured max group size:%d", groupSize, Params.QuotaConfig.MaxGroupSize.GetAsInt64()))
+		return nil, merr.WrapErrParameterInvalidMsg("input group size:%d exceeds configured max group size:%d", groupSize, Params.QuotaConfig.MaxGroupSize.GetAsInt64())
 	}
 	ret.groupSize = groupSize
 
@@ -889,24 +883,24 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, rankParamsPair)
 	if err != nil {
-		return nil, errors.New(LimitKey + " not found in rank_params")
+		return nil, merr.WrapErrParameterMissingMsg("%s not found in rank_params", LimitKey)
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", LimitKey, limitStr)
 	}
 
 	offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, rankParamsPair)
 	if err == nil {
 		offset, err = strconv.ParseInt(offsetStr, 0, 64)
 		if err != nil {
-			return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+			return nil, merr.WrapErrParameterInvalidErr(err, "%s [%s] is invalid", OffsetKey, offsetStr)
 		}
 	}
 
 	// validate max result window.
 	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
-		return nil, fmt.Errorf("invalid max query result window, %w", err)
+		return nil, merr.WrapErrParameterInvalidErr(err, "invalid max query result window")
 	}
 
 	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, rankParamsPair)
@@ -916,11 +910,11 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 
 	roundDecimal, err = strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidErr(err, "%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
+		return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	// parse group_by parameters from main request body for hybrid search

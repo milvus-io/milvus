@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -107,7 +108,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 	defer broadcaster.Close()
 
 	if err := c.meta.CheckIfOperateUserRole(ctx, in); err != nil {
-		return errors.Wrap(err, "failed to check if operate user role")
+		return merr.Wrap(err, "failed to check if operate user role")
 	}
 
 	var msg message.BroadcastMutableMessage
@@ -135,7 +136,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
-		return errors.New("invalid operate user role type")
+		return merr.WrapErrRbacMsg("invalid operate user role type")
 	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

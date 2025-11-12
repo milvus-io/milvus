@@ -2,15 +2,13 @@ package timestamptz
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"time"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // Define max/min offset boundaries in seconds for validation, exported for external checks if necessary.
@@ -40,7 +38,7 @@ func validateOffset(t time.Time) (time.Time, error) {
 	_, offsetSeconds := t.Zone()
 	if offsetSeconds > MaxOffsetSeconds || offsetSeconds < MinOffsetSeconds {
 		offsetHours := offsetSeconds / 3600
-		return time.Time{}, fmt.Errorf("UTC offset hour %d is out of the valid range [%d, %d]",
+		return time.Time{}, merr.WrapErrParameterInvalidMsg("UTC offset hour %d is out of the valid range [%d, %d]",
 			offsetHours, MinOffsetSeconds/3600, MaxOffsetSeconds/3600)
 	}
 	return t, nil
@@ -73,7 +71,7 @@ func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) 
 
 	loc, err := time.LoadLocation(defaultTimezoneStr)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid default timezone string '%s': %w", defaultTimezoneStr, err)
+		return time.Time{}, merr.WrapErrParameterInvalidErr(err, "invalid default timezone string '%s'", defaultTimezoneStr)
 	}
 
 	// 4. Fallback parsing: Attempt to parse a naive string using NaiveTzLayouts
@@ -89,7 +87,7 @@ func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) 
 	}
 
 	if !parsed {
-		return time.Time{}, fmt.Errorf("invalid timestamp string: '%s'. Does not match any known format", inputStr)
+		return time.Time{}, merr.WrapErrParameterInvalidMsg("invalid timestamp string: '%s'. Does not match any known format", inputStr)
 	}
 
 	// No offset validation needed here: The time was assigned the safe defaultTimezoneStr (loc),
@@ -132,13 +130,13 @@ func CompareUnixMicroTz(ts1 string, ts2 string, defaultTimezoneStr string) (bool
 	// 1. Parse the first timestamp
 	t1, err := ParseTimeTz(ts1, defaultTimezoneStr)
 	if err != nil {
-		return false, fmt.Errorf("error parsing first timestamp '%s': %w", ts1, err)
+		return false, merr.WrapErrServiceInternalErr(err, "error parsing first timestamp '%s'", ts1)
 	}
 
 	// 2. Parse the second timestamp
 	t2, err := ParseTimeTz(ts2, defaultTimezoneStr)
 	if err != nil {
-		return false, fmt.Errorf("error parsing second timestamp '%s': %w", ts2, err)
+		return false, merr.WrapErrServiceInternalErr(err, "error parsing second timestamp '%s'", ts2)
 	}
 
 	// 3. Compare their Unix Microsecond values (int64)
@@ -151,7 +149,7 @@ func CompareUnixMicroTz(ts1 string, ts2 string, defaultTimezoneStr string) (bool
 func ConvertUnixMicroToTimezoneString(ts int64, targetTimezoneStr string) (string, error) {
 	loc, err := time.LoadLocation(targetTimezoneStr)
 	if err != nil {
-		return "", fmt.Errorf("invalid target timezone string '%s': %w", targetTimezoneStr, err)
+		return "", merr.WrapErrParameterInvalidErr(err, "invalid target timezone string '%s'", targetTimezoneStr)
 	}
 
 	// 1. Convert Unix Microsecond (UTC) to a time.Time object (still in UTC).
@@ -390,8 +388,7 @@ func RewriteTimestampTzDefaultValueToString(schema *schemapb.CollectionSchema) e
 		if err != nil {
 			// In a real system, you might log the error and use the raw int64 as a fallback string,
 			// but here we'll set a placeholder string to avoid crashing.
-			tzString = fmt.Sprintf("error converting timestamp: %v", err)
-			return errors.Wrap(err, tzString)
+			return merr.WrapErrServiceInternalErr(err, "error converting timestamp")
 		}
 
 		// 5. Rewrite the default value field in the response schema.
