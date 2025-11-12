@@ -186,8 +186,7 @@ ChunkTranslator::get_cells(
             // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
             auto filepath =
                 std::filesystem::path(mmap_dir_path_) /
-                fmt::format(
-                    "seg_{}_fid_{}_cid_{}", segment_id_, field_id_, cid);
+                fmt::format("seg_{}_fid_{}_{}", segment_id_, field_id_, cid);
             std::filesystem::create_directories(
                 std::filesystem::path(mmap_dir_path_));
 
