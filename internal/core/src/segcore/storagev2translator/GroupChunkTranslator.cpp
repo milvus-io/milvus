@@ -45,6 +45,7 @@ namespace milvus::segcore::storagev2translator {
 
 GroupChunkTranslator::GroupChunkTranslator(
     int64_t segment_id,
+    GroupChunkType group_chunk_type,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
@@ -52,7 +53,23 @@ GroupChunkTranslator::GroupChunkTranslator(
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
-      key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
+      group_chunk_type_(group_chunk_type),
+      key_([&]() {
+          switch (group_chunk_type) {
+              case GroupChunkType::DEFAULT:
+                  return fmt::format(
+                      "seg_{}_cg_{}", segment_id, column_group_info.field_id);
+              case GroupChunkType::JSON_KEY_STATS:
+                  AssertInfo(
+                      column_group_info.main_field_id != INVALID_FIELD_ID,
+                      "main field id is not set for json key stats group "
+                      "chunk");
+                  return fmt::format("seg_{}_jks_{}_cg_{}",
+                                     segment_id,
+                                     column_group_info.main_field_id,
+                                     column_group_info.field_id);
+          }
+      }()),
       field_metas_(field_metas),
       column_group_info_(column_group_info),
       insert_files_(insert_files),
@@ -337,11 +354,29 @@ GroupChunkTranslator::load_group_chunk(
         chunks = create_group_chunk(field_ids, field_metas, array_vecs);
     } else {
         std::filesystem::path filepath;
-        filepath = std::filesystem::path(column_group_info_.mmap_dir_path) /
-                   fmt::format("seg_{}_cg_{}_cid_{}",
-                               segment_id_,
-                               column_group_info_.field_id,
-                               cid);
+        switch (group_chunk_type_) {
+            case GroupChunkType::DEFAULT:
+                filepath =
+                    std::filesystem::path(column_group_info_.mmap_dir_path) /
+                    fmt::format("seg_{}_cg_{}_{}",
+                                segment_id_,
+                                column_group_info_.field_id,
+                                cid);
+                break;
+            case GroupChunkType::JSON_KEY_STATS:
+                filepath =
+                    std::filesystem::path(column_group_info_.mmap_dir_path) /
+                    fmt::format("seg_{}_jks_{}_cg_{}_{}",
+                                segment_id_,
+                                column_group_info_.main_field_id,
+                                column_group_info_.field_id,
+                                cid);
+                break;
+            default:
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "unknown group chunk type: {}",
+                          static_cast<uint8_t>(group_chunk_type_));
+        }
         std::filesystem::create_directories(filepath.parent_path());
         chunks = create_group_chunk(
             field_ids, field_metas, array_vecs, filepath.string());

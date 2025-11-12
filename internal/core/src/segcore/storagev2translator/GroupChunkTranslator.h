@@ -38,6 +38,7 @@ class GroupChunkTranslator
  public:
     GroupChunkTranslator(
         int64_t segment_id,
+        GroupChunkType group_chunk_type,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         FieldDataInfo column_group_info,
         std::vector<std::string> insert_files,
@@ -108,6 +109,7 @@ class GroupChunkTranslator
                      const milvus::cachinglayer::cid_t cid);
 
     int64_t segment_id_;
+    GroupChunkType group_chunk_type_{GroupChunkType::DEFAULT};
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     FieldDataInfo column_group_info_;
