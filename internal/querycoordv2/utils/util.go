@@ -223,34 +223,6 @@ func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.
 	return nil
 }
 
-func filterDupLeaders(ctx context.Context, replicaManager *meta.ReplicaManager, leaders map[int64]*meta.LeaderView) map[int64]*meta.LeaderView {
-	type leaderID struct {
-		ReplicaID int64
-		Shard     string
-	}
-
-	newLeaders := make(map[leaderID]*meta.LeaderView)
-	for _, view := range leaders {
-		replica := replicaManager.GetByCollectionAndNode(ctx, view.CollectionID, view.ID)
-		if replica == nil {
-			continue
-		}
-
-		id := leaderID{replica.GetID(), view.Channel}
-		if old, ok := newLeaders[id]; ok && old.Version > view.Version {
-			continue
-		}
-
-		newLeaders[id] = view
-	}
-
-	result := make(map[int64]*meta.LeaderView)
-	for _, v := range newLeaders {
-		result[v.ID] = v
-	}
-	return result
-}
-
 // GetChannelRWAndRONodesFor260 gets the RW and RO nodes of the channel.
 func GetChannelRWAndRONodesFor260(replica *meta.Replica, nodeManager *session.NodeManager) ([]int64, []int64) {
 	rwNodes, roNodes := replica.GetRWSQNodes(), replica.GetROSQNodes()
