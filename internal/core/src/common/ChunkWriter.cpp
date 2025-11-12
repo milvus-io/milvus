@@ -72,8 +72,11 @@ StringChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
     write_null_bit_maps(null_bitmaps, target);
 
     // write data
-    int offset_num = row_nums_ + 1;
-    uint32_t offset_start_pos = sizeof(uint32_t) * offset_num;
+    const int offset_num = row_nums_ + 1;
+    const uint32_t null_bitmap_bytes =
+        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
+    uint32_t offset_start_pos =
+        null_bitmap_bytes + sizeof(uint32_t) * offset_num;
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
     for (const auto& str : strs) {
@@ -137,8 +140,11 @@ JSONChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
     // write null bitmaps
     write_null_bit_maps(null_bitmaps, target);
 
-    int offset_num = row_nums_ + 1;
-    uint32_t offset_start_pos = sizeof(uint32_t) * offset_num;
+    const int offset_num = row_nums_ + 1;
+    const uint32_t null_bitmap_bytes =
+        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
+    uint32_t offset_start_pos =
+        null_bitmap_bytes + sizeof(uint32_t) * offset_num;
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
     for (const auto& json : jsons) {
@@ -201,7 +207,10 @@ GeometryChunkWriter::write_to_target(
     write_null_bit_maps(null_bitmaps, target);
 
     const int offset_num = row_nums_ + 1;
+    const uint32_t null_bitmap_bytes =
+        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
     uint32_t offset_start_pos =
+        null_bitmap_bytes +
         static_cast<uint32_t>(sizeof(uint32_t) * offset_num);
     std::vector<uint32_t> offsets;
     offsets.reserve(offset_num);
@@ -275,7 +284,10 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 
     const int offsets_num = row_nums_ + 1;
     const int len_num = row_nums_;
-    uint32_t offset_start_pos = sizeof(uint32_t) * (offsets_num + len_num);
+    const uint32_t null_bitmap_bytes =
+        nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0;
+    uint32_t offset_start_pos =
+        null_bitmap_bytes + sizeof(uint32_t) * (offsets_num + len_num);
 
     std::vector<uint32_t> offsets(offsets_num);
     std::vector<uint32_t> lens(len_num);
@@ -451,7 +463,10 @@ SparseFloatVectorChunkWriter::write_to_target(
     write_null_bit_maps(null_bitmaps, target);
 
     const int offset_num = row_nums_ + 1;
-    uint64_t offset_start_pos = sizeof(uint64_t) * offset_num;
+    const uint64_t null_bitmap_bytes =
+        nullable_ ? static_cast<uint64_t>((row_nums_ + 7) / 8) : 0;
+    uint64_t offset_start_pos =
+        null_bitmap_bytes + sizeof(uint64_t) * offset_num;
     std::vector<uint64_t> offsets;
     offsets.reserve(offset_num);
 
