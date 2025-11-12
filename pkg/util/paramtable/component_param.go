@@ -1786,6 +1786,8 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	OptimizeExpr ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -2292,6 +2294,15 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.QueryNodePoolingSize.Init(base.mgr)
+
+	p.OptimizeExpr = ParamItem{
+		Key:          "proxy.optimizeExpr",
+		Version:      "2.6.6",
+		DefaultValue: "true",
+		Doc:          `Enable query expression optimization including range simplification, IN/NOT IN merge, etc.`,
+		Export:       true,
+	}
+	p.OptimizeExpr.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
