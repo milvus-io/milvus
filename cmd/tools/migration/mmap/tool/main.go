@@ -75,7 +75,8 @@ func prepareTsoAllocator() tso.Allocator {
 			etcdConfig.EtcdTLSCert.GetValue(),
 			etcdConfig.EtcdTLSKey.GetValue(),
 			etcdConfig.EtcdTLSCACert.GetValue(),
-			etcdConfig.EtcdTLSMinVersion.GetValue())
+			etcdConfig.EtcdTLSMinVersion.GetValue(),
+			etcdConfig.ClientOptions()...)
 		if err != nil {
 			panic(err)
 		}
@@ -109,7 +110,8 @@ func metaKVCreator() (kv.MetaKv, error) {
 		etcdConfig.EtcdTLSCert.GetValue(),
 		etcdConfig.EtcdTLSKey.GetValue(),
 		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+		etcdConfig.EtcdTLSMinVersion.GetValue(),
+		etcdConfig.ClientOptions()...)
 	if err != nil {
 		panic(err)
 	}
