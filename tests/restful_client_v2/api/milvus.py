@@ -92,17 +92,16 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
 
 class Requests():
     uuid = str(uuid.uuid1())
-    api_key = None
 
     def __init__(self, url=None, api_key=None):
         self.url = url
         self.api_key = api_key
-        if self.uuid is None:
-            self.uuid = str(uuid.uuid1())
+        if self.__class__.uuid is None:
+            self.__class__.uuid = str(uuid.uuid1())
         self.headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.api_key}',
-            'RequestId': self.uuid,
+            'RequestId': self.__class__.uuid,
             "Request-Timeout": REQUEST_TIMEOUT
         }
 
@@ -110,12 +109,11 @@ class Requests():
     def update_uuid(cls, _uuid):
         cls.uuid = _uuid
 
-    @classmethod
-    def update_headers(cls):
+    def update_headers(self):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid,
+            'Authorization': f'Bearer {self.api_key}',
+            'RequestId': self.__class__.uuid,
             "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
@@ -183,13 +181,12 @@ class VectorClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    @classmethod
-    def update_headers(cls):
+    def update_headers(self):
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
+            'Authorization': f'Bearer {self.api_key}',
             'Accept-Type-Allow-Int64': "true",
-            'RequestId': cls.uuid,
+            'RequestId': self.__class__.uuid,
             "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
@@ -352,14 +349,13 @@ class CollectionClient(Requests):
             else:
                 time.sleep(1)
 
-    @classmethod
-    def update_headers(cls, headers=None):
+    def update_headers(self, headers=None):
         if headers is not None:
             return headers
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid,
+            'Authorization': f'Bearer {self.api_key}',
+            'RequestId': self.__class__.uuid,
             "Request-Timeout": REQUEST_TIMEOUT
         }
         return headers
@@ -613,16 +609,6 @@ class PartitionClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
-        }
-        return headers
-
     def partition_list(self, db_name="default", collection_name=None):
         url = f'{self.endpoint}/v2/vectordb/partitions/list'
         data = {
@@ -730,15 +716,6 @@ class UserClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
-        }
-        return headers
-
     def user_list(self):
         url = f'{self.endpoint}/v2/vectordb/users/list'
         response = self.post(url, headers=self.update_headers())
@@ -795,15 +772,6 @@ class RoleClient(Requests):
         self.headers = self.update_headers()
         self.role_names = []
 
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
-        }
-        return headers
-
     def role_list(self):
         url = f'{self.endpoint}/v2/vectordb/roles/list'
         response = self.post(url, headers=self.update_headers())
@@ -854,16 +822,6 @@ class IndexClient(Requests):
         self.api_key = token
         self.db_name = None
         self.headers = self.update_headers()
-
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
-        }
-        return headers
 
     def index_create(self, payload, db_name="default"):
         url = f'{self.endpoint}/v2/vectordb/indexes/create'
@@ -948,15 +906,6 @@ class AliasClient(Requests):
         self.db_name = None
         self.headers = self.update_headers()
 
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid
-        }
-        return headers
-
     def list_alias(self):
         url = f'{self.endpoint}/v2/vectordb/aliases/list'
         response = self.post(url, headers=self.update_headers())
@@ -999,16 +948,6 @@ class ImportJobClient(Requests):
         self.api_key = token
         self.db_name = None
         self.headers = self.update_headers()
-
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}',
-            'RequestId': cls.uuid,
-            "Request-Timeout": REQUEST_TIMEOUT
-        }
-        return headers
 
     def list_import_jobs(self, payload, db_name="default"):
         if self.db_name is not None:
@@ -1068,14 +1007,6 @@ class DatabaseClient(Requests):
         self.headers = self.update_headers()
         self.db_name = None
         self.db_names = []  # Track created databases
-
-    @classmethod
-    def update_headers(cls):
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {cls.api_key}'
-        }
-        return headers
 
     def database_create(self, payload):
         """Create a database"""

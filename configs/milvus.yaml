@@ -970,7 +970,7 @@ common:
         readwrite:
           privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
         admin:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup # Cluster level admin privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup,UpdateReplicateConfiguration # Cluster level admin privileges
       database:
         readonly:
           privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
@@ -988,7 +988,7 @@ common:
     internaltlsEnabled: false
     tlsMode: 0
   session:
-    ttl: 10 # ttl value when session granting a lease to register service
+    ttl: 30 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
   locks:
     metrics:

@@ -191,6 +191,46 @@ func (s *ReadSuite) TestSearch() {
 	})
 }
 
+// TestSearch_TextMatch tests the text match search functionality.
+// It tests the minimum_should_match parameter in the expression.
+func (s *ReadSuite) TestSearch_TextMatch() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("min_should_match_in_expr", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collectionName, s.schema)
+
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			// ensure the expression contains minimum_should_match and both fields
+			s.Contains(sr.GetDsl(), "minimum_should_match=2")
+			s.Contains(sr.GetDsl(), "text_match(")
+			return &milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					FieldsData: []*schemapb.FieldData{
+						s.getInt64FieldData("ID", []int64{1}),
+					},
+					Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+					Scores: []float32{0.1},
+					Topks:  []int64{1},
+				},
+			}, nil
+		}).Once()
+
+		q := "artificial intelligence"
+		expr := "text_match(title, \"" + q + "\", minimum_should_match=2) OR text_match(document_text, \"" + q + "\", minimum_should_match=2)"
+		vectors := []entity.Vector{entity.Text(q)}
+		_, err := s.client.Search(ctx, NewSearchOption(collectionName, 5, vectors).
+			WithANNSField("text_sparse_vector").
+			WithFilter(expr).
+			WithOutputFields("ID"))
+		s.NoError(err)
+	})
+}
+
 func (s *ReadSuite) TestHybridSearch() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
