@@ -2117,8 +2117,8 @@ func (m *meta) SaveStatsResultSegment(oldSegmentID int64, result *workerpb.Stats
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]int)}
 
 	oldSegment := m.segments.GetSegment(oldSegmentID)
-	if oldSegment == nil {
-		log.Warn("old segment is not found with stats task")
+	if oldSegment == nil || !isSegmentHealthy(oldSegment) {
+		log.Warn("old segment is not found or not healthy with stats task")
 		return nil, merr.WrapErrSegmentNotFound(oldSegmentID)
 	}
 
