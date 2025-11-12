@@ -215,11 +215,10 @@ func TestEmbeddingFailed(t *testing.T) {
 	}
 }
 
-func TestTimeout(t *testing.T) {
+func TestTimeoutAndRetry(t *testing.T) {
 	var st int32 = 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// (Timeout 1s + 2s + 4s + Wait 1s * 3)
-		time.Sleep(11 * time.Second)
+		time.Sleep(2 * time.Second)
 		atomic.AddInt32(&st, 1)
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -235,7 +234,7 @@ func TestTimeout(t *testing.T) {
 		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)
 		assert.True(t, err != nil)
 		assert.Equal(t, atomic.LoadInt32(&st), int32(0))
-		time.Sleep(3 * time.Second)
+		time.Sleep(2 * time.Second)
 		assert.Equal(t, atomic.LoadInt32(&st), int32(1))
 	}
 
@@ -244,10 +243,8 @@ func TestTimeout(t *testing.T) {
 		c := NewAzureOpenAIEmbeddingClient("mock_key", url)
 		err := c.Check()
 		assert.True(t, err == nil)
-		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 1)
+		_, err = c.Embedding("text-embedding-3-small", []string{"sentence"}, 0, "", 14)
 		assert.True(t, err != nil)
-		assert.Equal(t, atomic.LoadInt32(&st), int32(0))
-		time.Sleep(3 * time.Second)
-		assert.Equal(t, atomic.LoadInt32(&st), int32(1))
+		assert.Equal(t, atomic.LoadInt32(&st), int32(3))
 	}
 }

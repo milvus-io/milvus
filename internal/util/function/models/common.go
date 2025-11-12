@@ -61,6 +61,7 @@ const (
 	CredentialParamKey         string = "credential"
 	TruncateParamKey           string = "truncate"
 	MaxClientBatchSizeParamKey string = "max_client_batch_size"
+	IntegrationIDKey           string = "integration_id"
 )
 
 // ali text embedding
@@ -136,7 +137,19 @@ const (
 	TeiTruncateParamName string = "truncate"
 )
 
-func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string) (string, string, error) {
+// zilliz
+
+const (
+	ModelDeploymentIDKey string = "model_deployment_id"
+	TruncationKey        string = "truncation"
+)
+
+type ModelExtraInfo struct {
+	ClusterID string
+	DBName    string
+}
+
+func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string, extraInfo *ModelExtraInfo) (string, string, error) {
 	// function param > yaml > env
 	var err error
 	var apiKey, url string
@@ -148,6 +161,8 @@ func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyV
 			if apiKey, err = credentials.GetAPIKeyCredential(credentialName); err != nil {
 				return "", "", err
 			}
+		case IntegrationIDKey:
+			apiKey = param.Value + "|" + extraInfo.ClusterID + "|" + extraInfo.DBName
 		}
 	}
 
@@ -302,6 +317,13 @@ func retrySend(ctx context.Context, data []byte, httpMethod string, url string, 
 	var err error
 	var body []byte
 	for i := 0; i < maxRetries; i++ {
+		// Check if context is canceled/timed out before each retry
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		req, reqErr := http.NewRequestWithContext(ctx, httpMethod, url, bytes.NewBuffer(data))
 		if reqErr != nil {
 			return nil, reqErr
@@ -313,9 +335,22 @@ func retrySend(ctx context.Context, data []byte, httpMethod string, url string, 
 		if err == nil {
 			return body, nil
 		}
+
+		// Don't sleep after the last retry attempt
+		if i == maxRetries-1 {
+			break
+		}
+
 		backoffDelay := 1 << uint(i) * time.Second
 		jitter := time.Duration(rand.Int63n(int64(backoffDelay / 4)))
-		time.Sleep(backoffDelay + jitter)
+
+		// Use context-aware sleep to respect timeout
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoffDelay + jitter):
+			// Continue to next retry
+		}
 	}
 	return nil, err
 }
