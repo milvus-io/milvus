@@ -52,6 +52,7 @@ mkdir -p ./indexcgopb
 mkdir -p ./cgopb
 mkdir -p ./internalpb
 mkdir -p ./rootcoordpb
+mkdir -p ./modelservicepb
 mkdir -p ./segcorepb
 mkdir -p ./clusteringpb
 mkdir -p ./proxypb
@@ -70,6 +71,7 @@ ${protoc_opt} --go_out=paths=source_relative:./etcdpb --go-grpc_out=require_unim
 ${protoc_opt} --go_out=paths=source_relative:./indexcgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./cgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./cgopb cgo_msg.proto || { echo 'generate cgo_msg failed '; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./rootcoordpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./rootcoordpb root_coord.proto || { echo 'generate root_coord.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./modelservicepb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./modelservicepb model_service.proto || { echo 'generate model_service.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./internalpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./internalpb internal.proto || { echo 'generate internal.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./proxypb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./proxypb proxy.proto|| { echo 'generate proxy.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./indexpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexpb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }

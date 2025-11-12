@@ -62,11 +62,8 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 	if endpoint == "" {
 		return nil, fmt.Errorf("Rerank function lost params endpoint")
 	}
-	if maxBatch < 0 {
-		return nil, fmt.Errorf("Rerank function params max_batch must > 0")
-	}
 
-	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "")
+	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
 	if err != nil {
 		return nil, err
 	}
