@@ -77,7 +77,7 @@ func (rrf *RRFFunction[T]) processOneSearchData(ctx context.Context, searchParam
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if score, ok := rrfScores[id]; !ok {
-				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx + int(col.nqOffset)}
 				rrfScores[id] = 1 / (rrf.k + float32(idx+1))
 			} else {
 				rrfScores[id] = score + 1/(rrf.k+float32(idx+1))

@@ -97,7 +97,7 @@ func (weighted *WeightedFunction[T]) processOneSearchData(ctx context.Context, s
 		ids := col.ids.([]T)
 		for j, id := range ids {
 			if score, ok := weightedScores[id]; !ok {
-				idLocations[id] = IDLoc{batchIdx: i, offset: j}
+				idLocations[id] = IDLoc{batchIdx: i, offset: j + int(col.nqOffset)}
 				weightedScores[id] = weighted.weight[i] * normFunc(col.scores[j])
 			} else {
 				weightedScores[id] = score + weighted.weight[i]*normFunc(col.scores[j])

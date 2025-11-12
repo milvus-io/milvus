@@ -21,6 +21,9 @@ ENV TZ=UTC
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 libzstd-dev uuid-dev libaio-dev libboost-program-options-dev libboost-filesystem-dev && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
+        ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+        echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 

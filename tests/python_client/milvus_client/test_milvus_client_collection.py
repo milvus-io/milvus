@@ -3345,7 +3345,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"collection name or database name should be different"}
+        error = {ct.err_code: 1100, ct.err_msg: f"collection name or database name should be different"}
         self.rename_collection(client, collection_name, collection_name,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -3528,7 +3528,7 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
                                               "consistency_level": 0})
-        error = {ct.err_code: 65535, ct.err_msg: f"no properties or delete keys provided"}
+        error = {ct.err_code: 1100, ct.err_msg: f"no properties or delete keys provided"}
         self.drop_collection_properties(client, collection_name, property_keys,
                                         check_task=CheckTasks.err_res,
                                         check_items=error)

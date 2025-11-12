@@ -384,12 +384,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 for (auto& [_, info] : load_info.field_infos) {
                     num_rows = info.row_count;
                 }
+                auto all_ts_chunks =
+                    timestamp_proxy_column->GetAllChunks(nullptr);
                 std::vector<Timestamp> timestamps(num_rows);
                 int64_t offset = 0;
-                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
-                    auto chunk = timestamp_proxy_column->GetChunk(nullptr, i);
+                for (int i = 0; i < all_ts_chunks.size(); i++) {
+                    auto chunk_data = all_ts_chunks[i].get();
                     auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk.get());
+                        static_cast<FixedWidthChunk*>(chunk_data);
                     auto span = fixed_chunk->Span();
                     for (size_t j = 0; j < span.row_count(); j++) {
                         auto ts = *(int64_t*)((char*)span.data() +
@@ -624,6 +626,19 @@ bool
 ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     return mmap_field_ids_.find(field_id) != mmap_field_ids_.end();
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::vector<int64_t>& chunk_ids) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(field_id)) {
+        column->PrefetchChunks(op_ctx, chunk_ids);
+    }
 }
 
 PinWrapper<SpanBase>
@@ -1026,18 +1041,6 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
     }
 }
 
-std::vector<SegOffset>
-ChunkedSegmentSealedImpl::search_pk(milvus::OpContext* op_ctx,
-                                    const PkType& pk,
-                                    Timestamp timestamp) const {
-    if (!is_sorted_by_pk_) {
-        return insert_record_.search_pk(pk, timestamp);
-    }
-    return search_sorted_pk(op_ctx, pk, [this, timestamp](int64_t offset) {
-        return insert_record_.timestamps_[offset] <= timestamp;
-    });
-}
-
 void
 ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
                                      const std::vector<PkType>& pks) const {
@@ -1219,74 +1222,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     }
 }
 
-template <typename Condition>
-std::vector<SegOffset>
-ChunkedSegmentSealedImpl::search_sorted_pk(milvus::OpContext* op_ctx,
-                                           const PkType& pk,
-                                           Condition condition) const {
-    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
-    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
-    auto pk_column = get_column(pk_field_id);
-    AssertInfo(pk_column != nullptr, "primary key column not loaded");
-    std::vector<SegOffset> pk_offsets;
-    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
-        case DataType::INT64: {
-            auto target = std::get<int64_t>(pk);
-            // get int64 pks
-            auto num_chunk = pk_column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                auto pw = pk_column->DataOfChunk(op_ctx, i);
-                auto src = reinterpret_cast<const int64_t*>(pw.get());
-                auto chunk_row_num = pk_column->chunk_row_nums(i);
-                auto it = std::lower_bound(
-                    src,
-                    src + chunk_row_num,
-                    target,
-                    [](const int64_t& elem, const int64_t& value) {
-                        return elem < value;
-                    });
-                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                for (; it != src + chunk_row_num && *it == target; ++it) {
-                    auto offset = it - src + num_rows_until_chunk;
-                    if (condition(offset)) {
-                        pk_offsets.emplace_back(offset);
-                    }
-                }
-            }
-            break;
-        }
-        case DataType::VARCHAR: {
-            auto target = std::get<std::string>(pk);
-            // get varchar pks
-            auto num_chunk = pk_column->num_chunks();
-            for (int i = 0; i < num_chunk; ++i) {
-                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
-                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-                auto pw = pk_column->GetChunk(op_ctx, i);
-                auto string_chunk = static_cast<StringChunk*>(pw.get());
-                auto offset = string_chunk->binary_search_string(target);
-                for (; offset != -1 && offset < string_chunk->RowNums() &&
-                       string_chunk->operator[](offset) == target;
-                     ++offset) {
-                    auto segment_offset = offset + num_rows_until_chunk;
-                    if (condition(segment_offset)) {
-                        pk_offsets.emplace_back(segment_offset);
-                    }
-                }
-            }
-            break;
-        }
-        default: {
-            ThrowInfo(
-                DataTypeInvalid,
-                fmt::format(
-                    "unsupported type {}",
-                    schema_->get_fields().at(pk_field_id).get_data_type()));
-        }
-    }
-    return pk_offsets;
-}
-
 void
 ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
                                    proto::plan::OpType op,
@@ -1297,17 +1232,14 @@ ChunkedSegmentSealedImpl::pk_range(milvus::OpContext* op_ctx,
         return;
     }
 
-    search_sorted_pk_range(
-        op_ctx, op, pk, bitset, [](int64_t offset) { return true; });
+    search_sorted_pk_range(op_ctx, op, pk, bitset);
 }
 
-template <typename Condition>
 void
 ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                                                  proto::plan::OpType op,
                                                  const PkType& pk,
-                                                 BitsetTypeView& bitset,
-                                                 Condition condition) const {
+                                                 BitsetTypeView& bitset) const {
     auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = get_column(pk_field_id);
@@ -1335,9 +1267,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                         pk_column->GetNumRowsUntilChunk(i);
                     for (; it != src + chunk_row_num; ++it) {
                         auto offset = it - src + num_rows_until_chunk;
-                        if (condition(offset)) {
-                            bitset[offset] = true;
-                        }
+                        bitset[offset] = true;
                     }
                 } else if (op == proto::plan::OpType::GreaterThan) {
                     auto it = std::upper_bound(
@@ -1351,9 +1281,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                         pk_column->GetNumRowsUntilChunk(i);
                     for (; it != src + chunk_row_num; ++it) {
                         auto offset = it - src + num_rows_until_chunk;
-                        if (condition(offset)) {
-                            bitset[offset] = true;
-                        }
+                        bitset[offset] = true;
                     }
                 } else if (op == proto::plan::OpType::LessEqual) {
                     auto it = std::upper_bound(
@@ -1370,9 +1298,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                         pk_column->GetNumRowsUntilChunk(i);
                     for (auto ptr = src; ptr < it; ++ptr) {
                         auto offset = ptr - src + num_rows_until_chunk;
-                        if (condition(offset)) {
-                            bitset[offset] = true;
-                        }
+                        bitset[offset] = true;
                     }
                 } else if (op == proto::plan::OpType::LessThan) {
                     auto it =
@@ -1384,9 +1310,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                         pk_column->GetNumRowsUntilChunk(i);
                     for (auto ptr = src; ptr < it; ++ptr) {
                         auto offset = ptr - src + num_rows_until_chunk;
-                        if (condition(offset)) {
-                            bitset[offset] = true;
-                        }
+                        bitset[offset] = true;
                     }
                 } else if (op == proto::plan::OpType::Equal) {
                     auto it = std::lower_bound(
@@ -1400,9 +1324,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                         pk_column->GetNumRowsUntilChunk(i);
                     for (; it != src + chunk_row_num && *it == target; ++it) {
                         auto offset = it - src + num_rows_until_chunk;
-                        if (condition(offset)) {
-                            bitset[offset] = true;
-                        }
+                        bitset[offset] = true;
                     }
                     if (it != src + chunk_row_num && *it > target) {
                         break;
@@ -1430,9 +1352,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                            string_chunk->operator[](offset) == target;
                          ++offset) {
                         auto segment_offset = offset + num_rows_until_chunk;
-                        if (condition(segment_offset)) {
-                            bitset[segment_offset] = true;
-                        }
+                        bitset[segment_offset] = true;
                     }
                     if (offset < string_chunk->RowNums() &&
                         string_chunk->operator[](offset) > target) {
@@ -1442,17 +1362,13 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                     auto offset = string_chunk->lower_bound_string(target);
                     for (; offset < string_chunk->RowNums(); ++offset) {
                         auto segment_offset = offset + num_rows_until_chunk;
-                        if (condition(segment_offset)) {
-                            bitset[segment_offset] = true;
-                        }
+                        bitset[segment_offset] = true;
                     }
                 } else if (op == proto::plan::OpType::GreaterThan) {
                     auto offset = string_chunk->upper_bound_string(target);
                     for (; offset < string_chunk->RowNums(); ++offset) {
                         auto segment_offset = offset + num_rows_until_chunk;
-                        if (condition(segment_offset)) {
-                            bitset[segment_offset] = true;
-                        }
+                        bitset[segment_offset] = true;
                     }
                 } else if (op == proto::plan::OpType::LessEqual) {
                     auto pos = string_chunk->upper_bound_string(target);
@@ -1461,9 +1377,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                     }
                     for (auto offset = 0; offset < pos; ++offset) {
                         auto segment_offset = offset + num_rows_until_chunk;
-                        if (condition(segment_offset)) {
-                            bitset[segment_offset] = true;
-                        }
+                        bitset[segment_offset] = true;
                     }
                 } else if (op == proto::plan::OpType::LessThan) {
                     auto pos = string_chunk->lower_bound_string(target);
@@ -1472,9 +1386,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
                     }
                     for (auto offset = 0; offset < pos; ++offset) {
                         auto segment_offset = offset + num_rows_until_chunk;
-                        if (condition(segment_offset)) {
-                            bitset[segment_offset] = true;
-                        }
+                        bitset[segment_offset] = true;
                     }
                 } else {
                     ThrowInfo(ErrorCode::Unsupported,
@@ -2357,14 +2269,6 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
 
     deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
     return SegcoreError::success();
-}
-
-std::string
-ChunkedSegmentSealedImpl::debug() const {
-    std::string log_str;
-    log_str += "Sealed\n";
-    log_str += "\n";
-    return log_str;
 }
 
 void

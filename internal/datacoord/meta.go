@@ -2253,7 +2253,7 @@ func (m *meta) completeSortCompactionMutation(
 		StartPosition:             oldSegment.GetStartPosition(),
 		DmlPosition:               oldSegment.GetDmlPosition(),
 		IsImporting:               oldSegment.GetIsImporting(),
-		State:                     oldSegment.GetState(),
+		State:                     commonpb.SegmentState_Flushed,
 		Level:                     oldSegment.GetLevel(),
 		LastLevel:                 oldSegment.GetLastLevel(),
 		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),

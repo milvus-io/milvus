@@ -15,7 +15,7 @@ expr:
 	| EmptyArray                                                                 # EmptyArray
 	| EXISTS expr                                                                # Exists
 	| expr LIKE StringLiteral                                                    # Like
-	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
+	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'         # TextMatch
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
 	| expr POW expr											                     # Power
@@ -50,6 +50,9 @@ expr:
 	| (Identifier | JSONIdentifier) ISNULL                                                          # IsNull
 	| (Identifier | JSONIdentifier) ISNOTNULL                                                       # IsNotNull;
 
+textMatchOption:
+	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
+
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
 // BOOL: 'bool';
@@ -76,6 +79,8 @@ PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
+MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
+ASSIGN: '=';
 
 ADD: '+';
 SUB: '-';

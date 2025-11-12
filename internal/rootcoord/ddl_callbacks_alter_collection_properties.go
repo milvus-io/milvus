@@ -227,19 +227,19 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 }
 
 // getCacheExpireForCollection gets the cache expirations for collection.
-func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionName string) (*message.CacheExpirations, error) {
-	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionNameOrAlias string) (*message.CacheExpirations, error) {
+	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}
-	aliases, err := c.meta.ListAliases(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	aliases, err := c.meta.ListAliases(ctx, dbName, coll.Name, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}
 	builder := ce.NewBuilder()
 	builder.WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(dbName),
-		ce.OptLPCMCollectionName(collectionName),
+		ce.OptLPCMCollectionName(coll.Name),
 		ce.OptLPCMCollectionID(coll.CollectionID),
 		ce.OptLPCMMsgType(commonpb.MsgType_AlterCollection),
 	)
