@@ -27,8 +27,8 @@ This module performs rule-based logical rewrites on parsed `planpb.Expr` trees r
 
 2) TEXT_MATCH OR merge (`text_match.go`)
 - Merge ORs of `TEXT_MATCH(field, "literal")` on the same column (no options):
-  - Tokenize by whitespace, union, sort, and re-join.
-  - Example: `TEXT_MATCH(f, "A C") OR TEXT_MATCH(f, "B D")` → `TEXT_MATCH(f, "A B C D")`
+  - Concatenate literals with a single space in the order they appear; no tokenization, deduplication, or sorting is performed.
+  - Example: `TEXT_MATCH(f, "A C") OR TEXT_MATCH(f, "B D")` → `TEXT_MATCH(f, "A C B D")`
 - If any `TEXT_MATCH` in the group has options (e.g., `minimum_should_match`), this optimization is skipped for that group.
 
 3) Range predicate simplification (`range.go`)
@@ -87,7 +87,7 @@ This module performs rule-based logical rewrites on parsed `planpb.Expr` trees r
   7. AND `!=` → NOT IN
   8. Fold back to BinaryExpr
 
-Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH tokens are unioned, sorted, and re-joined with spaces.
+Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 
 ### File Structure
 - `entry.go`      — rewrite entry and visitor orchestration
@@ -100,5 +100,7 @@ Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH
 - More IN-range algebra (e.g., `IN` vs exact equality propagation across subtrees).
 - Merging phrase_match or other string ops with clearly-defined token rules.
 - More algebraic simplifications around equality and null checks.
+- Range optimization support for JSON/dynamic fields (define comparison semantics and safe gates).
+- Merge/union logic for BinaryRangeExpr nodes (e.g., coalescing intervals across AND/OR when compatible).
 
 
