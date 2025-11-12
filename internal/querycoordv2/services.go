@@ -866,6 +866,7 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 		log.Warn("failed to create resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	log.Info("create resource group done")
 	return merr.Success(), nil
 }
 
@@ -884,6 +885,7 @@ func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateRe
 		log.Warn("failed to update resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	log.Info("update resource group done")
 	return merr.Success(), nil
 }
 
@@ -906,6 +908,7 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 		log.Warn("failed to drop resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	log.Info("drop resource group done")
 	return merr.Success(), nil
 }
 
@@ -928,6 +931,7 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		log.Warn("failed to transfer node", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	log.Info("transfer node done")
 	return merr.Success(), nil
 }
 
@@ -936,6 +940,7 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		zap.String("source", req.GetSourceResourceGroup()),
 		zap.String("target", req.GetTargetResourceGroup()),
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("numReplica", req.GetNumReplica()),
 	)
 
 	log.Info("transfer replica request received")
@@ -944,22 +949,12 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		return merr.Status(err), nil
 	}
 
-	// TODO: !!!WARNING, replica manager and resource manager doesn't protected with each other by lock.
-	if ok := s.meta.ResourceManager.ContainResourceGroup(ctx, req.GetSourceResourceGroup()); !ok {
-		err := merr.WrapErrResourceGroupNotFound(req.GetSourceResourceGroup())
-		return merr.Status(errors.Wrap(err,
-			fmt.Sprintf("the source resource group[%s] doesn't exist", req.GetSourceResourceGroup()))), nil
+	if err := s.broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx, req); err != nil {
+		log.Warn("failed to transfer replica between resource group", zap.Error(err))
+		return merr.Status(err), nil
 	}
-
-	if ok := s.meta.ResourceManager.ContainResourceGroup(ctx, req.GetTargetResourceGroup()); !ok {
-		err := merr.WrapErrResourceGroupNotFound(req.GetTargetResourceGroup())
-		return merr.Status(errors.Wrap(err,
-			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()))), nil
-	}
-
-	// Apply change into replica manager.
-	err := s.meta.TransferReplica(ctx, req.GetCollectionID(), req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumReplica()))
-	return merr.Status(err), nil
+	log.Info("transfer replica done")
+	return merr.Success(), nil
 }
 
 func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {

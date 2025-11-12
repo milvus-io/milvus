@@ -37,7 +37,7 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		return errors.New("default partition cannot be deleted")
 	}
 
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
 	if err != nil {
 		return err
 	}

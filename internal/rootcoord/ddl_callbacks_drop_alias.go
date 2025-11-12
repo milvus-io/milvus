@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -34,9 +33,7 @@ import (
 func (c *Core) broadcastDropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) error {
 	req.DbName = strings.TrimSpace(req.DbName)
 	req.Alias = strings.TrimSpace(req.Alias)
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(req.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(req.GetDbName(), req.GetAlias()))
+	broadcaster, err := startBroadcastWithDatabaseLock(ctx, req.GetDbName())
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // RegisterDDLCallbacks registers the ddl callbacks.
@@ -142,21 +143,10 @@ func startBroadcastWithDatabaseLock(ctx context.Context, dbName string) (broadca
 	return broadcaster, nil
 }
 
-// startBroadcastWithAlterAliasLock starts a broadcast with alter alias lock.
-func startBroadcastWithAlterAliasLock(ctx context.Context, dbName string, collectionName string, alias string) (broadcaster.BroadcastAPI, error) {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(dbName),
-		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
-		message.NewExclusiveCollectionNameResourceKey(dbName, alias),
-	)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to start broadcast with alter alias lock")
-	}
-	return broadcaster, nil
-}
-
 // startBroadcastWithCollectionLock starts a broadcast with collection lock.
-func startBroadcastWithCollectionLock(ctx context.Context, dbName string, collectionName string) (broadcaster.BroadcastAPI, error) {
+// CreateCollection and DropCollection can only be called with collection name itself, not alias.
+// So it's safe to use collection name directly for those API.
+func (*Core) startBroadcastWithCollectionLock(ctx context.Context, dbName string, collectionName string) (broadcaster.BroadcastAPI, error) {
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(dbName),
 		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
@@ -165,4 +155,15 @@ func startBroadcastWithCollectionLock(ctx context.Context, dbName string, collec
 		return nil, errors.Wrap(err, "failed to start broadcast with collection lock")
 	}
 	return broadcaster, nil
+}
+
+// startBroadcastWithAliasOrCollectionLock starts a broadcast with alias or collection lock.
+// Some API like AlterCollection can be called with alias or collection name,
+// so we need to get the real collection name to add resource key lock.
+func (c *Core) startBroadcastWithAliasOrCollectionLock(ctx context.Context, dbName string, collectionNameOrAlias string) (broadcaster.BroadcastAPI, error) {
+	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get collection by name")
+	}
+	return c.startBroadcastWithCollectionLock(ctx, dbName, coll.Name)
 }

@@ -19,7 +19,7 @@ import (
 
 // broadcastAlterCollectionForAddField broadcasts the put collection message for add field.
 func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *milvuspb.AddCollectionFieldRequest) error {
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
