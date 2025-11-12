@@ -245,6 +245,16 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
                     std::string_view, dwithin);
             }
         }
+        case proto::plan::GISFunctionFilterExpr_GISOp_IsValidOp: {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
+                GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string, is_valid);
+            } else {
+                GEOMETRY_EXECUTE_SUB_BATCH_UNARY(std::string_view, is_valid);
+            }
+        }
         default: {
             PanicInfo(NotImplemented,
                       "internal error: unknown GIS op : {}",
