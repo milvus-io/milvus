@@ -528,7 +528,7 @@ class SparseFloatVectorChunk : public Chunk {
         std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
         : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)) {
         vec_.resize(row_nums);
-        auto null_bitmap_bytes_num = (row_nums + 7) / 8;
+        auto null_bitmap_bytes_num = nullable ? (row_nums + 7) / 8 : 0;
         auto offsets_ptr =
             reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
         for (int i = 0; i < row_nums; i++) {
