@@ -103,6 +103,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
+        GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
         paths_,
@@ -232,6 +233,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
+        GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
         multi_file_paths,
