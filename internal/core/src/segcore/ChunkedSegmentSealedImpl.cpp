@@ -239,6 +239,7 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
     const milvus::proto::segcore::FieldIndexInfo* field_index_info) const {
     LoadIndexInfo load_index_info;
 
+    load_index_info.segment_id = id_;
     // Extract field ID
     auto field_id = FieldId(field_index_info->fieldid());
     load_index_info.field_id = field_id.get();
@@ -257,6 +258,7 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
         static_cast<IndexVersion>(field_index_info->current_index_version());
     load_index_info.index_size = field_index_info->index_size();
     load_index_info.num_rows = field_index_info->num_rows();
+    load_index_info.schema = field_meta.ToProto();
 
     // Copy index file paths
     for (const auto& file_path : field_index_info->index_file_paths()) {
@@ -267,6 +269,20 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
     for (const auto& kv_pair : field_index_info->index_params()) {
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
+
+    size_t dim = IsVectorDataType(field_meta.get_data_type()) &&
+                            !IsSparseFloatVectorDataType(
+                                field_meta.get_data_type())
+                        ? field_meta.get_dim()
+                        : 1;
+    load_index_info.dim = dim;
+    auto remote_chunk_manager =
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    load_index_info.mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
 
     return load_index_info;
 }
@@ -2796,6 +2812,9 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
     for (int i = 0; i < segment_load_info_.index_infos_size(); i++) {
         const auto& index_info = segment_load_info_.index_infos(i);
+        if (index_info.index_file_paths_size() == 0) {
+            continue;
+        }
         auto field_id = FieldId(index_info.fieldid());
         field_id_to_index_info[field_id] = &index_info;
         indexed_fields.insert(field_id);
@@ -2808,33 +2827,47 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     for (const auto& pair : field_id_to_index_info) {
         auto field_id = pair.first;
         auto index_info_ptr = pair.second;
-        auto future = pool.Submit([this,
-                                   trace_ctx,
-                                   field_id,
-                                   index_info_ptr,
-                                   num_rows]() mutable -> void {
-            // Convert proto FieldIndexInfo to LoadIndexInfo
-            auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
-                index_info_ptr);
+        auto future = pool.Submit(
+            [this, trace_ctx, field_id, index_info_ptr, num_rows]() mutable
+            -> void {
+                // Convert proto FieldIndexInfo to LoadIndexInfo
+                auto load_index_info =
+                    ConvertFieldIndexInfoToLoadIndexInfo(index_info_ptr);
 
-            LOG_INFO("Loading index for segment {} field {} with {} files",
-                     id_,
-                     field_id.get(),
-                     load_index_info.index_files.size());
+                LOG_INFO("Loading index for segment {} field {} with {} files",
+                         id_,
+                         field_id.get(),
+                         load_index_info.index_files.size());
 
-            // Download & compose index
-            LoadIndexData(trace_ctx, &load_index_info);
+                // Download & compose index
+                LoadIndexData(trace_ctx, &load_index_info);
 
-            // Load index into segment
-            LoadIndex(load_index_info);
-        });
+                // Load index into segment
+                LoadIndex(load_index_info);
+            });
 
         load_index_futures.push_back(std::move(future));
     }
 
-    // Wait for all index loading to complete
+    // Wait for all index loading to complete and collect exceptions
+    std::vector<std::exception_ptr> index_exceptions;
     for (auto& future : load_index_futures) {
-        future.get();
+        try {
+            future.get();
+        } catch (...) {
+            index_exceptions.push_back(std::current_exception());
+        }
+    }
+
+    // If any exceptions occurred during index loading, handle them
+    if (!index_exceptions.empty()) {
+        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
+                  index_exceptions.size(),
+                  load_index_futures.size(),
+                  id_);
+
+        // Rethrow the first exception
+        std::rethrow_exception(index_exceptions[0]);
     }
 
     LOG_INFO("Finished loading {} indexes for segment {}",
@@ -2898,9 +2931,25 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
             load_field_futures.push_back(std::move(future));
         }
 
-        // Wait for all field data loading to complete
+        // Wait for all field data loading to complete and collect exceptions
+        std::vector<std::exception_ptr> field_exceptions;
         for (auto& future : load_field_futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                field_exceptions.push_back(std::current_exception());
+            }
+        }
+
+        // If any exceptions occurred during field data loading, handle them
+        if (!field_exceptions.empty()) {
+            LOG_ERROR("Failed to load {} out of {} field data for segment {}",
+                      field_exceptions.size(),
+                      load_field_futures.size(),
+                      id_);
+
+            // Rethrow the first exception
+            std::rethrow_exception(field_exceptions[0]);
         }
     }
 
