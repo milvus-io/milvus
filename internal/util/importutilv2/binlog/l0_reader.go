@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -39,9 +40,10 @@ type L0Reader interface {
 }
 
 type l0Reader struct {
-	ctx     context.Context
-	cm      storage.ChunkManager
-	pkField *schemapb.FieldSchema
+	ctx           context.Context
+	cm            storage.ChunkManager
+	storageConfig *indexpb.StorageConfig
+	pkField       *schemapb.FieldSchema
 
 	bufferSize int
 	deltaLogs  []string
@@ -53,6 +55,7 @@ type l0Reader struct {
 
 func NewL0Reader(ctx context.Context,
 	cm storage.ChunkManager,
+	storageConfig *indexpb.StorageConfig,
 	pkField *schemapb.FieldSchema,
 	importFile *internalpb.ImportFile,
 	bufferSize int,
@@ -60,10 +63,11 @@ func NewL0Reader(ctx context.Context,
 	tsEnd uint64,
 ) (*l0Reader, error) {
 	r := &l0Reader{
-		ctx:        ctx,
-		cm:         cm,
-		pkField:    pkField,
-		bufferSize: bufferSize,
+		ctx:           ctx,
+		cm:            cm,
+		storageConfig: storageConfig,
+		pkField:       pkField,
+		bufferSize:    bufferSize,
 	}
 
 	// Initialize filters
@@ -105,24 +109,10 @@ func (r *l0Reader) filter(dl *storage.DeleteLog) bool {
 
 func (r *l0Reader) Read() (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
-	for {
-		if r.readIdx == len(r.deltaLogs) {
-			if deleteData.RowCount != 0 {
-				return deleteData, nil
-			}
-			return nil, io.EOF
-		}
-		path := r.deltaLogs[r.readIdx]
-
-		// TODO: support multiple delta logs
-		reader, err := storage.NewDeltalogReader(r.pkField, []string{path}, storage.WithDownloader(
-			func(ctx context.Context, paths []string) ([][]byte, error) {
-				return r.cm.MultiRead(ctx, paths)
-			},
-		))
+	readInternal := func(path string, opts []storage.RwOption) error {
+		reader, err := storage.NewDeltalogReader(r.pkField, []string{path}, opts...)
 		if err != nil {
-			log.Error("malformed delta file", zap.Error(err))
-			return nil, err
+			return err
 		}
 		defer reader.Close()
 
@@ -133,7 +123,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 					break
 				}
 				log.Error("error on importing L0 segment, fail to read deltalogs", zap.Error(err))
-				return nil, err
+				return err
 			}
 
 			for i := 0; i < rec.Len(); i++ {
@@ -155,7 +145,37 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				deleteData.Append(pk, ts)
 			}
 		}
+		return nil
+	}
 
+	for {
+		if r.readIdx == len(r.deltaLogs) {
+			if deleteData.RowCount != 0 {
+				return deleteData, nil
+			}
+			return nil, io.EOF
+		}
+		path := r.deltaLogs[r.readIdx]
+
+		v1opts := []storage.RwOption{
+			storage.WithVersion(storage.StorageV1),
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return r.cm.MultiRead(ctx, paths)
+			}),
+		}
+		v2opts := []storage.RwOption{
+			storage.WithVersion(storage.StorageV2),
+			storage.WithStorageConfig(r.storageConfig),
+		}
+
+		// try v1 first
+		if errv1 := readInternal(path, v1opts); errv1 != nil {
+			// try v2 if v1 failed
+			if errv2 := readInternal(path, v2opts); errv2 != nil {
+				// return both the error from v1 and v2
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to read deltalogs from v1 and v2: %v, %v", errv1, errv2))
+			}
+		}
 		r.readIdx++
 		if deleteData.Size() >= int64(r.bufferSize) {
 			break

@@ -22,12 +22,14 @@ import (
 	"io"
 	"math"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -37,6 +39,7 @@ import (
 type reader struct {
 	ctx            context.Context
 	cm             storage.ChunkManager
+	storageConfig  *indexpb.StorageConfig
 	schema         *schemapb.CollectionSchema
 	storageVersion int64
 
@@ -76,15 +79,16 @@ func NewReader(ctx context.Context,
 		storageVersion: storageVersion,
 		fileSize:       atomic.NewInt64(0),
 		bufferSize:     bufferSize,
+		storageConfig:  storageConfig,
 	}
-	err := r.init(paths, tsStart, tsEnd, storageConfig)
+	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -122,7 +126,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.cm.MultiRead(ctx, paths)
 		}),
-		storage.WithStorageConfig(storageConfig),
+		storage.WithStorageConfig(r.storageConfig),
 	)
 	if err != nil {
 		return err
@@ -161,35 +165,70 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 }
 
 func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]typeutil.Timestamp, error) {
+	v1opts := []storage.RwOption{
+		storage.WithVersion(storage.StorageV1),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return r.cm.MultiRead(ctx, paths)
+		}),
+	}
+	v2opts := []storage.RwOption{
+		storage.WithVersion(storage.StorageV2),
+		storage.WithStorageConfig(r.storageConfig),
+	}
+
 	deleteData := make(map[any]typeutil.Timestamp)
-	for _, path := range deltaLogs {
-		reader, err := newBinlogReader(r.ctx, r.cm, path)
+
+	readInternal := func(path string, opts []storage.RwOption) error {
+		pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		// no need to read nulls in DeleteEventType
-		rowsSet, _, err := readData(reader, storage.DeleteEventType)
+		reader, err := storage.NewDeltalogReader(pkField, []string{path}, opts...)
 		if err != nil {
-			reader.Close()
-			return nil, err
+			return err
 		}
-		for _, rows := range rowsSet {
-			for _, row := range rows.([]string) {
-				dl := &storage.DeleteLog{}
-				err = dl.Parse(row)
-				if err != nil {
-					reader.Close()
-					return nil, err
+		defer reader.Close()
+
+		for {
+			rec, err := reader.Next()
+			if err != nil {
+				if err == io.EOF {
+					break
 				}
-				if dl.Ts >= tsStart && dl.Ts <= tsEnd {
-					pk := dl.Pk.GetValue()
-					if ts, ok := deleteData[pk]; !ok || ts < dl.Ts {
-						deleteData[pk] = dl.Ts
-					}
+				log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
+				return err
+			}
+
+			for i := 0; i < rec.Len(); i++ {
+				ts := typeutil.Timestamp(rec.Column(common.TimeStampField).(*array.Int64).Value(i))
+				if ts < tsStart || ts > tsEnd {
+					continue
 				}
+				var pk any
+				switch pkField.DataType {
+				case schemapb.DataType_Int64:
+					pk = rec.Column(pkField.FieldID).(*array.Int64).Value(i)
+				case schemapb.DataType_VarChar:
+					pk = rec.Column(pkField.FieldID).(*array.String).Value(i)
+				}
+				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
+					// skip if existing entry is newer
+					continue
+				}
+				deleteData[pk] = ts
 			}
 		}
-		reader.Close()
+		return nil
+	}
+
+	for _, path := range deltaLogs {
+		// try v1 first
+		if err := readInternal(path, v1opts); err != nil {
+			// try v2 if v1 failed
+			if err := readInternal(path, v2opts); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return deleteData, nil
 }
