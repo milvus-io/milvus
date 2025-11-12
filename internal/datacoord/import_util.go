@@ -364,6 +364,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		storageVersion = storage.StorageV2
 	}
 	req := &datapb.ImportRequest{
+		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
 		CollectionID:    task.GetCollectionID(),

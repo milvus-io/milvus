@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -83,7 +84,7 @@ func createCohereProvider(url string, schema *schemapb.FieldSchema, providerName
 	}
 	switch providerName {
 	case cohereProvider:
-		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		return NewCohereEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -102,7 +103,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbedding() {
 		s.Equal("float", provider.(*CohereEmbeddingProvider).outputType)
 		{
 			data := []string{"sentence"}
-			r, err2 := provider.CallEmbedding(data, models.InsertMode)
+			r, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
@@ -111,7 +112,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbedding() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			ret, _ := provider.CallEmbedding(data, models.SearchMode)
+			ret, _ := provider.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {1.0, 2.0, 3.0, 4.0}, {2.0, 3.0, 4.0, 5.0}}, ret)
 		}
 	}
@@ -137,7 +138,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingInt8() {
 		s.Equal("int8", provider.(*CohereEmbeddingProvider).outputType)
 		{
 			data := []string{"sentence"}
-			r, err2 := provider.CallEmbedding(data, models.InsertMode)
+			r, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			s.NoError(err2)
 			ret := r.([][]int8)
 			s.Equal(1, len(ret))
@@ -146,7 +147,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingInt8() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			ret, _ := provider.CallEmbedding(data, models.SearchMode)
+			ret, _ := provider.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.Equal([][]int8{{0, 1, 2, 3}, {1, 2, 3, 4}, {2, 3, 4, 5}}, ret)
 		}
 	}
@@ -172,7 +173,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 			// embedding dim not match
 			data := []string{"sentence", "sentence"}
-			_, err2 := provider.CallEmbedding(data, models.InsertMode)
+			_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			s.Error(err2)
 		}
 	}
@@ -200,7 +201,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provider.CallEmbedding(data, models.InsertMode)
+		_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -225,7 +226,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 			// embedding dim not match
 			data := []string{"sentence", "sentence2"}
-			_, err2 := provider.CallEmbedding(data, models.InsertMode)
+			_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			s.Error(err2)
 		}
 	}
@@ -252,7 +253,7 @@ func (s *CohereTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provider.CallEmbedding(data, models.InsertMode)
+		_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -271,18 +272,18 @@ func (s *CohereTextEmbeddingProviderSuite) TestNewCohereProvider() {
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(provider.truncate, "END")
 
 	functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "START"})
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(provider.truncate, "START")
 
 	// Invalid truncateParam
 	functionSchema.Params[2].Value = "Unknow"
-	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	_, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.Error(err)
 }
 
@@ -300,13 +301,13 @@ func (s *CohereTextEmbeddingProviderSuite) TestGetInputType() {
 		},
 	}
 
-	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(provider.getInputType(models.InsertMode), "")
 	s.Equal(provider.getInputType(models.SearchMode), "")
 
 	functionSchema.Params[0].Value = "model-v3.0"
-	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err = NewCohereEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(provider.getInputType(models.InsertMode), "search_document")
 	s.Equal(provider.getInputType(models.SearchMode), "search_query")
@@ -331,6 +332,6 @@ func (s *CohereTextEmbeddingProviderSuite) TestRuntimeDimNotMatch() {
 	provider, err := createCohereProvider(ts.URL, s.schema.Fields[2], cohereProvider)
 	s.NoError(err)
 	data := []string{"sentence"}
-	_, err2 := provider.CallEmbedding(data, models.InsertMode)
+	_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 	s.Error(err2)
 }

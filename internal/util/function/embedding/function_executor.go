@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -45,24 +46,24 @@ type Runner interface {
 	GetFunctionTypeName() string
 	GetFunctionName() string
 	GetFunctionProvider() string
-	Check() error
+	Check(ctx context.Context) error
 
 	MaxBatch() int
 	ProcessInsert(ctx context.Context, inputs []*schemapb.FieldData) ([]*schemapb.FieldData, error)
 	ProcessSearch(ctx context.Context, placeholderGroup *commonpb.PlaceholderGroup) (*commonpb.PlaceholderGroup, error)
-	ProcessBulkInsert(inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error)
+	ProcessBulkInsert(ctx context.Context, inputs []storage.FieldData) (map[storage.FieldID]storage.FieldData, error)
 }
 
 type FunctionExecutor struct {
 	runners map[int64]Runner
 }
 
-func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (Runner, error) {
+func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Runner, error) {
 	switch schema.GetType() {
 	case schemapb.FunctionType_BM25: // ignore bm25 function
 		return nil, nil
 	case schemapb.FunctionType_TextEmbedding:
-		f, err := NewTextEmbeddingFunction(coll, schema)
+		f, err := NewTextEmbeddingFunction(coll, schema, extraInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -73,9 +74,9 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 }
 
 // Since bm25 and embedding are implemented in different ways, the bm25 function is not verified here.
-func ValidateFunctions(schema *schemapb.CollectionSchema) error {
+func ValidateFunctions(schema *schemapb.CollectionSchema, extraInfo *models.ModelExtraInfo) error {
 	for _, fSchema := range schema.Functions {
-		f, err := createFunction(schema, fSchema)
+		f, err := createFunction(schema, fSchema, extraInfo)
 		if err != nil {
 			return err
 		}
@@ -84,14 +85,14 @@ func ValidateFunctions(schema *schemapb.CollectionSchema) error {
 		if f == nil {
 			continue
 		}
-		if err := f.Check(); err != nil {
+		if err := f.Check(context.Background()); err != nil {
 			return fmt.Errorf("Check function [%s:%s] failed, the err is: %v", fSchema.Name, fSchema.GetType().String(), err)
 		}
 	}
 	return nil
 }
 
-func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema) (*FunctionExecutor, error) {
+func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (*FunctionExecutor, error) {
 	executor := &FunctionExecutor{
 		runners: make(map[int64]Runner),
 	}
@@ -99,7 +100,7 @@ func NewFunctionExecutor(schema *schemapb.CollectionSchema, functions []*schemap
 		functions = schema.Functions
 	}
 	for _, fSchema := range functions {
-		runner, err := createFunction(schema, fSchema)
+		runner, err := createFunction(schema, fSchema, extraInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +255,7 @@ func (executor *FunctionExecutor) ProcessSearch(ctx context.Context, req *intern
 	return executor.prcessAdvanceSearch(ctx, req)
 }
 
-func (executor *FunctionExecutor) processSingleBulkInsert(runner Runner, data *storage.InsertData) (map[storage.FieldID]storage.FieldData, error) {
+func (executor *FunctionExecutor) processSingleBulkInsert(ctx context.Context, runner Runner, data *storage.InsertData) (map[storage.FieldID]storage.FieldData, error) {
 	inputs := make([]storage.FieldData, 0, len(runner.GetSchema().InputFieldIds))
 	for idx, id := range runner.GetSchema().InputFieldIds {
 		field, exist := data.Data[id]
@@ -264,17 +265,17 @@ func (executor *FunctionExecutor) processSingleBulkInsert(runner Runner, data *s
 		inputs = append(inputs, field)
 	}
 
-	outputs, err := runner.ProcessBulkInsert(inputs)
+	outputs, err := runner.ProcessBulkInsert(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
 	return outputs, nil
 }
 
-func (executor *FunctionExecutor) ProcessBulkInsert(data *storage.InsertData) error {
+func (executor *FunctionExecutor) ProcessBulkInsert(ctx context.Context, data *storage.InsertData) error {
 	// Since concurrency has already been used in the outer layer, only a serial logic access model is used here.
 	for _, runner := range executor.runners {
-		output, err := executor.processSingleBulkInsert(runner, data)
+		output, err := executor.processSingleBulkInsert(ctx, runner, data)
 		if err != nil {
 			return nil
 		}

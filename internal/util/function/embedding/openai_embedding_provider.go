@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -40,6 +41,7 @@ type OpenAIEmbeddingProvider struct {
 
 	maxBatch   int
 	timeoutSec int64
+	extraInfo  *models.ModelExtraInfo
 }
 
 func createOpenAIEmbeddingClient(apiKey string, url string) (*openai.OpenAIEmbeddingClient, error) {
@@ -75,7 +77,7 @@ func createAzureOpenAIEmbeddingClient(apiKey string, url string, resourceName st
 	return c, nil
 }
 
-func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, isAzure bool, credentials *credentials.Credentials) (*OpenAIEmbeddingProvider, error) {
+func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, isAzure bool, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*OpenAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -100,7 +102,7 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 
 	var c openai.OpenAIEmbeddingInterface
 	if !isAzure {
-		apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.OpenaiAKEnvStr)
+		apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.OpenaiAKEnvStr, extraInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +111,7 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 			return nil, err
 		}
 	} else {
-		apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.AzureOpenaiAKEnvStr)
+		apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.AzureOpenaiAKEnvStr, extraInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -128,16 +130,17 @@ func newOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 		embedDimParam: dim,
 		maxBatch:      128,
 		timeoutSec:    30,
+		extraInfo:     extraInfo,
 	}
 	return &provider, nil
 }
 
-func NewOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*OpenAIEmbeddingProvider, error) {
-	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, false, credentials)
+func NewOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*OpenAIEmbeddingProvider, error) {
+	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, false, credentials, extraInfo)
 }
 
-func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*OpenAIEmbeddingProvider, error) {
-	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, true, credentials)
+func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*OpenAIEmbeddingProvider, error) {
+	return newOpenAIEmbeddingProvider(fieldSchema, functionSchema, params, true, credentials, extraInfo)
 }
 
 func (provider *OpenAIEmbeddingProvider) MaxBatch() int {
@@ -148,7 +151,7 @@ func (provider *OpenAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *OpenAIEmbeddingProvider) CallEmbedding(texts []string, _ models.TextEmbeddingMode) (any, error) {
+func (provider *OpenAIEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, _ models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {
