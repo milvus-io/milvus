@@ -247,6 +247,7 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
     // Get field type from schema
     const auto& field_meta = get_schema()[field_id];
     load_index_info.field_type = field_meta.get_data_type();
+    load_index_info.element_type = field_meta.get_element_type();
 
     // Set index metadata
     load_index_info.index_id = field_index_info->indexid();
@@ -260,21 +261,37 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
     load_index_info.num_rows = field_index_info->num_rows();
     load_index_info.schema = field_meta.ToProto();
 
-    // Copy index file paths
+    // Copy index file paths, excluding indexParams file
     for (const auto& file_path : field_index_info->index_file_paths()) {
-        load_index_info.index_files.push_back(file_path);
+        size_t last_slash = file_path.find_last_of('/');
+        std::string filename = (last_slash != std::string::npos)
+                                   ? file_path.substr(last_slash + 1)
+                                   : file_path;
+
+        if (filename != "indexParams") {
+            load_index_info.index_files.push_back(file_path);
+        }
     }
 
+    bool mmap_enabled = false;
     // Set index params
     for (const auto& kv_pair : field_index_info->index_params()) {
+        if (kv_pair.key() == "mmap.enable") {
+            std::string lower;
+            std::transform(kv_pair.value().begin(),
+                           kv_pair.value().end(),
+                           std::back_inserter(lower),
+                           ::tolower);
+            mmap_enabled = lower == "true";
+        }
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
 
-    size_t dim = IsVectorDataType(field_meta.get_data_type()) &&
-                            !IsSparseFloatVectorDataType(
-                                field_meta.get_data_type())
-                        ? field_meta.get_dim()
-                        : 1;
+    size_t dim =
+        IsVectorDataType(field_meta.get_data_type()) &&
+                !IsSparseFloatVectorDataType(field_meta.get_data_type())
+            ? field_meta.get_dim()
+            : 1;
     load_index_info.dim = dim;
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -283,6 +300,7 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager()
             ->GetRootPath();
+    load_index_info.enable_mmap = mmap_enabled;
 
     return load_index_info;
 }
@@ -2924,9 +2942,10 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
         for (const auto& [field_id, load_field_data_info] :
              field_data_to_load) {
-            auto future = pool.Submit([this, load_field_data_info]() -> void {
-                LoadFieldData(load_field_data_info);
-            });
+            // Create a local copy to capture in lambda (C++17 compatible)
+            const auto field_data = load_field_data_info;
+            auto future = pool.Submit(
+                [this, field_data]() -> void { LoadFieldData(field_data); });
 
             load_field_futures.push_back(std::move(future));
         }
