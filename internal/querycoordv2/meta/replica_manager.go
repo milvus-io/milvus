@@ -178,6 +178,13 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
 	replicas := make([]*Replica, 0)
 	for _, config := range params.Configs {
+		if existedReplica, ok := m.replicas[config.GetReplicaId()]; ok {
+			// if the replica is already existed, just update the resource group
+			mutableReplica := existedReplica.CopyForWrite()
+			mutableReplica.SetResourceGroup(config.GetResourceGroupName())
+			replicas = append(replicas, mutableReplica.IntoReplica())
+			continue
+		}
 		replica := NewReplicaWithPriority(&querypb.Replica{
 			ID:            config.GetReplicaId(),
 			CollectionID:  params.CollectionID,
@@ -189,6 +196,11 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 			replica = mutableReplica.IntoReplica()
 		}
 		replicas = append(replicas, replica)
+		log.Ctx(ctx).Info("spawn replica for collection",
+			zap.Int64("collectionID", params.CollectionID),
+			zap.Int64("replicaID", config.GetReplicaId()),
+			zap.String("resourceGroup", config.GetResourceGroupName()),
+		)
 	}
 	if err := m.put(ctx, replicas...); err != nil {
 		return nil, errors.Wrap(err, "failed to put replicas")
@@ -539,6 +551,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
 			log.Info(
 				"new replica recovery found",
+				zap.Int64("collectionID", collectionID),
 				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.Int64s("newRONodes", roNodes),
 				zap.Int64s("roToRWNodes", recoverableNodes),
@@ -705,6 +718,7 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 		mutableReplica.AddRWSQNode(incomingNode...)     // unused -> rw
 		log.Info(
 			"new replica recovery streaming query node found",
+			zap.Int64("collectionID", collectionID),
 			zap.Int64("replicaID", assignment.GetReplicaID()),
 			zap.Int64s("newRONodes", roNodes),
 			zap.Int64s("roToRWNodes", recoverableNodes),
