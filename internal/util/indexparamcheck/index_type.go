@@ -12,11 +12,11 @@
 package indexparamcheck
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // IndexType string.
@@ -76,11 +76,11 @@ func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string)
 	}
 	enable, err := strconv.ParseBool(mmapEnable)
 	if err != nil {
-		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.MmapEnabledKey, mmapEnable)
+		return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", common.MmapEnabledKey, mmapEnable)
 	}
 	mmapSupport := indexType == AutoIndex || IsVectorMmapIndex(indexType) || IsScalarMmapIndex(indexType)
 	if enable && !mmapSupport {
-		return fmt.Errorf("index type %s does not support mmap", indexType)
+		return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
 	}
 	return nil
 }
@@ -92,10 +92,10 @@ func ValidateOffsetCacheIndexParams(indexType IndexType, indexParams map[string]
 	}
 	enable, err := strconv.ParseBool(offsetCacheEnable)
 	if err != nil {
-		return fmt.Errorf("invalid %s value: %s, expected: true, false", common.IndexOffsetCacheEnabledKey, offsetCacheEnable)
+		return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", common.IndexOffsetCacheEnabledKey, offsetCacheEnable)
 	}
 	if enable && !IsOffsetCacheSupported(indexType) {
-		return fmt.Errorf("only bitmap index support %s now", common.IndexOffsetCacheEnabledKey)
+		return merr.WrapErrParameterInvalidMsg("only bitmap index support %s now", common.IndexOffsetCacheEnabledKey)
 	}
 	return nil
 }

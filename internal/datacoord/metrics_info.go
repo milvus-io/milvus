@@ -18,10 +18,8 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
-	"github.com/cockroachdb/errors"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -33,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -137,7 +136,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 		}
 		return string(bs), nil
 	}
-	return "", fmt.Errorf("invalid param value in=[%s], it should be dc or dn", in)
+	return "", merr.WrapErrServiceInternalMsg("invalid param value in=[%s], it should be dc or dn", in)
 }
 
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
@@ -299,7 +298,7 @@ func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetri
 		},
 	}
 	if node == nil {
-		return infos, errors.New("IndexNode is nil")
+		return infos, merr.WrapErrServiceInternalMsg("IndexNode is nil")
 	}
 
 	metrics, err := node.GetMetrics(ctx, req)

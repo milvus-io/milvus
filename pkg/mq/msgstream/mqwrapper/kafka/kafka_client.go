@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -17,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -112,7 +112,7 @@ func NewKafkaClientInstanceWithConfig(ctx context.Context, config *paramtable.Ka
 	// connection setup timeout, default as 30000ms, available range is [1000, 2147483647]
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when new kafka client")
+			return nil, merr.WrapErrServiceInternalMsg("context timeout when new kafka client")
 		}
 		// timeout := time.Until(deadline).Milliseconds()
 		// kafkaConfig.SetKey("socket.connection.setup.timeout.ms", strconv.FormatInt(timeout, 10))

@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -300,7 +299,7 @@ func (st *statsTask) handleEmptySegment(ctx context.Context) error {
 func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo) (*workerpb.CreateStatsRequest, error) {
 	collInfo, err := st.handler.GetCollection(ctx, segment.GetCollectionID())
 	if err != nil || collInfo == nil {
-		return nil, fmt.Errorf("failed to get collection info: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to get collection info")
 	}
 
 	// Calculate binlog allocation
@@ -311,7 +310,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	// Allocate IDs
 	start, end, err := st.allocator.AllocN(binlogNum + int64(len(collInfo.Schema.GetFunctions())) + 1)
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate log IDs: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to allocate log IDs")
 	}
 
 	// Create the request

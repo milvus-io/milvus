@@ -1427,7 +1427,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 					fieldName = field.Name
 					vectorField = field
 				} else {
-					return nil, errors.New("search without annsField, but already found multiple vector fields: [" + fieldName + ", " + field.Name + ",,,]")
+					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [" + fieldName + ", " + field.Name + ",,,]")
 				}
 			}
 		}
@@ -1440,7 +1440,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	}
 	if vectorField == nil {
-		return nil, errors.New("cannot find a vector field named: " + fieldName)
+		return nil, merr.WrapErrParameterInvalidMsg("cannot find a vector field named: " + fieldName)
 	}
 	dim := int64(0)
 	if !typeutil.IsSparseFloatVectorType(vectorField.DataType) {

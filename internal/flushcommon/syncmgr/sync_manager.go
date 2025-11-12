@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -109,7 +109,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 
 func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	if mgr.workerPool.IsClosed() {
-		return nil, errors.New("sync manager is closed")
+		return nil, merr.WrapErrServiceInternalMsg("sync manager is closed")
 	}
 
 	switch t := task.(type) {
@@ -122,7 +122,7 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 
 func (mgr *syncManager) SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	if mgr.workerPool.IsClosed() {
-		return nil, errors.New("sync manager is closed")
+		return nil, merr.WrapErrServiceInternalMsg("sync manager is closed")
 	}
 
 	switch t := task.(type) {

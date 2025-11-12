@@ -13,7 +13,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strconv"
 	"sync"
@@ -24,6 +23,7 @@ import (
 
 	rocksdbkv "github.com/milvus-io/milvus/pkg/v2/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -316,11 +316,11 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 
 	ll, ok := topicMu.Load(topic)
 	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topic)
+		return merr.WrapErrServiceInternalMsg("topic name = %s not exist", topic)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topic)
+		return merr.WrapErrServiceInternalMsg("get mutex failed, topic name = %s", topic)
 	}
 	lock.Lock()
 	defer lock.Unlock()

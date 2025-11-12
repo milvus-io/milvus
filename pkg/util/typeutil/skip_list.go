@@ -17,11 +17,12 @@
 package typeutil
 
 import (
-	"fmt"
 	"math/rand"
 	"sync"
 
 	"golang.org/x/exp/constraints"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 const (
@@ -265,10 +266,10 @@ func NewSkipList[K constraints.Ordered, V any](opts ...SkipListOption) (*SkipLis
 		opt(option)
 	}
 	if option.maxLevel < 1 {
-		return nil, fmt.Errorf("invalid maxlevel %d", option.maxLevel)
+		return nil, merr.WrapErrServiceInternalMsg("invalid maxlevel %d", option.maxLevel)
 	}
 	if option.skip < 1 {
-		return nil, fmt.Errorf("invalid skip %d", option.skip)
+		return nil, merr.WrapErrServiceInternalMsg("invalid skip %d", option.skip)
 	}
 
 	return &SkipList[K, V]{

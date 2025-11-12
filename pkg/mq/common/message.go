@@ -17,12 +17,10 @@
 package common
 
 import (
-	"fmt"
-
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // ProducerOptions contains the options of a producer
@@ -99,14 +97,14 @@ func GetMsgTypeFromRaw(payload []byte, properties map[string]string) (commonpb.M
 	if msgType == commonpb.MsgType_Undefined {
 		header := commonpb.MsgHeader{}
 		if payload == nil {
-			return msgType, errors.New("failed to unmarshal message header, payload is empty")
+			return msgType, merr.WrapErrSerializationFailedMsg("failed to unmarshal message header, payload is empty")
 		}
 		err := proto.Unmarshal(payload, &header)
 		if err != nil {
-			return msgType, fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
+			return msgType, merr.WrapErrSerializationFailed(err, "failed to unmarshal message header")
 		}
 		if header.Base == nil {
-			return msgType, errors.New("failed to unmarshal message, header is uncomplete")
+			return msgType, merr.WrapErrSerializationFailedMsg("failed to unmarshal message, header is incomplete")
 		}
 		msgType = header.Base.MsgType
 	}

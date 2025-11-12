@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -338,7 +339,7 @@ func (m *Manager) UpdateSourceOptions(opts ...Option) {
 func (m *Manager) pullSourceConfigs(source string) error {
 	configSource, ok := m.sources.Get(source)
 	if !ok {
-		return errors.New("invalid source or source not added")
+		return merr.WrapErrServiceInternalMsg("invalid source or source not added")
 	}
 
 	configs, err := configSource.GetConfigurations()

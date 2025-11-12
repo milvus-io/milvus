@@ -20,8 +20,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -50,13 +48,13 @@ func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.Create
 
 	dbID, err := c.idAllocator.AllocOne()
 	if err != nil {
-		return errors.Wrap(err, "failed to allocate database id")
+		return merr.WrapErrServiceInternalErr(err, "failed to allocate database id")
 	}
 
 	// Use dbID as ezID because the dbID is unqiue
 	properties, err := hookutil.TidyDBCipherProperties(dbID, req.GetProperties())
 	if err != nil {
-		return errors.Wrap(err, "failed to tidy database cipher properties")
+		return merr.WrapErrServiceInternalErr(err, "failed to tidy database cipher properties")
 	}
 
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, properties)
@@ -65,7 +63,7 @@ func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.Create
 	}
 
 	if err := hookutil.CreateEZByDBProperties(properties); err != nil {
-		return errors.Wrap(err, "failed to create ez by db properties")
+		return merr.WrapErrServiceInternalErr(err, "failed to create ez by db properties")
 	}
 
 	msg := message.NewCreateDatabaseMessageBuilderV2().
@@ -86,7 +84,7 @@ func (c *DDLCallback) createDatabaseV1AckCallback(ctx context.Context, result me
 	header := result.Message.Header()
 	db := model.NewDatabase(header.DbId, header.DbName, etcdpb.DatabaseState_DatabaseCreated, result.Message.MustBody().Properties)
 	if err := c.meta.CreateDatabase(ctx, db, result.GetControlChannelResult().TimeTick); err != nil {
-		return errors.Wrap(err, "failed to create database")
+		return merr.WrapErrServiceInternalErr(err, "failed to create database")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(

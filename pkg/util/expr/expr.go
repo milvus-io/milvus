@@ -23,13 +23,13 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -79,21 +79,21 @@ func HasRegistered(key string) bool {
 func Exec(code, auth string) (res string, err error) {
 	defer func() {
 		if e := recover(); e != nil {
-			err = fmt.Errorf("panic: %v", e)
+			err = merr.WrapErrServiceInternalMsg("panic: %v", e)
 		}
 	}()
 	if v == nil {
-		return "", errors.New("the expr isn't inited")
+		return "", merr.WrapErrParameterInvalidMsg("the expr isn't inited")
 	}
 	if code == "" {
-		return "", errors.New("the expr code is empty")
+		return "", merr.WrapErrParameterInvalidMsg("the expr code is empty")
 	}
 	if auth == "" {
-		return "", errors.New("the expr auth is empty")
+		return "", merr.WrapErrParameterInvalidMsg("the expr auth is empty")
 	}
 	// Allow bypass when authentication has been verified externally (e.g., by HTTP handler)
 	if auth != AuthBypass && authKey != auth {
-		return "", errors.New("the expr auth is invalid")
+		return "", merr.WrapErrParameterInvalidMsg("the expr auth is invalid")
 	}
 	program, err := expr.Compile(code, expr.Env(env), expr.WithContext("ctx"))
 	if err != nil {

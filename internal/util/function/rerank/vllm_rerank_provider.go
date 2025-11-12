@@ -20,7 +20,6 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vllm"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type vllmProvider struct {
@@ -52,7 +52,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 			}
 		case models.VllmTruncateParamName:
 			if vllmTrun, err := strconv.ParseInt(param.Value, 10, 64); err != nil {
-				return nil, fmt.Errorf("Rerank params error, %s: %s is not a number", models.VllmTruncateParamName, param.Value)
+				return nil, merr.WrapErrFunctionFailed(err, "Rerank params error, %s: %s is not a number", models.VllmTruncateParamName, param.Value)
 			} else {
 				truncateParams[models.VllmTruncateParamName] = vllmTrun
 			}
@@ -60,7 +60,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		}
 	}
 	if endpoint == "" {
-		return nil, fmt.Errorf("Rerank function lost params endpoint")
+		return nil, merr.WrapErrFunctionFailedMsg("Rerank function lost params endpoint")
 	}
 
 	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})

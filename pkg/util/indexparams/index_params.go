@@ -22,12 +22,11 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -179,11 +178,11 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		var ok bool
 		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
-			return errors.New("index param max_degree not exist")
+			return merr.WrapErrParameterInvalidMsg("index param max_degree not exist")
 		}
 		searchListSize, ok = indexParams[SearchListSizeKey]
 		if !ok {
-			return errors.New("index param search_list_size not exist")
+			return merr.WrapErrParameterInvalidMsg("index param search_list_size not exist")
 		}
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
@@ -226,13 +225,13 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 	if params.AutoIndexConfig.Enable.GetAsBool() {
 		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
-			return indexParams, errors.New("index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
+			return indexParams, merr.WrapErrParameterInvalidErr(err, "index param search_cache_budget_gb_ratio not exist in AutoIndex Config")
 		}
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
 	} else {
 		paramVal, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
 		if err != nil {
-			return indexParams, errors.New("index param search_cache_budget_gb_ratio not exist in Config")
+			return indexParams, merr.WrapErrParameterInvalidErr(err, "index param search_cache_budget_gb_ratio not exist in Config")
 		}
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", paramVal)
 	}
@@ -271,7 +270,7 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64) error {
 	pqCodeBudgetGBRatioStr, ok := indexParams[PQCodeBudgetRatioKey]
 	if !ok {
-		return errors.New("index param pqCodeBudgetGBRatio not exist")
+		return merr.WrapErrParameterInvalidMsg("index param pqCodeBudgetGBRatio not exist")
 	}
 	pqCodeBudgetGBRatio, err := strconv.ParseFloat(pqCodeBudgetGBRatioStr, 64)
 	if err != nil {
@@ -279,7 +278,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, fieldDataSize int64)
 	}
 	buildNumThreadsRatioStr, ok := indexParams[NumBuildThreadRatioKey]
 	if !ok {
-		return errors.New("index param buildNumThreadsRatio not exist")
+		return merr.WrapErrParameterInvalidMsg("index param buildNumThreadsRatio not exist")
 	}
 	buildNumThreadsRatio, err := strconv.ParseFloat(buildNumThreadsRatioStr, 64)
 	if err != nil {
@@ -315,7 +314,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	dimStr, ok := indexParams[common.DimKey]
 	if !ok {
 		// type param dim has been put into index params before build index
-		return errors.New("type param dim not exist")
+		return merr.WrapErrParameterInvalidMsg("type param dim not exist")
 	}
 	dim, err := strconv.ParseInt(dimStr, 10, 64)
 	if err != nil {
@@ -337,15 +336,15 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	} else {
 		searchCacheBudgetGBRatio, err = strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "parse SearchCacheBudgetGBRatio failed")
 		}
 		loadNumThreadRatio, err = strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "parse LoadNumThreadRatio failed")
 		}
 		beamWidthRatio, err = strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "parse BeamWidthRatio failed")
 		}
 	}
 

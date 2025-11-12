@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/streamnative/pulsarctl/pkg/cli"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
@@ -36,6 +35,7 @@ import (
 	pulsarmqwrapper "github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar/pulsarlog"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
@@ -82,7 +82,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewMsgStream")
+			return nil, merr.WrapErrServiceInternalMsg("context timeout when NewMsgStream")
 		}
 		timeout = time.Until(deadline)
 	}
@@ -111,7 +111,7 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 	var timeout time.Duration = f.RequestTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewTtMsgStream")
+			return nil, merr.WrapErrServiceInternalMsg("context timeout when NewTtMsgStream")
 		}
 		timeout = time.Until(deadline)
 	}
@@ -141,7 +141,7 @@ func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
 		log.Error("build authencation from config failed, please check it!",
 			zap.String("authPlugin", f.PulsarAuthPlugin),
 			zap.Error(err))
-		return nil, errors.New("build authencation from config failed")
+		return nil, merr.WrapErrServiceInternalMsg("build authencation from config failed")
 	}
 	return auth, nil
 }

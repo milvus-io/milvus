@@ -791,7 +791,7 @@ func convertEmptyStringToByte(value string) ([]byte, error) {
 	if len(value) == 0 {
 		return EmptyValueByte, nil
 	} else if value == EmptyValueString {
-		return nil, fmt.Errorf("value for key is reserved by EmptyValue: %s", EmptyValueString)
+		return nil, merr.WrapErrServiceInternalMsg("value for key is reserved by EmptyValue: %s", EmptyValueString)
 	}
 	return []byte(value), nil
 }

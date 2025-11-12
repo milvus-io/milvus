@@ -294,24 +294,6 @@ func Test_ToPhysicalChannel(t *testing.T) {
 	}
 }
 
-func Test_ConvertChannelName(t *testing.T) {
-	const (
-		chanName      = "by-dev_rootcoord-dml_123v0"
-		deltaChanName = "by-dev_rootcoord-delta_123v0"
-		tFrom         = "rootcoord-dml"
-		tTo           = "rootcoord-delta"
-	)
-	_, err := ConvertChannelName("by-dev", tFrom, tTo)
-	assert.Error(t, err)
-	_, err = ConvertChannelName("by-dev", "", tTo)
-	assert.Error(t, err)
-	_, err = ConvertChannelName("by-dev_rootcoord-delta_123v0", tFrom, tTo)
-	assert.Error(t, err)
-	str, err := ConvertChannelName(chanName, tFrom, tTo)
-	assert.NoError(t, err)
-	assert.Equal(t, deltaChanName, str)
-}
-
 func TestGetNumRowsOfScalarField(t *testing.T) {
 	cases := []struct {
 		datas interface{}

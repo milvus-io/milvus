@@ -17,9 +17,8 @@
 package typeutil
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // IDsChecker provides efficient lookup functionality for schema.IDs
@@ -55,7 +54,7 @@ func NewIDsChecker(ids *schemapb.IDs) (*IDsChecker, error) {
 			checker.strIDSet[id] = struct{}{}
 		}
 	default:
-		return nil, fmt.Errorf("unsupported ID type in IDs")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported ID type in IDs")
 	}
 
 	return checker, nil
@@ -66,13 +65,13 @@ func NewIDsChecker(ids *schemapb.IDs) (*IDsChecker, error) {
 // Returns error if cursor is out of bounds or type mismatch
 func (c *IDsChecker) Contains(idsA *schemapb.IDs, cursor int) (bool, error) {
 	if idsA == nil || idsA.GetIdField() == nil {
-		return false, fmt.Errorf("idsA is nil or empty")
+		return false, merr.WrapErrParameterInvalidMsg("idsA is nil or empty")
 	}
 
 	// Check if cursor is within bounds
 	size := GetSizeOfIDs(idsA)
 	if cursor < 0 || cursor >= size {
-		return false, fmt.Errorf("cursor %d is out of bounds [0, %d)", cursor, size)
+		return false, merr.WrapErrParameterInvalidMsg("cursor %d is out of bounds [0, %d)", cursor, size)
 	}
 
 	// If checker is empty, return false for any query
@@ -83,7 +82,7 @@ func (c *IDsChecker) Contains(idsA *schemapb.IDs, cursor int) (bool, error) {
 	switch idsA.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		if c.idType != schemapb.DataType_Int64 {
-			return false, fmt.Errorf("type mismatch: checker expects %v, got Int64", c.idType)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: checker expects %v, got Int64", c.idType)
 		}
 		if c.intIDSet == nil {
 			return false, nil
@@ -94,7 +93,7 @@ func (c *IDsChecker) Contains(idsA *schemapb.IDs, cursor int) (bool, error) {
 
 	case *schemapb.IDs_StrId:
 		if c.idType != schemapb.DataType_VarChar {
-			return false, fmt.Errorf("type mismatch: checker expects %v, got VarChar", c.idType)
+			return false, merr.WrapErrParameterInvalidMsg("type mismatch: checker expects %v, got VarChar", c.idType)
 		}
 		if c.strIDSet == nil {
 			return false, nil
@@ -104,7 +103,7 @@ func (c *IDsChecker) Contains(idsA *schemapb.IDs, cursor int) (bool, error) {
 		return exists, nil
 
 	default:
-		return false, fmt.Errorf("unsupported ID type in idsA")
+		return false, merr.WrapErrParameterInvalidMsg("unsupported ID type in idsA")
 	}
 }
 
@@ -112,7 +111,7 @@ func (c *IDsChecker) Contains(idsA *schemapb.IDs, cursor int) (bool, error) {
 // Returns the indices of IDs that exist in the checker
 func (c *IDsChecker) ContainsAny(idsA *schemapb.IDs) ([]int, error) {
 	if idsA == nil || idsA.GetIdField() == nil {
-		return nil, fmt.Errorf("idsA is nil or empty")
+		return nil, merr.WrapErrParameterInvalidMsg("idsA is nil or empty")
 	}
 
 	var result []int
@@ -125,7 +124,7 @@ func (c *IDsChecker) ContainsAny(idsA *schemapb.IDs) ([]int, error) {
 	switch idsA.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		if c.idType != schemapb.DataType_Int64 {
-			return nil, fmt.Errorf("type mismatch: checker expects %v, got Int64", c.idType)
+			return nil, merr.WrapErrParameterInvalidMsg("type mismatch: checker expects %v, got Int64", c.idType)
 		}
 		if c.intIDSet == nil {
 			return result, nil
@@ -139,7 +138,7 @@ func (c *IDsChecker) ContainsAny(idsA *schemapb.IDs) ([]int, error) {
 
 	case *schemapb.IDs_StrId:
 		if c.idType != schemapb.DataType_VarChar {
-			return nil, fmt.Errorf("type mismatch: checker expects %v, got VarChar", c.idType)
+			return nil, merr.WrapErrParameterInvalidMsg("type mismatch: checker expects %v, got VarChar", c.idType)
 		}
 		if c.strIDSet == nil {
 			return result, nil
@@ -152,7 +151,7 @@ func (c *IDsChecker) ContainsAny(idsA *schemapb.IDs) ([]int, error) {
 		}
 
 	default:
-		return nil, fmt.Errorf("unsupported ID type in idsA")
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported ID type in idsA")
 	}
 
 	return result, nil
@@ -190,7 +189,7 @@ func (c *IDsChecker) GetIDType() schemapb.DataType {
 // Returns a slice of booleans indicating whether each cursor position exists in the checker
 func (c *IDsChecker) ContainsIDsAtCursors(idsA *schemapb.IDs, cursors []int) ([]bool, error) {
 	if idsA == nil || idsA.GetIdField() == nil {
-		return nil, fmt.Errorf("idsA is nil or empty")
+		return nil, merr.WrapErrParameterInvalidMsg("idsA is nil or empty")
 	}
 
 	size := GetSizeOfIDs(idsA)
@@ -198,7 +197,7 @@ func (c *IDsChecker) ContainsIDsAtCursors(idsA *schemapb.IDs, cursors []int) ([]
 
 	for i, cursor := range cursors {
 		if cursor < 0 || cursor >= size {
-			return nil, fmt.Errorf("cursor %d is out of bounds [0, %d)", cursor, size)
+			return nil, merr.WrapErrParameterInvalidMsg("cursor %d is out of bounds [0, %d)", cursor, size)
 		}
 
 		exists, err := c.Contains(idsA, cursor)

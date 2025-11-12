@@ -1,6 +1,8 @@
 package funcutil
 
-import "fmt"
+import (
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+)
 
 func MapReduce(results []map[string]string, method map[string]func(string) error) error {
 	// TODO: use generic type to reconstruct map[string]string -> [T any] map[string]T
@@ -8,7 +10,7 @@ func MapReduce(results []map[string]string, method map[string]func(string) error
 		for k, v := range result {
 			fn, ok := method[k]
 			if !ok {
-				return fmt.Errorf("unknown field %s", k)
+				return merr.WrapErrServiceInternalMsg("unknown field %s", k)
 			}
 			if err := fn(v); err != nil {
 				return err

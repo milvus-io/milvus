@@ -1,9 +1,8 @@
 package typeutil
 
 import (
-	"fmt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type kvPairsHelper[K comparable, V any] struct {
@@ -13,7 +12,7 @@ type kvPairsHelper[K comparable, V any] struct {
 func (h *kvPairsHelper[K, V]) Get(k K) (V, error) {
 	v, ok := h.kvPairs[k]
 	if !ok {
-		return v, fmt.Errorf("%v not found", k)
+		return v, merr.WrapErrParameterInvalidMsg("%v not found", k)
 	}
 	return v, nil
 }

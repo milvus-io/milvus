@@ -26,17 +26,24 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
+	retryableCode      typeutil.Set[int32]
 	fullMethodName2Tag *typeutil.ConcurrentMap[string, string]
 	sf                 conc.Singleflight[string]
 )
 
 func init() {
+	retryableCode = typeutil.NewSet(
+		merr.Code(merr.ErrServiceRateLimit),
+		merr.Code(merr.ErrCollectionSchemaMismatch),
+	)
+
 	fullMethodName2Tag = typeutil.NewConcurrentMap[string, string]()
 }
 

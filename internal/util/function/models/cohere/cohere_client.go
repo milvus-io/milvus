@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type CohereClient struct {
@@ -29,7 +30,7 @@ type CohereClient struct {
 
 func NewCohereClient(apiKey string) (*CohereClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.CohereAIAKEnvStr)
+		return nil, merr.WrapErrFunctionFailedMsg("Missing credentials config or configure the %s environment variable in the Milvus service.", models.CohereAIAKEnvStr)
 	}
 	return &CohereClient{
 		apiKey: apiKey,

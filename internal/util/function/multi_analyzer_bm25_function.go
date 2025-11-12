@@ -76,12 +76,12 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 
 	mfield, ok := m["by_field"]
 	if !ok {
-		return nil, fmt.Errorf("bm25 function with multi analyzer must have by_field param in multi_analyzer_params")
+		return nil, merr.WrapErrFunctionFailedMsg("bm25 function with multi analyzer must have by_field param in multi_analyzer_params")
 	}
 
 	err = json.Unmarshal(mfield, &mFileName)
 	if err != nil {
-		return nil, fmt.Errorf("bm25 function with multi analyzer by_field must be string but now: %s", mfield)
+		return nil, merr.WrapErrFunctionFailed(err, "bm25 function with multi analyzer by_field must be string but now: %s", mfield)
 	}
 
 	for _, field := range coll.GetFields() {
@@ -91,33 +91,33 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	}
 
 	if len(runner.inputFields) != 2 {
-		return nil, fmt.Errorf("bm25 function with multi analyzer must have two input fields")
+		return nil, merr.WrapErrFunctionFailedMsg("bm25 function with multi analyzer must have two input fields")
 	}
 
 	if value, ok := m["alias"]; ok {
 		mapping := map[string]string{}
 		err = json.Unmarshal(value, &mapping)
 		if err != nil {
-			return nil, fmt.Errorf("bm25 function with multi analyzer mapping must be string map but now: %s", value)
+			return nil, merr.WrapErrFunctionFailed(err, "bm25 function with multi analyzer mapping must be string map but now: %s", value)
 		}
 		runner.alias = mapping
 	}
 
 	analyzers, ok := m["analyzers"]
 	if !ok {
-		return nil, fmt.Errorf("bm25 function with multi analyzer must have analyzers param in multi_analyzer_params")
+		return nil, merr.WrapErrFunctionFailedMsg("bm25 function with multi analyzer must have analyzers param in multi_analyzer_params")
 	}
 
 	var analyzersParam map[string]json.RawMessage
 	err = json.Unmarshal(analyzers, &analyzersParam)
 	if err != nil {
-		return nil, fmt.Errorf("bm25 function unmarshal multi_analyzer_params analyzers failed : %s", err.Error())
+		return nil, merr.WrapErrFunctionFailed(err, "bm25 function unmarshal multi_analyzer_params analyzers failed : %s", err.Error())
 	}
 
 	for name, param := range analyzersParam {
 		analyzer, err := analyzer.NewAnalyzer(string(param), "")
 		if err != nil {
-			return nil, fmt.Errorf("bm25 function create analyzer %s failed with error: %s", name, err.Error())
+			return nil, merr.WrapErrFunctionFailed(err, "bm25 function create analyzer %s failed", name)
 		}
 		runner.analyzers[name] = analyzer
 	}
@@ -161,7 +161,7 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 		}
 
 		if !typeutil.IsUTF8(text[i]) {
-			return merr.WrapErrParameterInvalidMsg("string data must be utf8 format: %v", text[i])
+			return merr.WrapErrServiceInternal(fmt.Sprintf("string data must be utf8 format: %v", text[i]))
 		}
 		embeddingMap := map[uint32]float32{}
 
@@ -189,25 +189,25 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, fmt.Errorf("analyzer receview request after function closed")
+		return nil, merr.WrapErrServiceInternal("analyzer receview request after function closed")
 	}
 
 	if len(inputs) != 2 {
-		return nil, fmt.Errorf("BM25 function with multi analyzer must received two input column")
+		return nil, merr.WrapErrServiceInternal("BM25 function with multi analyzer must received two input column")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, fmt.Errorf("BM25 function with multi analyzer text input must be string list")
+		return nil, merr.WrapErrServiceInternal("BM25 function with multi analyzer text input must be string list")
 	}
 
 	analyzer, ok := inputs[1].([]string)
 	if !ok {
-		return nil, fmt.Errorf("BM25 function with multi analyzer input analyzer name must be string list")
+		return nil, merr.WrapErrServiceInternal("BM25 function with multi analyzer input analyzer name must be string list")
 	}
 
 	if len(text) != len(analyzer) {
-		return nil, fmt.Errorf("BM25 function with multi analyzer input text and analyzer name must have same length")
+		return nil, merr.WrapErrServiceInternal("BM25 function with multi analyzer input text and analyzer name must have same length")
 	}
 
 	rowNum := len(text)
@@ -286,25 +286,25 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchAnalyze(withDetail bool, withHash
 	defer v.mu.RUnlock()
 
 	if v.closed {
-		return nil, fmt.Errorf("analyzer receview request after function closed")
+		return nil, merr.WrapErrServiceInternal("analyzer receview request after function closed")
 	}
 
 	if len(inputs) != 2 {
-		return nil, fmt.Errorf("multi analyzer must received two input column(text, analyzer_name)")
+		return nil, merr.WrapErrServiceInternal("multi analyzer must received two input column(text, analyzer_name)")
 	}
 
 	text, ok := inputs[0].([]string)
 	if !ok {
-		return nil, fmt.Errorf("multi analyzer text input must be string list")
+		return nil, merr.WrapErrServiceInternal("multi analyzer text input must be string list")
 	}
 
 	analyzer, ok := inputs[1].([]string)
 	if !ok {
-		return nil, fmt.Errorf("multi analyzer input analyzer name must be string list")
+		return nil, merr.WrapErrServiceInternal("multi analyzer input analyzer name must be string list")
 	}
 
 	if len(text) != len(analyzer) {
-		return nil, fmt.Errorf("multi analyzer input text and analyzer name must have same length")
+		return nil, merr.WrapErrServiceInternal("multi analyzer input text and analyzer name must have same length")
 	}
 
 	rowNum := len(text)

@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // properties keys
@@ -49,7 +50,7 @@ func NewProperties(properties map[string]string) Properties {
 }
 
 func WrapErrTaskPropertyLack(lackProperty string, taskID any) error {
-	return fmt.Errorf("cannot find property '%s' for task '%v'", lackProperty, taskID)
+	return merr.WrapErrServiceInternalMsg("cannot find property '%s' for task '%v'", lackProperty, taskID)
 }
 
 func (p Properties) AppendClusterID(clusterID string) {
@@ -101,7 +102,7 @@ func (p Properties) GetTaskType() (Type, error) {
 	case PreImport, Import, Compaction, Index, Stats, Analyze, CopySegment:
 		return p[TypeKey], nil
 	default:
-		return p[TypeKey], fmt.Errorf("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
+		return p[TypeKey], merr.WrapErrServiceInternalMsg("unrecognized task type '%s', taskID=%s", p[TypeKey], p[TaskIDKey])
 	}
 }
 
@@ -146,7 +147,7 @@ func (p Properties) GetTaskState() (State, error) {
 	}
 	stateStr := p[StateKey]
 	if _, ok := indexpb.JobState_value[stateStr]; !ok {
-		return None, fmt.Errorf("invalid task state '%v', taskID=%s", stateStr, p[TaskIDKey])
+		return None, merr.WrapErrServiceInternalMsg("invalid task state '%v', taskID=%s", stateStr, p[TaskIDKey])
 	}
 	return State(indexpb.JobState_value[stateStr]), nil
 }

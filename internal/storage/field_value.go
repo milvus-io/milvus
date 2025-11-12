@@ -21,8 +21,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -159,7 +157,7 @@ func (ifv *Int8FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int8)
 	if !ok {
 		log.Warn("wrong type value when setValue for Int64FieldValue")
-		return errors.New("wrong type value when setValue for Int64FieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
 	ifv.Value = value
@@ -279,7 +277,7 @@ func (ifv *Int16FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int16)
 	if !ok {
 		log.Warn("wrong type value when setValue for Int64FieldValue")
-		return errors.New("wrong type value when setValue for Int64FieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
 	ifv.Value = value
@@ -399,7 +397,7 @@ func (ifv *Int32FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int32)
 	if !ok {
 		log.Warn("wrong type value when setValue for Int64FieldValue")
-		return errors.New("wrong type value when setValue for Int64FieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
 	ifv.Value = value
@@ -519,7 +517,7 @@ func (ifv *Int64FieldValue) SetValue(data interface{}) error {
 	value, ok := data.(int64)
 	if !ok {
 		log.Warn("wrong type value when setValue for Int64FieldValue")
-		return errors.New("wrong type value when setValue for Int64FieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for Int64FieldValue")
 	}
 
 	ifv.Value = value
@@ -640,7 +638,7 @@ func (ifv *FloatFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(float32)
 	if !ok {
 		log.Warn("wrong type value when setValue for FloatFieldValue")
-		return errors.New("wrong type value when setValue for FloatFieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for FloatFieldValue")
 	}
 
 	ifv.Value = value
@@ -760,7 +758,7 @@ func (ifv *DoubleFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(float64)
 	if !ok {
 		log.Warn("wrong type value when setValue for DoubleFieldValue")
-		return errors.New("wrong type value when setValue for DoubleFieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for DoubleFieldValue")
 	}
 
 	ifv.Value = value
@@ -856,7 +854,7 @@ func (sfv *StringFieldValue) UnmarshalJSON(data []byte) error {
 func (sfv *StringFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(string)
 	if !ok {
-		return errors.New("wrong type value when setValue for StringFieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for StringFieldValue")
 	}
 
 	sfv.Value = value
@@ -934,7 +932,7 @@ func (vcfv *VarCharFieldValue) EQ(obj ScalarFieldValue) bool {
 func (vcfv *VarCharFieldValue) SetValue(data interface{}) error {
 	value, ok := data.(string)
 	if !ok {
-		return errors.New("wrong type value when setValue for StringFieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for StringFieldValue")
 	}
 
 	vcfv.Value = value
@@ -1014,7 +1012,7 @@ func (ifv *FloatVectorFieldValue) SetValue(data interface{}) error {
 	value, ok := data.([]float32)
 	if !ok {
 		log.Warn("wrong type value when setValue for FloatVectorFieldValue")
-		return errors.New("wrong type value when setValue for FloatVectorFieldValue")
+		return merr.WrapErrStorageMsg("wrong type value when setValue for FloatVectorFieldValue")
 	}
 
 	ifv.Value = value

@@ -17,8 +17,6 @@
 package datacoord
 
 import (
-	"fmt"
-
 	"github.com/cockroachdb/errors"
 )
 
@@ -28,19 +26,3 @@ var (
 	errNilStatusResponse   = errors.New("response has nil status")
 	errUnknownResponseType = errors.New("unknown response type")
 )
-
-func msgDataCoordIsUnhealthy(coordID UniqueID) string {
-	return fmt.Sprintf("DataCoord %d is not ready", coordID)
-}
-
-func errDataCoordIsUnhealthy(coordID UniqueID) error {
-	return errors.New(msgDataCoordIsUnhealthy(coordID))
-}
-
-func msgSegmentNotFound(segID UniqueID) string {
-	return fmt.Sprintf("failed to get segment %d", segID)
-}
-
-func msgAmbiguousIndexName() string {
-	return "there are multiple indexes, please specify the index_name"
-}

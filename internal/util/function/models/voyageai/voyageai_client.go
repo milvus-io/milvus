@@ -21,9 +21,8 @@ import (
 	"maps"
 	"sort"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type VoyageAIClient struct {
@@ -32,7 +31,7 @@ type VoyageAIClient struct {
 
 func NewVoyageAIClient(apiKey string) (*VoyageAIClient, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("Missing credentials config or configure the %s environment variable in the Milvus service.", models.VoyageAIAKEnvStr)
+		return nil, merr.WrapErrFunctionFailedMsg("Missing credentials config or configure the %s environment variable in the Milvus service.", models.VoyageAIAKEnvStr)
 	}
 	return &VoyageAIClient{
 		apiKey: apiKey,
@@ -114,18 +113,18 @@ func newVoyageAIEmbedding(apiKey string, url string) *voyageAIEmbedding {
 
 func (c *voyageAIEmbedding) Check() error {
 	if c.apiKey == "" {
-		return errors.New("api key is empty")
+		return merr.WrapErrFunctionFailedMsg("api key is empty")
 	}
 
 	if c.url == "" {
-		return errors.New("url is empty")
+		return merr.WrapErrFunctionFailedMsg("url is empty")
 	}
 	return nil
 }
 
 func (c *voyageAIEmbedding) embedding(modelName string, texts []string, dim int, textType string, outputType string, truncation bool, headers map[string]string, timeoutSec int64) (any, error) {
 	if outputType != "float" && outputType != "int8" {
-		return nil, fmt.Errorf("Voyageai: unsupport output type: [%s], only support float and int8", outputType)
+		return nil, merr.WrapErrFunctionFailedMsg("Voyageai: unsupport output type: [%s], only support float and int8", outputType)
 	}
 	r := EmbeddingRequest{
 		Model:       modelName,

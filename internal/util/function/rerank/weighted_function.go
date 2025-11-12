@@ -48,7 +48,7 @@ func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *sche
 	}
 
 	if len(base.GetInputFieldNames()) != 0 {
-		return nil, fmt.Errorf("The weighted function does not support input parameters, but got %s", base.GetInputFieldNames())
+		return nil, merr.WrapErrFunctionFailedMsg("The weighted function does not support input parameters, but got %s", base.GetInputFieldNames())
 	}
 
 	var weights []float32
@@ -57,21 +57,21 @@ func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *sche
 		switch strings.ToLower(param.Key) {
 		case WeightsParamsKey:
 			if err := json.Unmarshal([]byte(param.Value), &weights); err != nil {
-				return nil, fmt.Errorf("Parse %s param failed, weight should be []float, bug got: %s", WeightsParamsKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("Parse %s param failed, weight should be []float, bug got: %s", WeightsParamsKey, param.Value)
 			}
 			for _, weight := range weights {
 				if weight < 0 || weight > 1 {
-					return nil, fmt.Errorf("rank param weight should be in range [0, 1]")
+					return nil, merr.WrapErrParameterInvalidMsg("rank param weight should be in range [0, 1]")
 				}
 			}
 		case NormScoreKey:
 			if needNorm, err = strconv.ParseBool(param.Value); err != nil {
-				return nil, fmt.Errorf("%s params must be true/false, bug got %s", NormScoreKey, param.Value)
+				return nil, merr.WrapErrParameterInvalidMsg("%s params must be true/false, bug got %s", NormScoreKey, param.Value)
 			}
 		}
 	}
 	if len(weights) == 0 {
-		return nil, fmt.Errorf(WeightsParamsKey + " not found")
+		return nil, merr.WrapErrFunctionFailedMsg(WeightsParamsKey + " not found")
 	}
 	if base.pkType == schemapb.DataType_Int64 {
 		return &WeightedFunction[int64]{RerankBase: *base, weight: weights, needNorm: needNorm}, nil

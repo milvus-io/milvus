@@ -58,7 +58,7 @@ type reader struct {
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int, isLinesFormat bool) (*reader, error) {
 	r, err := cm.Reader(ctx, path)
 	if err != nil {
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read json file failed, path=%s, err=%s", path, err.Error()))
+		return nil, merr.WrapErrImportSysFailedErr(err, "read json file failed, path=%s", path)
 	}
 	retryableReader := common.NewRetryableReader(ctx, path, r)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)

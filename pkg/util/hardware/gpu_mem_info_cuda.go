@@ -55,7 +55,7 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // GPUMemoryInfo represents a single GPU's memory information.
@@ -72,7 +72,7 @@ func GetAllGPUMemoryInfo() ([]GPUMemoryInfo, error) {
 	// Call the C function to retrieve GPU memory info
 	deviceCount := int(C.getAllGPUMemoryInfo(&infos))
 	if deviceCount == 0 {
-		return nil, errors.New("failed to retrieve GPU memory info or no GPUs found")
+		return nil, merr.WrapErrServiceInternalMsg("failed to retrieve GPU memory info or no GPUs found")
 	}
 	defer C.free(unsafe.Pointer(infos)) // Free the allocated memory
 

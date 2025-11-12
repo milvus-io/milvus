@@ -7,7 +7,6 @@ import (
 	"context"
 	"math/rand"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -15,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -48,10 +48,10 @@ func (w *walImpls) Append(ctx context.Context, msg message.MutableMessage) (mess
 		panic("write on a wal that is not in read-write mode")
 	}
 	if fenced.Contain(w.Channel().Name) {
-		return nil, errors.Mark(errors.New("err"), walimpls.ErrFenced)
+		return nil, merr.Mark(merr.WrapErrServiceInternalMsg("err"), walimpls.ErrFenced)
 	}
 	if enableFenceError.Load() && rand.Int31n(30) == 0 {
-		return nil, errors.New("random error")
+		return nil, merr.WrapErrServiceInternalMsg("random error")
 	}
 	return w.datas.Append(ctx, msg)
 }

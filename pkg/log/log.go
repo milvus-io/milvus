@@ -30,19 +30,19 @@
 package log
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var _globalL, _globalP, _globalS, _globalR, _globalCleanup atomic.Value
@@ -120,7 +120,7 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	level := zap.NewAtomicLevel()
 	err := level.UnmarshalText([]byte(cfg.Level))
 	if err != nil {
-		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
+		return nil, nil, merr.WrapErrServiceInternalErr(err, "initLoggerWithWriteSyncer UnmarshalText cfg.Level")
 	}
 	var core zapcore.Core
 	if cfg.AsyncWriteEnable {
@@ -144,7 +144,7 @@ func initFileLog(cfg *FileLogConfig) (*lumberjack.Logger, error) {
 	logPath := strings.Join([]string{cfg.RootPath, cfg.Filename}, string(filepath.Separator))
 	if st, err := os.Stat(logPath); err == nil {
 		if st.IsDir() {
-			return nil, errors.New("can't use directory as log file name")
+			return nil, merr.WrapErrServiceInternalMsg("can't use directory as log file name")
 		}
 	}
 	if cfg.MaxSize == 0 {

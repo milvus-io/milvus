@@ -1,12 +1,11 @@
 package migration
 
 import (
-	"fmt"
-
 	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/meta"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Migrator interface {
@@ -28,6 +27,6 @@ func NewMigrator(sourceVersion, targetVersion string) (Migrator, error) {
 		return newMigrator210To220(), nil
 	}
 
-	return nil, fmt.Errorf("migration from source version to target version is forbidden, source: %s, target: %s",
+	return nil, merr.WrapErrServiceInternalMsg("migration from source version to target version is forbidden, source: %s, target: %s",
 		sourceVersion, targetVersion)
 }

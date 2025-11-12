@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -283,9 +282,6 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 }
 
 func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	if err := merr.CheckHealthy(s.datanode.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
 	return s.datanode.FlushSegments(ctx, req)
 }
 

@@ -1,18 +1,17 @@
 package funcutil
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 func CntOfInternalResult(res *internalpb.RetrieveResults) (int64, error) {
 	if len(res.GetFieldsData()) != 1 {
-		return 0, errors.New("internal count result should only have one column")
+		return 0, merr.WrapErrServiceInternal("internal count result should only have one column")
 	}
 
 	f := res.GetFieldsData()[0]
@@ -21,7 +20,7 @@ func CntOfInternalResult(res *internalpb.RetrieveResults) (int64, error) {
 
 func CntOfSegCoreResult(res *segcorepb.RetrieveResults) (int64, error) {
 	if len(res.GetFieldsData()) != 1 {
-		return 0, errors.New("segcore count result should only have one column")
+		return 0, merr.WrapErrServiceInternal("segcore count result should only have one column")
 	}
 
 	f := res.GetFieldsData()[0]
@@ -31,14 +30,14 @@ func CntOfSegCoreResult(res *segcorepb.RetrieveResults) (int64, error) {
 func CntOfFieldData(f *schemapb.FieldData) (int64, error) {
 	scalars := f.GetScalars()
 	if scalars == nil {
-		return 0, errors.New("count result should be scalar")
+		return 0, merr.WrapErrServiceInternal("count result should be scalar")
 	}
 	data := scalars.GetLongData()
 	if data == nil {
-		return 0, errors.New("count result should be int64 data")
+		return 0, merr.WrapErrServiceInternal("count result should be int64 data")
 	}
 	if len(data.GetData()) != 1 {
-		return 0, errors.New("count result shoud only have one row")
+		return 0, merr.WrapErrServiceInternal("count result should only have one row")
 	}
 	return data.GetData()[0], nil
 }
@@ -85,7 +84,7 @@ func WrapCntToQueryResults(cnt int64) *milvuspb.QueryResults {
 
 func CntOfQueryResults(res *milvuspb.QueryResults) (int64, error) {
 	if len(res.GetFieldsData()) != 1 {
-		return 0, errors.New("milvus count result should only have one column")
+		return 0, merr.WrapErrServiceInternal("milvus count result should only have one column")
 	}
 
 	f := res.GetFieldsData()[0]

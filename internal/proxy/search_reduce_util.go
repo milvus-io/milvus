@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -351,7 +350,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 
 		// limit search result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, merr.WrapErrServiceInternalMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
 	ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
@@ -497,7 +496,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 
 			// limit search result to avoid oom
 			if retSize > maxOutputSize {
-				return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
+				return nil, merr.WrapErrServiceInternalMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 			}
 		}
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
@@ -536,7 +535,7 @@ func setupIdListForSearchResult(searchResult *milvuspb.SearchResults, pkType sch
 			},
 		}
 	default:
-		return errors.New("unsupported pk type")
+		return merr.WrapErrServiceInternalMsg("unsupported pk type")
 	}
 	return nil
 }
@@ -606,14 +605,14 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 
 func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64, pkHitNum int) error {
 	if data.NumQueries != nq {
-		return fmt.Errorf("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+		return merr.WrapErrServiceInternalMsg("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
 	}
 	if data.TopK != topk {
-		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
+		return merr.WrapErrServiceInternalMsg("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
 
 	if len(data.Scores) != pkHitNum {
-		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
+		return merr.WrapErrServiceInternalMsg("search result's score length invalid, score length=%d, expectedLength=%d",
 			len(data.Scores), pkHitNum)
 	}
 	return nil

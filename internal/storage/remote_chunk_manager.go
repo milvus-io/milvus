@@ -123,7 +123,7 @@ func (mcm *RemoteChunkManager) Path(ctx context.Context, filePath string) (strin
 		return "", err
 	}
 	if !exist {
-		return "", errors.New("minio file manage cannot be found with filePath:" + filePath)
+		return "", merr.WrapErrStorageMsg("%s", "minio file manage cannot be found with filePath:"+filePath)
 	}
 	return filePath, nil
 }
@@ -249,7 +249,7 @@ func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([]
 }
 
 func (mcm *RemoteChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
-	return nil, errors.New("this method has not been implemented")
+	return nil, merr.WrapErrStorageMsg("this method has not been implemented")
 }
 
 // ReadAt reads specific position data of minio storage if exists.

@@ -3,7 +3,6 @@ package dependency
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
@@ -12,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -97,7 +97,7 @@ func (f *DefaultFactory) initMQ(standalone bool, params *paramtable.ComponentPar
 		f.msgStreamFactory = msgstream.NewWpmsFactory(&params.ServiceParam)
 	}
 	if f.msgStreamFactory == nil {
-		return errors.New("failed to create MQ: check the milvus log for initialization failures")
+		return merr.WrapErrServiceInternalMsg("failed to create MQ: check the milvus log for initialization failures")
 	}
 	return nil
 }
@@ -126,16 +126,16 @@ func mustSelectMQType(standalone bool, mqType string, enable mqEnable) string {
 		return mqTypeWoodpecker
 	}
 
-	panic(errors.Errorf("no available mq config found, %s, enable: %+v", mqType, enable))
+	panic(merr.WrapErrServiceInternalMsg("no available mq config found, %s, enable: %+v", mqType, enable))
 }
 
 // Validate mq type.
 func validateMQType(standalone bool, mqType string) error {
 	if mqType != mqTypeRocksmq && mqType != mqTypeKafka && mqType != mqTypePulsar && mqType != mqTypeWoodpecker {
-		return errors.Newf("mq type %s is invalid", mqType)
+		return merr.WrapErrServiceInternalMsg("mq type %s is invalid", mqType)
 	}
 	if !standalone && mqType == mqTypeRocksmq {
-		return errors.Newf("mq %s is only valid in standalone mode")
+		return merr.WrapErrServiceInternalMsg("mq %s is only valid in standalone mode")
 	}
 	return nil
 }

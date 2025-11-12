@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -38,9 +36,8 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 
 	replicas := s.meta.ReplicaManager.GetByResourceGroup(ctx, req.GetResourceGroup())
 	if len(replicas) > 0 {
-		err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
-		return errors.Wrap(err,
-			fmt.Sprintf("some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup()))
+		return merr.WrapErrParameterInvalid("empty resource group",
+			fmt.Sprintf("resource group %s has collection %d loaded, please release it at first", req.GetResourceGroup(), replicas[0].GetCollectionID()))
 	}
 	if err := s.meta.ResourceManager.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil {
 		return err

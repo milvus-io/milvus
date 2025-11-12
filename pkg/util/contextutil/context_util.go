@@ -22,11 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ctxTenantKey struct{}
@@ -90,20 +90,20 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 func GetAuthInfoFromContext(ctx context.Context) (string, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", "", errors.New("fail to get md from the context")
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get md from the context")
 	}
 	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 	if !ok || len(authorization) < 1 {
-		return "", "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
 	}
 	token := authorization[0]
 	rawToken, err := crypto.Base64Decode(token)
 	if err != nil {
-		return "", "", fmt.Errorf("fail to decode the token, token: %s", token)
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to decode the token, token: %s", token)
 	}
 	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
-		return "", "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
+		return "", "", merr.WrapErrParameterInvalidMsg("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
 	// username: secrets[0]
 	// password: secrets[1]

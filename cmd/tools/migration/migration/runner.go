@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type Runner struct {
@@ -114,7 +114,7 @@ func (r *Runner) Validate() error {
 	if can {
 		return nil
 	}
-	return fmt.Errorf("higher version to lower version is not allowed, "+
+	return merr.WrapErrServiceInternalMsg("higher version to lower version is not allowed, "+
 		"source version: %s, target version: %s", source.String(), target.String())
 }
 
@@ -133,7 +133,7 @@ func (r *Runner) checkSessionsWithPrefix(prefix string) error {
 		return err
 	}
 	if len(sessions) > 0 {
-		return fmt.Errorf("there are still sessions alive, prefix: %s, num of alive sessions: %d", prefix, len(sessions))
+		return merr.WrapErrServiceInternalMsg("there are still sessions alive, prefix: %s, num of alive sessions: %d", prefix, len(sessions))
 	}
 	return nil
 }
@@ -145,7 +145,7 @@ func (r *Runner) checkMySelf() error {
 	}
 	for _, session := range sessions {
 		if session.Address != r.address {
-			return errors.New("other migration is running")
+			return merr.WrapErrServiceInternalMsg("other migration is running")
 		}
 	}
 	return nil

@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"time"
 
@@ -241,7 +240,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		var err error
 		params, err = Params.KnowhereConfig.UpdateIndexParams(GetIndexType(params), paramtable.BuildStage, params)
 		if err != nil {
-			return nil, fmt.Errorf("failed to update index build params: %w", err)
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to update index build params")
 		}
 	}
 
@@ -249,14 +248,14 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		var err error
 		params, err = indexparams.UpdateDiskIndexBuildParams(Params, params)
 		if err != nil {
-			return nil, fmt.Errorf("failed to append index build params: %w", err)
+			return nil, merr.WrapErrServiceInternalErr(err, "failed to append index build params")
 		}
 	}
 
 	// Get collection info and field
 	collectionInfo, err := it.handler.GetCollection(ctx, segment.GetCollectionID())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get collection info: %w", err)
+		return nil, merr.WrapErrServiceInternalErr(err, "failed to get collection info")
 	}
 
 	schema := collectionInfo.Schema
@@ -271,7 +270,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 
 	if field == nil {
-		return nil, fmt.Errorf("field not found with ID %d", fieldID)
+		return nil, merr.WrapErrServiceInternalMsg("field not found with ID %d", fieldID)
 	}
 
 	// Extract dim only for vector types to avoid unnecessary warnings
