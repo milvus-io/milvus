@@ -286,3 +286,12 @@ func (i *RestfulInfo) TemplateValueLength() string {
 
 	return fmt.Sprint(m)
 }
+
+func (i *RestfulInfo) ExprTemplateValues() string {
+	templateValues, ok := requestutil.GetExprTemplateValues(i.req)
+	if !ok {
+		return NotAny
+	}
+
+	return fmt.Sprint(templateValues)
+}
