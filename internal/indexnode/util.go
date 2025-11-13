@@ -67,3 +67,16 @@ func calculateNodeSlots() int64 {
 	}
 	return totalSlot
 }
+
+func calculateNodeSlotsV2() (float64, float64) {
+	cpuNum := hardware.GetCPUNum()
+	memory := hardware.GetMemoryCount()
+
+	cpuSlot := float64(cpuNum) * Params.IndexNodeCfg.BuildParallel.GetAsFloat()
+	memorySlot := float64(memory) / 1024 / 1024 / 1024 * Params.IndexNodeCfg.BuildParallel.GetAsFloat()
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		cpuSlot = cpuSlot * paramtable.Get().IndexNodeCfg.StandaloneSlotRatio.GetAsFloat()
+		memorySlot = memorySlot * paramtable.Get().IndexNodeCfg.StandaloneSlotRatio.GetAsFloat()
+	}
+	return cpuSlot, memorySlot
+}
