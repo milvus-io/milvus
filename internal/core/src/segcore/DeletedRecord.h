@@ -214,7 +214,8 @@ class DeletedRecord {
         SortedDeleteList::Accessor accessor(deleted_lists_);
         int total_size = accessor.size();
 
-        while (total_size - dumped_entry_count_.load() > DELETE_DUMP_BATCH_SIZE) {
+        while (total_size - dumped_entry_count_.load() >
+               DELETE_DUMP_BATCH_SIZE) {
             int32_t bitsize = 0;
             if constexpr (is_sealed) {
                 bitsize = sealed_row_count_;
@@ -232,11 +233,14 @@ class DeletedRecord {
                                              snapshots_.back().second.size());
             }
 
-            while (total_size - dumped_entry_count_.load() > DELETE_DUMP_BATCH_SIZE &&
+            while (total_size - dumped_entry_count_.load() >
+                       DELETE_DUMP_BATCH_SIZE &&
                    it != accessor.end()) {
                 Timestamp dump_ts = 0;
 
-                for (auto size = 0; size < DELETE_DUMP_BATCH_SIZE && it != accessor.end(); ++it, ++size) {
+                for (auto size = 0;
+                     size < DELETE_DUMP_BATCH_SIZE && it != accessor.end();
+                     ++it, ++size) {
                     bitmap.set(it->second);
                     dump_ts = it->first;
                 }

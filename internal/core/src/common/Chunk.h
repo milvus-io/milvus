@@ -113,7 +113,7 @@ class FixedWidthChunk : public Chunk {
                     std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
         : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)),
           dim_(dim),
-          element_size_(element_size) {};
+          element_size_(element_size){};
 
     milvus::SpanBase
     Span() const {
