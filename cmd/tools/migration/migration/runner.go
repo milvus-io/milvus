@@ -79,7 +79,8 @@ func (r *Runner) initEtcdCli() {
 		r.cfg.EtcdCfg.EtcdTLSCert.GetValue(),
 		r.cfg.EtcdCfg.EtcdTLSKey.GetValue(),
 		r.cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue(),
+		r.cfg.EtcdCfg.ClientOptions()...)
 	console.AbnormalExitIf(err, r.backupFinished.Load())
 	r.etcdCli = cli
 }

@@ -47,7 +47,7 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 
-	DefaultSessionTTL        = 30 // s
+	DefaultSessionTTL        = 10 // s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
