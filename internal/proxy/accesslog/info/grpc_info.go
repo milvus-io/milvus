@@ -371,3 +371,12 @@ func (i *GrpcAccessInfo) TemplateValueLength() string {
 
 	return fmt.Sprint(m)
 }
+
+func (i *GrpcAccessInfo) ExprTemplateValues() string {
+	templateValues, ok := requestutil.GetExprTemplateValues(i.req)
+	if !ok {
+		return NotAny
+	}
+
+	return fmt.Sprint(templateValues)
+}
