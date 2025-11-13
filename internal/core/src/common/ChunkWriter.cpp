@@ -562,14 +562,13 @@ make_chunk(const FieldMeta& field_meta,
            size_t row_nums,
            char* data,
            size_t size,
-           const std::string& file_path) {
+           const std::string& file_path,
+           std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard) {
     int dim = IsVectorDataType(field_meta.get_data_type()) &&
                       !IsSparseFloatVectorDataType(field_meta.get_data_type())
                   ? field_meta.get_dim()
                   : 1;
     bool nullable = field_meta.is_nullable();
-    auto mmap_file_raii =
-        file_path.empty() ? nullptr : std::make_unique<MmapFileRAII>(file_path);
     switch (field_meta.get_data_type()) {
         case milvus::DataType::BOOL:
             return std::make_unique<FixedWidthChunk>(row_nums,
@@ -578,7 +577,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(bool),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::INT8:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -586,7 +585,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(int8_t),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::INT16:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -594,7 +593,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(int16_t),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::INT32:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -602,7 +601,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(int32_t),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::INT64:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -610,7 +609,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(int64_t),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::FLOAT:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -618,7 +617,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(float),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::DOUBLE:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -626,7 +625,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(double),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::TIMESTAMPTZ:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -634,7 +633,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(int64_t),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::VECTOR_FLOAT:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -642,7 +641,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(knowhere::fp32),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::VECTOR_BINARY:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -650,7 +649,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(knowhere::bin1),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::VECTOR_FLOAT16:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -658,7 +657,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(knowhere::fp16),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::VECTOR_BFLOAT16:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -666,7 +665,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(knowhere::bf16),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::VECTOR_INT8:
             return std::make_unique<FixedWidthChunk>(row_nums,
                                                      dim,
@@ -674,18 +673,18 @@ make_chunk(const FieldMeta& field_meta,
                                                      size,
                                                      sizeof(knowhere::int8),
                                                      nullable,
-                                                     std::move(mmap_file_raii));
+                                                     chunk_mmap_guard);
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
         case milvus::DataType::TEXT:
             return std::make_unique<StringChunk>(
-                row_nums, data, size, nullable, std::move(mmap_file_raii));
+                row_nums, data, size, nullable, chunk_mmap_guard);
         case milvus::DataType::JSON:
             return std::make_unique<JSONChunk>(
-                row_nums, data, size, nullable, std::move(mmap_file_raii));
+                row_nums, data, size, nullable, chunk_mmap_guard);
         case milvus::DataType::GEOMETRY: {
             return std::make_unique<GeometryChunk>(
-                row_nums, data, size, nullable, std::move(mmap_file_raii));
+                row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
             return std::make_unique<ArrayChunk>(row_nums,
@@ -693,10 +692,10 @@ make_chunk(const FieldMeta& field_meta,
                                                 size,
                                                 field_meta.get_element_type(),
                                                 nullable,
-                                                std::move(mmap_file_raii));
+                                                chunk_mmap_guard);
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
             return std::make_unique<SparseFloatVectorChunk>(
-                row_nums, data, size, nullable, std::move(mmap_file_raii));
+                row_nums, data, size, nullable, chunk_mmap_guard);
         case milvus::DataType::VECTOR_ARRAY:
             return std::make_unique<VectorArrayChunk>(
                 dim,
@@ -704,7 +703,7 @@ make_chunk(const FieldMeta& field_meta,
                 data,
                 size,
                 field_meta.get_element_type(),
-                std::move(mmap_file_raii));
+                chunk_mmap_guard);
         default:
             ThrowInfo(DataTypeInvalid, "Unsupported data type");
     }
@@ -726,7 +725,15 @@ create_chunk(const FieldMeta& field_meta,
     }
     cw->write_to_target(array_vec, target);
     auto data = target->release();
-    return make_chunk(field_meta, row_nums, data, size, file_path);
+    std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr;
+    if (!file_path.empty()) {
+        chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(data, size, file_path);
+    } else {
+        chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(data, size, "");
+    }
+    return make_chunk(
+        field_meta, row_nums, data, size, file_path, chunk_mmap_guard);
 }
 
 std::unordered_map<FieldId, std::shared_ptr<Chunk>>
@@ -796,13 +803,24 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
 
     auto data = target->release();
 
+    // For mmap mode, create a shared mmap region manager
+    std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr;
+    if (!file_path.empty()) {
+        chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(
+            data, total_aligned_size, file_path);
+    } else {
+        chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(data, total_aligned_size, "");
+    }
+
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     for (size_t i = 0; i < field_ids.size(); i++) {
         chunks[field_ids[i]] = std::move(make_chunk(field_metas[i],
                                                     final_row_nums,
                                                     data + chunk_offsets[i],
                                                     chunk_sizes[i],
-                                                    file_path));
+                                                    file_path,
+                                                    chunk_mmap_guard));
         LOG_INFO(
             "created chunk for field {} with chunk offset: {}, chunk "
             "size: {}, file path: {}",
