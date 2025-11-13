@@ -1576,7 +1576,7 @@ Leave it empty if you want to use AWS default endpoint`,
 
 	p.MaxConnections = ParamItem{
 		Key:          "minio.maxConnections",
-		Version:      "2.6.5",
+		Version:      "2.6.6",
 		DefaultValue: DefaultMinioMaxConnections,
 		Doc:          "Maximum concurrent HTTP connections to object storage",
 	}
