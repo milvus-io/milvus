@@ -118,7 +118,7 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 		IsPartitionKey:   field.IsPartitionKey,
 		IsClusteringKey:  field.IsClusteringKey,
 		IsFunctionOutput: field.IsFunctionOutput,
-		DefaultValue:     field.DefaultValue,
+		DefaultValue:     proto.Clone(field.DefaultValue).(*schemapb.ValueField),
 		ElementType:      field.ElementType,
 		Nullable:         field.Nullable,
 	}

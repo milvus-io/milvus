@@ -25,50 +25,40 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type dropCollectionTask struct {
-	baseTask
-	Req *milvuspb.DropCollectionRequest
+	*Core
+	Req       *milvuspb.DropCollectionRequest
+	header    *message.DropCollectionMessageHeader
+	body      *message.DropCollectionRequest
+	vchannels []string
 }
 
 func (t *dropCollectionTask) validate(ctx context.Context) error {
-	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_DropCollection); err != nil {
-		return err
-	}
-	if t.core.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName()) {
+	// Critical promise here, also see comment of startBroadcastWithCollectionLock.
+	if t.meta.IsAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName()) {
 		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
-	return nil
-}
 
-func (t *dropCollectionTask) Prepare(ctx context.Context) error {
-	return t.validate(ctx)
-}
-
-func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	// use max ts to check if latest collection exists.
 	// we cannot handle case that
 	// dropping collection with `ts1` but a collection exists in catalog with newer ts which is bigger than `ts1`.
 	// fortunately, if ddls are promised to execute in sequence, then everything is OK. The `ts1` will always be latest.
-	collMeta, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
-	if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
-		// make dropping collection idempotent.
-		log.Ctx(ctx).Warn("drop non-existent collection", zap.String("collection", t.Req.GetCollectionName()), zap.String("database", t.Req.GetDbName()))
-		return nil
-	}
+	collMeta, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
+			return errIgnoredDropCollection
+		}
 		return err
 	}
 
 	// meta cache of all aliases should also be cleaned.
-	aliases := t.core.meta.ListAliasesByID(ctx, collMeta.CollectionID)
+	aliases := t.meta.ListAliasesByID(ctx, collMeta.CollectionID)
 
 	// Check if all aliases have been dropped.
 	if len(aliases) > 0 {
@@ -77,79 +67,25 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	ts := t.GetTs()
-	return executeDropCollectionTaskSteps(ctx,
-		t.core, collMeta, t.Req.GetDbName(), aliases,
-		t.Req.GetBase().GetReplicateInfo().GetIsReplicate(),
-		ts)
+	// fill the message body and header
+	// TODO: cleanupMetricsStep
+	t.header = &message.DropCollectionMessageHeader{
+		CollectionId: collMeta.CollectionID,
+		DbId:         collMeta.DBID,
+	}
+	t.body = &message.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DropCollection,
+		},
+		CollectionID:   collMeta.CollectionID,
+		DbID:           collMeta.DBID,
+		CollectionName: t.Req.CollectionName,
+		DbName:         collMeta.DBName,
+	}
+	t.vchannels = collMeta.VirtualChannelNames
+	return nil
 }
 
-func (t *dropCollectionTask) GetLockerKey() LockerKey {
-	collection := t.core.getCollectionIDStr(t.ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), 0)
-	return NewLockerKeyChain(
-		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(t.Req.GetDbName(), false),
-		NewCollectionLockerKey(collection, true),
-	)
-}
-
-func executeDropCollectionTaskSteps(ctx context.Context,
-	core *Core,
-	col *model.Collection,
-	dbName string,
-	alias []string,
-	isReplicate bool,
-	ts Timestamp,
-) error {
-	redoTask := newBaseRedoTask(core.stepExecutor)
-
-	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: core},
-		dbName:          dbName,
-		collectionNames: append(alias, col.Name),
-		collectionID:    col.CollectionID,
-		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
-	})
-	redoTask.AddSyncStep(&changeCollectionStateStep{
-		baseStep:     baseStep{core: core},
-		collectionID: col.CollectionID,
-		state:        pb.CollectionState_CollectionDropping,
-		ts:           ts,
-	})
-	redoTask.AddSyncStep(&cleanupMetricsStep{
-		baseStep:       baseStep{core: core},
-		dbName:         dbName,
-		collectionName: col.Name,
-	})
-
-	redoTask.AddAsyncStep(&releaseCollectionStep{
-		baseStep:     baseStep{core: core},
-		collectionID: col.CollectionID,
-	})
-	redoTask.AddAsyncStep(&dropIndexStep{
-		baseStep: baseStep{core: core},
-		collID:   col.CollectionID,
-		partIDs:  nil,
-	})
-	redoTask.AddAsyncStep(&deleteCollectionDataStep{
-		baseStep: baseStep{core: core},
-		coll:     col,
-		isSkip:   isReplicate,
-	})
-	redoTask.AddAsyncStep(&removeDmlChannelsStep{
-		baseStep:  baseStep{core: core},
-		pChannels: col.PhysicalChannelNames,
-	})
-	redoTask.AddAsyncStep(newConfirmGCStep(core, col.CollectionID, allPartition))
-	redoTask.AddAsyncStep(&deleteCollectionMetaStep{
-		baseStep:     baseStep{core: core},
-		collectionID: col.CollectionID,
-		// This ts is less than the ts when we notify data nodes to drop collection, but it's OK since we have already
-		// marked this collection as deleted. If we want to make this ts greater than the notification's ts, we should
-		// wrap a step who will have these three children and connect them with ts.
-		ts: ts,
-	})
-
-	return redoTask.Execute(ctx)
+func (t *dropCollectionTask) Prepare(ctx context.Context) error {
+	return t.validate(ctx)
 }

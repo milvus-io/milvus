@@ -6,16 +6,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -67,19 +71,61 @@ func TestReplicate(t *testing.T) {
 		},
 		CrossClusterTopology: []*commonpb.CrossClusterTopology{
 			{
-				SourceClusterId: "by-dev",
-				TargetClusterId: "primary",
+				SourceClusterId: "primary",
+				TargetClusterId: "by-dev",
 			},
 		},
 	})
 	if err != nil {
 		panic(err)
 	}
-	cfg, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+}
+
+func TestReplicateCreateCollection(t *testing.T) {
+	t.Skip("cat not running without streaming service at background")
+	streaming.Init()
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "ID", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
+		},
+	}
+	schemaBytes, err := proto.Marshal(schema)
 	if err != nil {
 		panic(err)
 	}
-	t.Logf("cfg: %+v\n", cfg)
+
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithHeader(&message.CreateCollectionMessageHeader{
+			CollectionId: 1,
+			PartitionIds: []int64{2},
+		}).
+		WithBody(&msgpb.CreateCollectionRequest{
+			CollectionID:   1,
+			CollectionName: collectionName,
+			PartitionName:  "partition",
+			PhysicalChannelNames: []string{
+				"primary-rootcoord-dml_0",
+				"primary-rootcoord-dml_1",
+			},
+			VirtualChannelNames: []string{
+				"primary-rootcoord-dml_0_1v0",
+				"primary-rootcoord-dml_1_1v1",
+			},
+			Schema: schemaBytes,
+		}).
+		WithBroadcast([]string{"primary-rootcoord-dml_0_1v0", "primary-rootcoord-dml_1_1v1"}).
+		MustBuildBroadcast()
+	msgs := msg.WithBroadcastID(100).SplitIntoMutableMessage()
+	for _, msg := range msgs {
+		immutableMsg := msg.WithLastConfirmedUseMessageID().WithTimeTick(1).IntoImmutableMessage(pulsar2.NewPulsarID(
+			pulsar.NewMessageID(1, 2, 3, 4),
+		))
+		_, err := streaming.WAL().Replicate().Append(context.Background(), message.MustNewReplicateMessage("primary", immutableMsg.IntoImmutableMessageProto()))
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func TestStreamingBroadcast(t *testing.T) {
@@ -101,7 +147,7 @@ func TestStreamingBroadcast(t *testing.T) {
 			CollectionID:   1,
 			CollectionName: collectionName,
 		}).
-		WithBroadcast(vChannels, message.NewCollectionNameResourceKey(collectionName)).
+		WithBroadcast(vChannels, message.NewExclusiveCollectionNameResourceKey("db", collectionName)).
 		BuildBroadcast()
 
 	resp, err := streaming.WAL().Broadcast().Append(context.Background(), msg)

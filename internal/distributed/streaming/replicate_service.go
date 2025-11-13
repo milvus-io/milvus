@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -46,19 +48,6 @@ func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, conf
 	defer s.lifetime.Done()
 
 	return s.streamingCoordClient.Assignment().UpdateReplicateConfiguration(ctx, config)
-}
-
-func (s replicateService) GetReplicateConfiguration(ctx context.Context) (*replicateutil.ConfigHelper, error) {
-	if !s.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrWALAccesserClosed
-	}
-	defer s.lifetime.Done()
-
-	config, err := s.streamingCoordClient.Assignment().GetReplicateConfiguration(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return config, nil
 }
 
 func (s replicateService) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
@@ -114,8 +103,13 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	}
 
 	// create collection message will set the vchannel in its body, so we need to overwrite it.
-	if msg.MessageType() == message.MessageTypeCreateCollection {
+	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection:
 		if err := s.overwriteCreateCollectionMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
+	case message.MessageTypeAlterReplicateConfig:
+		if err := s.overwriteAlterReplicateConfigMessage(cfg, msg); err != nil {
 			return nil, err
 		}
 	}
@@ -155,5 +149,29 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 		body.VirtualChannelNames[idx] = strings.Replace(body.VirtualChannelNames[idx], sourcePChannel, targetPChannel, 1)
 	}
 	createCollectionMsg.OverwriteBody(body)
+	return nil
+}
+
+// overwriteAlterReplicateConfigMessage overwrites the alter replicate configuration message.
+func (s replicateService) overwriteAlterReplicateConfigMessage(currentReplicateConfig *replicateutil.ConfigHelper, msg message.ReplicateMutableMessage) error {
+	alterReplicateConfigMsg := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
+	cfg := alterReplicateConfigMsg.Header().ReplicateConfiguration
+	_, err := replicateutil.NewConfigHelper(s.clusterID, cfg)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, replicateutil.ErrCurrentClusterNotFound) {
+		return err
+	}
+
+	// Current cluster not found in the replicate configuration,
+	// it means that the current cluster is removed from the replicate topology and become a independent cluster.
+	// So we need to overwrite the replicate configuration to make current cluster to be a primary cluster without replicate topology.
+	cluster := currentReplicateConfig.GetCurrentCluster()
+	alterReplicateConfigMsg.OverwriteHeader(&message.AlterReplicateConfigMessageHeader{
+		ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+			Clusters: []*commonpb.MilvusCluster{cluster.MilvusCluster},
+		},
+	})
 	return nil
 }

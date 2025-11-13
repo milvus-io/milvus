@@ -1,5 +1,7 @@
 #!/usr/bin/env groovy
 
+// DEPRECATED: This job is deprecated, it is replaced by nightly2 job
+
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = 'TZ=Asia/Shanghai'

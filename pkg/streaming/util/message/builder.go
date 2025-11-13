@@ -53,20 +53,23 @@ func NewImmutableMesasge(
 	}
 }
 
+// MustNewReplicateMessage creates a new replicate message.
+func MustNewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) ReplicateMutableMessage {
+	m, err := NewReplicateMessage(clustrID, im)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}
+
 // NewReplicateMessage creates a new replicate message.
-func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) ReplicateMutableMessage {
+func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (ReplicateMutableMessage, error) {
 	messageID := MustUnmarshalMessageID(im.GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties()).(*immutableMessageImpl)
-	rh, err := EncodeProto(&messagespb.ReplicateHeader{
-		ClusterId:              clustrID,
-		MessageId:              msg.MessageID().IntoProto(),
-		LastConfirmedMessageId: msg.LastConfirmedMessageID().IntoProto(),
-		TimeTick:               msg.TimeTick(),
-		Vchannel:               msg.VChannel(),
-	})
-	if err != nil {
-		panic("failed to encode replicate header")
+	if msg.ReplicateHeader() != nil {
+		return nil, errors.New("message is already a replicate message")
 	}
+
 	m := &messageImpl{
 		payload:    msg.payload,
 		properties: msg.properties.Clone(),
@@ -75,8 +78,14 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) Replica
 	m.properties.Delete(messageTimeTick)
 	m.properties.Delete(messageLastConfirmed)
 	m.properties.Delete(messageWALTerm)
-	m.properties.Set(messageReplicateMesssageHeader, rh)
-	return m
+	m.WithReplicateHeader(&ReplicateHeader{
+		ClusterID:              clustrID,
+		MessageID:              msg.MessageID(),
+		LastConfirmedMessageID: msg.LastConfirmedMessageID(),
+		TimeTick:               msg.TimeTick(),
+		VChannel:               msg.VChannel(),
+	})
+	return m, nil
 }
 
 func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMessage {
@@ -346,6 +355,11 @@ func (b *ImmutableTxnMessageBuilder) EstimateSize() int {
 	return size
 }
 
+// LastConfirmedMessageID returns the last confirmed message id of the txn.
+func (b *ImmutableTxnMessageBuilder) LastConfirmedMessageID() MessageID {
+	return b.begin.LastConfirmedMessageID()
+}
+
 // Messages returns the begin message and body messages.
 func (b *ImmutableTxnMessageBuilder) Messages() (ImmutableBeginTxnMessageV2, []ImmutableMessage) {
 	return b.begin, b.messages
@@ -374,18 +388,21 @@ func newImmutableTxnMesasgeFromWAL(
 	if err != nil {
 		return nil, err
 	}
-	// we don't need to modify the begin message's timetick, but set all the timetick of body messages.
+
+	// begin message will be used to replicate, so we also need to set it timetick and last confirmed message id into committed message.
+	var beginImmutable ImmutableMessage = begin
+	beginImmutable = beginImmutable.(*specializedImmutableMessageImpl[*BeginTxnMessageHeader, *BeginTxnMessageBody]).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	for idx, m := range body {
 		body[idx] = m.(*immutableMessageImpl).cloneForTxnBody(commit.TimeTick(), commit.LastConfirmedMessageID())
 	}
-
 	immutableMessage := msg.WithTimeTick(commit.TimeTick()).
 		WithLastConfirmed(commit.LastConfirmedMessageID()).
 		WithTxnContext(*commit.TxnContext()).
+		WithReplicateHeader(commit.ReplicateHeader()).
 		IntoImmutableMessage(commit.MessageID())
 	return &immutableTxnMessageImpl{
 		immutableMessageImpl: *immutableMessage.(*immutableMessageImpl),
-		begin:                begin,
+		begin:                MustAsImmutableBeginTxnMessageV2(beginImmutable),
 		messages:             body,
 		commit:               commit,
 	}, nil

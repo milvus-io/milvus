@@ -849,13 +849,16 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
         # 3. create index
         if not_supported_varchar_scalar_index == "TRIE":
             supported_field_type = "varchar"
+            got_json_suffix = ""
         if not_supported_varchar_scalar_index == "STL_SORT":
-            supported_field_type = "numeric"
+            supported_field_type = "numeric, varchar or timestamptz"
+            got_json_suffix = ", got JSON"
         if not_supported_varchar_scalar_index == "BITMAP":
             supported_field_type = "bool, int, string and array"
             not_supported_varchar_scalar_index = "bitmap index"
+            got_json_suffix = ""
         error = {ct.err_code: 1100, ct.err_msg: f"{not_supported_varchar_scalar_index} are only supported on "
-                                                f"{supported_field_type} field: invalid parameter[expected=valid "
+                                                f"{supported_field_type} field{got_json_suffix}: invalid parameter[expected=valid "
                                                 f"index params][actual=invalid index params]"}
         self.create_index(client, collection_name, index_params,
                           check_task=CheckTasks.err_res, check_items=error)

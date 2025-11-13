@@ -27,14 +27,13 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	uatomic "go.uber.org/atomic"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -46,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -965,8 +963,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, dbName, "collection1")
@@ -1018,8 +1015,7 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	// should be no data race.
@@ -1052,8 +1048,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 	t.Run("update with name", func(t *testing.T) {
 		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -1130,8 +1125,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
 		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
-		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, rootCoord, mgr)
+		err := InitMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
 	})
 
@@ -1141,8 +1135,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
 			&internalpb.ListPolicyResponse{Status: merr.Status(errors.New("mock list policy error"))},
 			nil).Once()
-		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, rootCoord, mgr)
+		err := InitMetaCache(ctx, rootCoord)
 		assert.Error(t, err)
 	})
 
@@ -1151,8 +1144,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
 			nil, errors.New("mock list policy rpc errorr")).Once()
-		mgr := newShardClientMgr()
-		err := InitMetaCache(ctx, rootCoord, mgr)
+		err := InitMetaCache(ctx, rootCoord)
 		assert.Error(t, err)
 	})
 }
@@ -1160,8 +1152,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	collection, err := globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
@@ -1212,8 +1203,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 	rootCoord.Error = true
 
@@ -1246,8 +1236,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, dbName, "collection3")
@@ -1261,8 +1250,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	id, err := globalMetaCache.GetPartitionID(ctx, dbName, "collection1", "par1")
@@ -1282,8 +1270,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -1336,8 +1323,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	// Test the case where ShowPartitionsResponse is not aligned
@@ -1361,133 +1347,23 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 }
 
 func TestMetaCache_GetShard(t *testing.T) {
-	var (
-		ctx            = context.Background()
-		collectionName = "collection1"
-		collectionID   = int64(1)
-	)
-
-	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
-	require.Nil(t, err)
-
-	t.Run("No collection in meta cache", func(t *testing.T) {
-		shards, err := globalMetaCache.GetShard(ctx, true, dbName, "non-exists", 0, "channel-1")
-		assert.Error(t, err)
-		assert.Empty(t, shards)
-	})
-
-	t.Run("without shardLeaders in collection info invalid shardLeaders", func(t *testing.T) {
-		shards, err := globalMetaCache.GetShard(ctx, false, dbName, collectionName, collectionID, "channel-1")
-		assert.Error(t, err)
-		assert.Empty(t, shards)
-	})
-
-	t.Run("without shardLeaders in collection info", func(t *testing.T) {
-		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return &querypb.GetShardLeadersResponse{
-				Status: merr.Success(),
-				Shards: []*querypb.ShardLeadersList{
-					{
-						ChannelName: "channel-1",
-						NodeIds:     []int64{1, 2, 3},
-						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-						Serviceable: []bool{true, true, true},
-					},
-				},
-			}, nil
-		}
-
-		shards, err := globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
-		assert.NoError(t, err)
-		assert.NotEmpty(t, shards)
-		assert.Equal(t, 3, len(shards))
-
-		// get from cache
-		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return &querypb.GetShardLeadersResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "not implemented",
-				},
-			}, nil
-		}
-
-		shards, err = globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
-
-		assert.NoError(t, err)
-		assert.NotEmpty(t, shards)
-		assert.Equal(t, 3, len(shards))
-	})
+	t.Skip("GetShard has been moved to ShardClientMgr in shardclient package")
+	// Test body removed - functionality moved to shardclient package
 }
 
 func TestMetaCache_ClearShards(t *testing.T) {
-	var (
-		ctx            = context.TODO()
-		collectionName = "collection1"
-		collectionID   = int64(1)
-	)
-
-	qc := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, qc, mgr)
-	require.Nil(t, err)
-
-	t.Run("Clear with no collection info", func(t *testing.T) {
-		globalMetaCache.DeprecateShardCache(dbName, "collection_not_exist")
-	})
-
-	t.Run("Clear valid collection empty cache", func(t *testing.T) {
-		globalMetaCache.DeprecateShardCache(dbName, collectionName)
-	})
-
-	t.Run("Clear valid collection valid cache", func(t *testing.T) {
-		qc.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return &querypb.GetShardLeadersResponse{
-				Status: merr.Success(),
-				Shards: []*querypb.ShardLeadersList{
-					{
-						ChannelName: "channel-1",
-						NodeIds:     []int64{1, 2, 3},
-						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-						Serviceable: []bool{true, true, true},
-					},
-				},
-			}, nil
-		}
-
-		shards, err := globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
-		require.NoError(t, err)
-		require.NotEmpty(t, shards)
-		require.Equal(t, 3, len(shards))
-
-		globalMetaCache.DeprecateShardCache(dbName, collectionName)
-
-		qc.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return &querypb.GetShardLeadersResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "not implemented",
-				},
-			}, nil
-		}
-
-		shards, err = globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
-		assert.Error(t, err)
-		assert.Empty(t, shards)
-	})
+	t.Skip("DeprecateShardCache has been moved to ShardClientMgr in shardclient package")
+	// Test body removed - functionality moved to shardclient package
 }
 
 func TestMetaCache_PolicyInfo(t *testing.T) {
 	client := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
 
 	t.Run("InitMetaCache", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return nil, errors.New("mock error")
 		}
-		err := InitMetaCache(context.Background(), client, mgr)
+		err := InitMetaCache(context.Background(), client)
 		assert.Error(t, err)
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -1496,7 +1372,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				PolicyInfos: []string{"policy1", "policy2", "policy3"},
 			}, nil
 		}
-		err = InitMetaCache(context.Background(), client, mgr)
+		err = InitMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 	})
 
@@ -1508,11 +1384,11 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
 			}, nil
 		}
-		err := InitMetaCache(context.Background(), client, mgr)
+		err := InitMetaCache(context.Background(), client)
 		assert.NoError(t, err)
-		policyInfos := globalMetaCache.GetPrivilegeInfo(context.Background())
+		policyInfos := privilege.GetPrivilegeCache().GetPrivilegeInfo(context.Background())
 		assert.Equal(t, 3, len(policyInfos))
-		roles := globalMetaCache.GetUserRole("foo")
+		roles := privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Equal(t, 2, len(roles))
 	})
 
@@ -1524,32 +1400,32 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
 			}, nil
 		}
-		err := InitMetaCache(context.Background(), client, mgr)
+		err := InitMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: "policyX"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: "policyX"})
 		assert.NoError(t, err)
-		policyInfos := globalMetaCache.GetPrivilegeInfo(context.Background())
+		policyInfos := privilege.GetPrivilegeCache().GetPrivilegeInfo(context.Background())
 		assert.Equal(t, 4, len(policyInfos))
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRevokePrivilege, OpKey: "policyX"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRevokePrivilege, OpKey: "policyX"})
 		assert.NoError(t, err)
-		policyInfos = globalMetaCache.GetPrivilegeInfo(context.Background())
+		policyInfos = privilege.GetPrivilegeCache().GetPrivilegeInfo(context.Background())
 		assert.Equal(t, 3, len(policyInfos))
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
 		assert.NoError(t, err)
-		roles := globalMetaCache.GetUserRole("foo")
+		roles := privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Equal(t, 3, len(roles))
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
 		assert.NoError(t, err)
-		roles = globalMetaCache.GetUserRole("foo")
+		roles = privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Equal(t, 2, len(roles))
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: ""})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: ""})
 		assert.Error(t, err)
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: 100, OpKey: "policyX"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: 100, OpKey: "policyX"})
 		assert.Error(t, err)
 	})
 
@@ -1565,21 +1441,21 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles: []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
-		err := InitMetaCache(context.Background(), client, mgr)
+		err := InitMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDeleteUser, OpKey: "foo"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDeleteUser, OpKey: "foo"})
 		assert.NoError(t, err)
 
-		roles := globalMetaCache.GetUserRole("foo")
+		roles := privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Len(t, roles, 0)
 
-		roles = globalMetaCache.GetUserRole("foo2")
+		roles = privilege.GetPrivilegeCache().GetUserRole("foo2")
 		assert.Len(t, roles, 2)
 
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDropRole, OpKey: "role2"})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDropRole, OpKey: "role2"})
 		assert.NoError(t, err)
-		roles = globalMetaCache.GetUserRole("foo2")
+		roles = privilege.GetPrivilegeCache().GetUserRole("foo2")
 		assert.Len(t, roles, 1)
 		assert.Equal(t, "role3", roles[0])
 
@@ -1590,9 +1466,9 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
-		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRefresh})
+		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRefresh})
 		assert.NoError(t, err)
-		roles = globalMetaCache.GetUserRole("foo")
+		roles = privilege.GetPrivilegeCache().GetUserRole("foo")
 		assert.Len(t, roles, 2)
 	})
 }
@@ -1600,8 +1476,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 func TestMetaCache_RemoveCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	shardMgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, shardMgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	rootCoord.showLoadCollections = func(ctx context.Context, in *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
@@ -1645,48 +1520,14 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 }
 
 func TestGlobalMetaCache_ShuffleShardLeaders(t *testing.T) {
-	shards := map[string][]nodeInfo{
-		"channel-1": {
-			{
-				nodeID:  1,
-				address: "localhost:9000",
-			},
-			{
-				nodeID:  2,
-				address: "localhost:9000",
-			},
-			{
-				nodeID:  3,
-				address: "localhost:9000",
-			},
-		},
-	}
-	sl := &shardLeaders{
-		idx:          uatomic.NewInt64(5),
-		shardLeaders: shards,
-	}
-
-	reader := sl.GetReader()
-	result := reader.Shuffle()
-	assert.Len(t, result["channel-1"], 3)
-	assert.Equal(t, int64(1), result["channel-1"][0].nodeID)
-
-	reader = sl.GetReader()
-	result = reader.Shuffle()
-	assert.Len(t, result["channel-1"], 3)
-	assert.Equal(t, int64(2), result["channel-1"][0].nodeID)
-
-	reader = sl.GetReader()
-	result = reader.Shuffle()
-	assert.Len(t, result["channel-1"], 3)
-	assert.Equal(t, int64(3), result["channel-1"][0].nodeID)
+	t.Skip("shardLeaders and nodeInfo have been moved to shardclient package")
+	// Test body removed - functionality moved to shardclient package
 }
 
 func TestMetaCache_Database(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	shardMgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, shardMgr)
+	err := InitMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
 
@@ -1702,8 +1543,7 @@ func TestGetDatabaseInfo(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
-		shardMgr := newShardClientMgr()
-		cache, err := NewMetaCache(rootCoord, shardMgr)
+		cache, err := NewMetaCache(rootCoord)
 		assert.NoError(t, err)
 
 		rootCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
@@ -1727,8 +1567,7 @@ func TestGetDatabaseInfo(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
-		shardMgr := newShardClientMgr()
-		cache, err := NewMetaCache(rootCoord, shardMgr)
+		cache, err := NewMetaCache(rootCoord)
 		assert.NoError(t, err)
 
 		rootCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
@@ -1741,7 +1580,6 @@ func TestGetDatabaseInfo(t *testing.T) {
 
 func TestMetaCache_AllocID(t *testing.T) {
 	ctx := context.Background()
-	shardMgr := newShardClientMgr()
 
 	t.Run("success", func(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
@@ -1755,7 +1593,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
 		}, nil)
 
-		err := InitMetaCache(ctx, rootCoord, shardMgr)
+		err := InitMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
 		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
 
@@ -1774,7 +1612,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
 		}, nil)
 
-		err := InitMetaCache(ctx, rootCoord, shardMgr)
+		err := InitMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
 		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
 
@@ -1793,7 +1631,7 @@ func TestMetaCache_AllocID(t *testing.T) {
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
 		}, nil)
 
-		err := InitMetaCache(ctx, rootCoord, shardMgr)
+		err := InitMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
 		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
 
@@ -1804,52 +1642,8 @@ func TestMetaCache_AllocID(t *testing.T) {
 }
 
 func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
-	paramtable.Init()
-	paramtable.Get().Save(Params.ProxyCfg.ShardLeaderCacheInterval.Key, "1")
-
-	ctx := context.Background()
-	rootCoord := &MockMixCoordClientInterface{}
-	shardMgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, shardMgr)
-	assert.NoError(t, err)
-
-	rootCoord.showLoadCollections = func(ctx context.Context, in *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-		return &querypb.ShowCollectionsResponse{
-			Status:              merr.Success(),
-			CollectionIDs:       []UniqueID{1},
-			InMemoryPercentages: []int64{100},
-		}, nil
-	}
-
-	called := uatomic.NewInt32(0)
-
-	rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-		called.Inc()
-		return &querypb.GetShardLeadersResponse{
-			Status: merr.Success(),
-			Shards: []*querypb.ShardLeadersList{
-				{
-					ChannelName: "channel-1",
-					NodeIds:     []int64{1, 2, 3},
-					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-					Serviceable: []bool{true, true, true},
-				},
-			},
-		}, nil
-	}
-	nodeInfos, err := globalMetaCache.GetShard(ctx, true, dbName, "collection1", 1, "channel-1")
-	assert.NoError(t, err)
-	assert.Len(t, nodeInfos, 3)
-	assert.Equal(t, called.Load(), int32(1))
-
-	globalMetaCache.GetShard(ctx, true, dbName, "collection1", 1, "channel-1")
-	assert.Equal(t, called.Load(), int32(1))
-
-	globalMetaCache.InvalidateShardLeaderCache([]int64{1})
-	nodeInfos, err = globalMetaCache.GetShard(ctx, true, dbName, "collection1", 1, "channel-1")
-	assert.NoError(t, err)
-	assert.Len(t, nodeInfos, 3)
-	assert.Equal(t, called.Load(), int32(2))
+	t.Skip("GetShard and InvalidateShardLeaderCache have been moved to ShardClientMgr in shardclient package")
+	// Test body removed - functionality moved to shardclient package
 }
 
 func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
@@ -2191,8 +1985,7 @@ func TestMetaCache_Parallel(t *testing.T) {
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status: merr.Success(),
 	}, nil).Maybe()
-	mgr := newShardClientMgr()
-	cache, err := NewMetaCache(rootCoord, mgr)
+	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
 
 	cacheVersion := uint64(100)
@@ -2241,84 +2034,6 @@ func TestMetaCache_Parallel(t *testing.T) {
 }
 
 func TestMetaCache_GetShardLeaderList(t *testing.T) {
-	var (
-		ctx            = context.Background()
-		collectionName = "collection1"
-		collectionID   = int64(1)
-	)
-
-	rootCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, rootCoord, mgr)
-	require.Nil(t, err)
-
-	t.Run("No collection in meta cache", func(t *testing.T) {
-		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, "non-exists", 0, true)
-		assert.Error(t, err)
-		assert.Empty(t, channels)
-	})
-
-	t.Run("Get channel list without cache", func(t *testing.T) {
-		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return &querypb.GetShardLeadersResponse{
-				Status: merr.Success(),
-				Shards: []*querypb.ShardLeadersList{
-					{
-						ChannelName: "channel-1",
-						NodeIds:     []int64{1, 2, 3},
-						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
-						Serviceable: []bool{true, true, true},
-					},
-					{
-						ChannelName: "channel-2",
-						NodeIds:     []int64{4, 5, 6},
-						NodeAddrs:   []string{"localhost:9003", "localhost:9004", "localhost:9005"},
-						Serviceable: []bool{true, true, true},
-					},
-				},
-			}, nil
-		}
-
-		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, false)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(channels))
-		assert.Contains(t, channels, "channel-1")
-		assert.Contains(t, channels, "channel-2")
-	})
-
-	t.Run("Get channel list with cache", func(t *testing.T) {
-		// First call should populate cache
-		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(channels))
-
-		// Mock should return error but cache should be used
-		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return &querypb.GetShardLeadersResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "should not be called when using cache",
-				},
-			}, nil
-		}
-
-		channels, err = globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(channels))
-		assert.Contains(t, channels, "channel-1")
-		assert.Contains(t, channels, "channel-2")
-	})
-
-	t.Run("Error from coordinator", func(t *testing.T) {
-		// Deprecate cache first
-		globalMetaCache.DeprecateShardCache(dbName, collectionName)
-
-		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-			return nil, errors.New("coordinator error")
-		}
-
-		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, true)
-		assert.Error(t, err)
-		assert.Empty(t, channels)
-	})
+	t.Skip("GetShardLeaderList has been moved to ShardClientMgr in shardclient package")
+	// Test body removed - functionality moved to shardclient package
 }

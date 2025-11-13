@@ -26,10 +26,7 @@ func (c *Client) UpdateReplicateConfiguration(ctx context.Context, config *commo
 }
 
 // GetReplicateInfo gets replicate information from the Milvus cluster
-func (c *Client) GetReplicateInfo(ctx context.Context, sourceClusterID string, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
-	req := &milvuspb.GetReplicateInfoRequest{
-		SourceClusterId: sourceClusterID,
-	}
+func (c *Client) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
 	var resp *milvuspb.GetReplicateInfoResponse
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		var err error

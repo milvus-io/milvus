@@ -305,10 +305,14 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(dataset->GetDim());
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
+    LOG_INFO("start build memory index with KNOWHERE, build_id: {}",
+             config.value("build_id", "unknown"));
     auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
+    LOG_INFO("build memory index with KNOWHERE done, build_id: {}",
+             config.value("build_id", "unknown"));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
 }
@@ -316,7 +320,11 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
+    LOG_INFO("start build memory index, build_id: {}",
+             config.value("build_id", "unknown"));
     auto field_datas = file_manager_->CacheRawDataToMemory(config);
+    LOG_INFO("CacheRawDataToMemory success, build_id: {}",
+             config.value("build_id", "unknown"));
     auto opt_fields = GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> scalar_info;
     auto is_partition_key_isolation =
@@ -638,6 +646,9 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
     std::chrono::duration<double> load_duration_sum;
     std::chrono::duration<double> write_disk_duration_sum;
+    // load files in two parts:
+    // 1. EMB_LIST_META: Written separately to embedding_list_meta_writer_ptr (if embedding list type)
+    // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere
     if (!slice_meta_filepath
              .empty()) {  // load with the slice meta info, then we can load batch by batch
         std::string index_file_prefix = slice_meta_filepath.substr(
@@ -696,7 +707,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                 HandleBatch(slice_num - 1);
             }
         }
-    } else {
+    }
+    if (!pending_index_files.empty()) {
         //1. load files into memory
         auto start_load_files2_mem = std::chrono::system_clock::now();
         auto result = file_manager_->LoadIndexToMemory(

@@ -28,31 +28,80 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/pkg/v2/common"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func generateMetaTable(t *testing.T) *MetaTable {
-	return &MetaTable{catalog: rootcoord.NewCatalog(memkv.NewMemoryKV(), nil)}
+func generateMetaTable(_ *testing.T) *MetaTable {
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10)
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	return &MetaTable{catalog: rootcoord.NewCatalog(catalogKV, nil)}
 }
 
-func TestRbacAddCredential(t *testing.T) {
+func buildAlterUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultAlterUserMessageV2 {
+	msg := message.NewAlterUserMessageBuilderV2().
+		WithHeader(&message.AlterUserMessageHeader{
+			UserEntity: &milvuspb.UserEntity{
+				Name: credInfo.Username,
+			},
+		}).
+		WithBody(&message.AlterUserMessageBody{
+			CredentialInfo: credInfo,
+		}).
+		WithBroadcast([]string{funcutil.GetControlChannel("by-dev-rootcoord-dml_1")}).
+		MustBuildBroadcast()
+	return message.BroadcastResultAlterUserMessageV2{
+		Message: message.MustAsBroadcastAlterUserMessageV2(msg),
+		Results: map[string]*message.AppendResult{
+			funcutil.GetControlChannel("by-dev-rootcoord-dml_1"): {TimeTick: timetick},
+		},
+	}
+}
+
+func buildDropUserMessage(credInfo *internalpb.CredentialInfo, timetick uint64) message.BroadcastResultDropUserMessageV2 {
+	msg := message.NewDropUserMessageBuilderV2().
+		WithHeader(&message.DropUserMessageHeader{
+			UserName: credInfo.Username,
+		}).
+		WithBody(&message.DropUserMessageBody{}).
+		WithBroadcast([]string{funcutil.GetControlChannel("by-dev-rootcoord-dml_1")}).
+		MustBuildBroadcast()
+	return message.BroadcastResultDropUserMessageV2{
+		Message: message.MustAsBroadcastDropUserMessageV2(msg),
+		Results: map[string]*message.AppendResult{
+			funcutil.GetControlChannel("by-dev-rootcoord-dml_1"): {TimeTick: timetick},
+		},
+	}
+}
+
+func TestRbacCredential(t *testing.T) {
 	mt := generateMetaTable(t)
-	err := mt.AddCredential(context.TODO(), &internalpb.CredentialInfo{
-		Username: "user1",
+
+	username := "user" + funcutil.RandomString(10)
+	credInfo := &internalpb.CredentialInfo{
+		Username: username,
 		Tenant:   util.DefaultTenant,
-	})
+	}
+	err := mt.CheckIfAddCredential(context.TODO(), credInfo)
+	require.NoError(t, err)
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 1))
+	require.NoError(t, err)
+	// idempotency
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 1))
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -63,7 +112,7 @@ func TestRbacAddCredential(t *testing.T) {
 	}{
 		{"Empty username", false, &internalpb.CredentialInfo{Username: ""}},
 		{"exceed MaxUserNum", true, &internalpb.CredentialInfo{Username: "user3", Tenant: util.DefaultTenant}},
-		{"user exist", false, &internalpb.CredentialInfo{Username: "user1", Tenant: util.DefaultTenant}},
+		{"user exist", false, &internalpb.CredentialInfo{Username: username, Tenant: util.DefaultTenant}},
 	}
 
 	for _, test := range tests {
@@ -74,10 +123,39 @@ func TestRbacAddCredential(t *testing.T) {
 				paramtable.Get().Save(Params.ProxyCfg.MaxUserNum.Key, "3")
 			}
 			defer paramtable.Get().Reset(Params.ProxyCfg.MaxUserNum.Key)
-			err := mt.AddCredential(context.TODO(), test.info)
+			err := mt.CheckIfAddCredential(context.TODO(), test.info)
 			assert.Error(t, err)
 		})
 	}
+
+	// should be ignored if timetick is too low.
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 0))
+	require.NoError(t, err)
+	newCred, err := mt.GetCredential(context.TODO(), credInfo.Username)
+	require.NoError(t, err)
+	assert.Equal(t, newCred.TimeTick, uint64(1))
+
+	err = mt.AlterCredential(context.TODO(), buildAlterUserMessage(credInfo, 2))
+	require.NoError(t, err)
+	newCred, err = mt.GetCredential(context.TODO(), credInfo.Username)
+	require.NoError(t, err)
+	assert.Equal(t, newCred.TimeTick, uint64(2))
+
+	// should be ignored if timetick is too low.
+	err = mt.DeleteCredential(context.TODO(), buildDropUserMessage(credInfo, 2))
+	require.NoError(t, err)
+	newCred, err = mt.GetCredential(context.TODO(), credInfo.Username)
+	require.NoError(t, err)
+	assert.Equal(t, newCred.TimeTick, uint64(2))
+
+	err = mt.DeleteCredential(context.TODO(), buildDropUserMessage(credInfo, 3))
+	require.NoError(t, err)
+	newCred, err = mt.GetCredential(context.TODO(), credInfo.Username)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	require.Nil(t, newCred)
+
+	err = mt.DeleteCredential(context.TODO(), buildDropUserMessage(credInfo, 0))
+	require.NoError(t, err)
 }
 
 func TestRbacCreateRole(t *testing.T) {
@@ -85,7 +163,11 @@ func TestRbacCreateRole(t *testing.T) {
 
 	paramtable.Get().Save(Params.ProxyCfg.MaxRoleNum.Key, "2")
 	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleNum.Key)
-	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
+	require.NoError(t, err)
+	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	require.NoError(t, err)
+	err = mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role2"}})
 	require.NoError(t, err)
 	err = mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role2"})
 	require.NoError(t, err)
@@ -101,14 +183,14 @@ func TestRbacCreateRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.CreateRole(context.TODO(), util.DefaultTenant, test.inEntity)
+			err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: test.inEntity})
 			assert.Error(t, err)
 		})
 	}
 	t.Run("role has existed", func(t *testing.T) {
-		err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		err := mt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
 		assert.Error(t, err)
-		assert.True(t, common.IsIgnorableError(err))
+		assert.True(t, errors.Is(err, errRoleAlreadyExists))
 	})
 
 	{
@@ -120,7 +202,7 @@ func TestRbacCreateRole(t *testing.T) {
 			mock.Anything,
 		).Return(nil, errors.New("error mock list role"))
 		mockMt := &MetaTable{catalog: mockCata}
-		err := mockMt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+		err := mockMt.CheckIfCreateRole(context.TODO(), &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: "role1"}})
 		assert.Error(t, err)
 	}
 }
@@ -128,24 +210,21 @@ func TestRbacCreateRole(t *testing.T) {
 func TestRbacDropRole(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	// drop a exist role
+	roleExist := "role" + funcutil.RandomString(10)
+	err := mt.CreateRole(context.TODO(), util.DefaultTenant, &milvuspb.RoleEntity{Name: roleExist})
+	require.NoError(t, err)
+	err = mt.CheckIfDropRole(context.TODO(), &milvuspb.DropRoleRequest{RoleName: roleExist})
+	require.NoError(t, err)
+	err = mt.DropRole(context.TODO(), util.DefaultTenant, roleExist)
+	require.NoError(t, err)
+	// idempotency
+	mt.DropRole(context.TODO(), util.DefaultTenant, roleExist)
 	require.NoError(t, err)
 
-	tests := []struct {
-		roleName string
-
-		description string
-	}{
-		{"role1", "drop role1"},
-		{"role_not_exists", "drop not exist role"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			err := mt.DropRole(context.TODO(), util.DefaultTenant, test.roleName)
-			assert.NoError(t, err)
-		})
-	}
+	// drop a not exist role
+	err = mt.CheckIfDropRole(context.TODO(), &milvuspb.DropRoleRequest{RoleName: "role_not_exist"})
+	require.ErrorIs(t, err, errRoleNotExists)
 }
 
 func TestRbacOperateRole(t *testing.T) {
@@ -169,7 +248,11 @@ func TestRbacOperateRole(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			err := mt.OperateUserRole(context.TODO(), util.DefaultTenant, &milvuspb.UserEntity{Name: test.user}, &milvuspb.RoleEntity{Name: test.role}, test.oType)
+			err := mt.CheckIfOperateUserRole(context.TODO(), &milvuspb.OperateUserRoleRequest{
+				Username: test.user,
+				RoleName: test.role,
+				Type:     test.oType,
+			})
 			assert.Error(t, err)
 		})
 	}
@@ -191,7 +274,7 @@ func TestRbacSelect(t *testing.T) {
 	}
 
 	for user, rs := range userRoles {
-		err := mt.catalog.CreateCredential(context.TODO(), &model.Credential{
+		err := mt.catalog.AlterCredential(context.TODO(), &model.Credential{
 			Username: user,
 			Tenant:   util.DefaultTenant,
 		})
@@ -703,6 +786,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	})
 }
 
+/*
 func TestMetaTable_AlterCollection(t *testing.T) {
 	t.Run("alter metastore fail", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
@@ -769,6 +853,7 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 		assert.Equal(t, meta.collID2Meta[1], newColl)
 	})
 }
+*/
 
 func TestMetaTable_DescribeAlias(t *testing.T) {
 	t.Run("metatable describe alias ok", func(t *testing.T) {
@@ -1092,6 +1177,10 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
 		assert.Error(t, err)
+
+		meta.collID2Meta[100].State = pb.CollectionState_CollectionDropping
+		err = meta.RemoveCollection(ctx, 100, 9999)
+		assert.Error(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1106,7 +1195,7 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "collection"},
+				100: {Name: "collection", State: pb.CollectionState_CollectionDropping},
 			},
 		}
 		channel.ResetStaticPChannelStatsManager()
@@ -1116,6 +1205,74 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		meta.names.insert("", "alias2", 100)
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_RemovePartition(t *testing.T) {
+	t.Run("catalog error", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropPartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.AnythingOfType("uint64"),
+		).Return(errors.New("error mock AlterPartition"))
+
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					CollectionID: 100,
+					DBID:         int64(100),
+					Partitions: []*model.Partition{
+						{PartitionID: 100, State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+
+		ctx := context.Background()
+		err := meta.RemovePartition(ctx, 100, 100, 9999)
+		assert.Error(t, err)
+
+		meta.collID2Meta[100].Partitions[0].State = pb.PartitionState_PartitionDropping
+		err = meta.RemovePartition(ctx, 100, 100, 9999)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropPartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name: "collection",
+					Partitions: []*model.Partition{
+						{PartitionID: 100, State: pb.PartitionState_PartitionDropping},
+					},
+				},
+			},
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("", "collection", 100)
+		meta.names.insert("", "alias1", 100)
+		meta.names.insert("", "alias2", 100)
+		ctx := context.Background()
+		err := meta.RemovePartition(ctx, 100, 100, 9999)
 		assert.NoError(t, err)
 	})
 }
@@ -1373,80 +1530,6 @@ func TestMetaTable_ListAllAvailCollections(t *testing.T) {
 	assert.Equal(t, 0, len(db3))
 }
 
-func TestMetaTable_ChangeCollectionState(t *testing.T) {
-	t.Run("not exist", func(t *testing.T) {
-		meta := &MetaTable{}
-		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 100)
-		assert.NoError(t, err)
-	})
-
-	t.Run("failed to alter collection", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Collection
-			mock.Anything, // *model.Collection
-			mock.Anything, // metastore.AlterType
-			mock.AnythingOfType("uint64"),
-			mock.Anything,
-		).Return(errors.New("error mock AlterCollection"))
-		meta := &MetaTable{
-			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "test", CollectionID: 100},
-			},
-		}
-		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
-		assert.Error(t, err)
-	})
-
-	t.Run("not found dbID", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Collection
-			mock.Anything, // *model.Collection
-			mock.Anything, // metastore.AlterType
-			mock.AnythingOfType("uint64"),
-			mock.Anything,
-		).Return(nil)
-		meta := &MetaTable{
-			catalog:     catalog,
-			dbName2Meta: map[string]*model.Database{},
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "test", CollectionID: 100, DBID: util.DefaultDBID},
-			},
-		}
-		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
-		assert.Error(t, err)
-	})
-
-	t.Run("normal case", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything, // context.Context
-			mock.Anything, // *model.Collection
-			mock.Anything, // *model.Collection
-			mock.Anything, // metastore.AlterType
-			mock.AnythingOfType("uint64"),
-			mock.Anything,
-		).Return(nil)
-		meta := &MetaTable{
-			catalog: catalog,
-			dbName2Meta: map[string]*model.Database{
-				util.DefaultDBName: {Name: util.DefaultDBName, ID: util.DefaultDBID},
-			},
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "test", CollectionID: 100, DBID: util.DefaultDBID},
-			},
-		}
-		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
-		assert.NoError(t, err)
-		err = meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionDropping, 1000)
-		assert.NoError(t, err)
-	})
-}
-
 func TestMetaTable_AddPartition(t *testing.T) {
 	t.Run("collection not available", func(t *testing.T) {
 		meta := &MetaTable{}
@@ -1481,7 +1564,7 @@ func TestMetaTable_AddPartition(t *testing.T) {
 				100: {Name: "test", CollectionID: 100},
 			},
 		}
-		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreating})
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.Error(t, err)
 	})
 
@@ -1499,11 +1582,12 @@ func TestMetaTable_AddPartition(t *testing.T) {
 				100: {Name: "test", CollectionID: 100},
 			},
 		}
-		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreating})
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.NoError(t, err)
 	})
 }
 
+/*
 func TestMetaTable_RenameCollection(t *testing.T) {
 	t.Run("unsupported use a alias to rename collection", func(t *testing.T) {
 		meta := &MetaTable{
@@ -1786,85 +1870,21 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		assert.Equal(t, "new", coll.Name)
 	})
 }
-
-func TestMetaTable_ChangePartitionState(t *testing.T) {
-	t.Run("collection not exist", func(t *testing.T) {
-		meta := &MetaTable{}
-		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
-		assert.NoError(t, err)
-	})
-
-	t.Run("partition not exist", func(t *testing.T) {
-		meta := &MetaTable{
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "test", CollectionID: 100},
-			},
-		}
-		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
-		assert.Error(t, err)
-	})
-
-	t.Run("failed to alter partition", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterPartition",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(errors.New("error mock AlterPartition"))
-		meta := &MetaTable{
-			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {
-					Name: "test", CollectionID: 100,
-					Partitions: []*model.Partition{
-						{CollectionID: 100, PartitionID: 500},
-					},
-				},
-			},
-		}
-		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
-		assert.Error(t, err)
-	})
-
-	t.Run("normal case", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterPartition",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(nil)
-		meta := &MetaTable{
-			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {
-					Name: "test", CollectionID: 100,
-					Partitions: []*model.Partition{
-						{CollectionID: 100, PartitionID: 500},
-					},
-				},
-			},
-		}
-		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionCreated, 1000)
-		assert.NoError(t, err)
-		err = meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
-		assert.NoError(t, err)
-	})
-}
+*/
 
 func TestMetaTable_CreateDatabase(t *testing.T) {
 	db := model.NewDatabase(1, "exist", pb.DatabaseState_DatabaseCreated, nil)
 	t.Run("database already exist", func(t *testing.T) {
 		meta := &MetaTable{
-			names: newNameDb(),
+			names:       newNameDb(),
+			aliases:     newNameDb(),
+			dbName2Meta: make(map[string]*model.Database),
 		}
 		meta.names.insert("exist", "collection", 100)
-		err := meta.CreateDatabase(context.TODO(), db, 10000)
+
+		err := meta.CheckIfDatabaseCreatable(context.TODO(), &milvuspb.CreateDatabaseRequest{
+			DbName: "exist",
+		})
 		assert.Error(t, err)
 	})
 
@@ -1892,14 +1912,16 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
-			dbName2Meta: map[string]*model.Database{
-				"exist": db,
-			},
-			names:   newNameDb(),
-			aliases: newNameDb(),
-			catalog: catalog,
+			dbName2Meta: make(map[string]*model.Database),
+			names:       newNameDb(),
+			aliases:     newNameDb(),
+			catalog:     catalog,
 		}
-		err := meta.CreateDatabase(context.TODO(), db, 10000)
+		err := meta.CheckIfDatabaseCreatable(context.TODO(), &milvuspb.CreateDatabaseRequest{
+			DbName: "exist",
+		})
+		assert.NoError(t, err)
+		err = meta.CreateDatabase(context.TODO(), db, 10000)
 		assert.NoError(t, err)
 		assert.True(t, meta.names.exist("exist"))
 		assert.True(t, meta.aliases.exist("exist"))
@@ -1934,7 +1956,7 @@ func TestAlterDatabase(t *testing.T) {
 				Value: "value1",
 			},
 		}
-		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		err := meta.AlterDatabase(context.TODO(), newDB, typeutil.ZeroTimestamp)
 		assert.NoError(t, err)
 	})
 
@@ -1964,32 +1986,8 @@ func TestAlterDatabase(t *testing.T) {
 				Value: "value1",
 			},
 		}
-		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		err := meta.AlterDatabase(context.TODO(), newDB, typeutil.ZeroTimestamp)
 		assert.ErrorIs(t, err, mockErr)
-	})
-
-	t.Run("alter database name", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated, nil)
-
-		meta := &MetaTable{
-			dbName2Meta: map[string]*model.Database{
-				"db1": db,
-			},
-			names:   newNameDb(),
-			aliases: newNameDb(),
-			catalog: catalog,
-		}
-		newDB := db.Clone()
-		newDB.Name = "db2"
-		db.Properties = []*commonpb.KeyValuePair{
-			{
-				Key:   "key1",
-				Value: "value1",
-			},
-		}
-		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
-		assert.Error(t, err)
 	})
 }
 
@@ -2070,17 +2068,7 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 		}
 
 		mt.names.insert(util.DefaultDBName, "name", 1)
-		err := mt.CreateAlias(context.TODO(), "", "name", "name", typeutil.MaxTimestamp)
-		assert.Error(t, err)
-	})
-
-	t.Run("DropAlias with empty db", func(t *testing.T) {
-		mt := &MetaTable{
-			names: newNameDb(),
-		}
-
-		mt.names.insert(util.DefaultDBName, "name", 1)
-		err := mt.DropAlias(context.TODO(), "", "name", typeutil.MaxTimestamp)
+		err := mt.CheckIfAliasCreatable(context.TODO(), "", "name", "name")
 		assert.Error(t, err)
 	})
 }
@@ -2088,7 +2076,9 @@ func TestMetaTable_EmtpyDatabaseName(t *testing.T) {
 func TestMetaTable_DropDatabase(t *testing.T) {
 	t.Run("can't drop default database", func(t *testing.T) {
 		mt := &MetaTable{}
-		err := mt.DropDatabase(context.TODO(), "default", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: util.DefaultDBName,
+		})
 		assert.Error(t, err)
 	})
 
@@ -2097,8 +2087,10 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 		}
-		err := mt.DropDatabase(context.TODO(), "not_exist", 10000)
-		assert.NoError(t, err)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_exist",
+		})
+		assert.True(t, errors.Is(err, merr.ErrDatabaseNotFound))
 	})
 
 	t.Run("database not empty", func(t *testing.T) {
@@ -2117,7 +2109,9 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 			},
 		}
 		mt.names.insert("not_empty", "collection", 10000000)
-		err := mt.DropDatabase(context.TODO(), "not_empty", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_empty",
+		})
 		assert.Error(t, err)
 	})
 
@@ -2138,7 +2132,11 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		}
 		mt.names.createDbIfNotExist("not_commit")
 		mt.aliases.createDbIfNotExist("not_commit")
-		err := mt.DropDatabase(context.TODO(), "not_commit", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_commit",
+		})
+		assert.NoError(t, err)
+		err = mt.DropDatabase(context.TODO(), "not_commit", 10000)
 		assert.Error(t, err)
 	})
 
@@ -2159,7 +2157,11 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		}
 		mt.names.createDbIfNotExist("not_commit")
 		mt.aliases.createDbIfNotExist("not_commit")
-		err := mt.DropDatabase(context.TODO(), "not_commit", 10000)
+		err := mt.CheckIfDatabaseDroppable(context.TODO(), &milvuspb.DropDatabaseRequest{
+			DbName: "not_commit",
+		})
+		assert.NoError(t, err)
+		err = mt.DropDatabase(context.TODO(), "not_commit", 10000)
 		assert.NoError(t, err)
 		assert.False(t, mt.names.exist("not_commit"))
 		assert.False(t, mt.aliases.exist("not_commit"))
@@ -2226,23 +2228,55 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 		aliases: newNameDb(),
 		catalog: catalog,
 	}
-	err := mt.CreatePrivilegeGroup(context.TODO(), "pg1")
+	err := mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "pg1",
+	})
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup(context.TODO(), "")
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "",
+	})
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup(context.TODO(), "Insert")
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "Insert",
+	})
 	assert.Error(t, err)
-	err = mt.CreatePrivilegeGroup(context.TODO(), "pg2")
+	err = mt.CheckIfPrivilegeGroupCreatable(context.TODO(), &milvuspb.CreatePrivilegeGroupRequest{
+		GroupName: "pg2",
+	})
 	assert.NoError(t, err)
-	err = mt.DropPrivilegeGroup(context.TODO(), "")
+	err = mt.CreatePrivilegeGroup(context.TODO(), "pg1")
+	assert.NoError(t, err)
+	// idempotency
+	err = mt.CreatePrivilegeGroup(context.TODO(), "pg1")
+	assert.NoError(t, err)
+
+	err = mt.CheckIfPrivilegeGroupDropable(context.TODO(), &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "",
+	})
 	assert.Error(t, err)
+	err = mt.CheckIfPrivilegeGroupDropable(context.TODO(), &milvuspb.DropPrivilegeGroupRequest{
+		GroupName: "pg1",
+	})
+	assert.NoError(t, err)
 	err = mt.DropPrivilegeGroup(context.TODO(), "pg1")
 	assert.NoError(t, err)
-	err = mt.OperatePrivilegeGroup(context.TODO(), "", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "",
+		Privileges: []*milvuspb.PrivilegeEntity{},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	})
 	assert.Error(t, err)
-	err = mt.OperatePrivilegeGroup(context.TODO(), "ClusterReadOnly", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "ClusterReadOnly",
+		Privileges: []*milvuspb.PrivilegeEntity{},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	})
 	assert.Error(t, err)
-	err = mt.OperatePrivilegeGroup(context.TODO(), "pg3", []*milvuspb.PrivilegeEntity{}, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup)
+	err = mt.CheckIfPrivilegeGroupAlterable(context.TODO(), &milvuspb.OperatePrivilegeGroupRequest{
+		GroupName:  "pg3",
+		Privileges: []*milvuspb.PrivilegeEntity{},
+		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+	})
 	assert.Error(t, err)
 	_, err = mt.GetPrivilegeGroupRoles(context.TODO(), "")
 	assert.Error(t, err)

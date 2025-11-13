@@ -62,18 +62,28 @@ type msgQueue struct {
 	notEmpty *sync.Cond
 	notFull  *sync.Cond
 
-	buf     []message.ImmutableMessage
-	readIdx int
-	cap     int
-	closed  bool
+	buf      []message.ImmutableMessage
+	bufBytes int
+	readIdx  int
+	cap      int
+	maxSize  int
+	closed   bool
+}
+
+type MsgQueueOptions struct {
+	Capacity int
+	MaxSize  int
 }
 
 // NewMsgQueue creates a queue with a fixed capacity (>0).
-func NewMsgQueue(capacity int) *msgQueue {
-	if capacity <= 0 {
+func NewMsgQueue(options MsgQueueOptions) *msgQueue {
+	if options.Capacity <= 0 {
 		panic("capacity must be > 0")
 	}
-	q := &msgQueue{cap: capacity}
+	if options.MaxSize <= 0 {
+		panic("max size must be > 0")
+	}
+	q := &msgQueue{cap: options.Capacity, maxSize: options.MaxSize}
 	q.notEmpty = sync.NewCond(&q.mu)
 	q.notFull = sync.NewCond(&q.mu)
 	return q
@@ -92,7 +102,7 @@ func (q *msgQueue) Enqueue(ctx context.Context, msg message.ImmutableMessage) er
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	for len(q.buf) >= q.cap {
+	for len(q.buf) >= q.cap || q.bufBytes >= q.maxSize {
 		if ctx.Err() != nil {
 			return context.Canceled
 		}
@@ -110,6 +120,7 @@ func (q *msgQueue) Enqueue(ctx context.Context, msg message.ImmutableMessage) er
 	// }
 
 	q.buf = append(q.buf, msg)
+	q.bufBytes += msg.EstimateSize()
 
 	// New data is available for readers.
 	q.notEmpty.Signal()
@@ -176,6 +187,11 @@ func (q *msgQueue) CleanupConfirmedMessages(lastConfirmedTimeTick uint64) []mess
 		copy(cleanedMessages, q.buf[:cut])
 
 		// Drop the prefix [0:cut)
+		// Release memory of [0:cut) by zeroing references before reslicing
+		for i := 0; i < cut; i++ {
+			q.bufBytes -= q.buf[i].EstimateSize()
+			q.buf[i] = nil
+		}
 		q.buf = q.buf[cut:]
 		// Adjust read cursor relative to the new slice
 		q.readIdx -= cut

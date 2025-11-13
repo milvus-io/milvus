@@ -47,11 +47,13 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -333,6 +335,7 @@ func (s *Server) initDataCoord() error {
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
+	RegisterDDLCallbacks(s)
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 
 	s.initMessageCallback()
@@ -342,16 +345,6 @@ func (s *Server) initDataCoord() error {
 // initMessageCallback initializes the message callback.
 // TODO: we should build a ddl framework to handle the message ack callback for ddl messages
 func (s *Server) initMessageCallback() {
-	registry.RegisterDropPartitionV1AckCallback(func(ctx context.Context, result message.BroadcastResultDropPartitionMessageV1) error {
-		partitionID := result.Message.Header().PartitionId
-		for _, vchannel := range result.GetVChannelsWithoutControlChannel() {
-			if err := s.NotifyDropPartition(ctx, vchannel, []int64{partitionID}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-
 	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 		body := result.Message.MustBody()
 		vchannels := result.GetVChannelsWithoutControlChannel()
@@ -398,6 +391,17 @@ func (s *Server) initMessageCallback() {
 		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
 		if err != nil {
 			return err
+		}
+		balancer, err := balance.GetWithContext(ctx)
+		if err != nil {
+			return err
+		}
+		channelAssignment, err := balancer.GetLatestChannelAssignment()
+		if err != nil {
+			return err
+		}
+		if channelAssignment.ReplicateConfiguration != nil {
+			return status.NewReplicateViolation("import in replicating cluster is not supported yet")
 		}
 		return nil
 	})

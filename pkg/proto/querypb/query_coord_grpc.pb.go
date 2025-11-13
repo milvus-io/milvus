@@ -85,6 +85,7 @@ type QueryCoordClient interface {
 	CreateResourceGroup(ctx context.Context, in *milvuspb.CreateResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateResourceGroups(ctx context.Context, in *UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropResourceGroup(ctx context.Context, in *milvuspb.DropResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated: Do not use.
 	TransferNode(ctx context.Context, in *milvuspb.TransferNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	TransferReplica(ctx context.Context, in *TransferReplicaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListResourceGroups(ctx context.Context, in *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error)
@@ -277,6 +278,7 @@ func (c *queryCoordClient) DropResourceGroup(ctx context.Context, in *milvuspb.D
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *queryCoordClient) TransferNode(ctx context.Context, in *milvuspb.TransferNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, QueryCoord_TransferNode_FullMethodName, in, out, opts...)
@@ -472,6 +474,7 @@ type QueryCoordServer interface {
 	CreateResourceGroup(context.Context, *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)
 	UpdateResourceGroups(context.Context, *UpdateResourceGroupsRequest) (*commonpb.Status, error)
 	DropResourceGroup(context.Context, *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error)
+	// Deprecated: Do not use.
 	TransferNode(context.Context, *milvuspb.TransferNodeRequest) (*commonpb.Status, error)
 	TransferReplica(context.Context, *TransferReplicaRequest) (*commonpb.Status, error)
 	ListResourceGroups(context.Context, *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)

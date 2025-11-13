@@ -114,7 +114,7 @@ class SimpleGeometryCacheManager {
     SimpleGeometryCacheManager() = default;
 
     SimpleGeometryCache&
-    GetCache(int64_t segment_id, FieldId field_id) {
+    GetOrCreateCache(int64_t segment_id, FieldId field_id) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto key = MakeCacheKey(segment_id, field_id);
         auto it = caches_.find(key);
@@ -126,6 +126,17 @@ class SimpleGeometryCacheManager {
         auto* cache_ptr = cache.get();
         caches_.emplace(key, std::move(cache));
         return *cache_ptr;
+    }
+
+    SimpleGeometryCache*
+    GetCache(int64_t segment_id, FieldId field_id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto key = MakeCacheKey(segment_id, field_id);
+        auto it = caches_.find(key);
+        if (it != caches_.end()) {
+            return it->second.get();
+        }
+        return nullptr;
     }
 
     void
@@ -183,27 +194,5 @@ class SimpleGeometryCacheManager {
 };
 
 }  // namespace exec
-
-// Convenient global functions for direct access to geometry cache
-inline const Geometry*
-GetGeometryByOffset(int64_t segment_id, FieldId field_id, size_t offset) {
-    auto& cache = exec::SimpleGeometryCacheManager::Instance().GetCache(
-        segment_id, field_id);
-    return cache.GetByOffset(offset);
-}
-
-inline void
-RemoveGeometryCache(GEOSContextHandle_t ctx,
-                    int64_t segment_id,
-                    FieldId field_id) {
-    exec::SimpleGeometryCacheManager::Instance().RemoveCache(
-        ctx, segment_id, field_id);
-}
-
-inline void
-RemoveSegmentGeometryCaches(GEOSContextHandle_t ctx, int64_t segment_id) {
-    exec::SimpleGeometryCacheManager::Instance().RemoveSegmentCaches(
-        ctx, segment_id);
-}
 
 }  // namespace milvus

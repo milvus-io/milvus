@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -83,10 +84,6 @@ const (
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 
-func ConcatStructFieldName(structName string, fieldName string) string {
-	return fmt.Sprintf("%s[%s]", structName, fieldName)
-}
-
 // transformStructFieldNames transforms struct field names to structName[fieldName] format
 // This ensures global uniqueness while allowing same field names across different structs
 func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
@@ -94,7 +91,7 @@ func transformStructFieldNames(schema *schemapb.CollectionSchema) error {
 		structName := structArrayField.Name
 		for _, field := range structArrayField.Fields {
 			// Create transformed name: structName[fieldName]
-			newName := ConcatStructFieldName(structName, field.Name)
+			newName := typeutil.ConcatStructFieldName(structName, field.Name)
 			field.Name = newName
 		}
 	}
@@ -1465,14 +1462,15 @@ func AppendUserInfoForRPC(ctx context.Context) context.Context {
 }
 
 func GetRole(username string) ([]string, error) {
-	if globalMetaCache == nil {
+	privCache := privilege.GetPrivilegeCache()
+	if privCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
-	return globalMetaCache.GetUserRole(username), nil
+	return privCache.GetUserRole(username), nil
 }
 
 func PasswordVerify(ctx context.Context, username, rawPwd string) bool {
-	return passwordVerify(ctx, username, rawPwd, globalMetaCache)
+	return passwordVerify(ctx, username, rawPwd, privilege.GetPrivilegeCache())
 }
 
 func VerifyAPIKey(rawToken string) (string, error) {
@@ -1486,10 +1484,10 @@ func VerifyAPIKey(rawToken string) (string, error) {
 }
 
 // PasswordVerify verify password
-func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
+func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache privilege.PrivilegeCache) bool {
 	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
-	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
+	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
 		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false
@@ -1510,7 +1508,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 	// update cache after miss cache
 	credInfo.Sha256Password = sha256Pwd
 	log.Ctx(ctx).Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
-	globalMetaCache.UpdateCredential(credInfo)
+	privilegeCache.UpdateCredential(credInfo)
 	return true
 }
 
@@ -1728,6 +1726,10 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
 }
 
+func validCharInIndexName(c byte) bool {
+	return c == '_' || c == '[' || c == ']' || isAlpha(c) || isNumber(c)
+}
+
 func validateIndexName(indexName string) error {
 	indexName = strings.TrimSpace(indexName)
 
@@ -1749,7 +1751,7 @@ func validateIndexName(indexName string) error {
 	indexNameSize := len(indexName)
 	for i := 1; i < indexNameSize; i++ {
 		c := indexName[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
+		if !validCharInIndexName(c) {
 			msg := invalidMsg + "Index name can only contain numbers, letters, and underscores."
 			return errors.New(msg)
 		}
@@ -1939,7 +1941,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 					structName, expectedArrayLen, currentArrayLen, subField.FieldName)
 			}
 
-			transformedFieldName := ConcatStructFieldName(structName, subField.FieldName)
+			transformedFieldName := typeutil.ConcatStructFieldName(structName, subField.FieldName)
 			subFieldCopy := &schemapb.FieldData{
 				FieldName: transformedFieldName,
 				FieldId:   subField.FieldId,
@@ -2866,143 +2868,54 @@ func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema
 	results.Results.OutputFields = outputFields
 }
 
-func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
-	for _, field := range schema.Fields {
-		if field.GetDataType() == schemapb.DataType_Timestamptz {
-			return true
-		}
+func getColTimezone(colInfo *collectionInfo) string {
+	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.properties)
+	if timezone == "" {
+		timezone = common.DefaultTimezone
 	}
-	return false
+	return timezone
 }
 
-func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
-	for _, p := range props {
-		// used in collection or database
-		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone {
-			return true, p.Value
-		}
-	}
-	return false, ""
-}
-
-func checkTimezone(props ...*commonpb.KeyValuePair) error {
-	hasTImezone, timezoneStr := getDefaultTimezoneVal(props...)
-	if hasTImezone {
-		_, err := time.LoadLocation(timezoneStr)
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid timezone, should be a IANA timezone name: %s", err.Error())
-		}
-	}
-	return nil
-}
-
-func getColTimezone(colInfo *collectionInfo) (bool, string) {
-	return getDefaultTimezoneVal(colInfo.properties...)
-}
-
-func getDbTimezone(dbInfo *databaseInfo) (bool, string) {
-	return getDefaultTimezoneVal(dbInfo.properties...)
-}
-
-func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string) error {
-	naiveLayouts := []string{
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-	}
-	for _, fieldData := range columns {
-		if fieldData.GetType() != schemapb.DataType_Timestamptz {
-			continue
-		}
-
-		scalarField := fieldData.GetScalars()
-		if scalarField == nil || scalarField.GetStringData() == nil {
-			log.Warn("field data is not string data", zap.String("fieldName", fieldData.GetFieldName()))
-			return merr.WrapErrParameterInvalidMsg("field data is not string data")
-		}
-
-		stringData := scalarField.GetStringData().GetData()
-		utcTimestamps := make([]int64, len(stringData))
-
-		for i, isoStr := range stringData {
-			var t time.Time
-			var err error
-			// parse directly
-			t, err = time.Parse(time.RFC3339Nano, isoStr)
-			if err == nil {
-				utcTimestamps[i] = t.UnixMicro()
-				continue
-			}
-			// no timezone, try to find timezone in collecion -> database level
-			defaultTZ := "UTC"
-			if colTimezone != "" {
-				defaultTZ = colTimezone
-			}
-
-			location, err := time.LoadLocation(defaultTZ)
-			if err != nil {
-				log.Error("invalid timezone", zap.String("timezone", defaultTZ), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", defaultTZ)
-			}
-			var parsed bool
-			for _, layout := range naiveLayouts {
-				t, err = time.ParseInLocation(layout, isoStr, location)
-				if err == nil {
-					parsed = true
-					break
-				}
-			}
-			if !parsed {
-				log.Warn("Can not parse timestamptz string", zap.String("timestamp_string", isoStr))
-				return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string: %s", isoStr)
-			}
-			utcTimestamps[i] = t.UnixMicro()
-		}
-		// Replace data in place
-		fieldData.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{
-			TimestamptzData: &schemapb.TimestamptzArray{
-				Data: utcTimestamps,
-			},
-		}
-	}
-	return nil
-}
-
-func timestamptzUTC2IsoStr(results []*schemapb.FieldData, userDefineTimezone string, colTimezone string) error {
-	// Determine the target timezone based on priority: collection -> database -> UTC.
-	defaultTZ := "UTC"
-	if userDefineTimezone != "" {
-		defaultTZ = userDefineTimezone
-	} else if colTimezone != "" {
-		defaultTZ = colTimezone
-	}
-
-	location, err := time.LoadLocation(defaultTZ)
+// timestamptzUTC2IsoStr converts Timestamptz (Unix Microsecond) data
+// within FieldData results into ISO-8601 strings, applying the correct
+// timezone offset and using the optimized format (microsecond precision, no trailing zeros).
+func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) error {
+	location, err := time.LoadLocation(colTimezone)
 	if err != nil {
-		log.Error("invalid timezone", zap.String("timezone", defaultTZ), zap.Error(err))
-		return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", defaultTZ)
+		log.Error("invalid timezone", zap.String("timezone", colTimezone), zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", colTimezone)
 	}
 
 	for _, fieldData := range results {
 		if fieldData.GetType() != schemapb.DataType_Timestamptz {
 			continue
 		}
+
 		scalarField := fieldData.GetScalars()
+
+		// Guard against nil scalars or missing timestamp data
 		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
 			if longData := scalarField.GetLongData(); longData != nil && len(longData.GetData()) > 0 {
 				log.Warn("field data is not Timestamptz data", zap.String("fieldName", fieldData.GetFieldName()))
 				return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
 			}
+			// Handle the case of an empty field (e.g., all nulls), skip if no data to process.
+			continue
 		}
 
 		utcTimestamps := scalarField.GetTimestamptzData().GetData()
 		isoStrings := make([]string, len(utcTimestamps))
 
+		// CORE CHANGE: Use the optimized formatting function
 		for i, ts := range utcTimestamps {
+			// 1. Convert Unix Microsecond (UTC) to a time.Time object (still in UTC).
 			t := time.UnixMicro(ts).UTC()
+
+			// 2. Adjust the time object to the target location.
 			localTime := t.In(location)
-			isoStrings[i] = localTime.Format(time.RFC3339Nano)
+
+			// 3. Format using the optimized logic (max 6 digits, no trailing zeros)
+			isoStrings[i] = funcutil.FormatTimeMicroWithoutTrailingZeros(localTime)
 		}
 
 		// Replace the TimestamptzData with the new StringData in place.
@@ -3044,23 +2957,11 @@ func extractFields(t time.Time, fieldList []string) ([]int64, error) {
 	return extractedValues, nil
 }
 
-func extractFieldsFromResults(results []*schemapb.FieldData, precedenceTimezone []string, fieldList []string) error {
-	var targetLocation *time.Location
-
-	for _, tz := range precedenceTimezone {
-		if tz != "" {
-			loc, err := time.LoadLocation(tz)
-			if err != nil {
-				log.Error("invalid timezone provided in precedence list", zap.String("timezone", tz), zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg("got invalid timezone: %s", tz)
-			}
-			targetLocation = loc
-			break // Use the first valid timezone found.
-		}
-	}
-
-	if targetLocation == nil {
-		targetLocation = time.UTC
+func extractFieldsFromResults(results []*schemapb.FieldData, timezone string, fieldList []string) error {
+	targetLocation, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Error("invalid timezone", zap.String("timezone", timezone), zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("got invalid timezone: %s", timezone)
 	}
 
 	for _, fieldData := range results {

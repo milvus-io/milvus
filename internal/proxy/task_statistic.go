@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -54,7 +55,8 @@ type getStatisticsTask struct {
 	*internalpb.GetStatisticsRequest
 	resultBuf *typeutil.ConcurrentSet[*internalpb.GetStatisticsResponse]
 
-	lb LBPolicy
+	shardclientMgr shardclient.ShardClientMgr
+	lb             shardclient.LBPolicy
 }
 
 func (g *getStatisticsTask) TraceCtx() context.Context {
@@ -258,12 +260,12 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	if g.resultBuf == nil {
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
 	}
-	err := g.lb.Execute(ctx, CollectionWorkLoad{
-		db:             g.request.GetDbName(),
-		collectionID:   g.GetStatisticsRequest.CollectionID,
-		collectionName: g.collectionName,
-		nq:             1,
-		exec:           g.getStatisticsShard,
+	err := g.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             g.request.GetDbName(),
+		CollectionID:   g.GetStatisticsRequest.CollectionID,
+		CollectionName: g.collectionName,
+		Nq:             1,
+		Exec:           g.getStatisticsShard,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to statistic")
@@ -286,15 +288,15 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel", channel),
 			zap.Error(err))
-		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader",
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel", channel))
-		globalMetaCache.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
-		return errInvalidShardLeaders
+		g.shardclientMgr.DeprecateShardCache(g.request.GetDbName(), g.collectionName)
+		return merr.Error(result.GetStatus())
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Ctx(ctx).Warn("QueryNode statistic result error",

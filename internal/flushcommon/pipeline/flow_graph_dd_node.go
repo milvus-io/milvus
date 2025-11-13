@@ -284,6 +284,19 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			)
 			logger.Info("receive schema change message")
 			ddn.msgHandler.HandleSchemaChange(ddn.ctx, schemaMsg.SchemaChangeMessage)
+		case commonpb.MsgType_AlterCollection:
+			alterCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", alterCollectionMsg.AlterCollectionMessage.TimeTick()),
+			)
+			logger.Info("receive put collection message")
+			if err := ddn.msgHandler.HandleAlterCollection(ddn.ctx, alterCollectionMsg.AlterCollectionMessage); err != nil {
+				logger.Warn("handle put collection message failed", zap.Error(err))
+			} else {
+				logger.Info("handle put collection message success")
+			}
 		}
 	}
 

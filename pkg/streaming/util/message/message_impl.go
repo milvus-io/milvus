@@ -101,6 +101,28 @@ func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 	return m
 }
 
+// WithReplicateHeader sets the replicate header of current message.
+func (m *messageImpl) WithReplicateHeader(rh *ReplicateHeader) MutableMessage {
+	if rh == nil {
+		return m
+	}
+	if m.properties.Exist(messageReplicateMesssageHeader) {
+		panic("replicate header already set in properties of message")
+	}
+	rhProto, err := EncodeProto(&messagespb.ReplicateHeader{
+		ClusterId:              rh.ClusterID,
+		MessageId:              rh.MessageID.IntoProto(),
+		LastConfirmedMessageId: rh.LastConfirmedMessageID.IntoProto(),
+		TimeTick:               rh.TimeTick,
+		Vchannel:               rh.VChannel,
+	})
+	if err != nil {
+		panic("should not happen on replicate header proto")
+	}
+	m.properties.Set(messageReplicateMesssageHeader, rhProto)
+	return m
+}
+
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
 	m.properties.Set(messageTimeTick, EncodeUint64(tt))

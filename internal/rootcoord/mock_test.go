@@ -31,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/rootcoord/mock_tombstone"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -44,10 +46,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -55,6 +57,8 @@ const (
 	TestProxyID     = 100
 	TestRootCoordID = 200
 )
+
+var _ IMetaTable = &mockMetaTable{}
 
 // TODO: remove mockMetaTable, use mockery instead
 type mockMetaTable struct {
@@ -69,9 +73,8 @@ type mockMetaTable struct {
 	AddPartitionFunc                 func(ctx context.Context, partition *model.Partition) error
 	ChangePartitionStateFunc         func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
 	RemovePartitionFunc              func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	CreateAliasFunc                  func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
-	AlterAliasFunc                   func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
-	DropAliasFunc                    func(ctx context.Context, dbName string, alias string, ts Timestamp) error
+	AlterAliasFunc                   func(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error
+	DropAliasFunc                    func(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error
 	IsAliasFunc                      func(ctx context.Context, dbName, name string) bool
 	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
 	ListAliasesFunc                  func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error)
@@ -79,12 +82,12 @@ type mockMetaTable struct {
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
 	GetCollectionVirtualChannelsFunc func(ctx context.Context, colID int64) []string
-	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error
+	AlterCollectionFunc              func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
 	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
 	AddCredentialFunc                func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
 	GetCredentialFunc                func(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
-	DeleteCredentialFunc             func(ctx context.Context, username string) error
-	AlterCredentialFunc              func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	DeleteCredentialFunc             func(ctx context.Context, msg message.BroadcastResultDropUserMessageV2) error
+	AlterCredentialFunc              func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error
 	ListCredentialUsernamesFunc      func(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
 	CreateRoleFunc                   func(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
 	DropRoleFunc                     func(ctx context.Context, tenant string, roleName string) error
@@ -145,20 +148,16 @@ func (m mockMetaTable) ChangePartitionState(ctx context.Context, collectionID Un
 	return m.ChangePartitionStateFunc(ctx, collectionID, partitionID, state, ts)
 }
 
-func (m mockMetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+func (m mockMetaTable) RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
 	return m.RemovePartitionFunc(ctx, collectionID, partitionID, ts)
 }
 
-func (m mockMetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
-	return m.CreateAliasFunc(ctx, dbName, alias, collectionName, ts)
+func (m mockMetaTable) AlterAlias(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error {
+	return m.AlterAliasFunc(ctx, result)
 }
 
-func (m mockMetaTable) AlterAlias(ctx context.Context, dbName, alias string, collectionName string, ts Timestamp) error {
-	return m.AlterAliasFunc(ctx, dbName, alias, collectionName, ts)
-}
-
-func (m mockMetaTable) DropAlias(ctx context.Context, dbName, alias string, ts Timestamp) error {
-	return m.DropAliasFunc(ctx, dbName, alias, ts)
+func (m mockMetaTable) DropAlias(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error {
+	return m.DropAliasFunc(ctx, result)
 }
 
 func (m mockMetaTable) IsAlias(ctx context.Context, dbName, name string) bool {
@@ -177,8 +176,8 @@ func (m mockMetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []s
 	return m.ListAliasesByIDFunc(ctx, collID)
 }
 
-func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error {
-	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts, fieldModify)
+func (m mockMetaTable) AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	return m.AlterCollectionFunc(ctx, result)
 }
 
 func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
@@ -205,12 +204,12 @@ func (m mockMetaTable) GetCredential(ctx context.Context, username string) (*int
 	return m.GetCredentialFunc(ctx, username)
 }
 
-func (m mockMetaTable) DeleteCredential(ctx context.Context, username string) error {
-	return m.DeleteCredentialFunc(ctx, username)
+func (m mockMetaTable) DeleteCredential(ctx context.Context, msg message.BroadcastResultDropUserMessageV2) error {
+	return m.DeleteCredentialFunc(ctx, msg)
 }
 
-func (m mockMetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	return m.AlterCredentialFunc(ctx, credInfo)
+func (m mockMetaTable) AlterCredential(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error {
+	return m.AlterCredentialFunc(ctx, msg)
 }
 
 func (m mockMetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error) {
@@ -373,10 +372,15 @@ func newMockTsoAllocator() *tso.MockAllocator {
 
 type mockProxy struct {
 	types.ProxyClient
+	UpdateCredentialCacheFunc         func(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error)
 	InvalidateCollectionMetaCacheFunc func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 	InvalidateCredentialCacheFunc     func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error)
 	RefreshPolicyInfoCacheFunc        func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error)
 	GetComponentStatesFunc            func(ctx context.Context) (*milvuspb.ComponentStates, error)
+}
+
+func (m mockProxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return m.UpdateCredentialCacheFunc(ctx, request)
 }
 
 func (m mockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -404,17 +408,15 @@ func newMockProxy() *mockProxy {
 }
 
 func newTestCore(opts ...Opt) *Core {
+	tombstoneSweeper := mock_tombstone.NewMockTombstoneSweeper(common.NewEmptyMockT())
+	tombstoneSweeper.EXPECT().AddTombstone(mock.Anything).Return()
+	tombstoneSweeper.EXPECT().Close().Return()
+
 	c := &Core{
-		metricsRequest: metricsinfo.NewMetricsRequest(),
-		session:        &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		metricsRequest:   metricsinfo.NewMetricsRequest(),
+		session:          &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestRootCoordID}},
+		tombstoneSweeper: tombstoneSweeper,
 	}
-	executor := newMockStepExecutor()
-	executor.AddStepsFunc = func(s *stepStack) {
-		// no schedule, execute directly.
-		s.Execute(context.Background())
-	}
-	executor.StopFunc = func() {}
-	c.stepExecutor = executor
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -426,7 +428,16 @@ func withValidProxyManager() Opt {
 	return func(c *Core) {
 		c.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
 		p := newMockProxy()
+		p.UpdateCredentialCacheFunc = func(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}
+		p.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		}
+		p.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
 		}
 		p.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -494,13 +505,10 @@ func withInvalidMeta() Opt {
 	meta.ChangePartitionStateFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error {
 		return errors.New("error mock ChangePartitionState")
 	}
-	meta.CreateAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
-		return errors.New("error mock CreateAlias")
-	}
-	meta.AlterAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
+	meta.AlterAliasFunc = func(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error {
 		return errors.New("error mock AlterAlias")
 	}
-	meta.DropAliasFunc = func(ctx context.Context, dbName string, alias string, ts Timestamp) error {
+	meta.DropAliasFunc = func(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error {
 		return errors.New("error mock DropAlias")
 	}
 	meta.AddCredentialFunc = func(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
@@ -509,10 +517,10 @@ func withInvalidMeta() Opt {
 	meta.GetCredentialFunc = func(ctx context.Context, username string) (*internalpb.CredentialInfo, error) {
 		return nil, errors.New("error mock GetCredential")
 	}
-	meta.DeleteCredentialFunc = func(ctx context.Context, username string) error {
+	meta.DeleteCredentialFunc = func(ctx context.Context, msg message.BroadcastResultDropUserMessageV2) error {
 		return errors.New("error mock DeleteCredential")
 	}
-	meta.AlterCredentialFunc = func(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	meta.AlterCredentialFunc = func(ctx context.Context, msg message.BroadcastResultAlterUserMessageV2) error {
 		return errors.New("error mock AlterCredential")
 	}
 	meta.ListCredentialUsernamesFunc = func(ctx context.Context) (*milvuspb.ListCredUsersResponse, error) {
@@ -607,19 +615,6 @@ func withMixCoord(mixc types.MixCoord) Opt {
 	return func(c *Core) {
 		c.mixCoord = mixc
 	}
-}
-
-func withUnhealthyMixCoord() Opt {
-	mixc := &mocks.MixCoord{}
-	err := errors.New("mock error")
-	mixc.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(
-		&milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: merr.Status(err),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
-	)
-
-	return withMixCoord(mixc)
 }
 
 func withInvalidMixCoord() Opt {
@@ -728,6 +723,11 @@ func withValidMixCoord() Opt {
 			Status: merr.Success(),
 		}, nil,
 	)
+	mixc.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(
+		&datapb.DropVirtualChannelResponse{
+			Status: merr.Success(),
+		}, nil,
+	)
 
 	mixc.EXPECT().Flush(mock.Anything, mock.Anything).Return(
 		&datapb.FlushResponse{
@@ -741,7 +741,8 @@ func withValidMixCoord() Opt {
 	mixc.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(
 		merr.Success(), nil,
 	)
-
+	mixc.EXPECT().NotifyDropPartition(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mixc.EXPECT().UpdateLoadConfig(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 	return withMixCoord(mixc)
 }
 
@@ -894,9 +895,29 @@ type mockBroker struct {
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
-	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollectionFunc func(ctx context.Context, collectionID UniqueID) error
 
 	GCConfirmFunc func(ctx context.Context, collectionID, partitionID UniqueID) bool
+}
+
+func newValidMockBroker() *mockBroker {
+	broker := newMockBroker()
+	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+		return nil
+	}
+	broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
+		return nil
+	}
+	broker.ReleasePartitionsFunc = func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
+		return nil
+	}
+	broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+		return nil
+	}
+	broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
+		return nil
+	}
+	return broker
 }
 
 func newMockBroker() *mockBroker {
@@ -931,8 +952,8 @@ func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, i
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 
-func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	return b.BroadcastAlteredCollectionFunc(ctx, req)
+func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
+	return b.BroadcastAlteredCollectionFunc(ctx, collectionID)
 }
 
 func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
@@ -942,12 +963,6 @@ func (b mockBroker) GcConfirm(ctx context.Context, collectionID, partitionID Uni
 func withBroker(b Broker) Opt {
 	return func(c *Core) {
 		c.broker = b
-	}
-}
-
-func withGarbageCollector(gc GarbageCollector) Opt {
-	return func(c *Core) {
-		c.garbageCollector = gc
 	}
 }
 
@@ -1056,40 +1071,5 @@ func newMockDdlTsLockManager() *mockDdlTsLockManager {
 func withDdlTsLockManager(m DdlTsLockManager) Opt {
 	return func(c *Core) {
 		c.ddlTsLockManager = m
-	}
-}
-
-type mockStepExecutor struct {
-	StepExecutor
-	StartFunc    func()
-	StopFunc     func()
-	AddStepsFunc func(s *stepStack)
-}
-
-func newMockStepExecutor() *mockStepExecutor {
-	return &mockStepExecutor{}
-}
-
-func (m mockStepExecutor) Start() {
-	if m.StartFunc != nil {
-		m.StartFunc()
-	}
-}
-
-func (m mockStepExecutor) Stop() {
-	if m.StopFunc != nil {
-		m.StopFunc()
-	}
-}
-
-func (m mockStepExecutor) AddSteps(s *stepStack) {
-	if m.AddStepsFunc != nil {
-		m.AddStepsFunc(s)
-	}
-}
-
-func withStepExecutor(executor StepExecutor) Opt {
-	return func(c *Core) {
-		c.stepExecutor = executor
 	}
 }

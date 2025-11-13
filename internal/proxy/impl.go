@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -136,12 +137,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
 				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
 			}
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
+				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
@@ -149,7 +150,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
 			}
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
@@ -164,13 +165,16 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
-		case commonpb.MsgType_DropDatabase, commonpb.MsgType_AlterDatabase:
+		case commonpb.MsgType_DropDatabase:
+			node.shardMgr.RemoveDatabase(request.GetDbName())
+			fallthrough
+		case commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, 0, false)
 				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
 			}
 			if collectionName != "" {
@@ -182,13 +186,13 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
 				for _, name := range aliasName {
-					globalMetaCache.DeprecateShardCache(request.GetDbName(), name)
+					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
 			}
 
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-				globalMetaCache.DeprecateShardCache(request.GetDbName(), collectionName)
+				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 		}
 	}
@@ -226,9 +230,8 @@ func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *prox
 
 	log.Info("received request to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
 
-	if globalMetaCache != nil {
-		globalMetaCache.InvalidateShardLeaderCache(request.GetCollectionIDs())
-	}
+	node.shardMgr.InvalidateShardLeaderCache(request.GetCollectionIDs())
+
 	log.Info("complete to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
 
 	return merr.Success(), nil
@@ -2790,6 +2793,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		mixCoord:               node.mixCoord,
 		node:                   node,
 		lb:                     node.lbPolicy,
+		shardClientMgr:         node.shardMgr,
 		enableMaterializedView: node.enableMaterializedView,
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
@@ -2977,8 +2981,8 @@ type hybridSearchRequestExprLogger struct {
 	*milvuspb.HybridSearchRequest
 }
 
-// String implements Stringer interface for lazy logging.
-func (l *hybridSearchRequestExprLogger) String() string {
+// Key implements Stringer interface for lazy logging.
+func (l *hybridSearchRequestExprLogger) Key() string {
 	builder := &strings.Builder{}
 
 	for idx, subReq := range l.Requests {
@@ -3023,6 +3027,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		mixCoord:            node.mixCoord,
 		node:                node,
 		lb:                  node.lbPolicy,
+		shardClientMgr:      node.shardMgr,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
@@ -3398,6 +3403,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		request:             request,
 		mixCoord:            node.mixCoord,
 		lb:                  node.lbPolicy,
+		shardclientMgr:      node.shardMgr,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
@@ -4596,7 +4602,7 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
 	var createTs int64
-	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetStartTime())
+	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetCreateTime())
 	if err == nil {
 		createTs = createTime.Unix()
 	}
@@ -4689,8 +4695,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	}
 
 	username := request.Username
-	if globalMetaCache != nil {
-		globalMetaCache.RemoveCredential(username) // no need to return error, though credential may be not cached
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to invalidate credential cache")
 
@@ -4715,8 +4722,9 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		Username:       request.Username,
 		Sha256Password: request.Password,
 	}
-	if globalMetaCache != nil {
-		globalMetaCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
 	log.Debug("complete to update credential cache")
 
@@ -4820,7 +4828,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 		}
 	}
 
-	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, globalMetaCache) {
+	if !skipPasswordVerify && !passwordVerify(ctx, req.Username, rawOldPassword, privilege.GetPrivilegeCache()) {
 		err := merr.WrapErrPrivilegeNotAuthenticated("old password not correct for %s", req.GetUsername())
 		return merr.Status(err), nil
 	}
@@ -5347,8 +5355,9 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 		return merr.Status(err), nil
 	}
 
-	if globalMetaCache != nil {
-		err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{
+	priCache := privilege.GetPrivilegeCache()
+	if priCache != nil {
+		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
 		})
@@ -6545,32 +6554,25 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 		return nil, err
 	}
 
-	logger := log.Ctx(ctx).With(zap.String("sourceClusterID", req.GetSourceClusterId()))
+	logger := log.Ctx(ctx).With(
+		zap.String("sourceClusterID", req.GetSourceClusterId()),
+		zap.String("pchannel", req.GetTargetPchannel()),
+	)
 	logger.Info("GetReplicateInfo received")
 	defer func() {
 		if err != nil {
 			logger.Warn("GetReplicateInfo fail", zap.Error(err))
 		} else {
-			logger.Info("GetReplicateInfo success", zap.Any("checkpoints", resp.GetCheckpoints()))
+			logger.Info("GetReplicateInfo success", zap.Any("checkpoint", resp.GetCheckpoint()))
 		}
 	}()
 
-	configHelper, err := streaming.WAL().Replicate().GetReplicateConfiguration(ctx)
+	checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, req.GetTargetPchannel())
 	if err != nil {
 		return nil, err
 	}
-	currentCluster := configHelper.GetCurrentCluster()
-
-	checkpoints := make([]*commonpb.ReplicateCheckpoint, 0, len(currentCluster.GetPchannels()))
-	for _, pchannel := range currentCluster.GetPchannels() {
-		checkpoint, err := streaming.WAL().Replicate().GetReplicateCheckpoint(ctx, pchannel)
-		if err != nil {
-			return nil, err
-		}
-		checkpoints = append(checkpoints, checkpoint.IntoProto())
-	}
 	return &milvuspb.GetReplicateInfoResponse{
-		Checkpoints: checkpoints,
+		Checkpoint: checkpoint.IntoProto(),
 	}, nil
 }
 

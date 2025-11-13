@@ -1,5 +1,7 @@
 @Library('jenkins-shared-library@tekton') _
 
+// DEPRECATED: This job is deprecated, it is replaced by ci-v2/ut-cpp job
+
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 def milvus_helm_chart_version = '4.2.56'
 

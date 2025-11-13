@@ -32,7 +32,7 @@ func newTimeTickSyncOperator(param *interceptors.InterceptorBuildParam) *timeTic
 			zap.Any("pchannel", param.ChannelInfo),
 		),
 		interceptorBuildParam: param,
-		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastTimeTickMessage.LastConfirmedMessageID(), metrics),
+		ackManager:            ack.NewAckManager(param.LastTimeTickMessage.TimeTick(), param.LastConfirmedMessageID, metrics),
 		ackDetails:            ack.NewAckDetails(),
 		sourceID:              paramtable.GetNodeID(),
 		metrics:               metrics,

@@ -25,56 +25,34 @@ import (
 	"github.com/twpayne/go-geom/encoding/wkb"
 	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	ms "github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type collectionChannels struct {
-	virtualChannels  []string
-	physicalChannels []string
-}
-
 type createCollectionTask struct {
-	baseTask
-	Req            *milvuspb.CreateCollectionRequest
-	schema         *schemapb.CollectionSchema
-	collID         UniqueID
-	partIDs        []UniqueID
-	channels       collectionChannels
-	dbID           UniqueID
-	partitionNames []string
-	dbProperties   []*commonpb.KeyValuePair
+	*Core
+	Req    *milvuspb.CreateCollectionRequest
+	header *message.CreateCollectionMessageHeader
+	body   *message.CreateCollectionRequest
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req == nil {
 		return errors.New("empty requests")
 	}
-
-	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreateCollection); err != nil {
-		return err
-	}
+	Params := paramtable.Get()
 
 	// 1. check shard number
 	shardsNum := t.Req.GetShardsNum()
@@ -94,7 +72,7 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 	}
 
 	// 2. check db-collection capacity
-	db2CollIDs := t.core.meta.ListAllAvailCollections(t.ctx)
+	db2CollIDs := t.meta.ListAllAvailCollections(ctx)
 	if err := t.checkMaxCollectionsPerDB(ctx, db2CollIDs); err != nil {
 		return err
 	}
@@ -116,18 +94,20 @@ func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req.GetNumPartitions() > 0 {
 		newPartNum = t.Req.GetNumPartitions()
 	}
-	return checkGeneralCapacity(t.ctx, 1, newPartNum, t.Req.GetShardsNum(), t.core)
+	return checkGeneralCapacity(ctx, 1, newPartNum, t.Req.GetShardsNum(), t.Core)
 }
 
 // checkMaxCollectionsPerDB DB properties take precedence over quota configurations for max collections.
 func (t *createCollectionTask) checkMaxCollectionsPerDB(ctx context.Context, db2CollIDs map[int64][]int64) error {
-	collIDs, ok := db2CollIDs[t.dbID]
+	Params := paramtable.Get()
+
+	collIDs, ok := db2CollIDs[t.header.DbId]
 	if !ok {
 		log.Ctx(ctx).Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
 	}
 
-	db, err := t.core.meta.GetDatabaseByName(t.ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
+	db, err := t.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
 		log.Ctx(ctx).Warn("can not found DB ID", zap.String("collection", t.Req.GetCollectionName()), zap.String("dbName", t.Req.GetDbName()))
 		return merr.WrapErrDatabaseNotFound(t.Req.GetDbName(), "failed to create collection")
@@ -171,6 +151,70 @@ func checkGeometryDefaultValue(value string) error {
 	return nil
 }
 
+// checkAndRewriteTimestampTzDefaultValue processes the collection schema to validate
+// and rewrite default values for TIMESTAMPTZ fields.
+//
+// Background:
+//  1. TIMESTAMPTZ default values are initially stored as user-provided ISO 8601 strings
+//     (in ValueField.GetStringData()).
+//  2. Milvus stores TIMESTAMPTZ data internally as UTC microseconds (int64).
+//
+// Logic:
+// The function iterates through all fields of type DataType_Timestamptz. For each field
+// with a default value:
+//  1. It retrieves the collection's default timezone if no offset is present in the string.
+//  2. It calls ValidateAndReturnUnixMicroTz to validate the string (including the UTC
+//     offset range check) and convert it to the absolute UTC microsecond (int64) value.
+//  3. It rewrites the ValueField, setting the LongData field with the calculated int64
+//     value, thereby replacing the initial string representation.
+func checkAndRewriteTimestampTzDefaultValue(schema *schemapb.CollectionSchema) error {
+	// 1. Get the collection-level default timezone.
+	// Assuming common.TimezoneKey and common.DefaultTimezone are defined constants.
+	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, schema.GetProperties())
+	if !exist {
+		timezone = common.DefaultTimezone
+	}
+
+	for _, fieldSchema := range schema.GetFields() {
+		// Only process TIMESTAMPTZ fields.
+		if fieldSchema.GetDataType() != schemapb.DataType_Timestamptz {
+			continue
+		}
+
+		defaultValue := fieldSchema.GetDefaultValue()
+		if defaultValue == nil {
+			continue
+		}
+
+		// 2. Read the default value as a string (the input format).
+		// We expect the default value to be set in string_data initially.
+		stringTz := defaultValue.GetStringData()
+		if stringTz == "" {
+			// Skip or handle empty string default values if necessary.
+			continue
+		}
+
+		// 3. Validate the string and convert it to UTC microsecond (int64).
+		// This also performs the critical UTC offset range validation.
+		utcMicro, err := funcutil.ValidateAndReturnUnixMicroTz(stringTz, timezone)
+		if err != nil {
+			// If validation fails (e.g., invalid format or illegal offset), return error immediately.
+			return err
+		}
+
+		// 4. Rewrite the default value to store the UTC microsecond (int64).
+		// By setting ValueField_LongData, the oneof field in the protobuf structure
+		// automatically switches from string_data to long_data.
+		defaultValue.Data = &schemapb.ValueField_LongData{
+			LongData: utcMicro,
+		}
+
+		// The original string_data field is now cleared due to the oneof nature,
+		// and the default value is correctly represented as an int64 microsecond value.
+	}
+	return nil
+}
+
 func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
 	for _, f := range schema.GetFields() {
 		if funcutil.SliceContain(systemFields, f.GetName()) {
@@ -189,6 +233,11 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	}
 
 	if err := checkFieldSchema(schema.GetFields()); err != nil {
+		return err
+	}
+
+	// Validate default
+	if err := checkAndRewriteTimestampTzDefaultValue(schema); err != nil {
 		return err
 	}
 
@@ -271,6 +320,24 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 	}
 }
 
+func (t *createCollectionTask) appendConsistecyLevel() {
+	if ok, _ := getConsistencyLevel(t.Req.Properties...); ok {
+		return
+	}
+	for _, p := range t.Req.Properties {
+		if p.GetKey() == common.ConsistencyLevel {
+			// if there's already a consistency level, overwrite it.
+			p.Value = strconv.Itoa(int(t.Req.ConsistencyLevel))
+			return
+		}
+	}
+	// append consistency level into schema properties
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+		Key:   common.ConsistencyLevel,
+		Value: strconv.Itoa(int(t.Req.ConsistencyLevel)),
+	})
+}
+
 func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	if !Params.CommonCfg.EnableNamespace.GetAsBool() {
 		return nil
@@ -310,7 +377,7 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
 		},
 	})
-	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
+	t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
 		Key:   common.PartitionKeyIsolationKey,
 		Value: "true",
 	})
@@ -347,48 +414,47 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 }
 
 func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
-	var schema schemapb.CollectionSchema
-	if err := proto.Unmarshal(t.Req.GetSchema(), &schema); err != nil {
+	if err := t.validateSchema(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
-	if err := t.validateSchema(ctx, &schema); err != nil {
-		return err
-	}
-	t.appendDynamicField(ctx, &schema)
-	if err := t.handleNamespaceField(ctx, &schema); err != nil {
+	t.appendConsistecyLevel()
+	t.appendDynamicField(ctx, t.body.CollectionSchema)
+	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
 
-	if err := t.assignFieldAndFunctionID(&schema); err != nil {
+	if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
 		return err
+	}
+
+	// Validate timezone
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Req.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
 	// Set properties for persistent
-	schema.Properties = t.Req.GetProperties()
-
-	t.appendSysFields(&schema)
-	t.schema = &schema
+	t.body.CollectionSchema.Properties = t.Req.GetProperties()
+	t.body.CollectionSchema.Version = 0
+	t.appendSysFields(t.body.CollectionSchema)
 	return nil
-}
-
-func (t *createCollectionTask) assignShardsNum() {
-	if t.Req.GetShardsNum() <= 0 {
-		t.Req.ShardsNum = common.DefaultShardsNum
-	}
 }
 
 func (t *createCollectionTask) assignCollectionID() error {
 	var err error
-	t.collID, err = t.core.idAllocator.AllocOne()
+	t.header.CollectionId, err = t.idAllocator.AllocOne()
+	t.body.CollectionID = t.header.CollectionId
 	return err
 }
 
 func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
-	t.partitionNames = make([]string, 0)
+	Params := paramtable.Get()
+
+	partitionNames := make([]string, 0, t.Req.GetNumPartitions())
 	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 
-	_, err := typeutil.GetPartitionKeyFieldSchema(t.schema)
-	if err == nil {
+	if _, err := typeutil.GetPartitionKeyFieldSchema(t.body.CollectionSchema); err == nil {
+		// only when enabling partition key mode, we allow to create multiple partitions.
 		partitionNums := t.Req.GetNumPartitions()
 		// double check, default num of physical partitions should be greater than 0
 		if partitionNums <= 0 {
@@ -402,84 +468,76 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 		}
 
 		for i := int64(0); i < partitionNums; i++ {
-			t.partitionNames = append(t.partitionNames, fmt.Sprintf("%s_%d", defaultPartitionName, i))
+			partitionNames = append(partitionNames, fmt.Sprintf("%s_%d", defaultPartitionName, i))
 		}
 	} else {
 		// compatible with old versions <= 2.2.8
-		t.partitionNames = append(t.partitionNames, defaultPartitionName)
+		partitionNames = append(partitionNames, defaultPartitionName)
 	}
 
-	t.partIDs = make([]UniqueID, len(t.partitionNames))
-	start, end, err := t.core.idAllocator.Alloc(uint32(len(t.partitionNames)))
+	// allocate partition ids
+	start, end, err := t.idAllocator.Alloc(uint32(len(partitionNames)))
+	if err != nil {
+		return err
+	}
+	t.header.PartitionIds = make([]int64, len(partitionNames))
+	t.body.PartitionIDs = make([]int64, len(partitionNames))
+	for i := start; i < end; i++ {
+		t.header.PartitionIds[i-start] = i
+		t.body.PartitionIDs[i-start] = i
+	}
+	t.body.PartitionNames = partitionNames
+
+	log.Ctx(ctx).Info("assign partitions when create collection",
+		zap.String("collectionName", t.Req.GetCollectionName()),
+		zap.Int64s("partitionIds", t.header.PartitionIds),
+		zap.Strings("partitionNames", t.body.PartitionNames))
+	return nil
+}
+
+func (t *createCollectionTask) assignChannels(ctx context.Context) error {
+	vchannels, err := snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
+		CollectionID: t.header.GetCollectionId(),
+		Num:          int(t.Req.GetShardsNum()),
+	})
 	if err != nil {
 		return err
 	}
 
-	for i := start; i < end; i++ {
-		t.partIDs[i-start] = i
-	}
-	log.Ctx(ctx).Info("assign partitions when create collection",
-		zap.String("collectionName", t.Req.GetCollectionName()),
-		zap.Strings("partitionNames", t.partitionNames))
-
-	return nil
-}
-
-func (t *createCollectionTask) assignChannels() error {
-	vchanNames := make([]string, t.Req.GetShardsNum())
-	// physical channel names
-	chanNames := t.core.chanTimeTick.getDmlChannelNames(int(t.Req.GetShardsNum()))
-
-	if int32(len(chanNames)) < t.Req.GetShardsNum() {
-		return fmt.Errorf("no enough channels, want: %d, got: %d", t.Req.GetShardsNum(), len(chanNames))
-	}
-
-	shardNum := int(t.Req.GetShardsNum())
-	for i := 0; i < shardNum; i++ {
-		vchanNames[i] = funcutil.GetVirtualChannel(chanNames[i], t.collID, i)
-	}
-	t.channels = collectionChannels{
-		virtualChannels:  vchanNames,
-		physicalChannels: chanNames,
+	for _, vchannel := range vchannels {
+		t.body.PhysicalChannelNames = append(t.body.PhysicalChannelNames, funcutil.ToPhysicalChannel(vchannel))
+		t.body.VirtualChannelNames = append(t.body.VirtualChannelNames, vchannel)
 	}
 	return nil
 }
 
 func (t *createCollectionTask) Prepare(ctx context.Context) error {
-	db, err := t.core.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
+	t.body.Base = &commonpb.MsgBase{
+		MsgType: commonpb.MsgType_CreateCollection,
+	}
+
+	db, err := t.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
 		return err
 	}
-	t.dbID = db.ID
-	dbReplicateID, _ := common.GetReplicateID(db.Properties)
-	if dbReplicateID != "" {
-		reqProperties := make([]*commonpb.KeyValuePair, 0, len(t.Req.Properties))
-		for _, prop := range t.Req.Properties {
-			if prop.Key == common.ReplicateIDKey {
-				continue
-			}
-			reqProperties = append(reqProperties, prop)
-		}
-		t.Req.Properties = reqProperties
-	}
-	t.dbProperties = db.Properties
-
 	// set collection timezone
 	properties := t.Req.GetProperties()
-	ok, _ := getDefaultTimezoneVal(properties...)
+	_, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, properties)
 	if !ok {
-		ok, defaultTz := getDefaultTimezoneVal(db.Properties...)
-		if !ok {
-			defaultTz = "UTC"
+		dbTz, ok2 := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, db.Properties)
+		if !ok2 {
+			dbTz = common.DefaultTimezone
 		}
-		timezoneKV := &commonpb.KeyValuePair{Key: common.CollectionDefaultTimezone, Value: defaultTz}
+		timezoneKV := &commonpb.KeyValuePair{Key: common.TimezoneKey, Value: dbTz}
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 
-	if hookutil.GetEzPropByDBProperties(t.dbProperties) != nil {
-		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(t.dbProperties))
+	if hookutil.GetEzPropByDBProperties(db.Properties) != nil {
+		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(db.Properties))
 	}
 
+	t.header.DbId = db.ID
+	t.body.DbID = t.header.DbId
 	if err := t.validate(ctx); err != nil {
 		return err
 	}
@@ -487,8 +545,6 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 	if err := t.prepareSchema(ctx); err != nil {
 		return err
 	}
-
-	t.assignShardsNum()
 
 	if err := t.assignCollectionID(); err != nil {
 		return err
@@ -498,273 +554,29 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
-	return t.assignChannels()
-}
-
-func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts uint64) *ms.MsgPack {
-	msgPack := ms.MsgPack{}
-	msg := &ms.CreateCollectionMsg{
-		BaseMsg: ms.BaseMsg{
-			Ctx:            ctx,
-			BeginTimestamp: ts,
-			EndTimestamp:   ts,
-			HashValues:     []uint32{0},
-		},
-		CreateCollectionRequest: t.genCreateCollectionRequest(),
-	}
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	return &msgPack
-}
-
-func (t *createCollectionTask) genCreateCollectionRequest() *msgpb.CreateCollectionRequest {
-	collectionID := t.collID
-	partitionIDs := t.partIDs
-	// error won't happen here.
-	marshaledSchema, _ := proto.Marshal(t.schema)
-	pChannels := t.channels.physicalChannels
-	vChannels := t.channels.virtualChannels
-	return &msgpb.CreateCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
-			commonpbutil.WithTimeStamp(t.ts),
-		),
-		CollectionID:         collectionID,
-		PartitionIDs:         partitionIDs,
-		Schema:               marshaledSchema,
-		VirtualChannelNames:  vChannels,
-		PhysicalChannelNames: pChannels,
-	}
-}
-
-func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Context, ts uint64) (map[string][]byte, error) {
-	t.core.chanTimeTick.addDmlChannels(t.channels.physicalChannels...)
-	if streamingutil.IsStreamingServiceEnabled() {
-		return t.broadcastCreateCollectionMsgIntoStreamingService(ctx, ts)
-	}
-	msg := t.genCreateCollectionMsg(ctx, ts)
-	return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
-}
-
-func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(ctx context.Context, ts uint64) (map[string][]byte, error) {
-	notifier := snmanager.NewStreamingReadyNotifier()
-	if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(ctx, notifier); err != nil {
-		return nil, err
-	}
-	if !notifier.IsReady() {
-		// streaming service is not ready, so we send it into msgstream.
-		defer notifier.Release()
-		msg := t.genCreateCollectionMsg(ctx, ts)
-		return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
-	}
-	// streaming service is ready, so we release the ready notifier and send it into streaming service.
-	notifier.Release()
-
-	req := t.genCreateCollectionRequest()
-	// dispatch the createCollectionMsg into all vchannel.
-	msgs := make([]message.MutableMessage, 0, len(req.VirtualChannelNames))
-	for _, vchannel := range req.VirtualChannelNames {
-		msg, err := message.NewCreateCollectionMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&message.CreateCollectionMessageHeader{
-				CollectionId: req.CollectionID,
-				PartitionIds: req.GetPartitionIDs(),
-			}).
-			WithBody(req).
-			BuildMutable()
-		if err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, msg)
-	}
-	// send the createCollectionMsg into streaming service.
-	// ts is used as initial checkpoint at datacoord,
-	// it must be set as barrier time tick.
-	// The timetick of create message in wal must be greater than ts, to avoid data read loss at read side.
-	resps := streaming.WAL().AppendMessagesWithOption(ctx, streaming.AppendOption{
-		BarrierTimeTick: ts,
-	}, msgs...)
-	if err := resps.UnwrapFirstError(); err != nil {
-		return nil, err
-	}
-	// make the old message stream serialized id.
-	startPositions := make(map[string][]byte)
-	for idx, resp := range resps.Responses {
-		// The key is pchannel here
-		startPositions[req.PhysicalChannelNames[idx]] = adaptor.MustGetMQWrapperIDFromMessage(resp.AppendResult.MessageID).Serialize()
-	}
-	return startPositions, nil
-}
-
-func (t *createCollectionTask) getCreateTs(ctx context.Context) (uint64, error) {
-	replicateInfo := t.Req.GetBase().GetReplicateInfo()
-	if !replicateInfo.GetIsReplicate() {
-		return t.GetTs(), nil
-	}
-	if replicateInfo.GetMsgTimestamp() == 0 {
-		log.Ctx(ctx).Warn("the cdc timestamp is not set in the request for the backup instance")
-		return 0, merr.WrapErrParameterInvalidMsg("the cdc timestamp is not set in the request for the backup instance")
-	}
-	return replicateInfo.GetMsgTimestamp(), nil
-}
-
-func (t *createCollectionTask) Execute(ctx context.Context) error {
-	collID := t.collID
-	partIDs := t.partIDs
-	ts, err := t.getCreateTs(ctx)
-	if err != nil {
+	if err := t.assignChannels(ctx); err != nil {
 		return err
 	}
 
-	vchanNames := t.channels.virtualChannels
-	chanNames := t.channels.physicalChannels
+	return t.validateIfCollectionExists(ctx)
+}
 
-	partitions := make([]*model.Partition, len(partIDs))
-	for i, partID := range partIDs {
-		partitions[i] = &model.Partition{
-			PartitionID:               partID,
-			PartitionName:             t.partitionNames[i],
-			PartitionCreatedTimestamp: ts,
-			CollectionID:              collID,
-			State:                     pb.PartitionState_PartitionCreated,
-		}
-	}
-	ConsistencyLevel := t.Req.ConsistencyLevel
-	if ok, level := getConsistencyLevel(t.Req.Properties...); ok {
-		ConsistencyLevel = level
-	}
-	collInfo := model.Collection{
-		CollectionID:         collID,
-		DBID:                 t.dbID,
-		Name:                 t.schema.Name,
-		DBName:               t.Req.GetDbName(),
-		Description:          t.schema.Description,
-		AutoID:               t.schema.AutoID,
-		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
-		StructArrayFields:    model.UnmarshalStructArrayFieldModels(t.schema.StructArrayFields),
-		Functions:            model.UnmarshalFunctionModels(t.schema.Functions),
-		VirtualChannelNames:  vchanNames,
-		PhysicalChannelNames: chanNames,
-		ShardsNum:            t.Req.ShardsNum,
-		ConsistencyLevel:     ConsistencyLevel,
-		CreateTime:           ts,
-		State:                pb.CollectionState_CollectionCreating,
-		Partitions:           partitions,
-		Properties:           t.Req.Properties,
-		EnableDynamicField:   t.schema.EnableDynamicField,
-		UpdateTimestamp:      ts,
-	}
-
+func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) error {
 	// Check if the collection name duplicates an alias.
-	_, err = t.core.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
-	if err == nil {
+	if _, err := t.meta.DescribeAlias(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp); err == nil {
 		err2 := fmt.Errorf("collection name [%s] conflicts with an existing alias, please choose a unique name", t.Req.GetCollectionName())
 		log.Ctx(ctx).Warn("create collection failed", zap.String("database", t.Req.GetDbName()), zap.Error(err2))
 		return err2
 	}
 
-	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps
-	// if add collection successfully due to idempotency check. Some steps may be risky to be duplicate executed if they
-	// are not promised idempotent.
-	clone := collInfo.Clone()
-	// need double check in meta table if we can't promise the sequence execution.
-	existedCollInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	// Check if the collection already exists.
+	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err == nil {
-		equal := existedCollInfo.Equal(*clone)
-		if !equal {
+		newCollInfo := newCollectionModel(t.header, t.body, 0)
+		if equal := existedCollInfo.Equal(*newCollInfo); !equal {
 			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())
 		}
-		// make creating collection idempotent.
-		log.Ctx(ctx).Warn("add duplicate collection", zap.String("collection", t.Req.GetCollectionName()), zap.Uint64("ts", ts))
-		return nil
+		return errIgnoredCreateCollection
 	}
-	log.Ctx(ctx).Info("check collection existence", zap.String("collection", t.Req.GetCollectionName()), zap.Error(err))
-
-	// TODO: The create collection is not idempotent for other component, such as wal.
-	// we need to make the create collection operation must success after some persistent operation, refactor it in future.
-	startPositions, err := t.addChannelsAndGetStartPositions(ctx, ts)
-	if err != nil {
-		// ugly here, since we must get start positions first.
-		t.core.chanTimeTick.removeDmlChannels(t.channels.physicalChannels...)
-		return err
-	}
-	collInfo.StartPositions = toKeyDataPairs(startPositions)
-
-	return executeCreateCollectionTaskSteps(ctx, t.core, &collInfo, t.Req.GetDbName(), t.dbProperties, ts)
-}
-
-func (t *createCollectionTask) GetLockerKey() LockerKey {
-	return NewLockerKeyChain(
-		NewClusterLockerKey(false),
-		NewDatabaseLockerKey(t.Req.GetDbName(), false),
-		NewCollectionLockerKey(strconv.FormatInt(t.collID, 10), true),
-	)
-}
-
-func executeCreateCollectionTaskSteps(ctx context.Context,
-	core *Core,
-	col *model.Collection,
-	dbName string,
-	dbProperties []*commonpb.KeyValuePair,
-	ts Timestamp,
-) error {
-	undoTask := newBaseUndoTask(core.stepExecutor)
-	collID := col.CollectionID
-	undoTask.AddStep(&expireCacheStep{
-		baseStep:        baseStep{core: core},
-		dbName:          dbName,
-		collectionNames: []string{col.Name},
-		collectionID:    collID,
-		ts:              ts,
-		opts:            []proxyutil.ExpireCacheOpt{proxyutil.SetMsgType(commonpb.MsgType_DropCollection)},
-	}, &nullStep{})
-	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
-		baseStep:  baseStep{core: core},
-		pChannels: col.PhysicalChannelNames,
-	}) // remove dml channels if any error occurs.
-	undoTask.AddStep(&addCollectionMetaStep{
-		baseStep: baseStep{core: core},
-		coll:     col,
-	}, &deleteCollectionMetaStep{
-		baseStep:     baseStep{core: core},
-		collectionID: collID,
-		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
-		ts: ts,
-	})
-	// serve for this case: watching channels succeed in datacoord but failed due to network failure.
-	undoTask.AddStep(&nullStep{}, &unwatchChannelsStep{
-		baseStep:     baseStep{core: core},
-		collectionID: collID,
-		channels: collectionChannels{
-			virtualChannels:  col.VirtualChannelNames,
-			physicalChannels: col.PhysicalChannelNames,
-		},
-		isSkip: !Params.CommonCfg.TTMsgEnabled.GetAsBool(),
-	})
-	undoTask.AddStep(&watchChannelsStep{
-		baseStep: baseStep{core: core},
-		info: &watchInfo{
-			ts:             ts,
-			collectionID:   collID,
-			vChannels:      col.VirtualChannelNames,
-			startPositions: col.StartPositions,
-			schema: &schemapb.CollectionSchema{
-				Name:              col.Name,
-				DbName:            col.DBName,
-				Description:       col.Description,
-				AutoID:            col.AutoID,
-				Fields:            model.MarshalFieldModels(col.Fields),
-				StructArrayFields: model.MarshalStructArrayFieldModels(col.StructArrayFields),
-				Properties:        col.Properties,
-				Functions:         model.MarshalFunctionModels(col.Functions),
-			},
-			dbProperties: dbProperties,
-		},
-	}, &nullStep{})
-	undoTask.AddStep(&changeCollectionStateStep{
-		baseStep:     baseStep{core: core},
-		collectionID: collID,
-		state:        pb.CollectionState_CollectionCreated,
-		ts:           ts,
-	}, &nullStep{}) // We'll remove the whole collection anyway.
-	return undoTask.Execute(ctx)
+	return nil
 }

@@ -24,7 +24,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -60,7 +59,7 @@ type Broker interface {
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	// notify observer to clean their meta cache
-	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error
 }
 
 type ServerBroker struct {
@@ -157,6 +156,15 @@ func toKeyDataPairs(m map[string][]byte) []*commonpb.KeyDataPair {
 	return ret
 }
 
+// toMap converts []*commonpb.KeyDataPair to map[string][]byte.
+func toMap(pairs []*commonpb.KeyDataPair) map[string][]byte {
+	m := make(map[string][]byte, len(pairs))
+	for _, pair := range pairs {
+		m[pair.Key] = pair.Data
+	}
+	return m
+}
+
 func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error {
 	log.Ctx(ctx).Info("watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
 
@@ -226,19 +234,16 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	return resp.GetStates(), nil
 }
 
-func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
 	log.Ctx(ctx).Info("broadcasting request to alter collection",
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Any("props", req.GetProperties()),
-		zap.Any("deleteKeys", req.GetDeleteKeys()))
+		zap.Int64("collectionID", collectionID))
 
-	colMeta, err := b.s.meta.GetCollectionByID(ctx, req.GetDbName(), req.GetCollectionID(), typeutil.MaxTimestamp, false)
+	colMeta, err := b.s.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return err
 	}
 
-	db, err := b.s.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
+	db, err := b.s.meta.GetDatabaseByName(ctx, colMeta.DBName, typeutil.MaxTimestamp)
 	if err != nil {
 		return err
 	}
@@ -248,7 +253,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		partitionIDs = append(partitionIDs, p.PartitionID)
 	}
 	dcReq := &datapb.AlterCollectionRequest{
-		CollectionID: req.GetCollectionID(),
+		CollectionID: collectionID,
 		Schema: &schemapb.CollectionSchema{
 			Name:              colMeta.Name,
 			Description:       colMeta.Description,
@@ -272,7 +277,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(resp.Reason)
 	}
-	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", req.GetCollectionName()), zap.Int64("collectionID", req.GetCollectionID()), zap.Any("props", req.GetProperties()), zap.Any("field", colMeta.Fields))
+	log.Ctx(ctx).Info("done to broadcast request to alter collection", zap.String("collectionName", colMeta.Name), zap.Int64("collectionID", collectionID), zap.Any("props", colMeta.Properties), zap.Any("field", colMeta.Fields))
 	return nil
 }
 

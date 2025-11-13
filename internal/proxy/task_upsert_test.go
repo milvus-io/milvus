@@ -32,6 +32,7 @@ import (
 	grpcmixcoordclient "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -600,7 +601,7 @@ func createTestUpdateTask() *upsertTask {
 		collectionID: 1001,
 		node: &Proxy{
 			mixCoord: mcClient,
-			lbPolicy: NewLBPolicyImpl(nil),
+			lbPolicy: shardclient.NewLBPolicyImpl(nil),
 		},
 	}
 

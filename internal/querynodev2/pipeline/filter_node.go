@@ -142,6 +142,13 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
 		return nil
+	case commonpb.MsgType_AlterCollection:
+		putCollectionMsg := msg.(*adaptor.AlterCollectionMessageBody)
+		header := putCollectionMsg.AlterCollectionMessage.Header()
+		if header.GetCollectionId() != fNode.collectionID {
+			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+		}
+		return nil
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

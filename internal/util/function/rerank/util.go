@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -40,6 +41,8 @@ type columns struct {
 	size   int64
 	ids    any
 	scores []float32
+
+	nqOffset int64
 }
 
 type rerankInputs struct {
@@ -100,6 +103,7 @@ func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputF
 				cols[i][retIdx].size = size
 				cols[i][retIdx].ids = getIds(searchResult.Ids, start, size)
 				cols[i][retIdx].scores = searchResult.Scores[start : start+size]
+				cols[i][retIdx].nqOffset = start
 			}
 			for _, fieldId := range inputFieldIds {
 				fieldData, exist := multipIdField[retIdx][fieldId]
@@ -146,8 +150,12 @@ func newRerankOutputs(inputs *rerankInputs, searchParams *SearchParams) *rerankO
 		Ids:        &schemapb.IDs{},
 		Topks:      []int64{},
 	}
-	if len(inputs.fieldData) > 0 {
-		ret.FieldsData = typeutil.PrepareResultFieldData(inputs.fieldData[0].GetFieldsData(), searchParams.limit)
+	// Find the first non-empty fieldData and prepare result fields
+	for _, fieldData := range inputs.fieldData {
+		if fieldData != nil && len(fieldData.GetFieldsData()) > 0 {
+			ret.FieldsData = typeutil.PrepareResultFieldData(fieldData.GetFieldsData(), searchParams.limit)
+			break
+		}
 	}
 	return &rerankOutputs{ret}
 }
@@ -157,7 +165,7 @@ func appendResult[T PKType](inputs *rerankInputs, outputs *rerankOutputs, idScor
 	scores := idScores.scores
 	outputs.searchResultData.Topks = append(outputs.searchResultData.Topks, int64(len(ids)))
 	outputs.searchResultData.Scores = append(outputs.searchResultData.Scores, scores...)
-	if len(inputs.fieldData) > 0 {
+	if len(inputs.fieldData) > 0 && len(outputs.searchResultData.FieldsData) > 0 {
 		for idx := range ids {
 			loc := idScores.locations[idx]
 			typeutil.AppendFieldData(outputs.searchResultData.FieldsData, inputs.fieldData[loc.batchIdx].GetFieldsData(), int64(loc.offset))
@@ -512,7 +520,8 @@ func genIdGroupingMap(multipSearchResultData []*schemapb.SearchResultData) (map[
 	idGroupValue := map[any]any{}
 	for _, result := range multipSearchResultData {
 		if result.GetGroupByFieldValue() == nil {
-			return nil, fmt.Errorf("Group value is nil")
+			log.Warn("Group value is nil, this is due to empty results in search reduce phase")
+			continue
 		}
 		size := typeutil.GetSizeOfIDs(result.Ids)
 		groupIter := typeutil.GetDataIterator(result.GetGroupByFieldValue())

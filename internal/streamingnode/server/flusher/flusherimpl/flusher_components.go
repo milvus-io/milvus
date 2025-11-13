@@ -4,10 +4,8 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -59,16 +57,8 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			zap.Uint64("recoveryCheckPointTimeTick", impl.recoveryCheckPointTimeTick))
 		return
 	}
-	createCollectionRequest, err := createCollectionMsg.Body()
-	if err != nil {
-		panic("the message body is not CreateCollectionRequest")
-	}
-	msgChan := make(chan *msgstream.MsgPack, 10)
 
-	schema := &schemapb.CollectionSchema{}
-	if err := proto.Unmarshal(createCollectionRequest.GetSchema(), schema); err != nil {
-		panic("failed to unmarshal collection schema")
-	}
+	msgChan := make(chan *msgstream.MsgPack, 10)
 	ds := pipeline.NewEmptyStreamingNodeDataSyncService(
 		context.Background(), // There's no any rpc in this function, so the context is not used here.
 		&util.PipelineParams{

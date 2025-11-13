@@ -1,4 +1,5 @@
 use crate::error::Result;
+use core::slice;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_void};

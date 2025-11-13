@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -789,19 +790,21 @@ func TestGetCurDBNameFromContext(t *testing.T) {
 }
 
 func TestGetRole(t *testing.T) {
-	globalMetaCache = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	privilege.ResetPrivilegeCacheForTest()
 	_, err := GetRole("foo")
 	assert.Error(t, err)
-	mockCache := NewMockCache(t)
-	mockCache.On("GetUserRole",
-		mock.AnythingOfType("string"),
-	).Return(func(username string) []string {
-		if username == "root" {
-			return []string{"role1", "admin", "role2"}
-		}
-		return []string{"role1"}
-	})
-	globalMetaCache = mockCache
+
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status:    merr.Success(),
+		UserRoles: []string{"root/role1", "root/admin", "root/role2", "foo/role1"},
+	}, nil).Times(1)
+
+	privilege.InitPrivilegeCache(ctx, mixcoord)
+
 	roles, err := GetRole("root")
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(roles))
@@ -812,11 +815,12 @@ func TestGetRole(t *testing.T) {
 }
 
 func TestPasswordVerify(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	username := "user-test00"
 	password := "PasswordVerify"
 
-	// credential does not exist within cache
-	credCache := make(map[string]*internalpb.CredentialInfo, 0)
 	invokedCount := 0
 
 	mockedRootCoord := NewMixCoordMock()
@@ -825,34 +829,36 @@ func TestPasswordVerify(t *testing.T) {
 		return nil, errors.New("get cred not found credential")
 	}
 
-	metaCache := &MetaCache{
-		credMap:  credCache,
-		mixCoord: mockedRootCoord,
-	}
-	ret, ok := credCache[username]
-	assert.False(t, ok)
-	assert.Nil(t, ret)
-	assert.False(t, passwordVerify(context.TODO(), username, password, metaCache))
+	privilege.InitPrivilegeCache(ctx, mockedRootCoord)
+	privilegeCache := privilege.GetPrivilegeCache()
+	assert.False(t, passwordVerify(ctx, username, password, privilegeCache))
 	assert.Equal(t, 1, invokedCount)
 
 	// Sha256Password has not been filled into cache during establish connection firstly
 	encryptedPwd, err := crypto.PasswordEncrypt(password)
 	assert.NoError(t, err)
-	credCache[username] = &internalpb.CredentialInfo{
-		Username:          username,
-		EncryptedPassword: encryptedPwd,
+	privilegeCache.RemoveCredential(username)
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+		invokedCount++
+		return &rootcoordpb.GetCredentialResponse{
+			Status:   merr.Success(),
+			Username: username,
+			Password: encryptedPwd,
+		}, nil
 	}
-	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
-	ret, ok = credCache[username]
-	assert.True(t, ok)
+
+	assert.True(t, passwordVerify(ctx, username, password, privilegeCache))
+
+	ret, err := privilegeCache.GetCredentialInfo(ctx, username)
+	assert.NoError(t, err)
 	assert.NotNil(t, ret)
 	assert.Equal(t, username, ret.Username)
 	assert.NotNil(t, ret.Sha256Password)
-	assert.Equal(t, 1, invokedCount)
+	assert.Equal(t, 2, invokedCount)
 
 	// Sha256Password already exists within cache
-	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
-	assert.Equal(t, 1, invokedCount)
+	assert.True(t, passwordVerify(ctx, username, password, privilegeCache))
+	assert.Equal(t, 2, invokedCount)
 }
 
 func Test_isCollectionIsLoaded(t *testing.T) {

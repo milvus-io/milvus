@@ -22,6 +22,53 @@ func (_m *MockMsgHandler) EXPECT() *MockMsgHandler_Expecter {
 	return &MockMsgHandler_Expecter{mock: &_m.Mock}
 }
 
+// HandleAlterCollection provides a mock function with given fields: ctx, alterCollectionMsg
+func (_m *MockMsgHandler) HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
+	ret := _m.Called(ctx, alterCollectionMsg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleAlterCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, message.ImmutableAlterCollectionMessageV2) error); ok {
+		r0 = rf(ctx, alterCollectionMsg)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMsgHandler_HandleAlterCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleAlterCollection'
+type MockMsgHandler_HandleAlterCollection_Call struct {
+	*mock.Call
+}
+
+// HandleAlterCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - alterCollectionMsg message.ImmutableAlterCollectionMessageV2
+func (_e *MockMsgHandler_Expecter) HandleAlterCollection(ctx interface{}, alterCollectionMsg interface{}) *MockMsgHandler_HandleAlterCollection_Call {
+	return &MockMsgHandler_HandleAlterCollection_Call{Call: _e.mock.On("HandleAlterCollection", ctx, alterCollectionMsg)}
+}
+
+func (_c *MockMsgHandler_HandleAlterCollection_Call) Run(run func(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2)) *MockMsgHandler_HandleAlterCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(message.ImmutableAlterCollectionMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleAlterCollection_Call) Return(_a0 error) *MockMsgHandler_HandleAlterCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleAlterCollection_Call) RunAndReturn(run func(context.Context, message.ImmutableAlterCollectionMessageV2) error) *MockMsgHandler_HandleAlterCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HandleCreateSegment provides a mock function with given fields: ctx, createSegmentMsg
 func (_m *MockMsgHandler) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
 	ret := _m.Called(ctx, createSegmentMsg)

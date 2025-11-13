@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -36,9 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -81,24 +80,6 @@ func (s *ServerSuite) TearDownTest() {
 
 func TestServerSuite(t *testing.T) {
 	suite.Run(t, new(ServerSuite))
-}
-
-func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *msgstream.DataNodeTtMsg {
-	return &msgstream.DataNodeTtMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		DataNodeTtMsg: &msgpb.DataNodeTtMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   msgType,
-				Timestamp: t,
-				SourceID:  sourceID,
-			},
-			ChannelName:   ch,
-			Timestamp:     t,
-			SegmentsStats: []*commonpb.SegmentStats{{SegmentID: 2, NumRows: 100}},
-		},
-	}
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
@@ -1023,11 +1004,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
-		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+			IndexID:      rand.Int63n(1000),
+		})
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -1235,12 +1216,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
-		}
-
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+			IndexID:      rand.Int63n(1000),
+		})
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1389,12 +1369,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
+			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
-		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+		})
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,

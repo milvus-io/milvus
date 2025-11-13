@@ -29,13 +29,16 @@ import (
 type FileType int
 
 const (
-	Invalid FileType = 0
-	JSON    FileType = 1
-	Numpy   FileType = 2
-	Parquet FileType = 3
-	CSV     FileType = 4
+	Invalid   FileType = 0
+	JSON      FileType = 1
+	Numpy     FileType = 2
+	Parquet   FileType = 3
+	CSV       FileType = 4
+	JSONLines FileType = 5
 
 	JSONFileExt    = ".json"
+	JSONLFileExt   = ".jsonl"
+	NDJSONFileExt  = ".ndjson"
 	NumpyFileExt   = ".npy"
 	ParquetFileExt = ".parquet"
 	CSVFileExt     = ".csv"
@@ -47,10 +50,15 @@ var FileTypeName = map[int]string{
 	2: "Numpy",
 	3: "Parquet",
 	4: "CSV",
+	5: "JSONLines",
 }
 
 func (f FileType) String() string {
 	return FileTypeName[int(f)]
+}
+
+func isJSONLinesType(ft string) bool {
+	return ft == JSONLFileExt || ft == NDJSONFileExt
 }
 
 func GetFileType(file *internalpb.ImportFile) (FileType, error) {
@@ -63,6 +71,10 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 
 	ext := exts[0]
 	for i := 1; i < len(exts); i++ {
+		// *.jsonl equals *.ndjson
+		if isJSONLinesType(exts[i]) && isJSONLinesType(ext) {
+			continue
+		}
 		if exts[i] != ext {
 			return Invalid, merr.WrapErrImportFailed(
 				fmt.Sprintf("inconsistency in file types, (%s) vs (%s)",
@@ -71,11 +83,15 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	}
 
 	switch ext {
-	case JSONFileExt:
+	case JSONFileExt, JSONLFileExt, NDJSONFileExt:
 		if len(file.GetPaths()) != 1 {
 			return Invalid, merr.WrapErrImportFailed("for JSON import, accepts only one file")
 		}
-		return JSON, nil
+		if isJSONLinesType(ext) {
+			return JSONLines, nil
+		} else {
+			return JSON, nil
+		}
 	case NumpyFileExt:
 		return Numpy, nil
 	case ParquetFileExt:

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -160,6 +161,82 @@ func (m *ReplicaManager) Get(ctx context.Context, id typeutil.UniqueID) *Replica
 	defer m.rwmutex.RUnlock()
 
 	return m.replicas[id]
+}
+
+type SpawnWithReplicaConfigParams struct {
+	CollectionID int64
+	Channels     []string
+	Configs      []*messagespb.LoadReplicaConfig
+}
+
+// SpawnWithReplicaConfig spawns replicas with replica config.
+func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params SpawnWithReplicaConfigParams) ([]*Replica, error) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
+	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
+	replicas := make([]*Replica, 0)
+	for _, config := range params.Configs {
+		if existedReplica, ok := m.replicas[config.GetReplicaId()]; ok {
+			// if the replica is already existed, just update the resource group
+			mutableReplica := existedReplica.CopyForWrite()
+			mutableReplica.SetResourceGroup(config.GetResourceGroupName())
+			replicas = append(replicas, mutableReplica.IntoReplica())
+			continue
+		}
+		replica := NewReplicaWithPriority(&querypb.Replica{
+			ID:            config.GetReplicaId(),
+			CollectionID:  params.CollectionID,
+			ResourceGroup: config.ResourceGroupName,
+		}, config.GetPriority())
+		if enableChannelExclusiveMode {
+			mutableReplica := replica.CopyForWrite()
+			mutableReplica.TryEnableChannelExclusiveMode(params.Channels...)
+			replica = mutableReplica.IntoReplica()
+		}
+		replicas = append(replicas, replica)
+		log.Ctx(ctx).Info("spawn replica for collection",
+			zap.Int64("collectionID", params.CollectionID),
+			zap.Int64("replicaID", config.GetReplicaId()),
+			zap.String("resourceGroup", config.GetResourceGroupName()),
+		)
+	}
+	if err := m.put(ctx, replicas...); err != nil {
+		return nil, errors.Wrap(err, "failed to put replicas")
+	}
+	if err := m.removeRedundantReplicas(ctx, params); err != nil {
+		return nil, errors.Wrap(err, "failed to remove redundant replicas")
+	}
+	return replicas, nil
+}
+
+// removeRedundantReplicas removes redundant replicas that is not in the new replica config.
+func (m *ReplicaManager) removeRedundantReplicas(ctx context.Context, params SpawnWithReplicaConfigParams) error {
+	existedReplicas, ok := m.coll2Replicas[params.CollectionID]
+	if !ok {
+		return nil
+	}
+	toRemoveReplicas := make([]int64, 0)
+	for _, replica := range existedReplicas.replicas {
+		found := false
+		replicaID := replica.GetID()
+		for _, channel := range params.Configs {
+			if channel.GetReplicaId() == replicaID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			toRemoveReplicas = append(toRemoveReplicas, replicaID)
+		}
+	}
+	return m.removeReplicas(ctx, params.CollectionID, toRemoveReplicas...)
+}
+
+// AllocateReplicaID allocates a replica ID.
+func (m *ReplicaManager) AllocateReplicaID(ctx context.Context) (int64, error) {
+	return m.idAllocator()
 }
 
 // Spawn spawns N replicas at resource group for given collection in ReplicaManager.
@@ -474,6 +551,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
 			log.Info(
 				"new replica recovery found",
+				zap.Int64("collectionID", collectionID),
 				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.Int64s("newRONodes", roNodes),
 				zap.Int64s("roToRWNodes", recoverableNodes),
@@ -640,6 +718,7 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 		mutableReplica.AddRWSQNode(incomingNode...)     // unused -> rw
 		log.Info(
 			"new replica recovery streaming query node found",
+			zap.Int64("collectionID", collectionID),
 			zap.Int64("replicaID", assignment.GetReplicaID()),
 			zap.Int64s("newRONodes", roNodes),
 			zap.Int64s("roToRWNodes", recoverableNodes),

@@ -28,6 +28,7 @@ template <typename T>
 class VectorDiskAnnIndex : public VectorIndex {
  public:
     explicit VectorDiskAnnIndex(
+        DataType elem_type /* used for embedding list only */,
         const IndexType& index_type,
         const MetricType& metric_type,
         const IndexVersion& version,
@@ -102,6 +103,8 @@ class VectorDiskAnnIndex : public VectorIndex {
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
     uint32_t search_beamwidth_ = 8;
+    // used for embedding list only
+    DataType elem_type_;
 };
 
 template <typename T>

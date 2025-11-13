@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -72,7 +73,6 @@ const (
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
 	// key for timestamptz translation
-	TimezoneKey   = "timezone"
 	TimefieldsKey = "time_fields"
 
 	SearchIterV2Key        = "search_iter_v2"
@@ -414,6 +414,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
+	}
+
+	// Validate timezone
+	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
+	if exist && !funcutil.IsTimezoneValid(tz) {
+		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
 	// validate clustering key
@@ -1202,9 +1208,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 		// Check the validation of timezone
-		err := checkTimezone(t.Properties...)
-		if err != nil {
-			return err
+		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
+		if exist && !funcutil.IsTimezoneValid(userDefinedTimezone) {
+			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
@@ -3030,7 +3036,7 @@ type RunAnalyzerTask struct {
 	collectionID typeutil.UniqueID
 	fieldID      typeutil.UniqueID
 	dbName       string
-	lb           LBPolicy
+	lb           shardclient.LBPolicy
 
 	result *milvuspb.RunAnalyzerResponse
 }
@@ -3122,12 +3128,12 @@ func (t *RunAnalyzerTask) runAnalyzerOnShardleader(ctx context.Context, nodeID i
 }
 
 func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, CollectionWorkLoad{
-		db:             t.dbName,
-		collectionName: t.GetCollectionName(),
-		collectionID:   t.collectionID,
-		nq:             int64(len(t.GetPlaceholder())),
-		exec:           t.runAnalyzerOnShardleader,
+	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
+		Db:             t.dbName,
+		CollectionName: t.GetCollectionName(),
+		CollectionID:   t.collectionID,
+		Nq:             int64(len(t.GetPlaceholder())),
+		Exec:           t.runAnalyzerOnShardleader,
 	})
 
 	return err

@@ -259,13 +259,13 @@ message ChannelTimeTickMsg {
 }
 
 message CredentialInfo {
-  string username = 1;
+  string username = 1; // not save in metadata.
   // encrypted by bcrypt (for higher security level)
   string encrypted_password = 2;
-  string tenant = 3;
-  bool is_super = 4;
+  string tenant = 3 [deprecated=true]; // not used.
+  bool is_super = 4 [deprecated=true]; // not used.
   // encrypted by sha256 (for good performance in cache mapping)
-  string sha256_password = 5;
+  string sha256_password = 5; // not save in metadata.
   uint64 time_tick = 6; // the timetick in wal which the credential updates
 }
 
@@ -388,7 +388,7 @@ message GetImportProgressResponse {
   repeated ImportTaskProgress task_progresses = 7;
   int64 imported_rows = 8;
   int64 total_rows = 9;
-  string start_time = 10;
+  string create_time = 10;
 }
 
 message ListImportsRequestInternal {

@@ -56,7 +56,7 @@ func (b *broadcasterScheduler) AddTask(ctx context.Context, task *pendingBroadca
 	// Wait both request context and the background task context.
 	ctx, _ = contextutil.MergeContext(ctx, b.backgroundTaskNotifier.Context())
 	// wait for all the vchannels acked.
-	result, err := task.BlockUntilAllAck(ctx)
+	result, err := task.BlockUntilDone(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -78,14 +77,8 @@ const maxOperationsPerTxn = int64(64)
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-
 	rand.Seed(time.Now().UnixNano())
-	parameters := []string{"tikv", "etcd"}
-	var code int
-	for _, v := range parameters {
-		paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, v)
-		code = m.Run()
-	}
+	code := m.Run()
 	os.Exit(code)
 }
 
@@ -1194,12 +1187,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
-		}
-
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+			IndexID:      rand.Int63n(1000),
+		})
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -1413,12 +1405,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
-		}
-
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+			IndexID:      rand.Int63n(1000),
+		})
 		assert.NoError(t, err)
 		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: segment.ID,
@@ -1573,12 +1564,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		indexReq := &indexpb.CreateIndexRequest{
+		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
+			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
-		}
-		_, err = svr.meta.indexMeta.CreateIndex(context.TODO(), indexReq, 0, false)
+		})
 		assert.NoError(t, err)
 		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
@@ -2752,6 +2743,15 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	mockChunkManager := mocks.NewChunkManager(t)
 	mockManager := NewMockManager(t)
 
+	mb := mock_balancer.NewMockBalancer(t)
+	mb.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{}, nil).Maybe()
+	mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	snmanager.ResetStreamingNodeManager()
+	balance.Register(mb)
+
 	server := &Server{
 		ctx: ctx,
 		meta: &meta{
@@ -2766,28 +2766,6 @@ func TestServer_InitMessageCallback(t *testing.T) {
 
 	// Test initMessageCallback
 	server.initMessageCallback()
-
-	// Test DropPartition message callback
-	dropPartitionMsg := message.NewDropPartitionMessageBuilderV1().
-		WithHeader(&message.DropPartitionMessageHeader{
-			CollectionId: 1,
-			PartitionId:  1,
-		}).
-		WithBody(&msgpb.DropPartitionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DropPartition,
-			},
-		}).
-		WithBroadcast([]string{"test_channel"}, message.NewImportJobIDResourceKey(1)).
-		MustBuildBroadcast()
-	err := registry.CallMessageAckCallback(ctx, dropPartitionMsg, map[string]*message.AppendResult{
-		"test_channel": {
-			MessageID:              walimplstest.NewTestMessageID(1),
-			LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
-			TimeTick:               1,
-		},
-	})
-	assert.Error(t, err) // server not healthy
 
 	// Test Import message check callback
 	resourceKey := message.NewImportJobIDResourceKey(1)

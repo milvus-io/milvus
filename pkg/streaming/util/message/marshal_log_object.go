@@ -58,6 +58,14 @@ func (m *immutableMessageImpl) MarshalLogObject(enc zapcore.ObjectEncoder) error
 	}
 	if broadcast := m.BroadcastHeader(); broadcast != nil {
 		enc.AddInt64("broadcastID", int64(broadcast.BroadcastID))
+		enc.AddString("broadcastVChannels", strings.Join(broadcast.VChannels, ","))
+	}
+	if replicate := m.ReplicateHeader(); replicate != nil {
+		enc.AddString("rClusterID", replicate.ClusterID)
+		enc.AddString("rMessageID", replicate.MessageID.String())
+		enc.AddString("rLastConfirmedMessageID", replicate.LastConfirmedMessageID.String())
+		enc.AddUint64("rTimeTick", replicate.TimeTick)
+		enc.AddString("rVchannel", replicate.VChannel)
 	}
 	enc.AddInt("size", len(m.payload))
 	marshalSpecializedHeader(m.MessageType(), m.Version(), m.properties[messageHeader], enc)
@@ -125,17 +133,22 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 		enc.AddInt64("segmentID", header.GetSegmentId())
 	case *ManualFlushMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		encodeIDs(header.GetSegmentIds(), enc)
+		encodeIDs("flushedSegmentIDs", header.GetSegmentIds(), enc)
 	case *SchemaChangeMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		encodeIDs(header.GetFlushedSegmentIds(), enc)
+		encodeIDs("flushedSegmentIDs", header.GetFlushedSegmentIds(), enc)
 	case *AlterCollectionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		enc.AddString("udpateMasks", strings.Join(header.UpdateMask.GetPaths(), "|"))
-		encodeIDs(header.GetFlushedSegmentIds(), enc)
+		encodeIDs("flushedSegmentIDs", header.GetFlushedSegmentIds(), enc)
 	case *AlterLoadConfigMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		enc.AddInt64("replicaNumber", int64(len(header.GetReplicas())))
+		encodeIDs("partitionIDs", header.GetPartitionIds(), enc)
+		replicaIDs := make([]int64, 0, len(header.GetReplicas()))
+		for _, replica := range header.GetReplicas() {
+			replicaIDs = append(replicaIDs, replica.GetReplicaId())
+		}
+		encodeIDs("replicaIDs", replicaIDs, enc)
 	case *DropLoadConfigMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *CreateDatabaseMessageHeader:
@@ -182,10 +195,10 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 		enc.AddString("indexName", header.GetIndexName())
 	case *AlterIndexMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		encodeIDs(header.GetIndexIds(), enc)
+		encodeIDs("indexIDs", header.GetIndexIds(), enc)
 	case *DropIndexMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
-		encodeIDs(header.GetIndexIds(), enc)
+		encodeIDs("indexIDs", header.GetIndexIds(), enc)
 	case *ImportMessageHeader:
 	case *AlterResourceGroupMessageHeader:
 		encodeResourceGroupConfigs(header.GetResourceGroupConfigs(), enc)
@@ -198,12 +211,12 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 	}
 }
 
-func encodeIDs(targetIDs []int64, enc zapcore.ObjectEncoder) {
+func encodeIDs(name string, targetIDs []int64, enc zapcore.ObjectEncoder) {
 	ids := make([]string, 0, len(targetIDs))
 	for _, id := range targetIDs {
 		ids = append(ids, strconv.FormatInt(id, 10))
 	}
-	enc.AddString("segmentIDs", strings.Join(ids, "|"))
+	enc.AddString(name, strings.Join(ids, "|"))
 }
 
 func encodeResourceGroupConfigs(configs map[string]*rgpb.ResourceGroupConfig, enc zapcore.ObjectEncoder) {

@@ -249,6 +249,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 
 		if len(msgs) > 0 {
 			// Push the confirmed messages into pending queue for consuming.
+			if s.logger.Level().Enabled(zap.DebugLevel) {
+				for _, m := range msgs {
+					s.logger.Debug("push committed message into pending queue", zap.Uint64("committedTimeTick", msg.TimeTick()), log.FieldMessage(m))
+				}
+			}
 			s.pendingQueue.Add(msgs)
 		}
 		if msg.IsPersisted() || s.pendingQueue.Len() == 0 {

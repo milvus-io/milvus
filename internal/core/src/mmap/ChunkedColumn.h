@@ -219,6 +219,13 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                GetNumRowsUntilChunk(chunk_id);
     }
 
+    // TODO(tiered storage): make it async
+    void
+    PrefetchChunks(milvus::OpContext* op_ctx,
+                   const std::vector<int64_t>& chunk_ids) const override {
+        SemiInlineGet(slot_->PinCells(op_ctx, chunk_ids));
+    }
+
     PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
         ThrowInfo(ErrorCode::Unsupported,
@@ -430,6 +437,11 @@ class ChunkedColumn : public ChunkedColumnBase {
                 break;
             }
             case DataType::INT64: {
+                BulkPrimitiveValueAtImpl<int64_t, int64_t>(
+                    op_ctx, dst, offsets, count);
+                break;
+            }
+            case DataType::TIMESTAMPTZ: {
                 BulkPrimitiveValueAtImpl<int64_t, int64_t>(
                     op_ctx, dst, offsets, count);
                 break;

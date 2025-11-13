@@ -855,6 +855,9 @@ func (data *GeometryFieldData) AppendRow(row interface{}) error {
 	default:
 		return merr.WrapErrParameterInvalid("[]byte", row, "Wrong row type")
 	}
+	if data.GetNullable() {
+		data.ValidData = append(data.ValidData, true)
+	}
 	return nil
 }
 

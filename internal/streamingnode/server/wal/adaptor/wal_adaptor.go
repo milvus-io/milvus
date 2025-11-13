@@ -22,7 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -39,11 +39,13 @@ func adaptImplsToROWAL(
 		log.FieldComponent("wal"),
 		zap.String("channel", basicWAL.Channel().String()),
 	)
+	ctx, cancel := context.WithCancel(context.Background())
 	roWAL := &roWALAdaptorImpl{
-		roWALImpls:  basicWAL,
-		lifetime:    typeutil.NewLifetime(),
-		available:   lifetime.NewSafeChan(),
-		idAllocator: typeutil.NewIDAllocator(),
+		roWALImpls:      basicWAL,
+		lifetime:        typeutil.NewLifetime(),
+		availableCtx:    ctx,
+		availableCancel: cancel,
+		idAllocator:     typeutil.NewIDAllocator(),
 		scannerRegistry: scannerRegistry{
 			channel:     basicWAL.Channel(),
 			idAllocator: typeutil.NewIDAllocator(),
@@ -147,13 +149,19 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-w.available.CloseCh():
+	case <-w.availableCtx.Done():
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	case <-w.interceptorBuildResult.Interceptor.Ready():
 	}
 
 	// Setup the term of wal.
 	msg = msg.WithWALTerm(w.Channel().Term)
+
+	// we need to promise the state of wal kept consistent with the memory state of streamingnode.
+	// So we don't allow the append operation can be canceled by the append caller to avoid leave a inconsistent state of alive wal,
+	// the wal append operation can only be canceled when the wal is shutting down.
+	ctx, cancel := contextutil.MergeContext(context.WithoutCancel(ctx), w.availableCtx)
+	defer cancel()
 
 	appendMetrics := w.writeMetrics.StartAppend(msg)
 	ctx = utility.WithAppendMetricsContext(ctx, appendMetrics)
@@ -181,7 +189,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		if errors.Is(err, walimpls.ErrFenced) {
 			// if the append operation of wal is fenced, we should report the error to the client.
 			if w.isFenced.CompareAndSwap(false, true) {
-				w.available.Close()
+				w.forceCancelAfterGracefulTimeout()
 				w.Logger().Warn("wal is fenced, mark as unavailable, all append opertions will be rejected", zap.Error(err))
 			}
 			return nil, status.NewChannelFenced(w.Channel().String())
@@ -231,8 +239,8 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-w.available.CloseCh():
+			return nil, context.Cause(ctx)
+		case <-w.availableCtx.Done():
 			return nil, status.NewOnShutdownError("wal is on shutdown")
 		case <-time.After(nextInterval):
 		}
@@ -265,7 +273,7 @@ func (w *walAdaptorImpl) Close() {
 
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	w.available.Close()
+	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 
 	// close the flusher.

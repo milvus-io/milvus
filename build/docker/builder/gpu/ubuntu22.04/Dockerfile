@@ -8,12 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12  lcov libtool m4 autoconf automake python3 python3-pip \
     pkg-config uuid-dev libaio-dev libgoogle-perftools-dev libopenblas-dev && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
+        ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+        echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.6.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.9.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 RUN pip3 install conan==1.64.1
 # Install rust

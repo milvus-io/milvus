@@ -19,27 +19,18 @@ package cdc
 import (
 	"context"
 	"sync"
-	"time"
 
-	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/cdc"
-	"github.com/milvus-io/milvus/internal/cdc/controller/controllerimpl"
 	"github.com/milvus-io/milvus/internal/cdc/replication/replicatemanager"
 	"github.com/milvus-io/milvus/internal/cdc/resource"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -48,11 +39,8 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	metaKV    kv.MetaKv
 	cdcServer *cdc.CDCServer
-
-	etcdCli *clientv3.Client
-	tikvCli *txnkv.Client
+	etcdCli   *clientv3.Client
 
 	componentState *componentutil.ComponentStateService
 	stopOnce       sync.Once
@@ -103,19 +91,8 @@ func (s *Server) stop() {
 	// Stop CDC service.
 	s.cdcServer.Stop()
 
-	// Stop etcd
-	if s.etcdCli != nil {
-		if err := s.etcdCli.Close(); err != nil {
-			log.Warn("cdc stop etcd client failed", zap.Error(err))
-		}
-	}
-
-	// Stop tikv
-	if s.tikvCli != nil {
-		if err := s.tikvCli.Close(); err != nil {
-			log.Warn("cdc stop tikv client failed", zap.Error(err))
-		}
-	}
+	// Don't close s.etcdCli here because it's a shared instance from kvfactory.
+	// The kvfactory.CloseEtcdClient() will be called in roles.go to close it properly.
 
 	log.Info("cdc stop done")
 }
@@ -139,16 +116,11 @@ func (s *Server) init() (err error) {
 	// Create etcd client.
 	s.etcdCli, _ = kvfactory.GetEtcdAndPath()
 
-	if err := s.initMeta(); err != nil {
-		return err
-	}
-
 	// Create CDC service.
 	s.cdcServer = cdc.NewCDCServer(s.ctx)
 	resource.Init(
-		resource.OptMetaKV(s.metaKV),
+		resource.OptETCD(s.etcdCli),
 		resource.OptReplicateManagerClient(replicatemanager.NewReplicateManager()),
-		resource.OptController(controllerimpl.NewController()),
 	)
 	return nil
 }
@@ -166,29 +138,5 @@ func (s *Server) start() (err error) {
 	s.cdcServer.Start()
 
 	s.componentState.OnInitialized(0)
-	return nil
-}
-
-func (s *Server) initMeta() error {
-	params := paramtable.Get()
-	metaType := params.MetaStoreCfg.MetaStoreType.GetValue()
-	log := log.Ctx(s.ctx)
-	log.Info("cdc connecting to metadata store", zap.String("metaType", metaType))
-	metaRootPath := ""
-	if metaType == util.MetaStoreTypeTiKV {
-		var err error
-		s.tikvCli, err = tikv.GetTiKVClient(&paramtable.Get().TiKVCfg)
-		if err != nil {
-			log.Warn("cdc init tikv client failed", zap.Error(err))
-			return err
-		}
-		metaRootPath = params.TiKVCfg.MetaRootPath.GetValue()
-		s.metaKV = tikvkv.NewTiKV(s.tikvCli, metaRootPath,
-			tikvkv.WithRequestTimeout(paramtable.Get().ServiceParam.TiKVCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-	} else if metaType == util.MetaStoreTypeEtcd {
-		metaRootPath = params.EtcdCfg.MetaRootPath.GetValue()
-		s.metaKV = etcdkv.NewEtcdKV(s.etcdCli, metaRootPath,
-			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-	}
 	return nil
 }

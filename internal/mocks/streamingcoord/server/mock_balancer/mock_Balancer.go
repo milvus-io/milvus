@@ -33,6 +33,65 @@ func (_m *MockBalancer) EXPECT() *MockBalancer_Expecter {
 	return &MockBalancer_Expecter{mock: &_m.Mock}
 }
 
+// AllocVirtualChannels provides a mock function with given fields: ctx, param
+func (_m *MockBalancer) AllocVirtualChannels(ctx context.Context, param balancer.AllocVChannelParam) ([]string, error) {
+	ret := _m.Called(ctx, param)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllocVirtualChannels")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, balancer.AllocVChannelParam) ([]string, error)); ok {
+		return rf(ctx, param)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, balancer.AllocVChannelParam) []string); ok {
+		r0 = rf(ctx, param)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, balancer.AllocVChannelParam) error); ok {
+		r1 = rf(ctx, param)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBalancer_AllocVirtualChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocVirtualChannels'
+type MockBalancer_AllocVirtualChannels_Call struct {
+	*mock.Call
+}
+
+// AllocVirtualChannels is a helper method to define mock.On call
+//   - ctx context.Context
+//   - param balancer.AllocVChannelParam
+func (_e *MockBalancer_Expecter) AllocVirtualChannels(ctx interface{}, param interface{}) *MockBalancer_AllocVirtualChannels_Call {
+	return &MockBalancer_AllocVirtualChannels_Call{Call: _e.mock.On("AllocVirtualChannels", ctx, param)}
+}
+
+func (_c *MockBalancer_AllocVirtualChannels_Call) Run(run func(ctx context.Context, param balancer.AllocVChannelParam)) *MockBalancer_AllocVirtualChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(balancer.AllocVChannelParam))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_AllocVirtualChannels_Call) Return(_a0 []string, _a1 error) *MockBalancer_AllocVirtualChannels_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBalancer_AllocVirtualChannels_Call) RunAndReturn(run func(context.Context, balancer.AllocVChannelParam) ([]string, error)) *MockBalancer_AllocVirtualChannels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockBalancer) Close() {
 	_m.Called()
@@ -467,24 +526,17 @@ func (_c *MockBalancer_UpdateBalancePolicy_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
-// UpdateReplicateConfiguration provides a mock function with given fields: ctx, msgs
-func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error {
-	_va := make([]interface{}, len(msgs))
-	for _i := range msgs {
-		_va[_i] = msgs[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
+// UpdateReplicateConfiguration provides a mock function with given fields: ctx, result
+func (_m *MockBalancer) UpdateReplicateConfiguration(ctx context.Context, result message.BroadcastResultAlterReplicateConfigMessageV2) error {
+	ret := _m.Called(ctx, result)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateReplicateConfiguration")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, ...message.ImmutableAlterReplicateConfigMessageV2) error); ok {
-		r0 = rf(ctx, msgs...)
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResultAlterReplicateConfigMessageV2) error); ok {
+		r0 = rf(ctx, result)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -499,21 +551,14 @@ type MockBalancer_UpdateReplicateConfiguration_Call struct {
 
 // UpdateReplicateConfiguration is a helper method to define mock.On call
 //   - ctx context.Context
-//   - msgs ...message.ImmutableAlterReplicateConfigMessageV2
-func (_e *MockBalancer_Expecter) UpdateReplicateConfiguration(ctx interface{}, msgs ...interface{}) *MockBalancer_UpdateReplicateConfiguration_Call {
-	return &MockBalancer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration",
-		append([]interface{}{ctx}, msgs...)...)}
+//   - result message.BroadcastResultAlterReplicateConfigMessageV2
+func (_e *MockBalancer_Expecter) UpdateReplicateConfiguration(ctx interface{}, result interface{}) *MockBalancer_UpdateReplicateConfiguration_Call {
+	return &MockBalancer_UpdateReplicateConfiguration_Call{Call: _e.mock.On("UpdateReplicateConfiguration", ctx, result)}
 }
 
-func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2)) *MockBalancer_UpdateReplicateConfiguration_Call {
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Run(run func(ctx context.Context, result message.BroadcastResultAlterReplicateConfigMessageV2)) *MockBalancer_UpdateReplicateConfiguration_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]message.ImmutableAlterReplicateConfigMessageV2, len(args)-1)
-		for i, a := range args[1:] {
-			if a != nil {
-				variadicArgs[i] = a.(message.ImmutableAlterReplicateConfigMessageV2)
-			}
-		}
-		run(args[0].(context.Context), variadicArgs...)
+		run(args[0].(context.Context), args[1].(message.BroadcastResultAlterReplicateConfigMessageV2))
 	})
 	return _c
 }
@@ -523,7 +568,53 @@ func (_c *MockBalancer_UpdateReplicateConfiguration_Call) Return(_a0 error) *Moc
 	return _c
 }
 
-func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, ...message.ImmutableAlterReplicateConfigMessageV2) error) *MockBalancer_UpdateReplicateConfiguration_Call {
+func (_c *MockBalancer_UpdateReplicateConfiguration_Call) RunAndReturn(run func(context.Context, message.BroadcastResultAlterReplicateConfigMessageV2) error) *MockBalancer_UpdateReplicateConfiguration_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WaitUntilWALbasedDDLReady provides a mock function with given fields: ctx
+func (_m *MockBalancer) WaitUntilWALbasedDDLReady(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for WaitUntilWALbasedDDLReady")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_WaitUntilWALbasedDDLReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WaitUntilWALbasedDDLReady'
+type MockBalancer_WaitUntilWALbasedDDLReady_Call struct {
+	*mock.Call
+}
+
+// WaitUntilWALbasedDDLReady is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockBalancer_Expecter) WaitUntilWALbasedDDLReady(ctx interface{}) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
+	return &MockBalancer_WaitUntilWALbasedDDLReady_Call{Call: _e.mock.On("WaitUntilWALbasedDDLReady", ctx)}
+}
+
+func (_c *MockBalancer_WaitUntilWALbasedDDLReady_Call) Run(run func(ctx context.Context)) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_WaitUntilWALbasedDDLReady_Call) Return(_a0 error) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_WaitUntilWALbasedDDLReady_Call) RunAndReturn(run func(context.Context) error) *MockBalancer_WaitUntilWALbasedDDLReady_Call {
 	_c.Call.Return(run)
 	return _c
 }

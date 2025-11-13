@@ -9,8 +9,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
-// newPChannelMeta creates a new PChannelMeta.
-func newPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
+// NewPChannelMeta creates a new PChannelMeta.
+func NewPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
 	return &PChannelMeta{
 		inner: &streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{

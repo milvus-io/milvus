@@ -1601,6 +1601,13 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		return fieldSchema.GetDefaultValue().GetStringData()
 	case schemapb.DataType_Timestamptz:
 		return fieldSchema.GetDefaultValue().GetTimestamptzData()
+	case schemapb.DataType_JSON:
+		return fieldSchema.GetDefaultValue().GetBytesData()
+	case schemapb.DataType_Geometry:
+		// ignore err because the default value has been checked when create collection.
+		wkbValue, _ := common.ConvertWKTToWKB(fieldSchema.GetDefaultValue().GetStringData())
+		return wkbValue
+
 	default:
 		// won't happen
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
@@ -1612,7 +1619,6 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 	batchRows := int64(insertData.GetRowNum())
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
-
 	for _, field := range allFields {
 		// Skip function output fields and system fields
 		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {

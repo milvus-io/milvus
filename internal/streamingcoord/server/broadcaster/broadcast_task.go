@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 // newBroadcastTaskFromProto creates a new broadcast task from the proto.
@@ -26,10 +27,14 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		dirty:                true, // the task is recovered from the recovery info, so it's persisted.
 		metrics:              m,
 		ackCallbackScheduler: ackCallbackScheduler,
+		done:                 make(chan struct{}),
 		allAcked:             make(chan struct{}),
 	}
-	if proto.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+	if isAllDone(bt.task) {
 		close(bt.allAcked)
+	}
+	if proto.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+		close(bt.done)
 	}
 	return bt
 }
@@ -51,10 +56,8 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 		dirty:                false,
 		metrics:              m,
 		ackCallbackScheduler: ackCallbackScheduler,
+		done:                 make(chan struct{}),
 		allAcked:             make(chan struct{}),
-	}
-	if bt.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-		close(bt.allAcked)
 	}
 	return bt
 }
@@ -72,14 +75,16 @@ func newBroadcastTaskFromImmutableMessage(msg message.ImmutableMessage, metrics 
 // broadcastTask is the state of the broadcast task.
 type broadcastTask struct {
 	log.Binder
-	mu                   sync.Mutex
-	msg                  message.BroadcastMutableMessage
-	task                 *streamingpb.BroadcastTask
-	dirty                bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
-	metrics              *taskMetricsGuard
-	allAcked             chan struct{}
-	guards               *lockGuards
-	ackCallbackScheduler *ackCallbackScheduler
+	mu                       sync.Mutex
+	msg                      message.BroadcastMutableMessage
+	task                     *streamingpb.BroadcastTask
+	dirty                    bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
+	metrics                  *taskMetricsGuard
+	done                     chan struct{}
+	allAcked                 chan struct{}
+	guards                   *lockGuards
+	ackCallbackScheduler     *ackCallbackScheduler
+	joinAckCallbackScheduled bool // a flag to indicate that the join ack callback is scheduled.
 }
 
 // SetLogger sets the logger of the broadcast task.
@@ -131,6 +136,16 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 func (b *broadcastTask) Header() *message.BroadcastHeader {
 	// header is a immutable field, no need to lock.
 	return b.msg.BroadcastHeader()
+}
+
+// ControlChannelTimeTick returns the time tick of the control channel.
+func (b *broadcastTask) ControlChannelTimeTick() uint64 {
+	for idx, vc := range b.Header().VChannels {
+		if funcutil.IsControlChannel(vc) {
+			return b.task.AckedCheckpoints[idx].TimeTick
+		}
+	}
+	return 0
 }
 
 // State returns the State of the broadcast task.
@@ -214,26 +229,48 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs ...message.ImmutableMessag
 
 // ack acknowledges the message at the specified vchannel.
 func (b *broadcastTask) ack(ctx context.Context, msgs ...message.ImmutableMessage) (err error) {
-	b.copyAndSetAckedCheckpoints(msgs...)
+	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
 	if !b.dirty {
 		return nil
 	}
 	if err := b.saveTaskIfDirty(ctx, b.Logger()); err != nil {
 		return err
 	}
-	if isAllDone(b.task) {
+
+	allDone := isAllDone(b.task)
+	if (isControlChannelAcked || allDone) && !b.joinAckCallbackScheduled {
+		// after 2.6.5, the control channel is always broadcasted, it's used to determine the order of the ack callback operations.
+		// so if the control channel is acked, it should be added to the ack callback scheduler.
+		//
+		// allDone is for the compatibility only for the operation before 2.6.5, the control channel is not broadcasted,
 		b.ackCallbackScheduler.AddTask(b)
+		b.joinAckCallbackScheduled = true
+	}
+	if allDone {
+		close(b.allAcked)
 		b.metrics.ObserveAckAll()
 	}
 	return nil
 }
 
-// BlockUntilAllAck blocks until all the vchannels are acked.
-func (b *broadcastTask) BlockUntilAllAck(ctx context.Context) (*types.BroadcastAppendResult, error) {
+// hasControlChannel checks if the control channel is broadcasted.
+// for the operation since 2.6.5, the control channel is always broadcasted.
+// so it's just a dummy function for compatibility.
+func (b *broadcastTask) isControlChannelAcked() bool {
+	for idx, vc := range b.Header().VChannels {
+		if funcutil.IsControlChannel(vc) && b.task.AckedCheckpoints[idx] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// BlockUntilDone blocks until the broadcast task is done.
+func (b *broadcastTask) BlockUntilDone(ctx context.Context) (*types.BroadcastAppendResult, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-b.allAcked:
+	case <-b.done:
 		_, result := b.BroadcastResult()
 		return &types.BroadcastAppendResult{
 			BroadcastID:   b.Header().BroadcastID,
@@ -242,8 +279,18 @@ func (b *broadcastTask) BlockUntilAllAck(ctx context.Context) (*types.BroadcastA
 	}
 }
 
+// BlockUntilAllAck blocks until all the vchannels are acked.
+func (b *broadcastTask) BlockUntilAllAck(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.allAcked:
+		return nil
+	}
+}
+
 // copyAndSetAckedCheckpoints copies the task and set the acked checkpoints.
-func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMessage) {
+func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMessage) (isControlChannelAcked bool) {
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
 	for _, msg := range msgs {
 		vchannel := msg.VChannel()
@@ -269,9 +316,13 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 			LastConfirmedMessageId: msg.LastConfirmedMessageID().IntoProto(),
 			TimeTick:               msg.TimeTick(),
 		}
+		if funcutil.IsControlChannel(vchannel) {
+			isControlChannelAcked = true
+		}
 	}
 	// update current task state.
 	b.task = task
+	return
 }
 
 // findIdxOfVChannel finds the index of the vchannel in the broadcast task.
@@ -339,7 +390,7 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	defer b.mu.Unlock()
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
-		close(b.allAcked)
+		close(b.done)
 		b.dirty = true
 	}
 
@@ -365,7 +416,7 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *log.MLogger
 	logger = logger.With(zap.String("state", b.task.State.String()), zap.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.Header().BroadcastID, b.task); err != nil {
 		logger.Warn("save broadcast task failed", zap.Error(err))
-		if ctx.Err() != nil {
+		if ctx.Err() == nil {
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
 		return err

@@ -83,6 +83,7 @@ message SegmentIndex {
     uint64 finished_time = 18;
     uint64 mem_size = 19; // the total size of index file at local (disk or memory) before loading by knowhere. (not compress)
     int32 current_scalar_index_version = 20;
+    string index_type = 21;
 }
 
 message RegisterNodeRequest {
@@ -225,6 +226,7 @@ message StorageConfig {
     int64 request_timeout_ms = 13;
     string sslCACert = 14;
     string GcpCredentialJSON = 15;
+    uint32 max_connections = 16;
 }
 
 // Synchronously modify OptionalFieldInfo in index_cgo_msg.proto file

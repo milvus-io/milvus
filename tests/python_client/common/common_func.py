@@ -1327,6 +1327,8 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
 def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json_embedded_object"):
     """
     Method: gen json data for different json types. Refer to RFC7159
+    Note: String values should be passed as json.dumps(str) to ensure they are treated as strings,
+          not as serialized JSON results.
     """
     if json_type == "json_embedded_object":                 # a json object with an embedd json object
         return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i), "level2_array": [i for i in range(i, i + 10)]},
@@ -1343,7 +1345,7 @@ def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json
     if json_type == "json_float":                           # single float as json value
         return [i*1.0 for i in range(start, start + nb)]
     if json_type == "json_string":                          # single string as json value
-        return [str(i) for i in range(start, start + nb)]
+        return [json.dumps(str(i)) for i in range(start, start + nb)]
     if json_type == "json_bool":                            # single bool as json value
         return [bool(i) for i in range(start, start + nb)]
     else:

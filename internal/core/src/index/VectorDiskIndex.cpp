@@ -38,11 +38,12 @@ namespace milvus::index {
 
 template <typename T>
 VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
+    DataType elem_type,
     const IndexType& index_type,
     const MetricType& metric_type,
     const IndexVersion& version,
     const storage::FileManagerContext& file_manager_context)
-    : VectorIndex(index_type, metric_type) {
+    : VectorIndex(index_type, metric_type), elem_type_(elem_type) {
     CheckMetricTypeSupport<T>(metric_type);
     file_manager_ =
         std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
@@ -145,8 +146,34 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     build_config.update(config);
 
     auto segment_id = file_manager_->GetFieldDataMeta().segment_id;
-    auto local_data_path = file_manager_->CacheRawDataToDisk<T>(config);
+    auto field_id = file_manager_->GetFieldDataMeta().field_id;
+
+    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    Config config_with_emb_list = config;
+    config_with_emb_list[EMB_LIST] = is_embedding_list;
+
+    std::string offsets_path;
+    // Set offsets path in config for VECTOR_ARRAY
+    if (is_embedding_list) {
+        offsets_path = storage::GenFieldRawDataPathPrefix(
+                           local_chunk_manager, segment_id, field_id) +
+                       "offset";
+        config_with_emb_list[EMB_LIST_OFFSETS_PATH] = offsets_path;
+    }
+
+    auto local_data_path =
+        file_manager_->CacheRawDataToDisk<T>(config_with_emb_list);
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
+
+    // For VECTOR_ARRAY, verify offsets file exists and pass its path to build_config
+    if (is_embedding_list) {
+        if (!local_chunk_manager->Exist(offsets_path)) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      fmt::format("Embedding list offsets file not found: {}",
+                                  offsets_path));
+        }
+        build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
+    }
 
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
@@ -228,6 +255,44 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     size_t data_size = static_cast<size_t>(num) * milvus::GetVecRowSize<T>(dim);
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
+
+    // For VECTOR_ARRAY, write offsets to a separate file and pass the path to knowhere
+    if (elem_type_ != DataType::NONE) {
+        auto offsets =
+            dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
+        if (offsets == nullptr) {
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "Embedding list offsets is empty when build index");
+        }
+
+        // Write offsets to disk file (use same path convention as Build method)
+        std::string offsets_path =
+            storage::GenFieldRawDataPathPrefix(
+                local_chunk_manager, segment_id, field_id) +
+            "offset";
+        local_chunk_manager->CreateFile(offsets_path);
+
+        // Calculate the number of offsets (num_rows + 1)
+        // We need to find the actual number by looking at the data
+        uint32_t num_rows =
+            static_cast<uint32_t>(milvus::GetDatasetRows(dataset));
+        uint32_t num_offsets = num_rows + 1;
+
+        // Write offsets to file
+        // Format: [num_offsets][offsets_data]
+        int64_t write_pos = 0;
+        local_chunk_manager->Write(
+            offsets_path, write_pos, &num_offsets, sizeof(uint32_t));
+        write_pos += sizeof(uint32_t);
+
+        local_chunk_manager->Write(
+            offsets_path,
+            write_pos,
+            const_cast<void*>(static_cast<const void*>(offsets)),
+            num_offsets * sizeof(size_t));
+
+        build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
+    }
 
     auto stat = index_.Build({}, build_config);
     if (stat != knowhere::Status::success)

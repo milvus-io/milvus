@@ -189,11 +189,12 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 		case schemapb.DataType_ArrayOfStruct:
 			panic("unreachable, array of struct should have been flattened")
 		case schemapb.DataType_Timestamptz:
-			// TODO: Add check logic for timestamptz data
+			if err := v.checkTimestamptzFieldData(field, helper.GetTimezone()); err != nil {
+				return err
+			}
 		default:
 		}
 	}
-
 	err := v.fillWithValue(data, helper, int(numRows))
 	if err != nil {
 		return err
@@ -465,13 +466,11 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 			if err != nil {
 				return err
 			}
-
 		case *schemapb.ScalarField_StringData:
 			sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
 			if err != nil {
 				return err
 			}
-
 		case *schemapb.ScalarField_ArrayData:
 			sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
 			if err != nil {
@@ -564,11 +563,32 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 			}
 
 		case *schemapb.ScalarField_TimestamptzData:
+			// Basic validation: Check if the length of the validity mask matches the number of rows.
 			if len(field.GetValidData()) != numRows {
 				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
 				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
 			}
+
+			// Retrieve the default value, which is usually stored as int64 (UTC microseconds).
 			defaultValue := fieldSchema.GetDefaultValue().GetTimestamptzData()
+
+			// If the int64 default value is 0 (which might happen if it was not fully persisted
+			// or if the underlying storage is being checked), attempt to fall back to the string value.
+			if defaultValue == 0 {
+				strDefaultValue := fieldSchema.GetDefaultValue().GetStringData()
+
+				// If a non-empty string default value exists, perform conversion.
+				if len(strDefaultValue) != 0 {
+					// NOTE: The strDefaultValue is guaranteed to be a valid ISO 8601 timestamp string,
+					// as it was validated during collection schema creation (by checkAndRewriteTimestampTzDefaultValue).
+					//
+					// Since the string either contains a UTC offset (e.g., '+08:00') or should be treated
+					// as UTC/the collection's primary timezone, the 'common.DefaultTimezone' passed here
+					// as the fallback timezone is generally inconsequential (negligible)
+					// for the final conversion result in this specific context.
+					defaultValue, _ = funcutil.ValidateAndReturnUnixMicroTz(strDefaultValue, common.DefaultTimezone)
+				}
+			}
 			sd.TimestamptzData.Data, err = fillWithDefaultValueImpl(sd.TimestamptzData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return nil
@@ -607,12 +627,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
 			}
 			defaultValue := fieldSchema.GetDefaultValue().GetStringData()
-			geomT, err := wkt.Unmarshal(defaultValue)
-			if err != nil {
-				log.Warn("invalid default value for geometry field", zap.Error(err))
-				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
-			}
-			defaultValueWkbBytes, err := wkb.Marshal(geomT, wkb.NDR)
+			defaultValueWkbBytes, err := common.ConvertWKTToWKB(defaultValue)
 			if err != nil {
 				log.Warn("invalid default value for geometry field", zap.Error(err))
 				return merr.WrapErrParameterInvalidMsg("invalid default value for geometry field")
@@ -940,16 +955,6 @@ func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSche
 	return nil
 }
 
-func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	data := field.GetScalars().GetTimestamptzData().GetData()
-	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
-		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need long int array", "got nil", msg)
-	}
-	// TODO: Additional checks?
-	return nil
-}
-
 func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *schemapb.FieldSchema) error {
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
@@ -1139,6 +1144,43 @@ func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fi
 		msg := fmt.Sprintf("unsupported element type for ArrayOfVector: %v", fieldSchema.GetElementType())
 		return merr.WrapErrParameterInvalid("supported vector type", fieldSchema.GetElementType().String(), msg)
 	}
+}
+
+// checkTimestamptzFieldData validates the input string data for a Timestamptz field,
+// converts it into UTC Unix Microseconds (int64), and replaces the data in place.
+func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, timezone string) error {
+	// 1. Structural Check: Data must be present and must be a string array
+	scalarField := field.GetScalars()
+	if scalarField == nil || scalarField.GetStringData() == nil {
+		log.Warn("timestamptz field data is not string array", zap.String("fieldName", field.GetFieldName()))
+		return merr.WrapErrParameterInvalidMsg("timestamptz field data must be a string array")
+	}
+
+	stringData := scalarField.GetStringData().GetData()
+	utcTimestamps := make([]int64, len(stringData))
+
+	// 2. Validation and Conversion Loop
+	for i, isoStr := range stringData {
+		// Use the centralized parser (funcutil.ParseTimeTz) for validation and parsing.
+		t, err := funcutil.ParseTimeTz(isoStr, timezone)
+		if err != nil {
+			log.Warn("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.Error(err))
+			// Use the recommended refined error message structure
+			const invalidMsg = "invalid timezone name; must be a valid IANA Time Zone ID (e.g., 'Asia/Shanghai' or 'UTC')"
+			return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string '%s': %s", isoStr, invalidMsg)
+		}
+
+		// Convert the time object to Unix Microseconds (int64)
+		utcTimestamps[i] = t.UnixMicro()
+	}
+
+	// 3. In-Place Data Replacement: Replace StringData with converted TimestamptzData (int64)
+	field.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{
+		TimestamptzData: &schemapb.TimestamptzArray{
+			Data: utcTimestamps,
+		},
+	}
+	return nil
 }
 
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) (int, bool) {

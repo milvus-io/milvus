@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -27,7 +28,7 @@ func TestValidAuth(t *testing.T) {
 		if username == "" || password == "" {
 			return false
 		}
-		return passwordVerify(ctx, username, password, globalMetaCache)
+		return passwordVerify(ctx, username, password, privilege.GetPrivilegeCache())
 	}
 
 	ctx := context.Background()
@@ -39,27 +40,13 @@ func TestValidAuth(t *testing.T) {
 	assert.False(t, res)
 	// normal metadata
 	mix := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err := InitMetaCache(ctx, mix, mgr)
+	err := InitMetaCache(ctx, mix)
 	assert.NoError(t, err)
 	res = validAuth(ctx, []string{crypto.Base64Encode("mockUser:mockPass")})
 	assert.True(t, res)
 
 	res = validAuth(ctx, []string{crypto.Base64Encode("mock")})
 	assert.False(t, res)
-}
-
-func TestValidSourceID(t *testing.T) {
-	ctx := context.Background()
-	// no metadata
-	res := validSourceID(ctx, nil)
-	assert.False(t, res)
-	// illegal metadata
-	res = validSourceID(ctx, []string{"invalid_sourceid"})
-	assert.False(t, res)
-	// normal sourceId
-	res = validSourceID(ctx, []string{crypto.Base64Encode(util.MemberCredID)})
-	assert.True(t, res)
 }
 
 func TestAuthenticationInterceptor(t *testing.T) {
@@ -71,8 +58,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	// mock metacache
 	queryCoord := &MockMixCoordClientInterface{}
-	mgr := newShardClientMgr()
-	err = InitMetaCache(ctx, queryCoord, mgr)
+	err = InitMetaCache(ctx, queryCoord)
 	assert.NoError(t, err)
 	// with invalid metadata
 	md := metadata.Pairs("xxx", "yyy")
@@ -81,11 +67,6 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	// with valid username/password
 	md = metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("mockUser:mockPass"))
-	ctx = metadata.NewIncomingContext(ctx, md)
-	_, err = AuthenticationInterceptor(ctx)
-	assert.NoError(t, err)
-	// with valid sourceId
-	md = metadata.Pairs("sourceid", crypto.Base64Encode(util.MemberCredID))
 	ctx = metadata.NewIncomingContext(ctx, md)
 	_, err = AuthenticationInterceptor(ctx)
 	assert.NoError(t, err)

@@ -83,73 +83,22 @@ func NewKeyLock[K comparable]() *KeyLock[K] {
 	return &keyLock
 }
 
+// Lock acquires a write lock for a given key.
 func (k *KeyLock[K]) Lock(key K) {
-	k.keyLocksMutex.Lock()
-	// update the key map
-	if keyLock, ok := k.refLocks[key]; ok {
-		keyLock.ref()
-
-		k.keyLocksMutex.Unlock()
-		keyLock.mutex.Lock()
-	} else {
-		obj, err := refLockPoolPool.BorrowObject(ctx)
-		if err != nil {
-			log.Ctx(ctx).Error("BorrowObject failed", zap.Error(err))
-			k.keyLocksMutex.Unlock()
-			return
-		}
-		newKLock := obj.(*RefLock)
-		// newKLock := newRefLock()
-		newKLock.mutex.Lock()
-		k.refLocks[key] = newKLock
-		newKLock.ref()
-
-		k.keyLocksMutex.Unlock()
-		return
-	}
-}
-
-func (k *KeyLock[K]) TryLock(key K) bool {
-	k.keyLocksMutex.Lock()
-	// update the key map
-	if keyLock, ok := k.refLocks[key]; ok {
-		keyLock.ref()
-
-		k.keyLocksMutex.Unlock()
-		locked := keyLock.mutex.TryLock()
-		if !locked {
-			k.keyLocksMutex.Lock()
-			keyLock.unref()
-			if keyLock.refCounter == 0 {
-				_ = refLockPoolPool.ReturnObject(ctx, keyLock)
-				delete(k.refLocks, key)
-			}
-			k.keyLocksMutex.Unlock()
-		}
-		return locked
-	} else {
-		obj, err := refLockPoolPool.BorrowObject(ctx)
-		if err != nil {
-			log.Ctx(ctx).Error("BorrowObject failed", zap.Error(err))
-			k.keyLocksMutex.Unlock()
-			return false
-		}
-		newKLock := obj.(*RefLock)
-		// newKLock := newRefLock()
-		locked := newKLock.mutex.TryLock()
-		if !locked {
-			_ = refLockPoolPool.ReturnObject(ctx, newKLock)
-			k.keyLocksMutex.Unlock()
-			return false
-		}
-		k.refLocks[key] = newKLock
-		newKLock.ref()
-
-		k.keyLocksMutex.Unlock()
+	_ = k.tryLockInternal(key, func(mutex *sync.RWMutex) bool {
+		mutex.Lock()
 		return true
-	}
+	})
 }
 
+// TryLock attempts to acquire a write lock for a given key without blocking.
+func (k *KeyLock[K]) TryLock(key K) bool {
+	return k.tryLockInternal(key, func(mutex *sync.RWMutex) bool {
+		return mutex.TryLock()
+	})
+}
+
+// Unlock releases a lock for a given key.
 func (k *KeyLock[K]) Unlock(lockedKey K) {
 	k.keyLocksMutex.Lock()
 	defer k.keyLocksMutex.Unlock()
@@ -166,40 +115,30 @@ func (k *KeyLock[K]) Unlock(lockedKey K) {
 	keyLock.mutex.Unlock()
 }
 
+// RLock acquires a read lock for a given key.
 func (k *KeyLock[K]) RLock(key K) {
-	k.keyLocksMutex.Lock()
-	// update the key map
-	if keyLock, ok := k.refLocks[key]; ok {
-		keyLock.ref()
-
-		k.keyLocksMutex.Unlock()
-		keyLock.mutex.RLock()
-	} else {
-		obj, err := refLockPoolPool.BorrowObject(ctx)
-		if err != nil {
-			log.Ctx(ctx).Error("BorrowObject failed", zap.Error(err))
-			k.keyLocksMutex.Unlock()
-			return
-		}
-		newKLock := obj.(*RefLock)
-		// newKLock := newRefLock()
-		newKLock.mutex.RLock()
-		k.refLocks[key] = newKLock
-		newKLock.ref()
-
-		k.keyLocksMutex.Unlock()
-		return
-	}
+	_ = k.tryLockInternal(key, func(mutex *sync.RWMutex) bool {
+		mutex.RLock()
+		return true
+	})
 }
 
+// TryRLock attempts to acquire a read lock for a given key without blocking.
 func (k *KeyLock[K]) TryRLock(key K) bool {
+	return k.tryLockInternal(key, func(mutex *sync.RWMutex) bool {
+		return mutex.TryRLock()
+	})
+}
+
+// tryLockInternal is the internal function to try lock the key.
+func (k *KeyLock[K]) tryLockInternal(key K, tryLocker func(mutex *sync.RWMutex) bool) bool {
 	k.keyLocksMutex.Lock()
 	// update the key map
 	if keyLock, ok := k.refLocks[key]; ok {
 		keyLock.ref()
 
 		k.keyLocksMutex.Unlock()
-		locked := keyLock.mutex.TryRLock()
+		locked := tryLocker(&keyLock.mutex)
 		if !locked {
 			k.keyLocksMutex.Lock()
 			keyLock.unref()
@@ -218,8 +157,7 @@ func (k *KeyLock[K]) TryRLock(key K) bool {
 			return false
 		}
 		newKLock := obj.(*RefLock)
-		// newKLock := newRefLock()
-		locked := newKLock.mutex.TryRLock()
+		locked := tryLocker(&newKLock.mutex)
 		if !locked {
 			_ = refLockPoolPool.ReturnObject(ctx, newKLock)
 			k.keyLocksMutex.Unlock()

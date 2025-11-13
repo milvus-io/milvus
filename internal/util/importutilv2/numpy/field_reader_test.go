@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -110,7 +111,7 @@ func TestInvalidUTF8(t *testing.T) {
 	}
 
 	reader := WriteNonUTF8Npy()
-	fr, err := NewFieldReader(reader, fieldSchema)
+	fr, err := NewFieldReader(reader, fieldSchema, common.DefaultTimezone)
 	assert.NoError(t, err)
 
 	_, _, err = fr.Next(int64(6))
@@ -170,7 +171,7 @@ func TestNormalRead(t *testing.T) {
 		}
 
 		reader := WriteNormalNpy()
-		fr, err := NewFieldReader(reader, fieldSchema)
+		fr, err := NewFieldReader(reader, fieldSchema, common.DefaultTimezone)
 		assert.NoError(t, err)
 
 		data, validData, err := fr.Next(int64(6))
@@ -215,13 +216,14 @@ func TestNumpyFieldReaderError(t *testing.T) {
 		Name:       "str",
 		DataType:   schemapb.DataType_VarChar,
 		TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "256"}},
-	})
+	}, common.DefaultTimezone)
 	assert.Error(t, err)
 
 	// read values error
 	tests := []struct {
 		name        string
 		fieldSchema *schemapb.FieldSchema
+		timezone    string
 	}{
 		{
 			name: "read bool error",
@@ -296,6 +298,23 @@ func TestNumpyFieldReaderError(t *testing.T) {
 				DataType: schemapb.DataType_JSON,
 			},
 		},
+		{
+			name: "read geometry error",
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:  100,
+				Name:     "geometry",
+				DataType: schemapb.DataType_Geometry,
+			},
+		},
+		{
+			name: "read geometry error",
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:  100,
+				Name:     "geometry",
+				DataType: schemapb.DataType_Geometry,
+			},
+			timezone: "Asia/Shanghai",
+		},
 	}
 
 	for _, tt := range tests {
@@ -308,7 +327,11 @@ func TestNumpyFieldReaderError(t *testing.T) {
 			fieldData := insertData.Data[tt.fieldSchema.FieldID]
 			reader, err := createReader(fieldData, tt.fieldSchema.DataType)
 			assert.NoError(t, err)
-			fieldReader, err := NewFieldReader(reader, tt.fieldSchema)
+			tz := common.DefaultTimezone
+			if len(tt.timezone) > 0 {
+				tz = tt.timezone
+			}
+			fieldReader, err := NewFieldReader(reader, tt.fieldSchema, tz)
 			assert.NoError(t, err)
 
 			fieldReader.reader = errReader
@@ -449,7 +472,7 @@ func TestNumpyValidateHeaderError(t *testing.T) {
 
 			schema.Fields[0].DataType = tt.fieldType
 			schema.Fields[0].TypeParams[1].Value = "32"
-			fieldReader, err := NewFieldReader(reader, schema.Fields[0])
+			fieldReader, err := NewFieldReader(reader, schema.Fields[0], common.DefaultTimezone)
 			assert.Error(t, err)
 			assert.Nil(t, fieldReader)
 		})

@@ -22,24 +22,29 @@
 package proxy
 
 import (
+	"context"
+
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func AddRootUserToAdminRole() {
-	err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
 }
 
 func RemoveRootUserFromAdminRole() {
-	err := globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
+	err := privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("root", "admin")})
 	if err != nil {
 		panic(err)
 	}
@@ -50,11 +55,12 @@ func InitEmptyGlobalCache() {
 	emptyMock := common.NewEmptyMockT()
 	mixcoord := mocks.NewMockMixCoordClient(emptyMock)
 	mixcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("collection not found"))
-	mgr := newShardClientMgr()
-	globalMetaCache, err = NewMetaCache(mixcoord, mgr)
+	globalMetaCache, err = NewMetaCache(mixcoord)
 	if err != nil {
 		panic(err)
 	}
+	mixcoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
+	privilege.InitPrivilegeCache(context.Background(), mixcoord)
 }
 
 func SetGlobalMetaCache(metaCache *MetaCache) {

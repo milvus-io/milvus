@@ -43,7 +43,7 @@ func (s *replicateTxnHelper) BeginDone(txn *message.TxnContext) {
 
 func (s *replicateTxnHelper) AddNewMessage(txn *message.TxnContext, replicateHeader *message.ReplicateHeader) error {
 	if s.currentTxn == nil {
-		return status.NewReplicateViolation("add new txn message without new txn, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
+		return status.NewIgnoreOperation("add new txn message without txn, maybe already committed, incoming: %d", txn.TxnID)
 	}
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("add new txn message with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)

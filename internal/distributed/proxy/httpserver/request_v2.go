@@ -766,3 +766,16 @@ func (req *GetSegmentsInfoReq) GetSegmentIDs() []int64 {
 }
 
 type GetQuotaMetricsReq struct{}
+
+type RunAnalyzerReq struct {
+	DbName         string   `json:"dbName"`
+	AnalyzerParams string   `json:"analyzerParams"`
+	Text           []string `json:"text" binding:"required"`
+	WithDetail     bool     `json:"withDetail"`
+	WithHash       bool     `json:"withHash"`
+	CollectionName string   `json:"collectionName"`
+	FieldName      string   `json:"fieldName"`
+	AnalyzerNames  []string `json:"analyzerNames"`
+}
+
+func (req *RunAnalyzerReq) GetDbName() string { return req.DbName }

@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -32,10 +33,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -46,16 +53,28 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	sbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -95,13 +114,57 @@ type ServiceSuite struct {
 	server *Server
 }
 
+func initStreamingSystem() {
+	t := common.NewEmptyMockT()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0"))
+	streaming.SetWALForTest(wal)
+
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	sbalance.Register(b)
+
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		results := make(map[string]*message.AppendResult)
+		for _, vchannel := range msg.BroadcastHeader().VChannels {
+			results[vchannel] = &message.AppendResult{
+				MessageID:              walimplstest.NewTestMessageID(1),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+			}
+		}
+		retry.Do(context.Background(), func() error {
+			return registry.CallMessageAckCallback(context.Background(), msg, results)
+		}, retry.AttemptAlways())
+		return &types.BroadcastAppendResult{}, nil
+	})
+	bapi.EXPECT().Close().Return()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.ResetBroadcaster()
+	broadcast.Register(mb)
+}
+
 func (suite *ServiceSuite) SetupSuite() {
 	paramtable.Init()
 
+	initStreamingSystem()
+
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{
-		1000: {100, 101},
-		1001: {102, 103},
+		1000: {100, 101, 102},
+		1001: {103, 104, 105},
 	}
 	suite.channels = map[int64][]string{
 		1000: {"1000-dmc0", "1000-dmc1"},
@@ -111,16 +174,19 @@ func (suite *ServiceSuite) SetupSuite() {
 		1000: {
 			100: {1, 2},
 			101: {3, 4},
+			102: {5, 6},
 		},
 		1001: {
-			102: {5, 6},
 			103: {7, 8},
+			104: {9, 10},
+			105: {11, 12},
 		},
 	}
 	suite.loadTypes = map[int64]querypb.LoadType{
 		1000: querypb.LoadType_LoadCollection,
 		1001: querypb.LoadType_LoadPartition,
 	}
+
 	suite.replicaNumber = map[int64]int32{
 		1000: 1,
 		1001: 3,
@@ -236,6 +302,37 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		for _, collection := range suite.collections {
+			if collection == collectionID {
+				return &milvuspb.DescribeCollectionResponse{
+					DbName:         util.DefaultDBName,
+					DbId:           1,
+					CollectionID:   collectionID,
+					CollectionName: fmt.Sprintf("collection_%d", collectionID),
+					Schema: &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{
+							{FieldID: 100},
+							{FieldID: 101},
+							{FieldID: 102},
+						},
+					},
+				}, nil
+			}
+		}
+		return &milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(merr.ErrCollectionNotFound),
+		}, nil
+	}).Maybe()
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) ([]int64, error) {
+		partitionIDs, ok := suite.partitions[collectionID]
+		if !ok {
+			return nil, merr.WrapErrCollectionNotFound(collectionID)
+		}
+		return partitionIDs, nil
+	}).Maybe()
+	registry.ResetRegistration()
+	RegisterDDLCallbacks(suite.server)
 }
 
 func (suite *ServiceSuite) TestShowCollections() {
@@ -401,7 +498,6 @@ func (suite *ServiceSuite) TestLoadCollectionWithUserSpecifiedReplicaMode() {
 		collectionID := suite.collections[0]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user specifies replica number - should set IsUserSpecifiedReplicaMode to true
@@ -427,7 +523,6 @@ func (suite *ServiceSuite) TestLoadCollectionWithoutUserSpecifiedReplicaMode() {
 		collectionID := suite.collections[0]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user doesn't specify replica number - should not set IsUserSpecifiedReplicaMode
@@ -762,6 +857,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 func (suite *ServiceSuite) TestTransferReplica() {
 	ctx := context.Background()
+	suite.loadAll()
 	server := suite.server
 
 	err := server.meta.ResourceManager.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
@@ -787,7 +883,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          2,
 	})
 	suite.NoError(err)
-	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
+	suite.ErrorIs(merr.Error(resp), merr.ErrCollectionNotLoaded)
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rgg",
@@ -815,22 +911,6 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	})
 	suite.NoError(err)
 	suite.ErrorIs(merr.Error(resp), merr.ErrParameterInvalid)
-
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  1,
-		ID:            111,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(1)))
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  1,
-		ID:            222,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(2)))
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  1,
-		ID:            333,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(3)))
 
 	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1001,
@@ -863,62 +943,45 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.server.meta.HandleNodeUp(ctx, 1004)
 	suite.server.meta.HandleNodeUp(ctx, 1005)
 
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  2,
-		ID:            444,
-		ResourceGroup: meta.DefaultResourceGroupName,
-	}, typeutil.NewUniqueSet(3)))
-	suite.server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		CollectionID:  2,
-		ID:            555,
-		ResourceGroup: "rg2",
-	}, typeutil.NewUniqueSet(4)))
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg2",
-		CollectionID:        2,
+		CollectionID:        1001,
 		NumReplica:          1,
 	})
-	suite.NoError(err)
-	// we support dynamically increase replica num in resource group now.
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg1",
-		CollectionID:        1,
+		CollectionID:        1001,
 		NumReplica:          1,
 	})
-	suite.NoError(err)
-	// we support transfer replica to resource group load same collection.
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 
-	replicaNum := len(suite.server.meta.ReplicaManager.GetByCollection(ctx, 1))
+	replicaNum := len(suite.server.meta.ReplicaManager.GetByCollection(ctx, 1001))
 	suite.Equal(3, replicaNum)
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
-		CollectionID:        1,
-		NumReplica:          2,
+		CollectionID:        1001,
+		NumReplica:          1,
 	})
-	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rg1",
 		TargetResourceGroup: "rg3",
-		CollectionID:        1,
+		CollectionID:        1001,
 		NumReplica:          1,
 	})
-	suite.NoError(err)
-	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
-	suite.Len(suite.server.meta.GetByResourceGroup(ctx, "rg3"), 3)
+	suite.NoError(merr.CheckRPCCall(resp, err))
 
 	// server unhealthy
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
-		CollectionID:        1,
+		CollectionID:        1001,
 		NumReplica:          2,
 	})
 	suite.NoError(err)
@@ -1030,7 +1093,6 @@ func (suite *ServiceSuite) TestLoadPartitionsWithUserSpecifiedReplicaMode() {
 		partitionIDs := suite.partitions[collectionID]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user specifies replica number - should set IsUserSpecifiedReplicaMode to true
@@ -1058,7 +1120,6 @@ func (suite *ServiceSuite) TestLoadPartitionsWithoutUserSpecifiedReplicaMode() {
 		partitionIDs := suite.partitions[collectionID]
 
 		// Mock broker methods using mockey
-		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
 		suite.expectGetRecoverInfo(collectionID)
 
 		// Test when user doesn't specify replica number - should not set IsUserSpecifiedReplicaMode
@@ -1908,21 +1969,8 @@ func (suite *ServiceSuite) loadAll() {
 				CollectionID:  collection,
 				ReplicaNumber: suite.replicaNumber[collection],
 			}
-			job := job.NewLoadCollectionJob(
-				ctx,
-				req,
-				suite.dist,
-				suite.meta,
-				suite.broker,
-				suite.targetMgr,
-				suite.targetObserver,
-				suite.collectionObserver,
-				suite.nodeMgr,
-				false,
-			)
-			suite.jobScheduler.Add(job)
-			err := job.Wait()
-			suite.NoError(err)
+			resp, err := suite.server.LoadCollection(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(resp, err))
 			suite.EqualValues(suite.replicaNumber[collection], suite.meta.GetReplicaNumber(ctx, collection))
 			suite.True(suite.meta.Exist(ctx, collection))
 			suite.NotNil(suite.meta.GetCollection(ctx, collection))
@@ -1933,21 +1981,8 @@ func (suite *ServiceSuite) loadAll() {
 				PartitionIDs:  suite.partitions[collection],
 				ReplicaNumber: suite.replicaNumber[collection],
 			}
-			job := job.NewLoadPartitionJob(
-				ctx,
-				req,
-				suite.dist,
-				suite.meta,
-				suite.broker,
-				suite.targetMgr,
-				suite.targetObserver,
-				suite.collectionObserver,
-				suite.nodeMgr,
-				false,
-			)
-			suite.jobScheduler.Add(job)
-			err := job.Wait()
-			suite.NoError(err)
+			resp, err := suite.server.LoadPartitions(ctx, req)
+			suite.Require().NoError(merr.CheckRPCCall(resp, err))
 			suite.EqualValues(suite.replicaNumber[collection], suite.meta.GetReplicaNumber(ctx, collection))
 			suite.True(suite.meta.Exist(ctx, collection))
 			suite.NotNil(suite.meta.GetPartitionsByCollection(ctx, collection))
@@ -2012,6 +2047,12 @@ func (suite *ServiceSuite) assertSegments(collection int64, segments []*querypb.
 	return true
 }
 
+func (suite *ServiceSuite) expectGetRecoverInfoForAllCollections() {
+	for _, collection := range suite.collections {
+		suite.expectGetRecoverInfo(collection)
+	}
+}
+
 func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 	suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 	vChannels := []*datapb.VchannelInfo{}
@@ -2073,6 +2114,7 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 	segments := lo.Flatten(lo.Values(suite.segments[collection]))
 
 	replicas := suite.meta.ReplicaManager.GetByCollection(ctx, collection)
+	targetVersion := suite.targetMgr.GetCollectionTargetVersion(ctx, collection, meta.CurrentTargetFirst)
 	for _, replica := range replicas {
 		i := 0
 		for _, node := range suite.sortInt64(replica.GetNodes()) {
@@ -2092,6 +2134,7 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 							Version: time.Now().Unix(),
 						}
 					}),
+					TargetVersion: targetVersion,
 					Status: &querypb.LeaderViewStatus{
 						Serviceable: true,
 					},
@@ -2102,6 +2145,16 @@ func (suite *ServiceSuite) updateChannelDist(ctx context.Context, collection int
 				break
 			}
 		}
+	}
+}
+
+func (suite *ServiceSuite) releaseSegmentDist(nodeID int64) {
+	suite.dist.SegmentDistManager.Update(nodeID)
+}
+
+func (suite *ServiceSuite) releaseAllChannelDist() {
+	for _, node := range suite.nodes {
+		suite.dist.ChannelDistManager.Update(node)
 	}
 }
 
@@ -2172,6 +2225,8 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
+	suite.collectionObserver.Stop()
+	suite.jobScheduler.Stop()
 }
 
 func TestService(t *testing.T) {

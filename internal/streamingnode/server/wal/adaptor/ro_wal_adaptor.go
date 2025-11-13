@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
-	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -21,7 +21,8 @@ var _ wal.WAL = (*roWALAdaptorImpl)(nil)
 type roWALAdaptorImpl struct {
 	log.Binder
 	lifetime        *typeutil.Lifetime
-	available       lifetime.SafeChan
+	availableCtx    context.Context
+	availableCancel context.CancelFunc
 	idAllocator     *typeutil.IDAllocator
 	roWALImpls      walimpls.ROWALImpls
 	scannerRegistry scannerRegistry
@@ -89,12 +90,12 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 
 // IsAvailable returns whether the wal is available.
 func (w *roWALAdaptorImpl) IsAvailable() bool {
-	return !w.available.IsClosed()
+	return w.availableCtx.Err() == nil
 }
 
 // Available returns a channel that will be closed when the wal is shut down.
 func (w *roWALAdaptorImpl) Available() <-chan struct{} {
-	return w.available.CloseCh()
+	return w.availableCtx.Done()
 }
 
 // Close overrides Scanner Close function.
@@ -102,7 +103,7 @@ func (w *roWALAdaptorImpl) Close() {
 	// begin to close the wal.
 	w.Logger().Info("wal begin to close...")
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
-	w.available.Close()
+	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
 
 	w.Logger().Info("wal begin to close scanners...")
@@ -123,4 +124,15 @@ func (w *roWALAdaptorImpl) Close() {
 
 	// close all metrics.
 	w.scanMetrics.Close()
+}
+
+// forceCancelAfterGracefulTimeout forces to cancel the context after the graceful timeout.
+func (w *roWALAdaptorImpl) forceCancelAfterGracefulTimeout() {
+	if w.availableCtx.Err() != nil {
+		return
+	}
+	time.AfterFunc(3*time.Second, func() {
+		// perform a force cancel to avoid resource leak.
+		w.availableCancel()
+	})
 }

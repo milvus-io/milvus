@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
@@ -61,6 +62,14 @@ func (msg *insertNodeMsg) append(taskMsg msgstream.TsMsg) error {
 		}
 		msg.schema = body.GetSchema()
 		msg.schemaVersion = taskMsg.BeginTs()
+	case commonpb.MsgType_AlterCollection:
+		putCollectionMsg := taskMsg.(*adaptor.AlterCollectionMessageBody)
+		header := putCollectionMsg.AlterCollectionMessage.Header()
+		if messageutil.IsSchemaChange(header) {
+			body := putCollectionMsg.AlterCollectionMessage.MustBody()
+			msg.schema = body.GetUpdates().GetSchema()
+			msg.schemaVersion = taskMsg.BeginTs()
+		}
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}

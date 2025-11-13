@@ -39,8 +39,10 @@ import (
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -48,17 +50,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+var (
+	errIgnoredAlterAlias       = errors.New("ignored alter alias")       // alias already created on current collection, so it can be ignored.
+	errIgnoredAlterCollection  = errors.New("ignored alter collection")  // collection already created, so it can be ignored.
+	errIgnoredAlterDatabase    = errors.New("ignored alter database")    // database already created, so it can be ignored.
+	errIgnoredCreateCollection = errors.New("ignored create collection") // create collection with same schema, so it can be ignored.
+	errIgnoerdCreatePartition  = errors.New("ignored create partition")  // partition is already exist, so it can be ignored.
+	errIgnoredDropCollection   = errors.New("ignored drop collection")   // drop collection or database not found, so it can be ignored.
+	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
+
+	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
+)
+
+type MetaTableChecker interface {
+	RBACChecker
+
+	CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb.CreateDatabaseRequest) error
+	CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb.DropDatabaseRequest) error
+
+	CheckIfAliasCreatable(ctx context.Context, dbName string, alias string, collectionName string) error
+	CheckIfAliasAlterable(ctx context.Context, dbName string, alias string, collectionName string) error
+	CheckIfAliasDroppable(ctx context.Context, dbName string, alias string) error
+}
+
 //go:generate mockery --name=IMetaTable --structname=MockIMetaTable --output=./  --filename=mock_meta_table.go --with-expecter --inpackage
 type IMetaTable interface {
+	MetaTableChecker
+
 	GetDatabaseByID(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error)
 	GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error)
 	CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error
 	DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error
 	ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error)
-	AlterDatabase(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts typeutil.Timestamp) error
+	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
-	ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
+	DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
 	// If the collection does not exist, it will return InvalidCollectionID.
@@ -76,25 +103,27 @@ type IMetaTable interface {
 	GetCollectionVirtualChannels(ctx context.Context, colID int64) []string
 	GetPChannelInfo(ctx context.Context, pchannel string) *rootcoordpb.GetPChannelInfoResponse
 	AddPartition(ctx context.Context, partition *model.Partition) error
-	ChangePartitionState(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
-	RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
-	DropAlias(ctx context.Context, dbName string, alias string, ts Timestamp) error
-	AlterAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
+	DropPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
+	RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
+
+	// Alias
+	AlterAlias(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error
+	DropAlias(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error
 	DescribeAlias(ctx context.Context, dbName string, alias string, ts Timestamp) (string, error)
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
-	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error
-	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
+
+	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
+	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
 
-	AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error
 	GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
-	DeleteCredential(ctx context.Context, username string) error
-	AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error
+	InitCredential(ctx context.Context) error
+	DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error
+	AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error
 	ListCredentialUsernames(ctx context.Context) (*milvuspb.ListCredUsersResponse, error)
 
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
@@ -317,6 +346,24 @@ func (mt *MetaTable) createDefaultDb() error {
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
 }
 
+func (mt *MetaTable) CheckIfDatabaseCreatable(ctx context.Context, req *milvuspb.CreateDatabaseRequest) error {
+	dbName := req.GetDbName()
+
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if _, ok := mt.dbName2Meta[dbName]; ok || mt.aliases.exist(dbName) || mt.names.exist(dbName) {
+		// TODO: idempotency check here.
+		return fmt.Errorf("database already exist: %s", dbName)
+	}
+
+	cfgMaxDatabaseNum := Params.RootCoordCfg.MaxDatabaseNum.GetAsInt()
+	if len(mt.dbName2Meta) > cfgMaxDatabaseNum { // not include default database so use > instead of >= here.
+		return merr.WrapErrDatabaseNumLimitExceeded(cfgMaxDatabaseNum)
+	}
+	return nil
+}
+
 func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -330,10 +377,6 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	dbName := db.Name
-	if mt.names.exist(dbName) || mt.aliases.exist(dbName) {
-		return fmt.Errorf("database already exist: %s", dbName)
-	}
-
 	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
 		return err
 	}
@@ -351,35 +394,31 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	return nil
 }
 
-func (mt *MetaTable) AlterDatabase(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts typeutil.Timestamp) error {
+func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-
-	if oldDB.Name != newDB.Name || oldDB.ID != newDB.ID || oldDB.State != newDB.State {
-		return errors.New("alter database name/id is not supported!")
-	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
 		return err
 	}
-	mt.dbName2Meta[oldDB.Name] = newDB
-	log.Ctx(ctx).Info("alter database finished", zap.String("dbName", oldDB.Name), zap.Uint64("ts", ts))
+	mt.dbName2Meta[newDB.Name] = newDB
+	log.Ctx(ctx).Info("alter database finished", zap.String("dbName", newDB.Name), zap.Uint64("ts", ts))
 	return nil
 }
 
-func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb.DropDatabaseRequest) error {
+	dbName := req.GetDbName()
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 
 	if dbName == util.DefaultDBName {
 		return errors.New("can not drop default database")
 	}
 
-	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
-	if err != nil {
+	if _, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp); err != nil {
 		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
-		return nil
+		return err
 	}
 
 	colls, err := mt.listCollectionFromCache(ctx, dbName, true)
@@ -389,7 +428,18 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	if len(colls) > 0 {
 		return fmt.Errorf("database:%s not empty, must drop all collections before drop database", dbName)
 	}
+	return nil
+}
 
+func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
+	if err != nil {
+		log.Ctx(ctx).Warn("not found database", zap.String("db", dbName))
+		return nil
+	}
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
 		return err
 	}
@@ -458,22 +508,29 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	// Note:
 	// 1, idempotency check was already done outside;
 	// 2, no need to check time travel logic, since ts should always be the latest;
-
-	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
-	if err != nil {
-		return err
+	if coll.State != pb.CollectionState_CollectionCreated {
+		return fmt.Errorf("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
-	if coll.State != pb.CollectionState_CollectionCreating {
-		return fmt.Errorf("collection state should be creating, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+	// check if there's a collection meta with the same collection id.
+	// merge the collection meta together.
+	if _, ok := mt.collID2Meta[coll.CollectionID]; ok {
+		log.Ctx(ctx).Info("collection already created, skip add collection to meta table", zap.Int64("collectionID", coll.CollectionID))
+		return nil
 	}
+
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.CreateCollection(ctx1, coll, coll.CreateTime); err != nil {
 		return err
 	}
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
-	mt.names.insert(db.Name, coll.Name, coll.CollectionID)
+	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
+
+	pn := coll.GetPartitionNum(true)
+	mt.generalCnt += pn * int(coll.ShardsNum)
+	metrics.RootCoordNumOfCollections.WithLabelValues(coll.DBName).Inc()
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
 
 	channel.StaticPChannelStatsManager.MustGet().AddVChannel(coll.VirtualChannelNames...)
 	log.Ctx(ctx).Info("add collection to meta table",
@@ -485,7 +542,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	return nil
 }
 
-func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error {
+func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -493,8 +550,14 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 	if !ok {
 		return nil
 	}
+	if coll.State == pb.CollectionState_CollectionDropping {
+		return nil
+	}
+
 	clone := coll.Clone()
-	clone.State = state
+	clone.State = pb.CollectionState_CollectionDropping
+	clone.UpdateTimestamp = ts
+
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
 		return err
@@ -508,21 +571,13 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 
 	pn := coll.GetPartitionNum(true)
 
-	switch state {
-	case pb.CollectionState_CollectionCreated:
-		mt.generalCnt += pn * int(coll.ShardsNum)
-		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Inc()
-		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
-	case pb.CollectionState_CollectionDropping:
-		mt.generalCnt -= pn * int(coll.ShardsNum)
-		channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
-		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
-		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
-	}
+	mt.generalCnt -= pn * int(coll.ShardsNum)
+	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
+	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
 
-	log.Ctx(ctx).Info("change collection state", zap.Int64("collection", collectionID),
-		zap.String("state", state.String()), zap.Uint64("ts", ts))
-
+	log.Ctx(ctx).Info("drop collection from meta table", zap.Int64("collection", collectionID),
+		zap.String("state", coll.State.String()), zap.Uint64("ts", ts))
 	return nil
 }
 
@@ -563,6 +618,9 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	if !ok {
 		log.Ctx(ctx).Warn("not found collection, skip remove", zap.Int64("collectionID", collectionID))
 		return nil
+	}
+	if coll.State != pb.CollectionState_CollectionDropping {
+		return fmt.Errorf("remove collection which state is not dropping, collectionID: %d, state: %s", collectionID, coll.State.String())
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
@@ -875,22 +933,56 @@ func (mt *MetaTable) ListCollectionPhysicalChannels(ctx context.Context) map[typ
 	return chanMap
 }
 
-func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error {
+// AlterCollection is used to alter a collection in the meta table.
+func (mt *MetaTable) AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	header := result.Message.Header()
+	body := result.Message.MustBody()
+
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts, fieldModify); err != nil {
-		return err
+	coll, ok := mt.collID2Meta[header.CollectionId]
+	if !ok {
+		// collection not exists, return directly.
+		return errAlterCollectionNotFound
 	}
-	mt.collID2Meta[oldColl.CollectionID] = newColl
-	log.Ctx(ctx).Info("alter collection finished", zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", ts))
+
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+	newColl.ApplyUpdates(header, body)
+	fieldModify := false
+	dbChanged := false
+	for _, path := range header.UpdateMask.GetPaths() {
+		switch path {
+		case message.FieldMaskCollectionSchema:
+			fieldModify = true
+		case message.FieldMaskDB:
+			dbChanged = true
+		}
+	}
+	newColl.UpdateTimestamp = result.GetMaxTimeTick()
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if !dbChanged {
+		if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, fieldModify); err != nil {
+			return err
+		}
+	} else {
+		if err := mt.catalog.AlterCollectionDB(ctx1, oldColl, newColl, newColl.UpdateTimestamp); err != nil {
+			return err
+		}
+	}
+
+	mt.names.remove(oldColl.DBName, oldColl.Name)
+	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
+	mt.collID2Meta[header.CollectionId] = newColl
+	log.Ctx(ctx).Info("alter collection finished", zap.Bool("dbChanged", dbChanged), zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", newColl.UpdateTimestamp))
 	return nil
 }
 
-func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 
 	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	log := log.Ctx(ctx).With(
@@ -907,8 +999,21 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 		return fmt.Errorf("target database:%s not found", newDBName)
 	}
 
-	// check if new name already belongs to another existing collection
-	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, ts)
+	// old collection should not be an alias
+	_, ok = mt.aliases.get(dbName, oldName)
+	if ok {
+		log.Warn("unsupported use a alias to rename collection")
+		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", oldName)
+	}
+
+	_, ok = mt.aliases.get(newDBName, newName)
+	if ok {
+		log.Warn("cannot rename collection to an existing alias")
+		return fmt.Errorf("cannot rename collection to an existing alias: %s", newName)
+	}
+
+	// check new collection already exists
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp)
 	if coll != nil {
 		log.Warn("duplicated new collection name, already taken by another collection or alias.")
 		return fmt.Errorf("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
@@ -919,34 +1024,17 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	}
 
 	// get old collection meta
-	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, ts)
+	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, typeutil.MaxTimestamp)
 	if err != nil {
 		log.Warn("fail to find collection with old name", zap.Error(err))
 		return err
 	}
 
-	newColl := oldColl.Clone()
-	newColl.Name = newName
-	newColl.DBName = dbName
-	newColl.DBID = targetDB.ID
-	if oldColl.DBID == newColl.DBID {
-		if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, false); err != nil {
-			log.Warn("alter collection by catalog failed", zap.Error(err))
-			return err
-		}
-	} else {
-		if err := mt.catalog.AlterCollectionDB(ctx, oldColl, newColl, ts); err != nil {
-			log.Warn("alter collectionDB by catalog failed", zap.Error(err))
-			return err
-		}
+	// unsupported rename collection while the collection has aliases
+	aliases := mt.listAliasesByID(oldColl.CollectionID)
+	if len(aliases) > 0 && oldColl.DBID != targetDB.ID {
+		return errors.New("fail to rename db name, must drop all aliases of this collection before rename")
 	}
-
-	mt.names.insert(newDBName, newName, oldColl.CollectionID)
-	mt.names.remove(dbName, oldName)
-
-	mt.collID2Meta[oldColl.CollectionID] = newColl
-
-	log.Info("rename collection finished")
 	return nil
 }
 
@@ -1003,8 +1091,17 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	if !ok || !coll.Available() {
 		return fmt.Errorf("collection not exists: %d", partition.CollectionID)
 	}
-	if partition.State != pb.PartitionState_PartitionCreating {
+
+	if partition.State != pb.PartitionState_PartitionCreated {
 		return fmt.Errorf("partition state is not created, collection: %d, partition: %d, state: %s", partition.CollectionID, partition.PartitionID, partition.State)
+	}
+
+	// idempotency check here.
+	for _, part := range coll.Partitions {
+		if part.PartitionID == partition.PartitionID {
+			log.Ctx(ctx).Info("partition already exists, ignore the operation", zap.Int64("collection", partition.CollectionID), zap.Int64("partition", partition.PartitionID))
+			return nil
+		}
 	}
 	if err := mt.catalog.CreatePartition(ctx, coll.DBID, partition, partition.PartitionCreatedTimestamp); err != nil {
 		return err
@@ -1014,11 +1111,14 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	log.Ctx(ctx).Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
+	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
+	// support Dynamic load/release partitions
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 
 	return nil
 }
 
-func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error {
+func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -1028,46 +1128,40 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 	}
 	for idx, part := range coll.Partitions {
 		if part.PartitionID == partitionID {
+			if part.State == pb.PartitionState_PartitionDropping {
+				// promise idempotency here.
+				return nil
+			}
 			clone := part.Clone()
-			clone.State = state
+			clone.State = pb.PartitionState_PartitionDropping
 			ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 			if err := mt.catalog.AlterPartition(ctx1, coll.DBID, part, clone, metastore.MODIFY, ts); err != nil {
 				return err
 			}
 			mt.collID2Meta[collectionID].Partitions[idx] = clone
 
-			switch state {
-			case pb.PartitionState_PartitionCreated:
-				mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
-				// support Dynamic load/release partitions
-				metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
-			case pb.PartitionState_PartitionDropping:
-				mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
-				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
-			}
-
-			log.Ctx(ctx).Info("change partition state", zap.Int64("collection", collectionID),
-				zap.Int64("partition", partitionID), zap.String("state", state.String()),
+			log.Ctx(ctx).Info("drop partition", zap.Int64("collection", collectionID),
+				zap.Int64("partition", partitionID),
 				zap.Uint64("ts", ts))
 
+			mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
+			metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 			return nil
 		}
 	}
-	return fmt.Errorf("partition not exist, collection: %d, partition: %d", collectionID, partitionID)
+	// partition not found, so promise idempotency here.
+	return nil
 }
 
-func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.DropPartition(ctx1, dbID, collectionID, partitionID, ts); err != nil {
-		return err
-	}
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
 		return nil
 	}
+
 	loc := -1
 	for idx, part := range coll.Partitions {
 		if part.PartitionID == partitionID {
@@ -1075,16 +1169,27 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collection
 			break
 		}
 	}
-	if loc != -1 {
-		coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
+	if loc == -1 {
+		log.Ctx(ctx).Warn("not found partition, skip remove", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID))
+		return nil
 	}
+	partition := coll.Partitions[loc]
+	if partition.State != pb.PartitionState_PartitionDropping {
+		return fmt.Errorf("remove partition which state is not dropping, collection: %d, partition: %d, state: %s", collectionID, partitionID, partition.State.String())
+	}
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID, ts); err != nil {
+		return err
+	}
+	coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
 	log.Ctx(ctx).Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
 	return nil
 }
 
-func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
+func (mt *MetaTable) CheckIfAliasCreatable(ctx context.Context, dbName string, alias string, collectionName string) error {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
 		log.Ctx(ctx).Warn("db name is empty", zap.String("alias", alias), zap.String("collection", collectionName))
@@ -1118,8 +1223,8 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 	// check if alias exists.
 	aliasedCollectionID, ok := mt.aliases.get(dbName, alias)
 	if ok && aliasedCollectionID == collectionID {
-		log.Ctx(ctx).Warn("add duplicate alias", zap.String("alias", alias), zap.String("collection", collectionName), zap.Uint64("ts", ts))
-		return nil
+		log.Ctx(ctx).Warn("add duplicate alias", zap.String("alias", alias), zap.String("collection", collectionName))
+		return errIgnoredAlterAlias
 	} else if ok {
 		// TODO: better to check if aliasedCollectionID exist or is available, though not very possible.
 		aliasedColl := mt.collID2Meta[aliasedCollectionID]
@@ -1133,63 +1238,69 @@ func (mt *MetaTable) CreateAlias(ctx context.Context, dbName string, alias strin
 		// you cannot alias to a non-existent collection.
 		return merr.WrapErrCollectionNotFoundWithDB(dbName, collectionName)
 	}
-
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.CreateAlias(ctx1, &model.Alias{
-		Name:         alias,
-		CollectionID: collectionID,
-		CreatedTime:  ts,
-		State:        pb.AliasState_AliasCreated,
-		DbID:         coll.DBID,
-	}, ts); err != nil {
-		return err
-	}
-
-	mt.aliases.insert(dbName, alias, collectionID)
-
-	log.Ctx(ctx).Info("create alias",
-		zap.String("db", dbName),
-		zap.String("alias", alias),
-		zap.String("collection", collectionName),
-		zap.Int64("id", coll.CollectionID),
-		zap.Uint64("ts", ts),
-	)
-
 	return nil
 }
 
-func (mt *MetaTable) DropAlias(ctx context.Context, dbName string, alias string, ts Timestamp) error {
+func (mt *MetaTable) CheckIfAliasDroppable(ctx context.Context, dbName string, alias string) error {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	if _, ok := mt.aliases.get(dbName, alias); !ok {
+		return merr.WrapErrAliasNotFound(dbName, alias)
+	}
+	return nil
+}
+
+func (mt *MetaTable) DropAlias(ctx context.Context, result message.BroadcastResultDropAliasMessageV2) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	// backward compatibility for rolling  upgrade
-	if dbName == "" {
-		log.Ctx(ctx).Warn("db name is empty", zap.String("alias", alias), zap.Uint64("ts", ts))
-		dbName = util.DefaultDBName
-	}
+
+	header := result.Message.Header()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	db, err := mt.getDatabaseByNameInternal(ctx, dbName, typeutil.MaxTimestamp)
-	if err != nil {
+	if err := mt.catalog.DropAlias(ctx1, header.DbId, header.Alias, result.GetControlChannelResult().TimeTick); err != nil {
 		return err
 	}
-	if err := mt.catalog.DropAlias(ctx1, db.ID, alias, ts); err != nil {
-		return err
-	}
-
-	mt.aliases.remove(dbName, alias)
+	mt.aliases.remove(header.DbName, header.Alias)
 
 	log.Ctx(ctx).Info("drop alias",
-		zap.String("db", dbName),
-		zap.String("alias", alias),
-		zap.Uint64("ts", ts),
+		zap.String("db", header.DbName),
+		zap.String("alias", header.Alias),
+		zap.Uint64("ts", result.GetControlChannelResult().TimeTick),
 	)
-
 	return nil
 }
 
-func (mt *MetaTable) AlterAlias(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
+func (mt *MetaTable) AlterAlias(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
+
+	header := result.Message.Header()
+	if err := mt.catalog.AlterAlias(ctx, &model.Alias{
+		Name:         header.Alias,
+		CollectionID: header.CollectionId,
+		CreatedTime:  result.GetControlChannelResult().TimeTick,
+		State:        pb.AliasState_AliasCreated,
+		DbID:         header.DbId,
+	}, result.GetControlChannelResult().TimeTick); err != nil {
+		return err
+	}
+
+	// alias switch to another collection anyway.
+	mt.aliases.insert(header.DbName, header.Alias, header.CollectionId)
+
+	log.Ctx(ctx).Info("alter alias",
+		zap.String("db", header.DbName),
+		zap.String("alias", header.Alias),
+		zap.String("collection", header.CollectionName),
+		zap.Uint64("ts", result.GetControlChannelResult().TimeTick),
+	)
+	return nil
+}
+
+func (mt *MetaTable) CheckIfAliasAlterable(ctx context.Context, dbName string, alias string, collectionName string) error {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
 	// backward compatibility for rolling  upgrade
 	if dbName == "" {
 		log.Ctx(ctx).Warn("db name is empty", zap.String("alias", alias), zap.String("collection", collectionName))
@@ -1224,33 +1335,13 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, dbName string, alias string
 	}
 
 	// check if alias exists.
-	_, ok = mt.aliases.get(dbName, alias)
+	existAliasCollectionID, ok := mt.aliases.get(dbName, alias)
 	if !ok {
-		//
 		return merr.WrapErrAliasNotFound(dbName, alias)
 	}
-
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterAlias(ctx1, &model.Alias{
-		Name:         alias,
-		CollectionID: collectionID,
-		CreatedTime:  ts,
-		State:        pb.AliasState_AliasCreated,
-		DbID:         coll.DBID,
-	}, ts); err != nil {
-		return err
+	if existAliasCollectionID == collectionID {
+		return errIgnoredAlterAlias
 	}
-
-	// alias switch to another collection anyway.
-	mt.aliases.insert(dbName, alias, collectionID)
-
-	log.Ctx(ctx).Info("alter alias",
-		zap.String("db", dbName),
-		zap.String("alias", alias),
-		zap.String("collection", collectionName),
-		zap.Uint64("ts", ts),
-	)
-
 	return nil
 }
 
@@ -1353,47 +1444,103 @@ func (mt *MetaTable) GetGeneralCount(ctx context.Context) int {
 	return mt.generalCnt
 }
 
-// AddCredential add credential
-func (mt *MetaTable) AddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	if credInfo.Username == "" {
-		return errors.New("username is empty")
-	}
+func (mt *MetaTable) InitCredential(ctx context.Context) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
+
+	credInfo, err := mt.catalog.GetCredential(ctx, util.UserRoot)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	if credInfo != nil {
+		return nil
+	}
+	encryptedRootPassword, err := crypto.PasswordEncrypt(Params.CommonCfg.DefaultRootPassword.GetValue())
+	if err != nil {
+		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		return err
+	}
+	log.Ctx(ctx).Info("RootCoord init user root")
+	err = mt.catalog.AlterCredential(ctx, &model.Credential{
+		Username:          util.UserRoot,
+		EncryptedPassword: encryptedRootPassword,
+	})
+	if err != nil {
+		log.Ctx(ctx).Warn("RootCoord init user root failed", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (mt *MetaTable) CheckIfAddCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	if funcutil.IsEmptyString(credInfo.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
 	usernames, err := mt.catalog.ListCredentials(ctx)
 	if err != nil {
 		return err
 	}
-	if len(usernames) >= Params.ProxyCfg.MaxUserNum.GetAsInt() {
+	// check if the username already exists.
+	for _, username := range usernames {
+		if username == credInfo.GetUsername() {
+			return errUserAlreadyExists
+		}
+	}
+
+	// check if the number of users has reached the limit.
+	maxUserNum := Params.ProxyCfg.MaxUserNum.GetAsInt()
+	if len(usernames) >= maxUserNum {
 		errMsg := "unable to add user because the number of users has reached the limit"
-		log.Ctx(ctx).Error(errMsg, zap.Int("max_user_num", Params.ProxyCfg.MaxUserNum.GetAsInt()))
+		log.Ctx(ctx).Error(errMsg, zap.Int("maxUserNum", maxUserNum))
 		return errors.New(errMsg)
 	}
+	return nil
+}
 
-	if origin, _ := mt.catalog.GetCredential(ctx, credInfo.Username); origin != nil {
-		return fmt.Errorf("user already exists: %s", credInfo.Username)
+func (mt *MetaTable) CheckIfUpdateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	if funcutil.IsEmptyString(credInfo.GetUsername()) {
+		return errEmptyUsername
 	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	credential := &model.Credential{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+	// check if the number of credential exists.
+	if _, err := mt.catalog.GetCredential(ctx, credInfo.GetUsername()); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errUserNotFound
+		}
+		return err
 	}
-	return mt.catalog.CreateCredential(ctx, credential)
+	return nil
 }
 
 // AlterCredential update credential
-func (mt *MetaTable) AlterCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
-	if credInfo.Username == "" {
-		return errors.New("username is empty")
-	}
+func (mt *MetaTable) AlterCredential(ctx context.Context, result message.BroadcastResultAlterUserMessageV2) error {
+	body := result.Message.MustBody()
 
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
+	existsCredential, err := mt.catalog.GetCredential(ctx, body.CredentialInfo.Username)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	// if the credential already exists and the version is not greater than the current timetick.
+	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
+		log.Info("credential already exists and the version is not greater than the current timetick",
+			zap.String("username", body.CredentialInfo.Username),
+			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			zap.Uint64("current", existsCredential.TimeTick),
+		)
+		return nil
+	}
 	credential := &model.Credential{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+		Username:          body.CredentialInfo.Username,
+		EncryptedPassword: body.CredentialInfo.EncryptedPassword,
+		TimeTick:          result.GetControlChannelResult().TimeTick,
 	}
 	return mt.catalog.AlterCredential(ctx, credential)
 }
@@ -1407,12 +1554,42 @@ func (mt *MetaTable) GetCredential(ctx context.Context, username string) (*inter
 	return model.MarshalCredentialModel(credential), err
 }
 
+func (mt *MetaTable) CheckIfDeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) error {
+	if funcutil.IsEmptyString(req.GetUsername()) {
+		return errEmptyUsername
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if the number of credential exists.
+	if _, err := mt.catalog.GetCredential(ctx, req.GetUsername()); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errUserNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // DeleteCredential delete credential
-func (mt *MetaTable) DeleteCredential(ctx context.Context, username string) error {
+func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.BroadcastResultDropUserMessageV2) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.DropCredential(ctx, username)
+	existsCredential, err := mt.catalog.GetCredential(ctx, result.Message.Header().UserName)
+	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return err
+	}
+	// if the credential already exists and the version is not greater than the current timetick.
+	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
+		log.Info("credential already exists and the version is not greater than the current timetick",
+			zap.String("username", result.Message.Header().UserName),
+			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
+			zap.Uint64("current", existsCredential.TimeTick),
+		)
+		return nil
+	}
+	return mt.catalog.DropCredential(ctx, result.Message.Header().UserName)
 }
 
 // ListCredentialUsernames list credential usernames
@@ -1427,23 +1604,23 @@ func (mt *MetaTable) ListCredentialUsernames(ctx context.Context) (*milvuspb.Lis
 	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }
 
-// CreateRole create role
-func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-	if funcutil.IsEmptyString(entity.Name) {
-		return errors.New("the role name in the role info is empty")
+// CheckIfCreateRole checks if the role can be created.
+func (mt *MetaTable) CheckIfCreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetEntity().GetName()) {
+		return errEmptyRoleName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	results, err := mt.catalog.ListRole(ctx, tenant, nil, false)
+	results, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("fail to list roles", zap.Error(err))
 		return err
 	}
 	for _, result := range results {
-		if result.GetRole().GetName() == entity.Name {
-			log.Ctx(ctx).Info("role already exists", zap.String("role", entity.Name))
-			return common.NewIgnorableError(errors.Newf("role [%s] already exists", entity))
+		if result.GetRole().GetName() == in.GetEntity().GetName() {
+			log.Ctx(ctx).Info("role already exists", zap.String("role", in.GetEntity().GetName()))
+			return errRoleAlreadyExists
 		}
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
@@ -1451,8 +1628,49 @@ func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milv
 		log.Ctx(ctx).Warn(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
 		return errors.New(errMsg)
 	}
+	return nil
+}
+
+// CreateRole create role
+func (mt *MetaTable) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
 
 	return mt.catalog.CreateRole(ctx, tenant, entity)
+}
+
+func (mt *MetaTable) CheckIfDropRole(ctx context.Context, in *milvuspb.DropRoleRequest) error {
+	if funcutil.IsEmptyString(in.GetRoleName()) {
+		return errEmptyRoleName
+	}
+	if util.IsBuiltinRole(in.GetRoleName()) {
+		return merr.WrapErrPrivilegeNotPermitted("the role[%s] is a builtin role, which can't be dropped", in.GetRoleName())
+	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: in.GetRoleName()}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	if in.GetForceDrop() {
+		return nil
+	}
+
+	grantEntities, err := mt.catalog.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
+		Role:   &milvuspb.RoleEntity{Name: in.GetRoleName()},
+		DbName: "*",
+	})
+	if err != nil {
+		return err
+	}
+	if len(grantEntities) != 0 {
+		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
+		return errors.New(errMsg)
+	}
+	return nil
 }
 
 // DropRole drop role info
@@ -1463,15 +1681,33 @@ func (mt *MetaTable) DropRole(ctx context.Context, tenant string, roleName strin
 	return mt.catalog.DropRole(ctx, tenant, roleName)
 }
 
-// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
-func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	if funcutil.IsEmptyString(userEntity.Name) {
+func (mt *MetaTable) CheckIfOperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) error {
+	if funcutil.IsEmptyString(req.GetUsername()) {
 		return errors.New("username in the user entity is empty")
 	}
-	if funcutil.IsEmptyString(roleEntity.Name) {
+	if funcutil.IsEmptyString(req.GetRoleName()) {
 		return errors.New("role name in the role entity is empty")
 	}
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
+	if _, err := mt.catalog.ListRole(ctx, util.DefaultTenant, &milvuspb.RoleEntity{Name: req.RoleName}, false); err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return errRoleNotExists
+		}
+		return err
+	}
+	if req.Type != milvuspb.OperateUserRoleType_RemoveUserFromRole {
+		if _, err := mt.catalog.ListUser(ctx, util.DefaultTenant, &milvuspb.UserEntity{Name: req.Username}, false); err != nil {
+			errMsg := "not found the user, maybe the user isn't existed or internal system error"
+			return errors.New(errMsg)
+		}
+	}
+	return nil
+}
+
+// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
+func (mt *MetaTable) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
@@ -1584,6 +1820,72 @@ func (mt *MetaTable) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.R
 	return mt.catalog.BackupRBAC(ctx, tenant)
 }
 
+func (mt *MetaTable) CheckIfRBACRestorable(ctx context.Context, req *milvuspb.RestoreRBACMetaRequest) error {
+	meta := req.GetRBACMeta()
+	if len(meta.GetRoles()) == 0 && len(meta.GetPrivilegeGroups()) == 0 && len(meta.GetGrants()) == 0 && len(meta.GetUsers()) == 0 {
+		return errEmptyRBACMeta
+	}
+
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
+	// check if role already exists
+	existRoles, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	existRoleAfterRestoreMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
+	for _, role := range meta.GetRoles() {
+		if _, ok := existRoleMap[role.GetName()]; ok {
+			return errors.Newf("role [%s] already exists", role.GetName())
+		}
+		existRoleAfterRestoreMap[role.GetName()] = struct{}{}
+	}
+
+	// check if privilege group already exists
+	existPrivGroups, err := mt.catalog.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return err
+	}
+	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	existPrivGroupAfterRestoreMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
+	for _, group := range meta.GetPrivilegeGroups() {
+		if _, ok := existPrivGroupMap[group.GetGroupName()]; ok {
+			return errors.Newf("privilege group [%s] already exists", group.GetGroupName())
+		}
+		existPrivGroupAfterRestoreMap[group.GetGroupName()] = struct{}{}
+	}
+
+	// check if grant can be restored
+	for _, grant := range meta.GetGrants() {
+		privName := grant.GetGrantor().GetPrivilege().GetName()
+		if _, ok := existPrivGroupAfterRestoreMap[privName]; !ok && !util.IsPrivilegeNameDefined(privName) {
+			return errors.Newf("privilege [%s] does not exist", privName)
+		}
+	}
+
+	// check if user can be restored
+	existUser, err := mt.catalog.ListUser(ctx, util.DefaultTenant, nil, false)
+	if err != nil {
+		return err
+	}
+	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
+	for _, user := range meta.GetUsers() {
+		if _, ok := existUserMap[user.GetUser()]; ok {
+			return errors.Newf("user [%s] already exists", user.GetUser())
+		}
+
+		// check if user-role can be restored
+		for _, role := range user.GetRoles() {
+			if _, ok := existRoleAfterRestoreMap[role.GetName()]; !ok {
+				return errors.Newf("role [%s] does not exist", role.GetName())
+			}
+		}
+	}
+	return nil
+}
+
 func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
@@ -1605,23 +1907,30 @@ func (mt *MetaTable) IsCustomPrivilegeGroup(ctx context.Context, groupName strin
 	return false, nil
 }
 
-func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
+func (mt *MetaTable) CheckIfPrivilegeGroupCreatable(ctx context.Context, req *milvuspb.CreatePrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, req.GetGroupName())
 	if err != nil {
 		return err
 	}
 	if definedByUsers {
-		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", groupName)
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by users", req.GetGroupName())
 	}
-	if util.IsPrivilegeNameDefined(groupName) {
-		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", groupName)
+	if util.IsPrivilegeNameDefined(req.GetGroupName()) {
+		return merr.WrapErrParameterInvalidMsg("privilege group name [%s] is defined by built in privileges or privilege groups in system", req.GetGroupName())
 	}
+	return nil
+}
+
+func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	data := &milvuspb.PrivilegeGroupInfo{
 		GroupName:  groupName,
 		Privileges: make([]*milvuspb.PrivilegeEntity, 0),
@@ -1629,20 +1938,21 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 	return mt.catalog.SavePrivilegeGroup(ctx, data)
 }
 
-func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
+func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
+	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, req.GetGroupName())
 	if err != nil {
 		return err
 	}
 	if !definedByUsers {
-		return nil
+		return errNotCustomPrivilegeGroup
 	}
+
 	// check if the group is used by any role
 	roles, err := mt.catalog.ListRole(ctx, util.DefaultTenant, nil, false)
 	if err != nil {
@@ -1660,11 +1970,18 @@ func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) e
 			return err
 		}
 		for _, grant := range grants {
-			if grant.Grantor.Privilege.Name == groupName {
-				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", groupName, role.GetName())
+			if grant.Grantor.Privilege.Name == req.GetGroupName() {
+				return errors.Newf("privilege group [%s] is used by role [%s], Use REVOKE API to revoke it first", req.GetGroupName(), role.GetName())
 			}
 		}
 	}
+	return nil
+}
+
+func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	return mt.catalog.DropPrivilegeGroup(ctx, groupName)
 }
 
@@ -1675,42 +1992,54 @@ func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privi
 	return mt.catalog.ListPrivilegeGroups(ctx)
 }
 
-func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
-	if funcutil.IsEmptyString(groupName) {
-		return errors.New("the privilege group name is empty")
+// CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.
+func (mt *MetaTable) CheckIfPrivilegeGroupAlterable(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) error {
+	if funcutil.IsEmptyString(req.GetGroupName()) {
+		return errEmptyPrivilegeGroupName
 	}
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
 
-	if util.IsBuiltinPrivilegeGroup(groupName) {
-		return merr.WrapErrParameterInvalidMsg("the privilege group name [%s] is defined by built in privilege groups in system", groupName)
-	}
-
-	// validate input params
-	definedByUsers, err := mt.IsCustomPrivilegeGroup(ctx, groupName)
-	if err != nil {
-		return err
-	}
-	if !definedByUsers {
-		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] to operate", groupName)
-	}
 	groups, err := mt.catalog.ListPrivilegeGroups(ctx)
 	if err != nil {
 		return err
 	}
-	for _, p := range privileges {
+	currenctGroups := lo.SliceToMap(groups, func(group *milvuspb.PrivilegeGroupInfo) (string, []*milvuspb.PrivilegeEntity) {
+		return group.GroupName, group.Privileges
+	})
+	// check if the privilege group is defined by users
+	if _, ok := currenctGroups[req.GroupName]; !ok {
+		return merr.WrapErrParameterInvalidMsg("there is no privilege group name [%s] defined in system to operate", req.GroupName)
+	}
+
+	if len(req.Privileges) == 0 {
+		return merr.WrapErrParameterInvalidMsg("privileges is empty when alter the privilege group")
+	}
+	// check if the new incoming privileges are defined by users or built in
+	for _, p := range req.Privileges {
 		if util.IsPrivilegeNameDefined(p.Name) {
 			continue
 		}
-		for _, group := range groups {
-			// add privileges for custom privilege group
-			if group.GroupName == p.Name {
-				privileges = append(privileges, group.Privileges...)
-			} else {
-				return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
-			}
+		if _, ok := currenctGroups[p.Name]; !ok {
+			return merr.WrapErrParameterInvalidMsg("there is no privilege name or privilege group name [%s] defined in system to operate", p.Name)
 		}
 	}
+
+	if req.Type == milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup {
+		// Check if all privileges are the same privilege level
+		privilegeLevels := lo.SliceToMap(lo.Union(req.Privileges, currenctGroups[req.GroupName]), func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+			return util.GetPrivilegeLevel(p.Name), struct{}{}
+		})
+		if len(privilegeLevels) > 1 {
+			return merr.WrapErrParameterInvalidMsg("privileges are not the same privilege level")
+		}
+	}
+	return nil
+}
+
+func (mt *MetaTable) OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error {
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
 
 	// merge with current privileges
 	group, err := mt.catalog.GetPrivilegeGroup(ctx, groupName)

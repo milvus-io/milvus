@@ -19,6 +19,3 @@ packages:
   github.com/milvus-io/milvus/internal/cdc/replication/replicatemanager:
     interfaces:
       ChannelReplicator:
-  github.com/milvus-io/milvus/internal/cdc/controller:
-    interfaces:
-      Controller:

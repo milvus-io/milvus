@@ -53,6 +53,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+var errIndexOperationIgnored = errors.New("index operation ignored")
+
 type indexMeta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
@@ -355,7 +357,12 @@ func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool 
 func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
-	return m.canCreateIndex(req, isJson)
+	indexID, err := m.canCreateIndex(req, isJson)
+	if err != nil {
+		return 0, err
+	}
+
+	return indexID, nil
 }
 
 func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool) (UniqueID, error) {
@@ -370,7 +377,7 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		if req.IndexName == index.IndexName {
 			if req.FieldID == index.FieldID && checkParams(index, req) &&
 				/*only check json params when it is json index*/ (!isJson || checkIdenticalJson(index, req)) {
-				return index.IndexID, nil
+				return index.IndexID, errIndexOperationIgnored
 			}
 			errMsg := "at most one distinct index is allowed per field"
 			log.Warn(errMsg,
@@ -424,37 +431,10 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 	return false, 0
 }
 
-func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest, allocatedIndexID typeutil.UniqueID, isJson bool) (UniqueID, error) {
+func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
 
-	indexID, err := m.canCreateIndex(req, isJson)
-	if err != nil {
-		return indexID, err
-	}
-
-	if indexID == 0 {
-		indexID = allocatedIndexID
-	} else {
-		return indexID, nil
-	}
-
-	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
-	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
-	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
-	}
-	if err := ValidateIndexParams(index); err != nil {
-		return indexID, err
-	}
 	log.Ctx(ctx).Info("meta update: CreateIndex", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 
@@ -462,13 +442,13 @@ func (m *indexMeta) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReq
 		log.Ctx(ctx).Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
 			zap.String("indexName", index.IndexName), zap.Error(err))
-		return indexID, err
+		return err
 	}
 
 	m.updateCollectionIndex(index)
 	log.Ctx(ctx).Info("meta update: CreateIndex success", zap.Int64("collectionID", index.CollectionID),
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
-	return indexID, nil
+	return nil
 }
 
 func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
@@ -496,19 +476,19 @@ func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.Segment
 
 	log.Ctx(ctx).Info("meta update: adding segment index", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
-		zap.Int64("buildID", buildID))
+		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
 
 	segIndex.IndexState = commonpb.IndexState_Unissued
 	if err := m.catalog.CreateSegmentIndex(ctx, segIndex); err != nil {
 		log.Ctx(ctx).Warn("meta update: adding segment index failed",
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
-			zap.Int64("buildID", segIndex.BuildID), zap.Error(err))
+			zap.Int64("buildID", segIndex.BuildID), zap.String("indexType", segIndex.IndexType), zap.Error(err))
 		return err
 	}
 	m.updateSegmentIndex(segIndex)
 	log.Ctx(ctx).Info("meta update: adding segment index success", zap.Int64("collectionID", segIndex.CollectionID),
 		zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
-		zap.Int64("buildID", buildID))
+		zap.Int64("buildID", buildID), zap.String("indexType", segIndex.IndexType))
 	return nil
 }
 
@@ -660,6 +640,17 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 
 	m.fieldIndexLock.Lock()
 	defer m.fieldIndexLock.Unlock()
+
+	if len(indexIDs) == 0 {
+		// drop all indexes if indexIDs is empty.
+		indexIDs = make([]UniqueID, 0, len(m.indexes[collID]))
+		for indexID, index := range m.indexes[collID] {
+			if index.IsDeleted {
+				continue
+			}
+			indexIDs = append(indexIDs, indexID)
+		}
+	}
 
 	fieldIndexes, ok := m.indexes[collID]
 	if !ok {
@@ -1069,12 +1060,17 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
 	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
 	m.fieldIndexLock.RLock()
-	fieldIndexes, ok := m.indexes[collectionID]
+	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
 		return ret
 	}
+	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
+	for id, index := range fieldIndexesMap {
+		fieldIndexes[id] = index
+	}
 	m.fieldIndexLock.RUnlock()
+
 	for _, segID := range segmentIDs {
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes.Get(segID)

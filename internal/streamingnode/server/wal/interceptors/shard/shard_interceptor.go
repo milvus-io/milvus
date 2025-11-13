@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 const interceptorName = "shard"
@@ -39,6 +40,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeDelete:           impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:      impl.handleManualFlushMessage,
 		message.MessageTypeSchemaChange:     impl.handleSchemaChange,
+		message.MessageTypeAlterCollection:  impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
 		message.MessageTypeFlush:            impl.handleFlushSegment,
 	}
@@ -52,8 +54,10 @@ func (impl *shardInterceptor) Name() string {
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
 	op, ok := impl.ops[msg.MessageType()]
-	if ok {
+	if ok && !funcutil.IsControlChannel(msg.VChannel()) {
 		// If the message type is registered in the interceptor, use the registered operation.
+		// control channel message is only used to determine the DDL/DCL order,
+		// perform no effect on the shard manager, so skip it.
 		return op(ctx, msg, appendOp)
 	}
 	return appendOp(ctx, msg)
@@ -238,6 +242,19 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 	header.FlushedSegmentIds = segmentIDs
 	schemaChangeMsg.OverwriteHeader(header)
 
+	return appendOp(ctx, msg)
+}
+
+// handleAlterCollection handles the alter collection message.
+func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	putCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
+	header := putCollectionMsg.Header()
+	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	header.FlushedSegmentIds = segmentIDs
+	putCollectionMsg.OverwriteHeader(header)
 	return appendOp(ctx, msg)
 }
 

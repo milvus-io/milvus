@@ -40,8 +40,6 @@ type RootCoordCatalog interface {
 
 	// GetCredential gets the credential info for the username, returns error if no credential exists for this username.
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
-	// CreateCredential creates credential by Username and EncryptedPassword in crediential. Please make sure credential.Username isn't empty before calling this API. Credentials already exists will be altered.
-	CreateCredential(ctx context.Context, credential *model.Credential) error
 	// AlterCredential does exactly the same as CreateCredential
 	AlterCredential(ctx context.Context, credential *model.Credential) error
 	// DropCredential removes the credential of this username
@@ -128,6 +126,7 @@ type DataCoordCatalog interface {
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
+	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error
 	MarkChannelDeleted(ctx context.Context, channel string) error
 	ShouldDropChannel(ctx context.Context, channel string) bool
@@ -207,33 +206,22 @@ type QueryCoordCatalog interface {
 	GetCollectionTargets(ctx context.Context) (map[int64]*querypb.CollectionTarget, error)
 }
 
-// ReplicationCatalog is the interface for replication catalog
-// it's used by CDC component.
-type ReplicationCatalog interface {
-	// RemoveReplicatePChannel removes the replicate pchannel from metastore.
-	// Remove the task of CDC replication task of current cluster, should be called when a CDC replication task is finished.
-	RemoveReplicatePChannel(ctx context.Context, meta *streamingpb.ReplicatePChannelMeta) error
-
-	// ListReplicatePChannels lists all replicate pchannels from metastore.
-	// every ReplicatePChannelMeta is a task of CDC replication task of current cluster which is a source cluster in replication topology.
-	// the task is written by streaming coord, SaveReplicateConfiguration operation.
-	ListReplicatePChannels(ctx context.Context) ([]*streamingpb.ReplicatePChannelMeta, error)
-}
-
 // StreamingCoordCataLog is the interface for streamingcoord catalog
+// All write operation of catalog is reliable, the error will only be returned if the ctx is canceled,
+// otherwise it will retry until success.
 type StreamingCoordCataLog interface {
-	ReplicationCatalog
-
 	// GetCChannel get the control channel from metastore.
 	GetCChannel(ctx context.Context) (*streamingpb.CChannelMeta, error)
 
 	// SaveCChannel save the control channel to metastore.
+	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SaveCChannel(ctx context.Context, info *streamingpb.CChannelMeta) error
 
 	// GetVersion get the streaming version from metastore.
 	GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
 
 	// SaveVersion save the streaming version to metastore.
+	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SaveVersion(ctx context.Context, version *streamingpb.StreamingVersion) error
 
 	// physical channel watch related
@@ -242,6 +230,7 @@ type StreamingCoordCataLog interface {
 	ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta, error)
 
 	// SavePChannel save a pchannel info to metastore.
+	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SavePChannels(ctx context.Context, info []*streamingpb.PChannelMeta) error
 
 	// ListBroadcastTask list all broadcast tasks.
@@ -251,9 +240,11 @@ type StreamingCoordCataLog interface {
 	// SaveBroadcastTask save the broadcast task to metastore.
 	// Make the task recoverable after restart.
 	// When broadcast task is done, it will be removed from metastore.
+	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SaveBroadcastTask(ctx context.Context, broadcastID uint64, task *streamingpb.BroadcastTask) error
 
 	// SaveReplicateConfiguration saves the replicate configuration to metastore.
+	// Only return error if the ctx is canceled, otherwise it will retry until success.
 	SaveReplicateConfiguration(ctx context.Context, config *streamingpb.ReplicateConfigurationMeta, replicatingTasks []*streamingpb.ReplicatePChannelMeta) error
 
 	// GetReplicateConfiguration gets the replicate configuration from metastore.

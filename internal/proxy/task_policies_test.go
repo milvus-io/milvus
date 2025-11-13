@@ -1,5 +1,6 @@
 package proxy
 
+/*
 import (
 	"context"
 	"sort"
@@ -83,3 +84,4 @@ func (m *mockQuery) records() map[UniqueID][]string {
 	}
 	return m.queryset
 }
+*/

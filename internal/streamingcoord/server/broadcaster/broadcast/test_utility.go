@@ -9,5 +9,6 @@ import (
 )
 
 func ResetBroadcaster() {
+	Release()
 	singleton = syncutil.NewFuture[broadcaster.Broadcaster]()
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // errFastLockFailed is the error for fast lock failed.
@@ -83,7 +84,7 @@ func (l *lockGuard) Unlock() {
 // FastLock locks the resource keys without waiting.
 // return error if the resource key is already locked.
 func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, error) {
-	sortResourceKeys(keys)
+	keys = uniqueSortResourceKeys(keys)
 
 	g := &lockGuards{}
 	for _, key := range keys {
@@ -104,9 +105,10 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 }
 
 // Lock locks the resource keys.
-func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) (*lockGuards, error) {
+func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) *lockGuards {
 	// lock the keys in order to avoid deadlock.
-	sortResourceKeys(keys)
+	keys = uniqueSortResourceKeys(keys)
+
 	g := &lockGuards{}
 	for _, key := range keys {
 		if key.Shared {
@@ -116,7 +118,7 @@ func (r *resourceKeyLocker) Lock(keys ...message.ResourceKey) (*lockGuards, erro
 		}
 		g.append(&lockGuard{locker: r, key: key})
 	}
-	return g, nil
+	return g
 }
 
 // unlockWithKey unlocks the resource key.
@@ -128,12 +130,14 @@ func (r *resourceKeyLocker) unlockWithKey(key message.ResourceKey) {
 	r.inner.Unlock(newResourceLockKey(key))
 }
 
-// sortResourceKeys sorts the resource keys.
-func sortResourceKeys(keys []message.ResourceKey) {
+// uniqueSortResourceKeys sorts the resource keys.
+func uniqueSortResourceKeys(keys []message.ResourceKey) []message.ResourceKey {
+	keys = typeutil.NewSet(keys...).Collect()
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].Domain != keys[j].Domain {
 			return keys[i].Domain < keys[j].Domain
 		}
 		return keys[i].Key < keys[j].Key
 	})
+	return keys
 }

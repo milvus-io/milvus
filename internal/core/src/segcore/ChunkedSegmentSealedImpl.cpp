@@ -159,6 +159,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     auto is_pk = field_id == schema_->get_primary_field_id();
 
+    LOG_INFO("LoadScalarIndex, fieldID:{}. segmentID:{}, is_pk:{}",
+             info.field_id,
+             id_,
+             is_pk);
     // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
     if (is_pk && is_sorted_by_pk_) {
         LOG_INFO(
@@ -231,6 +235,11 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         // need the pk field again.
         fields_.rlock()->at(field_id)->ManualEvictCache();
     }
+    LOG_INFO(
+        "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
+        info.field_id,
+        id_,
+        request.has_raw_data);
 }
 
 void
@@ -335,12 +344,14 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 for (auto& [_, info] : load_info.field_infos) {
                     num_rows = info.row_count;
                 }
+                auto all_ts_chunks =
+                    timestamp_proxy_column->GetAllChunks(nullptr);
                 std::vector<Timestamp> timestamps(num_rows);
                 int64_t offset = 0;
-                for (int i = 0; i < timestamp_proxy_column->num_chunks(); i++) {
-                    auto chunk = timestamp_proxy_column->GetChunk(nullptr, i);
+                for (int i = 0; i < all_ts_chunks.size(); i++) {
+                    auto chunk_data = all_ts_chunks[i].get();
                     auto fixed_chunk =
-                        static_cast<FixedWidthChunk*>(chunk.get());
+                        static_cast<FixedWidthChunk*>(chunk_data);
                     auto span = fixed_chunk->Span();
                     for (size_t j = 0; j < span.row_count(); j++) {
                         auto ts = *(int64_t*)((char*)span.data() +
@@ -575,6 +586,19 @@ bool
 ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     return mmap_field_ids_.find(field_id) != mmap_field_ids_.end();
+}
+
+void
+ChunkedSegmentSealedImpl::prefetch_chunks(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const std::vector<int64_t>& chunk_ids) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(field_id)) {
+        column->PrefetchChunks(op_ctx, chunk_ids);
+    }
 }
 
 PinWrapper<SpanBase>
@@ -2530,7 +2554,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             column->ManualEvictCache();
         }
     }
-    if (data_type == DataType::GEOMETRY) {
+    if (data_type == DataType::GEOMETRY &&
+        segcore_config_.get_enable_geometry_cache()) {
         // Construct GeometryCache for the entire field
         LoadGeometryCache(field_id, column);
     }
@@ -2580,19 +2605,23 @@ ChunkedSegmentSealedImpl::FinishLoad() {
     std::unique_lock lck(mutex_);
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
+            // no filling system fields
             continue;
         }
-        // cannot use is_field_exist, since it check schema only
-        // this shall check the ready bitset here
-        if (!get_bit(field_data_ready_bitset_, field_id) &&
-            !get_bit(index_ready_bitset_, field_id)) {
-            // vector field is not supported to be "added field", thus if a vector
-            // field is absent, it means for some reason we want to skip loading this
-            // field.
-            if (!IsVectorDataType(field_meta.get_data_type())) {
-                fill_empty_field(field_meta);
-            }
+        if (get_bit(field_data_ready_bitset_, field_id)) {
+            // no filling fields that data already loaded
+            continue;
         }
+        if (get_bit(index_ready_bitset_, field_id) &&
+            (index_has_raw_data_[field_id])) {
+            // no filling fields that index already loaded and has raw data
+            continue;
+        }
+        if (IsVectorDataType(field_meta.get_data_type())) {
+            // no filling vector fields
+            continue;
+        }
+        fill_empty_field(field_meta);
     }
 }
 
@@ -2663,8 +2692,8 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
     try {
         // Get geometry cache for this segment+field
         auto& geometry_cache =
-            milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(
-                get_segment_id(), field_id);
+            milvus::exec::SimpleGeometryCacheManager::Instance()
+                .GetOrCreateCache(get_segment_id(), field_id);
 
         // Iterate through all chunks and collect WKB data
         auto num_chunks = column->num_chunks();

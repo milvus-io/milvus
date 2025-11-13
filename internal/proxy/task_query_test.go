@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -60,11 +61,16 @@ func TestQueryTask_all(t *testing.T) {
 
 	qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-	mgr := NewMockShardClientManager(t)
+	mgr := shardclient.NewMockShardClientManager(t)
 	mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(qn, nil).Maybe()
-	lb := NewLBPolicyImpl(mgr)
+	mgr.EXPECT().GetShardLeaderList(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]string{"mock_qn"}, nil).Maybe()
+	mgr.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]shardclient.NodeInfo{
+		{NodeID: 1, Address: "mock_qn", Serviceable: true},
+	}, nil).Maybe()
+	mgr.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
+	lb := shardclient.NewLBPolicyImpl(mgr)
 
-	err = InitMetaCache(ctx, qc, mgr)
+	err = InitMetaCache(ctx, qc)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -141,8 +147,9 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			mixCoord: qc,
-			lb:       lb,
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -290,9 +297,10 @@ func TestQueryTask_all(t *testing.T) {
 					},
 				},
 			},
-			mixCoord:  qc,
-			lb:        lb,
-			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+			resultBuf:      &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}
 		// simulate scheduler enqueue task
 		enqueTs := uint64(10000)
@@ -341,9 +349,10 @@ func TestQueryTask_all(t *testing.T) {
 				},
 				GuaranteeTimestamp: enqueTs,
 			},
-			mixCoord:  qc,
-			lb:        lb,
-			resultBuf: &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
+			mixCoord:       qc,
+			lb:             lb,
+			shardclientMgr: mgr,
+			resultBuf:      &typeutil.ConcurrentSet[*internalpb.RetrieveResults]{},
 		}
 		qtErr = qt.PreExecute(context.TODO())
 		assert.Nil(t, qtErr)

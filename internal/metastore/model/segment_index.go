@@ -32,6 +32,7 @@ type SegmentIndex struct {
 	IndexStoreVersion         int64
 	FinishedUTCTime           uint64
 	CurrentScalarIndexVersion int32
+	IndexType                 string
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -58,6 +59,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentIndexVersion:       segIndex.GetCurrentIndexVersion(),
 		FinishedUTCTime:           segIndex.FinishedTime,
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
+		IndexType:                 segIndex.IndexType,
 	}
 }
 
@@ -86,6 +88,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 		FinishedTime:              segIdx.FinishedUTCTime,
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+		IndexType:                 segIdx.IndexType,
 	}
 }
 
@@ -110,5 +113,6 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentIndexVersion:       segIndex.CurrentIndexVersion,
 		FinishedUTCTime:           segIndex.FinishedUTCTime,
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
+		IndexType:                 segIndex.IndexType,
 	}
 }

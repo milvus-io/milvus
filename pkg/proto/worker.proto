@@ -8,6 +8,7 @@ import "common.proto";
 import "schema.proto";
 import "data_coord.proto";
 import "index_coord.proto";
+import "milvus.proto";
 
 
 service IndexNode {
@@ -25,6 +26,11 @@ service IndexNode {
   rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {}
   // Deprecated
   rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest)
+      returns (milvus.GetMetricsResponse) {
+  }
 
   rpc CreateTask(CreateTaskRequest) returns (common.Status) {}
   rpc QueryTask(QueryTaskRequest) returns (QueryTaskResponse) {}

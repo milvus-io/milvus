@@ -20,6 +20,38 @@ func (_m *MockReplicateStreamClient) EXPECT() *MockReplicateStreamClient_Expecte
 	return &MockReplicateStreamClient_Expecter{mock: &_m.Mock}
 }
 
+// BlockUntilFinish provides a mock function with no fields
+func (_m *MockReplicateStreamClient) BlockUntilFinish() {
+	_m.Called()
+}
+
+// MockReplicateStreamClient_BlockUntilFinish_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BlockUntilFinish'
+type MockReplicateStreamClient_BlockUntilFinish_Call struct {
+	*mock.Call
+}
+
+// BlockUntilFinish is a helper method to define mock.On call
+func (_e *MockReplicateStreamClient_Expecter) BlockUntilFinish() *MockReplicateStreamClient_BlockUntilFinish_Call {
+	return &MockReplicateStreamClient_BlockUntilFinish_Call{Call: _e.mock.On("BlockUntilFinish")}
+}
+
+func (_c *MockReplicateStreamClient_BlockUntilFinish_Call) Run(run func()) *MockReplicateStreamClient_BlockUntilFinish_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockReplicateStreamClient_BlockUntilFinish_Call) Return() *MockReplicateStreamClient_BlockUntilFinish_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockReplicateStreamClient_BlockUntilFinish_Call) RunAndReturn(run func()) *MockReplicateStreamClient_BlockUntilFinish_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockReplicateStreamClient) Close() {
 	_m.Called()

@@ -2,7 +2,6 @@ import pytest
 import numpy
 
 from base.client_v2_base import TestMilvusClientV2Base
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -3056,7 +3055,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             'functions': [], 
             'aliases': [], 
             'consistency_level': 0, 
-            'properties': {'collection.timezone': 'UTC'},
+            'properties': {'timezone': 'UTC'},
             'num_partitions': 1, 
             'enable_dynamic_field': True
         }
@@ -3346,8 +3345,7 @@ class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        error = {ct.err_code: 65535, ct.err_msg: f"duplicated new collection name {collection_name} in database "
-                                                 f"default with other collection name or alias"}
+        error = {ct.err_code: 1100, ct.err_msg: f"collection name or database name should be different"}
         self.rename_collection(client, collection_name, collection_name,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -3530,8 +3528,7 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
                                               "consistency_level": 0})
-        error = {ct.err_code: 65535, ct.err_msg: f"alter collection with empty properties and "
-                                                 f"delete keys, expect to set either properties or delete keys"}
+        error = {ct.err_code: 1100, ct.err_msg: f"no properties or delete keys provided"}
         self.drop_collection_properties(client, collection_name, property_keys,
                                         check_task=CheckTasks.err_res,
                                         check_items=error)
@@ -4522,20 +4519,39 @@ class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_bfloat16_vec_field_name, DataType.BFLOAT16_VECTOR, dim=default_dim)
         # Add all supported scalar data types from DataType.__members__
         supported_types = []
-        for k, v in DataType.__members__.items():
-            if (v and v != DataType.UNKNOWN and v != DataType.STRING 
-                and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR 
-                and v != DataType.BINARY_VECTOR and v != DataType.ARRAY 
-                and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR 
-                and v != DataType.INT8_VECTOR and v != DataType.SPARSE_FLOAT_VECTOR):
-                supported_types.append((k.lower(), v))
+        for member in DataType:
+            if member and not member.name.startswith("_") and member not in (
+                DataType.UNKNOWN,
+                DataType.STRING,
+                DataType.VARCHAR,
+                DataType.FLOAT_VECTOR,
+                DataType.BINARY_VECTOR,
+                DataType.ARRAY, 
+                DataType.FLOAT16_VECTOR,
+                DataType.BFLOAT16_VECTOR,
+                DataType.INT8_VECTOR,
+                DataType.SPARSE_FLOAT_VECTOR,
+                DataType.STRUCT,
+            ):
+                supported_types.append((member.name.lower(), member.value))
         for field_name, data_type in supported_types:
+            if field_name.lower().startswith("_"):
+                # skip private fields           
+                continue
+            if data_type == DataType.STRUCT:
+                # add struct field
+                struct_schema = client.create_struct_field_schema()
+                struct_schema.add_field("struct_scalar_field", DataType.INT64)
+                schema.add_field(field_name, DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct_schema, max_capacity=10)
+                continue
             # Skip INT64 and VARCHAR as they're already added as primary key  
             if data_type != DataType.INT64 and data_type != DataType.VARCHAR: 
                 schema.add_field(field_name, data_type)
         # Add ARRAY field separately with required parameters
         schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10)
         # Create collection
+        from pprint import pprint
+        pprint(f"schema: {schema}")
         self.create_collection(client, collection_name, schema=schema, shards_num=shards_num)
         # Verify collection properties
         expected_field_count = len([name for name in supported_types]) + 5

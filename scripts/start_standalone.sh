@@ -30,6 +30,3 @@ fi
 
 echo "Starting standalone..."
 nohup ./bin/milvus run standalone --run-with-subprocess >/tmp/standalone.log 2>&1 &
-
-echo "Starting cdc..."
-nohup ./bin/milvus run cdc --run-with-subprocess >/tmp/cdc.log 2>&1 &

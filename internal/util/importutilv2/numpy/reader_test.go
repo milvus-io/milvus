@@ -89,6 +89,13 @@ func createReader(fieldData storage.FieldData, dataType schemapb.DataType) (io.R
 			jsonStrs = append(jsonStrs, string(row.([]byte)))
 		}
 		data = jsonStrs
+	case schemapb.DataType_Geometry:
+		geoStrs := make([]string, 0, rowNum)
+		for i := 0; i < rowNum; i++ {
+			row := fieldData.GetRow(i)
+			geoStrs = append(geoStrs, string(row.([]byte)))
+		}
+		data = geoStrs
 	case schemapb.DataType_BinaryVector:
 		rows := fieldData.GetDataRows().([]byte)
 		const rowBytes = dim / 8

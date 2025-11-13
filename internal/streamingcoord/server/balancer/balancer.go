@@ -19,6 +19,7 @@ var (
 )
 
 type (
+	AllocVChannelParam                   = channel.AllocVChannelParam
 	WatchChannelAssignmentsCallbackParam = channel.WatchChannelAssignmentsCallbackParam
 	WatchChannelAssignmentsCallback      = channel.WatchChannelAssignmentsCallback
 )
@@ -34,11 +35,17 @@ type Balancer interface {
 	// GetAllStreamingNodes fetches all streaming node info.
 	GetAllStreamingNodes(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error)
 
+	// AllocVirtualChannels allocates virtual channels for a collection.
+	AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error)
+
 	// UpdateBalancePolicy update the balance policy.
 	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)
 
 	// ReplicateRole returns the replicate role of the balancer.
 	ReplicateRole() replicateutil.Role
+
+	// WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
+	WaitUntilWALbasedDDLReady(ctx context.Context) error
 
 	// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
 	// If the error is returned, the balancer is closed.
@@ -60,7 +67,7 @@ type Balancer interface {
 	MarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) error
 
 	// UpdateReplicateConfiguration updates the replicate configuration.
-	UpdateReplicateConfiguration(ctx context.Context, msgs ...message.ImmutableAlterReplicateConfigMessageV2) error
+	UpdateReplicateConfiguration(ctx context.Context, result message.BroadcastResultAlterReplicateConfigMessageV2) error
 
 	// Trigger is a hint to trigger a balance.
 	Trigger(ctx context.Context) error

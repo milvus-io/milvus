@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_assignment"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_types"
@@ -35,14 +37,19 @@ func TestHandlerClient(t *testing.T) {
 
 	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
 	handlerServiceClient := mock_streamingpb.NewMockStreamingNodeHandlerServiceClient(t)
-	handlerServiceClient.EXPECT().GetReplicateCheckpoint(mock.Anything, mock.Anything).Return(&streamingpb.GetReplicateCheckpointResponse{
-		Checkpoint: &commonpb.ReplicateCheckpoint{
-			ClusterId: "pchannel",
-			Pchannel:  "pchannel",
-			MessageId: nil,
-			TimeTick:  0,
-		},
-	}, nil)
+	handlerServiceClient.EXPECT().GetReplicateCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, grcr *streamingpb.GetReplicateCheckpointRequest, co ...grpc.CallOption) (*streamingpb.GetReplicateCheckpointResponse, error) {
+		serverID, ok := contextutil.GetPickServerID(ctx)
+		assert.True(t, ok)
+		assert.Equal(t, serverID, assignment.Node.ServerID)
+		return &streamingpb.GetReplicateCheckpointResponse{
+			Checkpoint: &commonpb.ReplicateCheckpoint{
+				ClusterId: "pchannel",
+				Pchannel:  "pchannel",
+				MessageId: nil,
+				TimeTick:  0,
+			},
+		}, nil
+	})
 	service.EXPECT().GetService(mock.Anything).Return(handlerServiceClient, nil)
 	rb := mock_resolver.NewMockBuilder(t)
 	rb.EXPECT().Close().Run(func() {})
@@ -65,6 +72,9 @@ func TestHandlerClient(t *testing.T) {
 		watcher:          w,
 		rebalanceTrigger: rebalanceTrigger,
 		newProducer: func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, serverID, assignment.Node.ServerID)
 			if pK == 0 {
 				pK++
 				return nil, status.NewUnmatchedChannelTerm("pchannel", 1, 2)
@@ -72,6 +82,9 @@ func TestHandlerClient(t *testing.T) {
 			return p, nil
 		},
 		newConsumer: func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			assert.True(t, ok)
+			assert.Equal(t, serverID, assignment.Node.ServerID)
 			return c, nil
 		},
 	}

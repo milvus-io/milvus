@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
 )
 
 // newVChannelRecoveryInfoFromCreateCollectionMessage creates a new vchannel recovery info from a create collection message.
@@ -31,10 +32,8 @@ func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCre
 			PartitionId: partitionId,
 		})
 	}
-	schema := &schemapb.CollectionSchema{}
-	if err := proto.Unmarshal(msg.MustBody().Schema, schema); err != nil {
-		panic("failed to unmarshal collection schema, err: " + err.Error())
-	}
+	body := msg.MustBody()
+	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	return &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{
 			Vchannel: msg.VChannel(),
@@ -136,6 +135,26 @@ func (info *vchannelRecoveryInfo) ObserveSchemaChange(msg message.ImmutableSchem
 		State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 		CheckpointTimeTick: msg.TimeTick(),
 	})
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
+}
+
+// ObservePutCollection is called when a put collection message is observed.
+func (info *vchannelRecoveryInfo) ObserveAlterCollection(msg message.ImmutableAlterCollectionMessageV2) {
+	if msg.TimeTick() < info.meta.CheckpointTimeTick {
+		// the txn message will share the same time tick.
+		// (although the flush operation is not a txn message)
+		// so we only filter the time tick is less than the checkpoint time tick.
+		// Consistent state is guaranteed by the recovery storage's mutex.
+		return
+	}
+	if messageutil.IsSchemaChange(msg.Header()) {
+		info.meta.CollectionInfo.Schemas = append(info.meta.CollectionInfo.Schemas, &streamingpb.CollectionSchemaOfVChannel{
+			Schema:             msg.MustBody().Updates.Schema,
+			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+			CheckpointTimeTick: msg.TimeTick(),
+		})
+	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 }

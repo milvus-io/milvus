@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -44,14 +45,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -84,8 +87,6 @@ type ServerSuite struct {
 	nodes   []*mocks.MockQueryNode
 	ctx     context.Context
 }
-
-var testMeta string
 
 func (suite *ServerSuite) SetupSuite() {
 	paramtable.Init()
@@ -123,8 +124,9 @@ func (suite *ServerSuite) SetupSuite() {
 }
 
 func (suite *ServerSuite) SetupTest() {
+	initStreamingSystem()
+
 	var err error
-	paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MetaStoreType.Key, testMeta)
 	suite.tikvCli = tikv.SetupLocalTxn()
 	suite.server, err = suite.newQueryCoord()
 
@@ -626,11 +628,17 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.proxyClientManager,
 	)
 
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
-	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil).Maybe()
 	for _, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
+			DbName:         util.DefaultDBName,
+			DbId:           1,
+			CollectionID:   collection,
+			CollectionName: "collection_" + strconv.FormatInt(collection, 10),
+			Schema:         &schemapb.CollectionSchema{},
+		}, nil).Maybe()
 		suite.expectGetRecoverInfo(collection)
 	}
 	log.Debug("server hacked")
@@ -669,23 +677,13 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	if err != nil {
-		return nil, err
-	}
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	server.SetEtcdClient(etcdCli)
 	server.SetTiKVClient(suite.tikvCli)
 
 	server.SetQueryNodeCreator(session.DefaultQueryNodeCreator)
 	suite.hackBroker(server)
+	registry.ResetRegistration()
 	err = server.Init()
 	return server, err
 }
@@ -929,9 +927,5 @@ func createTestSession(nodeID int64, address string, stopping bool) *sessionutil
 }
 
 func TestServer(t *testing.T) {
-	parameters := []string{"tikv", "etcd"}
-	for _, v := range parameters {
-		testMeta = v
-		suite.Run(t, new(ServerSuite))
-	}
+	suite.Run(t, new(ServerSuite))
 }

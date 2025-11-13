@@ -46,6 +46,7 @@ class StorageV2FSCache {
         bool gcp_native_without_auth = false;
         std::string gcp_credential_json = "";
         bool use_custom_part_upload = true;
+        uint32_t max_connections = 100;
 
         bool
         operator==(const Key& other) const {
@@ -64,7 +65,8 @@ class StorageV2FSCache {
                    requestTimeoutMs == other.requestTimeoutMs &&
                    gcp_native_without_auth == other.gcp_native_without_auth &&
                    gcp_credential_json == other.gcp_credential_json &&
-                   use_custom_part_upload == other.use_custom_part_upload;
+                   use_custom_part_upload == other.use_custom_part_upload &&
+                   max_connections == other.max_connections;
         }
     };
 
@@ -90,6 +92,7 @@ class StorageV2FSCache {
             hash_combine(hash, k.gcp_native_without_auth);
             hash_combine(hash, k.gcp_credential_json);
             hash_combine(hash, k.use_custom_part_upload);
+            hash_combine(hash, k.max_connections);
             return hash;
         }
 

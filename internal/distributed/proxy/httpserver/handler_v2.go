@@ -209,6 +209,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// segment group
 	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
 	router.POST(QuotaCenterCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetQuotaMetricsReq{} }, wrapperTraceLog(h.getQuotaMetrics))))
+
+	// common
+	router.POST(CommonCategory+RunAnalyzerAction, timeoutMiddleware(wrapperPost(func() any { return &RunAnalyzerReq{} }, wrapperTraceLog(h.runAnalyzer))))
 }
 
 type (
@@ -2734,6 +2737,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		response := resp.(*internalpb.GetImportProgressResponse)
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
+		returnData["createTime"] = response.GetCreateTime()
 		returnData["collectionName"] = response.GetCollectionName()
 		returnData["completeTime"] = response.GetCompleteTime()
 		returnData["state"] = response.GetState().String()
@@ -2843,6 +2847,67 @@ func (h *HandlersV2) getQuotaMetrics(ctx context.Context, c *gin.Context, anyReq
 	if err == nil {
 		response := resp.(*internalpb.GetQuotaMetricsResponse)
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: response.GetMetricsInfo()})
+	}
+
+	return resp, err
+}
+
+func (h *HandlersV2) runAnalyzer(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*RunAnalyzerReq)
+
+	// Convert text strings to byte slices
+	placeholder := make([][]byte, len(httpReq.Text))
+	for i, text := range httpReq.Text {
+		placeholder[i] = []byte(text)
+	}
+
+	req := &milvuspb.RunAnalyzerRequest{
+		DbName:         dbName,
+		AnalyzerParams: httpReq.AnalyzerParams,
+		Placeholder:    placeholder,
+		WithDetail:     httpReq.WithDetail,
+		WithHash:       httpReq.WithHash,
+		CollectionName: httpReq.CollectionName,
+		FieldName:      httpReq.FieldName,
+		AnalyzerNames:  httpReq.AnalyzerNames,
+	}
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/RunAnalyzer", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.RunAnalyzer(reqCtx, req.(*milvuspb.RunAnalyzerRequest))
+	})
+
+	if err == nil {
+		analyzerResp := resp.(*milvuspb.RunAnalyzerResponse)
+		// Convert response to HTTP-friendly format
+		results := make([]gin.H, len(analyzerResp.Results))
+		for i, result := range analyzerResp.Results {
+			tokens := make([]gin.H, len(result.Tokens))
+			for j, token := range result.Tokens {
+				tokenData := gin.H{
+					"token": token.Token,
+				}
+				if httpReq.WithDetail {
+					tokenData["startOffset"] = token.StartOffset
+					tokenData["endOffset"] = token.EndOffset
+					tokenData["position"] = token.Position
+					tokenData["positionLength"] = token.PositionLength
+				}
+				if httpReq.WithHash {
+					tokenData["hash"] = token.Hash
+				}
+				tokens[j] = tokenData
+			}
+			results[i] = gin.H{
+				"tokens": tokens,
+			}
+		}
+		HTTPReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode: merr.Code(nil),
+			HTTPReturnData: gin.H{
+				"results": results,
+			},
+		})
 	}
 
 	return resp, err

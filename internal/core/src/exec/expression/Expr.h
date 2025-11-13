@@ -761,6 +761,14 @@ class SegmentExpr : public Expr {
 
         size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
 
+        // prefetch chunks to reduce cache miss latency
+        std::vector<int64_t> pf_chunk_ids;
+        pf_chunk_ids.reserve(num_data_chunk_ - start_chunk);
+        for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+            pf_chunk_ids.push_back(i);
+        }
+        segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
+
         for (size_t i = start_chunk; i < num_data_chunk_; i++) {
             auto data_pos =
                 process_all_chunks
@@ -1149,10 +1157,6 @@ class SegmentExpr : public Expr {
                         return ProcessChunksForValidByOffsets<std::string>(
                             use_index, input);
                     }
-                    case DataType::GEOMETRY: {
-                        return ProcessChunksForValidByOffsets<std::string>(
-                            use_index, input);
-                    }
                     default:
                         ThrowInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
@@ -1269,7 +1273,11 @@ class SegmentExpr : public Expr {
         auto size = std::min(
             std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
             int64_t(chunk_valid_res.size()));
-
+        if (field_type_ == DataType::GEOMETRY &&
+            segment_->type() == SegmentType::Growing) {
+            size = std::min(batch_size_ - processed_rows,
+                            int64_t(chunk_valid_res.size()) - data_pos);
+        }
         valid_result.append(chunk_valid_res, data_pos, size);
         return size;
     }
@@ -1421,8 +1429,10 @@ class SegmentExpr : public Expr {
             return false;
         };
 
+        // if path is empty, json stats can not know key name,
+        // so we can't use json shredding data
         return PlanUseJsonStats(context) && HasJsonStats(field_id) &&
-               !path_contains_integer(nested_path);
+               !nested_path.empty() && !path_contains_integer(nested_path);
     }
 
     virtual bool

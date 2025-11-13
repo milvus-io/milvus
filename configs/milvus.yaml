@@ -310,7 +310,7 @@ proxy:
       bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
   maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
-  maxVectorFieldNum: 4 # The maximum number of vector fields that can be specified in a collection. Value range: [1, 10].
+  maxVectorFieldNum: 4 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
@@ -465,6 +465,7 @@ queryNode:
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
+    enableGeometryCache: false # Enable geometry cache for geometry data
     tieredStorage:
       warmup:
         # options: sync, disable.
@@ -510,7 +511,7 @@ queryNode:
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
-    jsonStats: true # Enable mmap for loading json stats
+    jsonShredding: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
@@ -728,11 +729,11 @@ dataCoord:
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
-  jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
-  jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
-  jsonStatsMaxShreddingColumns: 1024 # the max number of columns to shred
-  jsonStatsShreddingRatioThreshold: 0.3 # the ratio threshold to shred
-  jsonStatsWriteBatchSize: 819200 # the batch size to write
+  jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
+  jsonShreddingTriggerInterval: 10 # jsonkey task interval per trigger
+  jsonShreddingMaxColumns: 1024 # the max number of columns to shred
+  jsonShreddingRatioThreshold: 0.3 # the ratio threshold to shred
+  jsonShreddingWriteBatchSize: 81920 # the batch size to write
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
@@ -931,7 +932,7 @@ common:
   # Currently, only QueryNode uses 'common.diskWrite*' parameters. Support for other components will be added in the future.
   # The options include 'direct' and 'buffered'. The default value is 'buffered'.
   diskWriteMode: buffered
-  # Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+  # Disk write buffer size in KB, used for both 'direct' and 'buffered' modes, default is 64KB.
   # Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.
   diskWriteBufferSizeKb: 64
   # This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
@@ -969,7 +970,7 @@ common:
         readwrite:
           privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups # Cluster level readwrite privileges
         admin:
-          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup # Cluster level admin privileges
+          privileges: ListDatabases,SelectOwnership,SelectUser,DescribeResourceGroup,ListResourceGroups,ListPrivilegeGroups,FlushAll,TransferNode,TransferReplica,UpdateResourceGroups,BackupRBAC,RestoreRBAC,CreateDatabase,DropDatabase,CreateOwnership,DropOwnership,ManageOwnership,CreateResourceGroup,DropResourceGroup,UpdateUser,RenameCollection,CreatePrivilegeGroup,DropPrivilegeGroup,OperatePrivilegeGroup,UpdateReplicateConfiguration # Cluster level admin privileges
       database:
         readonly:
           privileges: ShowCollections,DescribeDatabase # Database level readonly privileges
@@ -1022,11 +1023,11 @@ common:
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
-  enabledJSONKeyStats: true # Indicates sealedsegment whether to enable JSON key stats
-  enabledGrowingSegmentJSONKeyStats: false # Indicates growingsegment whether to enable JSON key stats
+  enabledJSONShredding: false # Indicates sealedsegment whether to enable JSON key stats
+  enabledGrowingSegmentJSONShredding: false # Indicates growingsegment whether to enable JSON key stats
   enableConfigParamTypeCheck: true # Indicates whether to enable config param type check
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
-  UsingJSONStatsForQuery: true # Indicates whether to use json stats when query
+  usingJSONShreddingForQuery: true # Indicates whether to use json stats when query
   clusterID: 0 # cluster id
 
 # QuotaConfig, configurations of Milvus quota and limits.
@@ -1312,7 +1313,7 @@ streaming:
         # it also determine the depth of depth first search method that is used to find the best balance result, 3 by default
         rebalanceMaxStep: 3
   walBroadcaster:
-    concurrencyRatio: 1 # The concurrency ratio based on number of CPU for wal broadcaster, 1 by default.
+    concurrencyRatio: 4 # The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
   walWriteAheadBuffer:

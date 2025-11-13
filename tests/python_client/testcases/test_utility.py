@@ -512,8 +512,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
                                             check_items={"err_code": 100,
-                                                         "err_msg": "collection not found in database, collection: {}"
-                                                                    ", database: default".format(old_collection_name)})
+                                                         "err_msg": "collection not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_name(self):
@@ -527,10 +526,8 @@ class TestUtilityParams(TestcaseBase):
         old_collection_name = collection_w.name
         self.utility_wrap.rename_collection(old_collection_name, old_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 65535,
-                                                         "err_msg": "duplicated new collection name {} in database default"
-                                                                    " with other collection name or"
-                                                                    " alias".format(collection_w.name)})
+                                            check_items={"err_code": 1100,
+                                                         "err_msg": "collection name or database name should be different"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_existed_collection_alias(self):

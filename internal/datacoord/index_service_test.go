@@ -18,7 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -31,24 +33,91 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func initStreamingSystem(t *testing.T) {
+	registry.ResetRegistration()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
+	streaming.SetWALForTest(wal)
+
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		results := make(map[string]*message.AppendResult)
+		for _, vchannel := range msg.BroadcastHeader().VChannels {
+			results[vchannel] = &message.AppendResult{
+				MessageID:              rmq.NewRmqID(1),
+				TimeTick:               tsoutil.ComposeTSByTime(time.Now(), 0),
+				LastConfirmedMessageID: rmq.NewRmqID(1),
+			}
+		}
+		retry.Do(context.Background(), func() error {
+			return registry.CallMessageAckCallback(context.Background(), msg, results)
+		}, retry.AttemptAlways())
+		return &types.BroadcastAppendResult{}, nil
+	}).Maybe()
+	bapi.EXPECT().Close().Return().Maybe()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Release()
+	broadcast.ResetBroadcaster()
+	broadcast.Register(mb)
+
+	snmanager.ResetStreamingNodeManager()
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().AllocVirtualChannels(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, param balancer.AllocVChannelParam) ([]string, error) {
+		vchannels := make([]string, 0, param.Num)
+		for i := 0; i < param.Num; i++ {
+			vchannels = append(vchannels, funcutil.GetVirtualChannel(fmt.Sprintf("by-dev-rootcoord-dml_%d_100v0", i), param.CollectionID, i))
+		}
+		return vchannels, nil
+	}).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	balance.Register(b)
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+}
 
 func TestServerId(t *testing.T) {
 	s := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}}}
@@ -56,6 +125,8 @@ func TestServerId(t *testing.T) {
 }
 
 func TestServer_CreateIndex(t *testing.T) {
+	initStreamingSystem(t)
+
 	var (
 		collID  = UniqueID(1)
 		fieldID = UniqueID(10)
@@ -109,6 +180,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	RegisterDDLCallbacks(s)
 
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -292,8 +364,18 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	t.Run("save index fail", func(t *testing.T) {
 		metakv := mockkv.NewMetaKv(t)
-		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
-		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
+		metakv.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, key string, value string) error {
+			if rand.Intn(3) == 0 {
+				return errors.New("failed")
+			}
+			return nil
+		}).Maybe()
+		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, kvs map[string]string) error {
+			if rand.Intn(3) == 0 {
+				return errors.New("failed")
+			}
+			return nil
+		}).Maybe()
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		s.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
 		s.meta.indexMeta.catalog = s.meta.catalog
@@ -304,11 +386,12 @@ func TestServer_CreateIndex(t *testing.T) {
 			},
 		}
 		resp, err := s.CreateIndex(ctx, req)
-		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 }
 
 func TestServer_AlterIndex(t *testing.T) {
+	initStreamingSystem(t)
 	var (
 		collID       = UniqueID(1)
 		partID       = UniqueID(2)
@@ -610,6 +693,12 @@ func TestServer_AlterIndex(t *testing.T) {
 			},
 		}, nil).Once()
 	}
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Status(nil),
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
 
 	s := &Server{
 		meta: &meta{
@@ -669,7 +758,9 @@ func TestServer_AlterIndex(t *testing.T) {
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 		handler:         mockHandler,
+		broker:          b,
 	}
+	RegisterDDLCallbacks(s)
 
 	t.Run("server not available", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
@@ -1267,6 +1358,8 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 }
 
 func TestServer_DescribeIndex(t *testing.T) {
+	initStreamingSystem(t)
+
 	var (
 		collID       = UniqueID(1)
 		partID       = UniqueID(2)
@@ -1352,6 +1445,13 @@ func TestServer_DescribeIndex(t *testing.T) {
 			},
 		},
 	}
+
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Status(nil),
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
 	s := &Server{
 		meta: &meta{
 			catalog: catalog,
@@ -1453,6 +1553,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
+		broker:          b,
 	}
 	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx1.Insert(indexID, &model.SegmentIndex{
@@ -1615,6 +1716,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
+	RegisterDDLCallbacks(s)
 
 	t.Run("server not available", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
@@ -1818,6 +1920,7 @@ func TestServer_ListIndexes(t *testing.T) {
 }
 
 func TestServer_GetIndexStatistics(t *testing.T) {
+	initStreamingSystem(t)
 	var (
 		collID       = UniqueID(1)
 		partID       = UniqueID(2)
@@ -1886,6 +1989,12 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 			},
 		},
 	}
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Status(nil),
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
 	s := &Server{
 		meta: &meta{
 			catalog: catalog,
@@ -1987,6 +2096,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
+		broker:          b,
 	}
 	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx1.Insert(indexID, &model.SegmentIndex{
@@ -2078,6 +2188,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
+	RegisterDDLCallbacks(s)
 
 	t.Run("server not available", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Initializing)
@@ -2116,6 +2227,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 }
 
 func TestServer_DropIndex(t *testing.T) {
+	initStreamingSystem(t)
 	var (
 		collID     = UniqueID(1)
 		partID     = UniqueID(2)
@@ -2150,6 +2262,13 @@ func TestServer_DropIndex(t *testing.T) {
 	).Return(nil)
 
 	mock0Allocator := newMockAllocator(t)
+
+	b := broker.NewMockBroker(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Status(nil),
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	}, nil)
 
 	s := &Server{
 		meta: &meta{
@@ -2235,6 +2354,7 @@ func TestServer_DropIndex(t *testing.T) {
 
 			segments: NewSegmentsInfo(),
 		},
+		broker:          b,
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -2265,18 +2385,20 @@ func TestServer_DropIndex(t *testing.T) {
 		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
 	})
 
+	RegisterDDLCallbacks(s)
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	t.Run("drop fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("AlterIndexes",
-			mock.Anything,
-			mock.Anything,
-		).Return(errors.New("fail"))
+		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, indexes []*model.Index) error {
+			if rand.Intn(3) == 0 {
+				return errors.New("fail")
+			}
+			return nil
+		}).Maybe()
 		s.meta.indexMeta.catalog = catalog
 		resp, err := s.DropIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("drop one index", func(t *testing.T) {
@@ -2672,6 +2794,8 @@ func TestValidateIndexParams(t *testing.T) {
 }
 
 func TestJsonIndex(t *testing.T) {
+	initStreamingSystem(t)
+
 	collID := UniqueID(1)
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -2721,6 +2845,7 @@ func TestJsonIndex(t *testing.T) {
 		notifyIndexChan: make(chan UniqueID, 1),
 		broker:          broker.NewCoordinatorBroker(b),
 	}
+	RegisterDDLCallbacks(s)
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	req := &indexpb.CreateIndexRequest{

@@ -389,9 +389,9 @@ ScalarFieldIndexing<T>::recreate_index(const FieldMeta& field_meta,
             sync_with_index_ = false;
             index_cur_ = 0;
             LOG_INFO(
-                "Created R-Tree index for geometry data type: {} with "
+                "Created R-Tree index for geometry fieldID: {} with "
                 "FileManagerContext",
-                field_meta.get_data_type());
+                field_meta.get_id().get());
             return;
         }
         index_ = index::CreateStringIndexMarisa();
@@ -509,7 +509,7 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
             if (!built_) {
                 try {
                     // Initialize R-Tree for building immediately when first data arrives
-                    rtree_index->InitForBuildIndex();
+                    rtree_index->InitForBuildIndex(true);
                     built_ = true;
                     sync_with_index_ = true;
                     LOG_INFO(
@@ -531,16 +531,14 @@ ScalarFieldIndexing<T>::process_geometry_data(int64_t reserved_offset,
                 // Use the accessor to get geometry data and validity
                 auto [wkb_data, is_valid] = accessor(i);
 
-                if (is_valid) {
-                    try {
-                        rtree_index->AddGeometry(wkb_data, global_offset);
-                        added_count++;
-                    } catch (std::exception& error) {
-                        ThrowInfo(UnexpectedError,
-                                  "Failed to add geometry at offset {}: {}",
-                                  global_offset,
-                                  error.what());
-                    }
+                try {
+                    rtree_index->AddGeometry(wkb_data, global_offset);
+                    added_count++;
+                } catch (std::exception& error) {
+                    ThrowInfo(UnexpectedError,
+                              "Failed to add geometry at offset {}: {}",
+                              global_offset,
+                              error.what());
                 }
             }
 

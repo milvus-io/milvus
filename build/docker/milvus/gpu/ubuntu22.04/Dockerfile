@@ -8,6 +8,9 @@ RUN apt-get update && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
+        ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+        echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 

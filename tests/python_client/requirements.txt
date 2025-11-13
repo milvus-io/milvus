@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.6.3rc9
-pymilvus[bulk_writer]==2.6.3rc9
+pymilvus==2.6.4rc3
+pymilvus[bulk_writer]==2.6.4rc3
 
 # for protobuf
 protobuf>=5.29.5
@@ -82,3 +82,6 @@ typing_extensions==4.12.2
 
 # for env configuration
 python-dotenv<=2.0.0
+
+# for geometry
+shapely==2.1.1

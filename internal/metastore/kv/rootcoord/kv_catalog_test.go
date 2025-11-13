@@ -1058,7 +1058,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		kc := NewCatalog(nil, snapshot).(*Catalog)
 		ctx := context.Background()
 		var collectionID int64 = 1
-		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
+		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, UpdateTimestamp: rand.Uint64()}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
@@ -1077,7 +1077,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		kc := NewCatalog(nil, nil)
 		ctx := context.Background()
 		var collectionID int64 = 1
-		oldC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
+		oldC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		newC := &model.Collection{TenantID: "2", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.Error(t, err)
@@ -1267,7 +1267,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t, withMockSave(errors.New("error mock Save")))
 		kc := NewCatalog(nil, mockSnapshot)
 		ctx := context.Background()
-		coll := &model.Collection{State: pb.CollectionState_CollectionCreating}
+		coll := &model.Collection{State: pb.CollectionState_CollectionCreated}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.Error(t, err)
 	})
@@ -1280,7 +1280,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			State: pb.CollectionState_CollectionCreating,
+			State: pb.CollectionState_CollectionCreated,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.Error(t, err)
@@ -1294,7 +1294,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
-			State: pb.CollectionState_CollectionCreating,
+			State: pb.CollectionState_CollectionCreated,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
@@ -1349,7 +1349,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 					OutputFieldNames: []string{"sparse"},
 				},
 			},
-			State: pb.CollectionState_CollectionCreating,
+			State: pb.CollectionState_CollectionCreated,
 		}
 		err := kc.CreateCollection(ctx, coll, 100)
 		assert.NoError(t, err)
@@ -1564,7 +1564,7 @@ func TestRBAC_Credential(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				err := c.CreateCredential(ctx, &model.Credential{
+				err := c.AlterCredential(ctx, &model.Credential{
 					Username:          test.user,
 					EncryptedPassword: test.password,
 				})
@@ -1772,94 +1772,17 @@ func TestRBAC_Role(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("test save", func(t *testing.T) {
-		var (
-			kvmock = mocks.NewTxnKV(t)
-			c      = NewCatalog(kvmock, nil).(*Catalog)
-
-			notExistKey = "not-exist"
-			errorKey    = "error"
-			otherError  = errors.New("mock load error")
-		)
-
-		kvmock.EXPECT().Load(mock.Anything, notExistKey).Return("", merr.WrapErrIoKeyNotFound(notExistKey)).Once()
-		kvmock.EXPECT().Load(mock.Anything, errorKey).Return("", otherError).Once()
-		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Return("", nil).Once()
-		kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil).Once()
-
-		tests := []struct {
-			description string
-
-			isValid bool
-			key     string
-
-			expectedError error
-			ignorable     bool
-		}{
-			{"key not exists", true, notExistKey, nil, false},
-			{"other error", false, errorKey, otherError, false},
-			{"ignorable error", false, "key1", &common.IgnorableError{}, true},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				err := c.save(ctx, test.key)
-				if test.isValid {
-					assert.NoError(t, err)
-				} else {
-					assert.Error(t, err)
-				}
-
-				if test.ignorable {
-					_, ok := err.(*common.IgnorableError)
-					assert.True(t, ok)
-				}
-			})
-		}
-	})
 	t.Run("test CreateRole", func(t *testing.T) {
 		var (
 			kvmock = mocks.NewTxnKV(t)
 			c      = NewCatalog(kvmock, nil)
-
-			notExistName = "not-exist"
-			notExistPath = funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, notExistName)
-			errorName    = "error"
-			errorPath    = funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, errorName)
-			otherError   = errors.New("mock load error")
 		)
 
-		kvmock.EXPECT().Load(mock.Anything, notExistPath).Return("", merr.WrapErrIoKeyNotFound(notExistName)).Once()
-		kvmock.EXPECT().Load(mock.Anything, errorPath).Return("", otherError).Once()
-		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Return("", nil).Once()
 		kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Call.Return(nil).Once()
-
-		tests := []struct {
-			description string
-
-			isValid bool
-			name    string
-
-			expectedError error
-		}{
-			{"key not exists", true, notExistName, nil},
-			{"other error", false, errorName, otherError},
-			{"ignorable error", false, "key1", &common.IgnorableError{}},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				err := c.CreateRole(ctx, tenant, &milvuspb.RoleEntity{
-					Name: test.name,
-				})
-				if test.isValid {
-					assert.NoError(t, err)
-				} else {
-					assert.Error(t, err)
-				}
-			})
-		}
+		err := c.CreateRole(ctx, tenant, &milvuspb.RoleEntity{
+			Name: "role1",
+		})
+		assert.NoError(t, err)
 	})
 	t.Run("test DropRole", func(t *testing.T) {
 		var (
@@ -1920,58 +1843,17 @@ func TestRBAC_Role(t *testing.T) {
 			c      = NewCatalog(kvmock, nil)
 
 			user = "default-user"
-
-			noErrorRoleSave     = "no-error-role-save"
-			noErrorRoleSavepath = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", user, noErrorRoleSave))
-
-			errorRoleSave     = "error-role-save"
-			errorRoleSavepath = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", user, errorRoleSave))
-
-			errorRoleRemove     = "error-role-remove"
-			errorRoleRemovepath = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", user, errorRoleRemove))
 		)
 		kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kvmock.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
-
-		// Catalog.save() returns error
-		kvmock.EXPECT().Load(mock.Anything, errorRoleSavepath).Return("", nil)
-
-		// Catalog.save() returns nil
-		kvmock.EXPECT().Load(mock.Anything, noErrorRoleSavepath).Return("", merr.WrapErrIoKeyNotFound(noErrorRoleSavepath))
-
-		// Catalog.remove() returns error
-		kvmock.EXPECT().Load(mock.Anything, errorRoleRemovepath).Return("", errors.New("not exists"))
-
-		// Catalog.remove() returns nil
-		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Return("", nil)
-
-		tests := []struct {
-			description string
-			isValid     bool
-
-			role  string
-			oType milvuspb.OperateUserRoleType
-		}{
-			{"valid role role1, AddUserToRole", true, noErrorRoleSave, milvuspb.OperateUserRoleType_AddUserToRole},
-			{"invalid role error-role, AddUserToRole", false, errorRoleSave, milvuspb.OperateUserRoleType_AddUserToRole},
-			{"valid role role1, RemoveUserFromRole", true, "role", milvuspb.OperateUserRoleType_RemoveUserFromRole},
-			{"invalid role error-role, RemoveUserFromRole", false, errorRoleRemove, milvuspb.OperateUserRoleType_RemoveUserFromRole},
-			{"invalid operate type 100", false, "role1", milvuspb.OperateUserRoleType(100)},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				err := c.AlterUserRole(ctx, tenant, &milvuspb.UserEntity{Name: user}, &milvuspb.RoleEntity{
-					Name: test.role,
-				}, test.oType)
-
-				if test.isValid {
-					assert.NoError(t, err)
-				} else {
-					assert.Error(t, err)
-				}
-			})
-		}
+		err := c.AlterUserRole(ctx, tenant, &milvuspb.UserEntity{Name: user}, &milvuspb.RoleEntity{
+			Name: "role1",
+		}, milvuspb.OperateUserRoleType_RemoveUserFromRole)
+		require.NoError(t, err)
+		err = c.AlterUserRole(ctx, tenant, &milvuspb.UserEntity{Name: user}, &milvuspb.RoleEntity{
+			Name: "role1",
+		}, milvuspb.OperateUserRoleType_AddUserToRole)
+		require.NoError(t, err)
 	})
 
 	t.Run("test ListRole", func(t *testing.T) {
@@ -2816,7 +2698,7 @@ func TestRBAC_Backup(t *testing.T) {
 			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
 		},
 	}, milvuspb.OperatePrivilegeType_Grant)
-	c.CreateCredential(ctx, &model.Credential{
+	c.AlterCredential(ctx, &model.Credential{
 		Username:          "user1",
 		EncryptedPassword: "passwd",
 	})
@@ -2940,15 +2822,6 @@ func TestRBAC_Restore(t *testing.T) {
 					},
 				},
 			},
-			{
-				User:     "user1",
-				Password: "passwd",
-				Roles: []*milvuspb.RoleEntity{
-					{
-						Name: "role2",
-					},
-				},
-			},
 		},
 		Roles: []*milvuspb.RoleEntity{
 			{
@@ -2979,30 +2852,31 @@ func TestRBAC_Restore(t *testing.T) {
 
 	// test restore failed and roll back
 	err = c.RestoreRBAC(ctx, util.DefaultTenant, rbacMeta2)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	// check user
 	users, err = c.ListCredentialsWithPasswd(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, users, 1)
+	assert.Len(t, users, 2)
 	// check role
 	roles, err = c.ListRole(ctx, util.DefaultTenant, nil, false)
 	assert.NoError(t, err)
-	assert.Len(t, roles, 1)
+	assert.Len(t, roles, 2)
 	// check grant
 	grants, err = c.ListGrant(ctx, util.DefaultTenant, &milvuspb.GrantEntity{
-		Role:   roles[0].Role,
+		Role:   &milvuspb.RoleEntity{Name: "role2"},
 		DbName: util.AnyWord,
 	})
 	assert.NoError(t, err)
 	assert.Len(t, grants, 1)
-	assert.Equal(t, grants[0].Grantor.Privilege.Name, "Load")
+	assert.Equal(t, "obj_name2", grants[0].ObjectName)
+	assert.Equal(t, "role2", grants[0].Role.Name)
+	assert.Equal(t, "user2", grants[0].Grantor.User.Name)
+	assert.Equal(t, "Load", grants[0].Grantor.Privilege.Name)
 	// check privilege group
 	privGroups, err = c.ListPrivilegeGroups(ctx)
 	assert.NoError(t, err)
-	assert.Len(t, privGroups, 1)
-	assert.Equal(t, "custom_group", privGroups[0].GroupName)
-	assert.Equal(t, "CreateCollection", privGroups[0].Privileges[0].Name)
+	assert.Len(t, privGroups, 2)
 }
 
 func TestRBAC_PrivilegeGroup(t *testing.T) {

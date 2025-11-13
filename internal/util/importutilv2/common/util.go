@@ -18,8 +18,12 @@ package common
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -55,9 +59,41 @@ func EstimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema
 	return ret, nil
 }
 
+// SafeStringForError safely converts a string for use in error messages.
+// It replaces invalid UTF-8 sequences with their hex representation to avoid
+// gRPC serialization errors while still providing useful debugging information.
+func SafeStringForError(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+
+	var result strings.Builder
+	for i, r := range s {
+		if r == utf8.RuneError {
+			// Invalid UTF-8 sequence, encode as hex
+			result.WriteString(fmt.Sprintf("\\x%02x", s[i]))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
+// SafeStringForErrorWithLimit safely converts a string for use in error messages
+// with a length limit to prevent extremely long error messages.
+func SafeStringForErrorWithLimit(s string, maxLen int) string {
+	safe := SafeStringForError(s)
+	if len(safe) <= maxLen {
+		return safe
+	}
+	return safe[:maxLen] + "..."
+}
+
 func CheckValidUTF8(s string, field *schemapb.FieldSchema) error {
 	if !typeutil.IsUTF8(s) {
-		return fmt.Errorf("field %s contains invalid UTF-8 data, value=%s", field.GetName(), s)
+		// Use safe string representation to avoid gRPC serialization errors
+		safeValue := SafeStringForErrorWithLimit(s, 100)
+		return fmt.Errorf("field '%s' contains invalid UTF-8 data, value=%s", field.GetName(), safeValue)
 	}
 	return nil
 }
@@ -70,4 +106,20 @@ func CheckValidString(s string, maxLength int64, field *schemapb.FieldSchema) er
 		return err
 	}
 	return nil
+}
+
+// GetSchemaTimezone retrieves the timezone string from the CollectionSchema's properties.
+// It falls back to common.DefaultTimezone if the key is not found or the value is empty.
+func GetSchemaTimezone(schema *schemapb.CollectionSchema) string {
+	// 1. Attempt to retrieve the timezone value from the schema's properties.
+	// We assume funcutil.TryGetAttrByKeyFromRepeatedKV returns the value and a boolean indicating existence.
+	// If the key is not found, the returned timezone string will be the zero value ("").
+	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, schema.GetProperties())
+
+	// 2. If the retrieved value is empty, use the system default timezone.
+	if timezone == "" {
+		timezone = common.DefaultTimezone
+	}
+
+	return timezone
 }

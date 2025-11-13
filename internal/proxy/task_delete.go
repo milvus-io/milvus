@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -249,7 +250,7 @@ type deleteRunner struct {
 	// for query
 	msgID int64
 	ts    uint64
-	lb    LBPolicy
+	lb    shardclient.LBPolicy
 	count atomic.Int64
 
 	// task queue
@@ -300,10 +301,8 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	_, dbTimezone := getDbTimezone(db)
-	_, colTimezone := getColTimezone(colInfo)
-	timezonePreference := []string{colTimezone, dbTimezone}
-	visitorArgs := &planparserv2.ParserVisitorArgs{TimezonePreference: timezonePreference}
+	colTimezone := getColTimezone(colInfo)
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
 	start := time.Now()
 	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.schemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
@@ -409,7 +408,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 
 // getStreamingQueryAndDelteFunc return query function used by LBPolicy
 // make sure it concurrent safe
-func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) executeFunc {
+func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) shardclient.ExecuteFunc {
 	return func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 		log := log.Ctx(ctx).With(
 			zap.Int64("collectionID", dr.collectionID),
@@ -556,12 +555,12 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		return err
 	}
 
-	err = dr.lb.Execute(ctx, CollectionWorkLoad{
-		db:             dr.req.GetDbName(),
-		collectionName: dr.req.GetCollectionName(),
-		collectionID:   dr.collectionID,
-		nq:             1,
-		exec:           dr.getStreamingQueryAndDelteFunc(plan),
+	err = dr.lb.Execute(ctx, shardclient.CollectionWorkLoad{
+		Db:             dr.req.GetDbName(),
+		CollectionName: dr.req.GetCollectionName(),
+		CollectionID:   dr.collectionID,
+		Nq:             1,
+		Exec:           dr.getStreamingQueryAndDelteFunc(plan),
 	})
 	dr.result.DeleteCnt = dr.count.Load()
 	dr.result.Timestamp = dr.sessionTS.Load()

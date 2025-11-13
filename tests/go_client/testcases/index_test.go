@@ -468,10 +468,10 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 	idx := index.NewSortedIndex()
 	for _, field := range schema.Fields {
 		if hp.SupportScalarIndexFieldType(field.DataType) {
-			if field.DataType == entity.FieldTypeVarChar || field.DataType == entity.FieldTypeBool ||
+			if field.DataType == entity.FieldTypeBool ||
 				field.DataType == entity.FieldTypeJSON || field.DataType == entity.FieldTypeArray {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-				common.CheckErr(t, err, false, "STL_SORT are only supported on numeric field")
+				require.ErrorContains(t, err, "STL_SORT are only supported on numeric, varchar or timestamptz field")
 			} else {
 				idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
 				common.CheckErr(t, err, true)
@@ -623,12 +623,12 @@ func TestCreateIndexJsonField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric field"},
+		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 	for _, idxErr := range inxError {
 		_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, common.DefaultJSONFieldName, idxErr.idx).WithIndexName("json_index"))
-		common.CheckErr(t, err, false, idxErr.errMsg)
+		require.ErrorContains(t, err, idxErr.errMsg)
 	}
 }
 
@@ -649,7 +649,7 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 		errMsg string
 	}
 	inxError := []scalarIndexError{
-		{index.NewSortedIndex(), "STL_SORT are only supported on numeric field"},
+		{index.NewSortedIndex(), "STL_SORT are only supported on numeric, varchar or timestamptz field"},
 		{index.NewTrieIndex(), "TRIE are only supported on varchar field"},
 	}
 
@@ -660,11 +660,11 @@ func TestCreateUnsupportedIndexArrayField(t *testing.T) {
 			if field.DataType == entity.FieldTypeArray {
 				// create vector index
 				_, err1 := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, vectorIdx).WithIndexName("vector_index"))
-				common.CheckErr(t, err1, false, "index SCANN only supports vector data type")
+				require.ErrorContains(t, err1, "index SCANN only supports vector data type")
 
 				// create scalar index
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idxErr.idx))
-				common.CheckErr(t, err, false, idxErr.errMsg)
+				require.ErrorContains(t, err, idxErr.errMsg)
 			}
 		}
 	}

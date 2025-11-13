@@ -171,8 +171,8 @@ func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]
 }
 
 func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
-	if coll.State != pb.CollectionState_CollectionCreating {
-		return fmt.Errorf("cannot create collection with state: %s, collection: %s", coll.State.String(), coll.Name)
+	if coll.State != pb.CollectionState_CollectionCreated {
+		return fmt.Errorf("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
 	k1 := BuildCollectionKey(coll.DBID, coll.CollectionID)
@@ -346,9 +346,11 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 	return kc.Snapshot.MultiSaveAndRemove(ctx, kvs, []string{oldKBefore210, oldKeyWithoutDb}, ts)
 }
 
-func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Credential) error {
+func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credential.Username)
-	v, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credential.EncryptedPassword})
+	credentialInfo := model.MarshalCredentialModel(credential)
+	credentialInfo.Username = "" // Username is already save in the key, remove it from the value.
+	v, err := json.Marshal(credentialInfo)
 	if err != nil {
 		log.Ctx(ctx).Error("create credential marshal fail", zap.String("key", k), zap.Error(err))
 		return err
@@ -359,12 +361,7 @@ func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Crede
 		log.Ctx(ctx).Error("create credential persist meta fail", zap.String("key", k), zap.Error(err))
 		return err
 	}
-
 	return nil
-}
-
-func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
-	return kc.CreateCredential(ctx, credential)
 }
 
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
@@ -625,8 +622,9 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal credential info err:%w", err)
 	}
-
-	return &model.Credential{Username: username, EncryptedPassword: credentialInfo.EncryptedPassword}, nil
+	// we don't save the username in the credential info, so we need to set it manually from path.
+	credentialInfo.Username = username
+	return model.UnmarshalCredentialModel(&credentialInfo), nil
 }
 
 func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
@@ -1050,18 +1048,6 @@ func (kc *Catalog) ListCredentialsWithPasswd(ctx context.Context) (map[string]st
 	return users, nil
 }
 
-func (kc *Catalog) save(ctx context.Context, k string) error {
-	var err error
-	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return err
-	}
-	if err == nil {
-		log.Ctx(ctx).Debug("the key has existed", zap.String("key", k))
-		return common.NewIgnorableError(fmt.Errorf("the key[%s] has existed", k))
-	}
-	return kc.Txn.Save(ctx, k, "")
-}
-
 func (kc *Catalog) remove(ctx context.Context, k string) error {
 	var err error
 	if _, err = kc.Txn.Load(ctx, k); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
@@ -1076,11 +1062,7 @@ func (kc *Catalog) remove(ctx context.Context, k string) error {
 
 func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
 	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
-	err := kc.save(ctx, k)
-	if err != nil && !common.IsIgnorableError(err) {
-		log.Ctx(ctx).Warn("fail to save the role", zap.String("key", k), zap.Error(err))
-	}
-	return err
+	return kc.Txn.Save(ctx, k, "")
 }
 
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
@@ -1112,21 +1094,13 @@ func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string)
 
 func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", userEntity.Name, roleEntity.Name))
-	var err error
-	if operateType == milvuspb.OperateUserRoleType_AddUserToRole {
-		err = kc.save(ctx, k)
-		if err != nil {
-			log.Ctx(ctx).Error("fail to save the user-role", zap.String("key", k), zap.Error(err))
-		}
-	} else if operateType == milvuspb.OperateUserRoleType_RemoveUserFromRole {
-		err = kc.remove(ctx, k)
-		if err != nil {
-			log.Ctx(ctx).Error("fail to remove the user-role", zap.String("key", k), zap.Error(err))
-		}
-	} else {
-		err = fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
+	switch operateType {
+	case milvuspb.OperateUserRoleType_AddUserToRole:
+		return kc.Txn.Save(ctx, k, "")
+	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
+		return kc.Txn.Remove(ctx, k)
 	}
-	return err
+	return fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
 }
 
 func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
@@ -1593,145 +1567,49 @@ func (kc *Catalog) BackupRBAC(ctx context.Context, tenant string) (*milvuspb.RBA
 }
 
 func (kc *Catalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
-	var err error
-	needRollbackUser := make([]*milvuspb.UserInfo, 0)
-	needRollbackRole := make([]*milvuspb.RoleEntity, 0)
-	needRollbackGrants := make([]*milvuspb.GrantEntity, 0)
-	needRollbackPrivilegeGroups := make([]*milvuspb.PrivilegeGroupInfo, 0)
-	defer func() {
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to restore rbac, try to rollback", zap.Error(err))
-			// roll back role
-			for _, role := range needRollbackRole {
-				err = kc.DropRole(ctx, tenant, role.GetName())
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback roles after restore failed", zap.Error(err))
-				}
-			}
-
-			// roll back grant
-			for _, grant := range needRollbackGrants {
-				err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Revoke)
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback grants after restore failed", zap.Error(err))
-				}
-			}
-
-			for _, user := range needRollbackUser {
-				// roll back user
-				err = kc.DropCredential(ctx, user.GetUser())
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback users after restore failed", zap.Error(err))
-				}
-			}
-
-			// roll back privilege group
-			for _, group := range needRollbackPrivilegeGroups {
-				err = kc.DropPrivilegeGroup(ctx, group.GetGroupName())
-				if err != nil {
-					log.Ctx(ctx).Warn("failed to rollback privilege groups after restore failed", zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	// restore role
-	existRoles, err := kc.ListRole(ctx, tenant, nil, false)
-	if err != nil {
-		return err
-	}
-	existRoleMap := lo.SliceToMap(existRoles, func(entity *milvuspb.RoleResult) (string, struct{}) { return entity.GetRole().GetName(), struct{}{} })
 	for _, role := range meta.GetRoles() {
-		if _, ok := existRoleMap[role.GetName()]; ok {
-			log.Ctx(ctx).Warn("failed to restore, role already exists", zap.String("role", role.GetName()))
-			err = errors.Newf("role [%s] already exists", role.GetName())
-			return err
+		if err := kc.CreateRole(ctx, tenant, role); err != nil {
+			return errors.Wrap(err, "failed to create role")
 		}
-		err = kc.CreateRole(ctx, tenant, role)
-		if err != nil {
-			return err
-		}
-		needRollbackRole = append(needRollbackRole, role)
 	}
 
-	// restore privilege group
-	existPrivGroups, err := kc.ListPrivilegeGroups(ctx)
-	if err != nil {
-		return err
-	}
-	existPrivGroupMap := lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
 	for _, group := range meta.GetPrivilegeGroups() {
-		if _, ok := existPrivGroupMap[group.GetGroupName()]; ok {
-			log.Ctx(ctx).Warn("failed to restore, privilege group already exists", zap.String("group", group.GetGroupName()))
-			err = errors.Newf("privilege group [%s] already exists", group.GetGroupName())
-			return err
+		if err := kc.SavePrivilegeGroup(ctx, group); err != nil {
+			return errors.Wrap(err, "failed to save privilege group")
 		}
-		err = kc.SavePrivilegeGroup(ctx, group)
-		if err != nil {
-			return err
-		}
-		needRollbackPrivilegeGroups = append(needRollbackPrivilegeGroups, group)
 	}
 
-	// restore grant, list latest privilege group first
-	existPrivGroups, err = kc.ListPrivilegeGroups(ctx)
-	if err != nil {
-		return err
-	}
-	existPrivGroupMap = lo.SliceToMap(existPrivGroups, func(entity *milvuspb.PrivilegeGroupInfo) (string, struct{}) { return entity.GetGroupName(), struct{}{} })
 	for _, grant := range meta.GetGrants() {
 		privName := grant.GetGrantor().GetPrivilege().GetName()
 		if util.IsPrivilegeNameDefined(privName) {
 			grant.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(privName)
-		} else if _, ok := existPrivGroupMap[privName]; ok {
-			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		} else {
-			log.Ctx(ctx).Warn("failed to restore, privilege group does not exist", zap.String("group", privName))
-			err = errors.Newf("privilege group [%s] does not exist", privName)
-			return err
+			grant.Grantor.Privilege.Name = util.PrivilegeGroupNameForMetastore(privName)
 		}
-		err = kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant)
-		if err != nil {
-			return err
+		if err := kc.AlterGrant(ctx, tenant, grant, milvuspb.OperatePrivilegeType_Grant); err != nil {
+			return errors.Wrap(err, "failed to alter grant")
 		}
-		needRollbackGrants = append(needRollbackGrants, grant)
 	}
 
-	// need rollback user
-	existUser, err := kc.ListUser(ctx, tenant, nil, false)
-	if err != nil {
-		return err
-	}
-	existUserMap := lo.SliceToMap(existUser, func(entity *milvuspb.UserResult) (string, struct{}) { return entity.GetUser().GetName(), struct{}{} })
 	for _, user := range meta.GetUsers() {
-		if _, ok := existUserMap[user.GetUser()]; ok {
-			log.Ctx(ctx).Info("failed to restore, user already exists", zap.String("user", user.GetUser()))
-			err = errors.Newf("user [%s] already exists", user.GetUser())
-			return err
-		}
-		// restore user
-		err = kc.CreateCredential(ctx, &model.Credential{
+		if err := kc.AlterCredential(ctx, &model.Credential{
 			Username:          user.GetUser(),
 			EncryptedPassword: user.GetPassword(),
-		})
-		if err != nil {
-			return err
+		}); err != nil {
+			return errors.Wrap(err, "failed to alter credential")
 		}
-		needRollbackUser = append(needRollbackUser, user)
 
 		// restore user role mapping
 		entity := &milvuspb.UserEntity{
 			Name: user.GetUser(),
 		}
 		for _, role := range user.GetRoles() {
-			err = kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole)
-			if err != nil {
-				return err
+			if err := kc.AlterUserRole(ctx, tenant, entity, role, milvuspb.OperateUserRoleType_AddUserToRole); err != nil {
+				return errors.Wrap(err, "failed to alter user role")
 			}
 		}
 	}
-
-	return err
+	return nil
 }
 
 func (kc *Catalog) GetPrivilegeGroup(ctx context.Context, groupName string) (*milvuspb.PrivilegeGroupInfo, error) {

@@ -19,6 +19,7 @@ import (
 // Therefore, we need to read configs from 2.3.x and modify meta data if necessary.
 type MmapMigration struct {
 	rootcoordMeta    rootcoord.IMetaTable
+	rootCoordCatalog metastore.RootCoordCatalog
 	tsoAllocator     tso.Allocator
 	datacoordCatalog metastore.DataCoordCatalog
 }
@@ -58,8 +59,7 @@ func (m *MmapMigration) MigrateRootCoordCollection(ctx context.Context) {
 
 			newColl.Properties = updateOrAddMmapKey(newColl.Properties, common.MmapEnabledKey, "true")
 			fmt.Printf("migrate collection %v, %s\n", collection.CollectionID, collection.Name)
-
-			if err := m.rootcoordMeta.AlterCollection(ctx, collection, newColl, ts, false); err != nil {
+			if err := m.rootCoordCatalog.AlterCollection(ctx, collection, newColl, metastore.MODIFY, ts, false); err != nil {
 				panic(err)
 			}
 		}
@@ -100,9 +100,10 @@ func (m *MmapMigration) MigrateIndexCoordCollection(ctx context.Context) {
 	}
 }
 
-func NewMmapMigration(rootcoordMeta rootcoord.IMetaTable, tsoAllocator tso.Allocator, datacoordCatalog metastore.DataCoordCatalog) *MmapMigration {
+func NewMmapMigration(rootcoordMeta rootcoord.IMetaTable, tsoAllocator tso.Allocator, datacoordCatalog metastore.DataCoordCatalog, rootCoordCatalog metastore.RootCoordCatalog) *MmapMigration {
 	return &MmapMigration{
 		rootcoordMeta:    rootcoordMeta,
+		rootCoordCatalog: rootCoordCatalog,
 		tsoAllocator:     tsoAllocator,
 		datacoordCatalog: datacoordCatalog,
 	}

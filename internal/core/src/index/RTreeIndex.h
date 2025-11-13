@@ -43,7 +43,7 @@ class RTreeIndex : public ScalarIndex<T> {
     ~RTreeIndex();
 
     void
-    InitForBuildIndex();
+    InitForBuildIndex(bool is_growing);
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;

@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -43,10 +45,13 @@ type FieldReader struct {
 	dim   int64
 	field *schemapb.FieldSchema
 
+	// timezone is the collection's default timezone
+	timezone string
+
 	readPosition int
 }
 
-func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema) (*FieldReader, error) {
+func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema, timezone string) (*FieldReader, error) {
 	r, err := npyio.NewReader(reader)
 	if err != nil {
 		return nil, err
@@ -71,6 +76,7 @@ func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema) (*FieldReader
 		npyReader: r,
 		dim:       dim,
 		field:     field,
+		timezone:  timezone,
 	}
 	cr.setByteOrder()
 	return cr, nil
@@ -179,16 +185,43 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Timestamptz:
-		data, err = ReadN[int64](c.reader, c.order, readCount)
+		var strs []string
+		strs, err = c.ReadString(readCount)
 		if err != nil {
 			return nil, nil, err
 		}
+		int64Ts := make([]int64, 0, len(strs))
+		for _, strValue := range strs {
+			tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, c.timezone)
+			if err != nil {
+				return nil, nil, err
+			}
+			int64Ts = append(int64Ts, tz)
+		}
+		data = int64Ts
+		c.readPosition += int(readCount)
 	case schemapb.DataType_VarChar:
 		data, err = c.ReadString(readCount)
 		c.readPosition += int(readCount)
 		if err != nil {
 			return nil, nil, err
 		}
+	case schemapb.DataType_Geometry:
+		var strs []string
+		strs, err = c.ReadString(readCount)
+		if err != nil {
+			return nil, nil, err
+		}
+		byteArr := make([][]byte, 0)
+		for _, wktValue := range strs {
+			wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			byteArr = append(byteArr, wkbValue)
+		}
+		data = byteArr
+		c.readPosition += int(readCount)
 	case schemapb.DataType_JSON:
 		var strs []string
 		strs, err = c.ReadString(readCount)

@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -52,7 +51,7 @@ type ackCallbackScheduler struct {
 // Initialize initializes the ack scheduler with a list of broadcast tasks.
 func (s *ackCallbackScheduler) Initialize(tasks []*broadcastTask, tombstoneIDs []uint64, bm *broadcastTaskManager) {
 	// when initializing, the tasks in recovery info may be out of order, so we need to sort them by the broadcastID.
-	sortByBroadcastID(tasks)
+	sortByControlChannelTimeTick(tasks)
 	s.tombstoneScheduler.Initialize(bm, tombstoneIDs)
 	s.pendingAckedTasks = tasks
 	go s.background()
@@ -84,14 +83,27 @@ func (s *ackCallbackScheduler) background() {
 	}()
 	s.Logger().Info("ack scheduler background start")
 
+	// it's weired to find that FastLock may be failure even if there's no resource-key locked,
+	// also see: #45285
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var triggerTicker <-chan time.Time
 	for {
 		s.triggerAckCallback()
+		if len(s.pendingAckedTasks) > 0 {
+			// if there's pending tasks, trigger the ack callback after a delay.
+			triggerTicker = ticker.C
+		} else {
+			triggerTicker = nil
+		}
 		select {
 		case <-s.notifier.Context().Done():
 			return
 		case task := <-s.pending:
 			s.addBroadcastTask(task)
 		case <-s.triggerChan:
+		case <-triggerTicker:
 		}
 	}
 }
@@ -99,8 +111,6 @@ func (s *ackCallbackScheduler) background() {
 // addBroadcastTask adds a broadcast task into the pending acked tasks.
 func (s *ackCallbackScheduler) addBroadcastTask(task *broadcastTask) error {
 	s.pendingAckedTasks = append(s.pendingAckedTasks, task)
-	sortByBroadcastID(s.pendingAckedTasks) // It's a redundant operation,
-	// once at runtime, the tasks are coming with the order of the broadcastID if they have the conflict resource-key.
 	return nil
 }
 
@@ -108,12 +118,6 @@ func (s *ackCallbackScheduler) addBroadcastTask(task *broadcastTask) error {
 func (s *ackCallbackScheduler) triggerAckCallback() {
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
 	for _, task := range s.pendingAckedTasks {
-		if task.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
-			task.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK &&
-			task.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
-			s.Logger().Info("task cannot be acked, skip the ack callback", zap.Uint64("broadcastID", task.Header().BroadcastID))
-			continue
-		}
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
 			s.Logger().Warn("lock is occupied, delay the ack callback", zap.Uint64("broadcastID", task.Header().BroadcastID), zap.Error(err))
@@ -128,16 +132,21 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 // doAckCallback executes the ack callback.
 func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
+	logger := s.Logger().With(zap.Uint64("broadcastID", bt.Header().BroadcastID))
 	defer func() {
 		g.Unlock()
 		s.triggerChan <- struct{}{}
 		if err == nil {
-			s.Logger().Info("execute ack callback done", zap.Uint64("broadcastID", bt.Header().BroadcastID))
+			logger.Info("execute ack callback done")
 		} else {
-			s.Logger().Warn("execute ack callback failed", zap.Uint64("broadcastID", bt.Header().BroadcastID), zap.Error(err))
+			logger.Warn("execute ack callback failed", zap.Error(err))
 		}
 	}()
-	s.Logger().Info("start to execute ack callback", zap.Uint64("broadcastID", bt.Header().BroadcastID))
+	logger.Info("start to execute ack callback")
+	if err := bt.BlockUntilAllAck(s.notifier.Context()); err != nil {
+		return err
+	}
+	logger.Debug("all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
 	makeMap := make(map[string]*message.AppendResult, len(result))
@@ -148,11 +157,11 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 			TimeTick:               result.TimeTick,
 		}
 	}
-
 	// call the ack callback until done.
 	if err := s.callMessageAckCallbackUntilDone(s.notifier.Context(), msg, makeMap); err != nil {
 		return err
 	}
+	logger.Debug("ack callback done")
 	if err := bt.MarkAckCallbackDone(s.notifier.Context()); err != nil {
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
 		return err
@@ -187,8 +196,9 @@ func (s *ackCallbackScheduler) callMessageAckCallbackUntilDone(ctx context.Conte
 	}
 }
 
-func sortByBroadcastID(tasks []*broadcastTask) {
+// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel.
+func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Header().BroadcastID < tasks[j].Header().BroadcastID
+		return tasks[i].ControlChannelTimeTick() < tasks[j].ControlChannelTimeTick()
 	})
 }

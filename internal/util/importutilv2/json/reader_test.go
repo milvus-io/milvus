@@ -327,7 +327,7 @@ func (suite *ReaderSuite) TestVector() {
 }
 
 func (suite *ReaderSuite) TestDecodeError() {
-	testDecode := func(jsonContent string, ioErr error, initErr bool, decodeErr bool) {
+	testDecode := func(jsonContent string, isLinesFormat bool, isOldFormat bool, ioErr error, initErr bool, decodeErr bool) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -344,7 +344,14 @@ func (suite *ReaderSuite) TestDecodeError() {
 			r := &mockReader{Reader: strings.NewReader(jsonContent)}
 			return r, ioErr
 		})
-		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+		var reader *reader
+		var err error
+		if isLinesFormat {
+			reader, err = NewLinesReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+		} else {
+			reader, err = NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
+		}
+
 		if initErr {
 			suite.Error(err)
 		} else {
@@ -352,6 +359,8 @@ func (suite *ReaderSuite) TestDecodeError() {
 		}
 
 		if err == nil {
+			reader.isLinesFormat = isLinesFormat
+			reader.isOldFormat = isOldFormat
 			_, err = reader.Read()
 			if decodeErr {
 				suite.Error(err)
@@ -361,20 +370,47 @@ func (suite *ReaderSuite) TestDecodeError() {
 		}
 	}
 
-	testDecode("", merr.WrapErrImportFailed("error"), true, true)
-	testDecode("", nil, true, true)
-	testDecode("a", nil, true, true)
-	testDecode("2", nil, true, true)
-	testDecode("{", nil, false, true)
-	testDecode("{a", nil, false, true)
-	testDecode("{\"a\":2}", nil, false, true)
-	testDecode("{\"rows\"a}", nil, false, true)
-	testDecode("{\"rows\":{}}", nil, false, true)
-	testDecode("{\"rows\":[]}", nil, false, false)
-	testDecode("{\"rows\":[a]}", nil, false, true)
-	testDecode("{\"rows\":[{\"dummy\": 3}]}", nil, false, true)
-	testDecode("{\"rows\":[{\"pk\": 3}]}", nil, false, false)
-	testDecode("{\"rows\":[{\"pk\": 3}", nil, false, true)
+	testOldFormatDecode := func(jsonContent string, ioErr error, initErr bool, decodeErr bool) {
+		testDecode(jsonContent, false, true, ioErr, initErr, decodeErr)
+	}
+
+	testListFormatDecode := func(jsonContent string, decodeErr bool) {
+		testDecode(jsonContent, false, false, nil, false, decodeErr)
+	}
+
+	testLinesDecode := func(jsonContent string, decodeErr bool) {
+		testDecode(jsonContent, true, false, nil, false, decodeErr)
+	}
+
+	// illegal formats
+	testOldFormatDecode("", merr.WrapErrImportFailed("error"), true, true)
+	testOldFormatDecode("", nil, true, true)
+	testOldFormatDecode("a", nil, true, true)
+	testOldFormatDecode("2", nil, true, true)
+	testOldFormatDecode("{", nil, false, true)
+	testOldFormatDecode("{}", nil, false, true) // return EOF
+	testOldFormatDecode("{a", nil, false, true)
+	testOldFormatDecode("{\"a\":2}", nil, false, true)
+	testOldFormatDecode("{\"rows\"a}", nil, false, true)
+	testOldFormatDecode("{\"rows\":{}}", nil, false, true)
+	testOldFormatDecode("{\"rows\":[a]}", nil, false, true)
+	testOldFormatDecode("{\"rows\":[{\"dummy\": 3}]}", nil, false, true)
+	testOldFormatDecode("{\"rows\":[{\"pk\": 3}", nil, false, true)
+
+	// old format
+	testOldFormatDecode("{\"rows\":[]}", nil, false, false)
+	testOldFormatDecode("{\"rows\":[{\"pk\": 3}]}", nil, false, false)
+	testOldFormatDecode("{\n\"rows\":\n[\n{\"pk\": 3},\n{\"pk\": 4}\n]\n}\n", nil, false, false)
+
+	// new format
+	testListFormatDecode("[]", true) // return EOF
+	testListFormatDecode("[{\"pk\": 3}]", false)
+	testListFormatDecode("[\n{\"pk\": 3},\n{\"pk\": 4}\n]", false)
+
+	// JSONL/NDJSON format
+	testLinesDecode("", true) // return EOF
+	testLinesDecode("{\"pk\": 3}", false)
+	testLinesDecode("{\"pk\": 3}\n{\"pk\": 4}\n", false)
 }
 
 func (suite *ReaderSuite) TestReadCount() {

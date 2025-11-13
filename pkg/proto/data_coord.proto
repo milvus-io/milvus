@@ -64,7 +64,9 @@ service DataCoord {
   rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
 
-  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
+  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {
+    option deprecated = true;
+  }
   rpc GetFlushState(GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
@@ -987,7 +989,7 @@ message ImportJob {
   string complete_time = 13;
   repeated internal.ImportFile files = 14;
   repeated common.KeyValuePair options = 15;
-  string start_time = 16;
+  string create_time = 16;
   repeated string ready_vchannels = 17;
   uint64 data_ts = 18;
 }

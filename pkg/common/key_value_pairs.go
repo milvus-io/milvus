@@ -37,3 +37,15 @@ func (pairs KeyValuePairs) Equal(other KeyValuePairs) bool {
 func CloneKeyValuePairs(pairs KeyValuePairs) KeyValuePairs {
 	return pairs.Clone()
 }
+
+// NewKeyValuePairs creates a new KeyValuePairs from a map[string]string.
+func NewKeyValuePairs(kvs map[string]string) KeyValuePairs {
+	pairs := make(KeyValuePairs, 0, len(kvs))
+	for key, value := range kvs {
+		pairs = append(pairs, &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		})
+	}
+	return pairs
+}

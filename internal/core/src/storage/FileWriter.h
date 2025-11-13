@@ -24,7 +24,6 @@
 #include <fcntl.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -34,7 +33,6 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
-#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -108,20 +106,10 @@ class WriteRateLimiter {
     Acquire(size_t bytes,
             size_t alignment_bytes = 1,
             Priority priority = Priority::MIDDLE) {
-        if (static_cast<int>(priority) >=
-            static_cast<int>(Priority::NR_PRIORITY)) {
-            ThrowInfo(ErrorCode::InvalidParameter,
-                      "Invalid priority value: {}",
-                      static_cast<int>(priority));
-        }
         // if priority ratio is <= 0, no rate limit is applied, return the original bytes
         if (priority_ratio_[static_cast<int>(priority)] <= 0) {
             return bytes;
         }
-        AssertInfo(alignment_bytes > 0 && bytes >= alignment_bytes &&
-                       (bytes % alignment_bytes == 0),
-                   "alignment_bytes must be positive and bytes must be "
-                   "divisible by alignment_bytes");
 
         std::unique_lock<std::mutex> lock(mutex_);
         // recheck the amplification ratio after taking the lock
@@ -263,10 +251,7 @@ class FileWriter {
 
  private:
     void
-    WriteWithDirectIO(const void* data, size_t nbyte);
-
-    void
-    WriteWithBufferedIO(const void* data, size_t nbyte);
+    WriteInternal(const void* data, size_t nbyte);
 
     void
     FlushWithDirectIO();
@@ -289,6 +274,8 @@ class FileWriter {
     std::string filename_{""};
     size_t file_size_{0};
 
+    bool use_writer_pool_{false};
+
     // for direct io
     bool use_direct_io_{false};
     void* aligned_buf_{nullptr};
@@ -298,8 +285,7 @@ class FileWriter {
     // for global configuration
     static WriteMode
         mode_;  // The write mode, which can be 'buffered' (default) or 'direct'.
-    static size_t
-        buffer_size_;  // The buffer size used for direct I/O, which is only used when the write mode is 'direct'.
+    static size_t buffer_size_;
 
     // for rate limiter
     io::Priority priority_;
@@ -359,15 +345,23 @@ class FileWriteWorkerPool {
 
     bool
     AddTask(std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(executor_mutex_);
         if (executor_ == nullptr) {
             return false;
         }
-        std::lock_guard<std::mutex> lock(executor_mutex_);
         executor_->add(std::move(task));
         return true;
     }
 
+    bool
+    HasPool() const {
+        // no lock here, so it's not thread-safe
+        // but it's ok because we still can write without the pool
+        return executor_ != nullptr;
+    }
+
     ~FileWriteWorkerPool() {
+        std::lock_guard<std::mutex> lock(executor_mutex_);
         if (executor_ != nullptr) {
             executor_->stop();
             executor_->join();

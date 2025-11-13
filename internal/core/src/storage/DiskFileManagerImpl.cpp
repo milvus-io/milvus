@@ -36,6 +36,7 @@
 #include "common/Slice.h"
 #include "common/Types.h"
 #include "index/Utils.h"
+#include "index/Meta.h"
 #include "log/Log.h"
 
 #include "storage/DiskFileManagerImpl.h"
@@ -425,6 +426,15 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     std::string local_data_path;
     bool file_created = false;
 
+    // Check if we're dealing with embedding list (VECTOR_ARRAY)
+    auto is_embedding_list =
+        index::GetValueFromConfig<bool>(config, index::EMB_LIST);
+    bool is_vector_array = is_embedding_list.value_or(false);
+    std::vector<size_t> offsets;
+    if (is_vector_array) {
+        offsets.push_back(0);  // Initialize with 0 for cumulative offsets
+    }
+
     // get batch raw data from s3 and write batch data to disk file
     // TODO: load and write of different batches at the same time
     std::vector<std::string> batch_files;
@@ -441,12 +451,14 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         for (int i = 0; i < batch_size; i++) {
             auto field_data = field_datas[i].get()->GetFieldData();
             num_rows += uint32_t(field_data->get_num_rows());
-            cache_raw_data_to_disk_common<DataType>(field_data,
-                                                    local_chunk_manager,
-                                                    local_data_path,
-                                                    file_created,
-                                                    dim,
-                                                    write_offset);
+            cache_raw_data_to_disk_common<DataType>(
+                field_data,
+                local_chunk_manager,
+                local_data_path,
+                file_created,
+                dim,
+                write_offset,
+                is_vector_array ? &offsets : nullptr);
         }
     };
 
@@ -473,6 +485,32 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     local_chunk_manager->Write(
         local_data_path, write_offset, &dim, sizeof(dim));
 
+    // Write offsets file for VECTOR_ARRAY
+    if (is_vector_array) {
+        AssertInfo(offsets.size() == num_rows + 1,
+                   "offsets size is not equal to num_rows + 1: offset size {}, "
+                   "num_rows {}",
+                   offsets.size(),
+                   num_rows);
+        // Get offsets path from config if provided, otherwise use default
+        auto offsets_path = index::GetValueFromConfig<std::string>(
+                                config, index::EMB_LIST_OFFSETS_PATH)
+                                .value();
+        local_chunk_manager->CreateFile(offsets_path);
+
+        uint32_t num_offsets = offsets.size();
+        int64_t offsets_write_pos = 0;
+
+        local_chunk_manager->Write(
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
+        offsets_write_pos += sizeof(uint32_t);
+
+        local_chunk_manager->Write(offsets_path,
+                                   offsets_write_pos,
+                                   offsets.data(),
+                                   offsets.size() * sizeof(size_t));
+    }
+
     return local_data_path;
 }
 
@@ -484,7 +522,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
     std::string& local_data_path,
     bool& file_created,
     uint32_t& dim,
-    int64_t& write_offset) {
+    int64_t& write_offset,
+    std::vector<size_t>* offsets) {
     auto data_type = field_data->get_data_type();
     if (!file_created) {
         auto init_file_info = [&](milvus::DataType dt) {
@@ -522,6 +561,45 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
                 local_data_path, write_offset, row.data(), row_byte_size);
             write_offset += row_byte_size;
         }
+    } else if (data_type == milvus::DataType::VECTOR_ARRAY) {
+        // Handle VECTOR_ARRAY - need to flatten the array data
+        auto vec_array_data =
+            dynamic_cast<FieldData<VectorArray>*>(field_data.get());
+        AssertInfo(vec_array_data != nullptr,
+                   "failed to cast field data to vector array");
+
+        dim = field_data->get_dim();
+        auto rows = vec_array_data->get_num_rows();
+
+        // Calculate total data size needed
+        int64_t total_size = 0;
+        for (auto i = 0; i < rows; ++i) {
+            total_size += vec_array_data->DataSize(i);
+        }
+
+        // Allocate buffer and copy data
+        auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[total_size]);
+        int64_t buf_offset = 0;
+
+        for (auto i = 0; i < rows; ++i) {
+            auto vec_array = vec_array_data->value_at(i);
+            auto size = vec_array_data->DataSize(i);
+
+            // Collect offsets information if needed (cumulative offsets)
+            if (offsets != nullptr) {
+                // Add cumulative offset (number of vectors processed so far)
+                size_t last_offset = offsets->back();
+                offsets->push_back(last_offset + vec_array->length());
+            }
+
+            std::memcpy(buf.get() + buf_offset, vec_array->data(), size);
+            buf_offset += size;
+        }
+
+        // Write flattened data to disk
+        local_chunk_manager->Write(
+            local_data_path, write_offset, buf.get(), total_size);
+        write_offset += total_size;
     } else {
         dim = field_data->get_dim();
         auto data_size =
@@ -559,6 +637,15 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     std::string local_data_path;
     bool file_created = false;
 
+    // Check if we're dealing with embedding list (VECTOR_ARRAY)
+    auto is_embedding_list =
+        index::GetValueFromConfig<bool>(config, index::EMB_LIST);
+    bool is_vector_array = is_embedding_list.value_or(false);
+    std::vector<size_t> offsets;
+    if (is_vector_array) {
+        offsets.push_back(0);  // Initialize with 0 for cumulative offsets
+    }
+
     // file format
     // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
     uint32_t num_rows = 0;
@@ -578,7 +665,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                          local_data_path,
                                          file_created,
                                          var_dim,
-                                         write_offset);
+                                         write_offset,
+                                         is_vector_array ? &offsets : nullptr);
     }
 
     // write num_rows and dim value to file header
@@ -588,6 +676,33 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     write_offset += sizeof(num_rows);
     local_chunk_manager->Write(
         local_data_path, write_offset, &var_dim, sizeof(var_dim));
+
+    // Write offsets file for VECTOR_ARRAY
+    if (is_vector_array) {
+        AssertInfo(offsets.size() == num_rows + 1,
+                   "offsets size is not equal to num_rows + 1: offset size {}, "
+                   "num_rows {}",
+                   offsets.size(),
+                   num_rows);
+        // Get offsets path from config if provided, otherwise use default
+        auto offsets_path = index::GetValueFromConfig<std::string>(
+                                config, index::EMB_LIST_OFFSETS_PATH)
+                                .value();
+
+        local_chunk_manager->CreateFile(offsets_path);
+
+        uint32_t num_offsets = offsets.size();
+        int64_t offsets_write_pos = 0;
+
+        local_chunk_manager->Write(
+            offsets_path, offsets_write_pos, &num_offsets, sizeof(uint32_t));
+        offsets_write_pos += sizeof(uint32_t);
+
+        local_chunk_manager->Write(offsets_path,
+                                   offsets_write_pos,
+                                   offsets.data(),
+                                   offsets.size() * sizeof(size_t));
+    }
 
     return local_data_path;
 }

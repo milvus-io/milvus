@@ -109,7 +109,7 @@ IsMaterializedViewSupported(const DataType& data_type) {
            data_type == DataType::INT16 || data_type == DataType::INT32 ||
            data_type == DataType::INT64 || data_type == DataType::FLOAT ||
            data_type == DataType::DOUBLE || data_type == DataType::VARCHAR ||
-           data_type == DataType::STRING;
+           data_type == DataType::TIMESTAMPTZ || data_type == DataType::STRING;
 }
 
 struct ColumnInfo {
@@ -681,7 +681,7 @@ class TimestamptzArithCompareExpr : public ITypeFilterExpr {
                                 const proto::plan::Interval& interval,
                                 const proto::plan::OpType compare_op,
                                 const proto::plan::GenericValue& compare_value)
-        : timestamp_column_(timestamp_column),
+        : column_(timestamp_column),
           arith_op_(arith_op),
           interval_(interval),
           compare_op_(compare_op),
@@ -691,8 +691,7 @@ class TimestamptzArithCompareExpr : public ITypeFilterExpr {
     std::string
     ToString() const override {
         std::stringstream ss;
-        ss << "TimestamptzArithCompareExpr:[Column: "
-           << timestamp_column_.ToString()
+        ss << "TimestamptzArithCompareExpr:[Column: " << column_.ToString()
            << ", ArithOp: " << milvus::proto::plan::ArithOpType_Name(arith_op_)
            << ", Interval: " << interval_.ShortDebugString()
            << ", CompareOp: " << milvus::proto::plan::OpType_Name(compare_op_)
@@ -701,7 +700,7 @@ class TimestamptzArithCompareExpr : public ITypeFilterExpr {
     }
 
  public:
-    const ColumnInfo timestamp_column_;
+    const ColumnInfo column_;
     const proto::plan::ArithOpType arith_op_;
     const proto::plan::Interval interval_;
     const proto::plan::OpType compare_op_;

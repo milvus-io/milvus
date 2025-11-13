@@ -127,6 +127,9 @@ class StringIndexMarisa : public StringIndex {
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
+    int64_t
+    CalculateTotalSize() const;
+
  private:
     Config config_;
     marisa::Trie trie_;
@@ -134,6 +137,7 @@ class StringIndexMarisa : public StringIndex {
     std::map<size_t, std::vector<size_t>> str_ids_to_offsets_;
     bool built_ = false;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    int64_t total_size_ = 0;  // Cached total size to avoid runtime calculation
 };
 
 using StringIndexMarisaPtr = std::unique_ptr<StringIndexMarisa>;

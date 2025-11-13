@@ -32,7 +32,10 @@ const (
 	RoleSecondary
 )
 
-var ErrWrongConfiguration = errors.New("wrong replicate configuration")
+var (
+	ErrWrongConfiguration     = errors.New("wrong replicate configuration")
+	ErrCurrentClusterNotFound = errors.New("current cluster not found")
+)
 
 func (r Role) String() string {
 	switch r {
@@ -101,7 +104,7 @@ func NewConfigHelper(currentClusterID string, cfg *commonpb.ReplicateConfigurati
 		return nil, errors.Wrap(ErrWrongConfiguration, "primary count is not 1")
 	}
 	if _, ok := vs[currentClusterID]; !ok {
-		return nil, errors.Wrap(ErrWrongConfiguration, fmt.Sprintf("current cluster %s not found", currentClusterID))
+		return nil, ErrCurrentClusterNotFound
 	}
 	pchannels := len(vs[currentClusterID].Pchannels)
 	for _, vertice := range vs {

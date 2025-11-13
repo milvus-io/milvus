@@ -112,6 +112,10 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithTxnContext(txnCtx TxnContext) MutableMessage
 
+	// WithReplicateHeader sets the replicate header of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithReplicateHeader(rh *ReplicateHeader) MutableMessage
+
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
 }

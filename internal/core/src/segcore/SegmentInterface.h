@@ -203,6 +203,13 @@ class SegmentInterface {
 // only for implementation
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    virtual void
+    prefetch_chunks(milvus::OpContext* op_ctx,
+                    FieldId field_id,
+                    const std::vector<int64_t>& chunk_ids) const {
+        // do nothing
+    }
+
     template <typename T>
     PinWrapper<Span<T>>
     chunk_data(milvus::OpContext* op_ctx,

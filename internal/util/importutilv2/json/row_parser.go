@@ -21,15 +21,13 @@ import (
 	"strconv"
 
 	"github.com/samber/lo"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
-	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -49,6 +47,8 @@ type rowParser struct {
 
 	structArrays      map[string]interface{}
 	allowInsertAutoID bool
+
+	timezone string
 }
 
 func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
@@ -105,6 +105,7 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 		functionOutputFields: functionOutputFields,
 		structArrays:         sturctArrays,
 		allowInsertAutoID:    allowInsertAutoID,
+		timezone:             common.GetSchemaTimezone(schema),
 	}, nil
 }
 
@@ -178,8 +179,20 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 	row := make(Row)
 	dynamicValues := make(map[string]any)
 
-	handleField := func(key string, value any) error {
-		if fieldID, ok := r.name2FieldID[key]; ok {
+	handleField := func(structName string, key string, value any) error {
+		var fieldID int64
+		var found bool
+
+		if structName != "" {
+			// Transform to structName[fieldName] format
+			transformedKey := typeutil.ConcatStructFieldName(structName, key)
+			fieldID, found = r.name2FieldID[transformedKey]
+		} else {
+			// For regular fields, lookup directly
+			fieldID, found = r.name2FieldID[key]
+		}
+
+		if found {
 			data, err := r.parseEntity(fieldID, value)
 			if err != nil {
 				return err
@@ -215,12 +228,14 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			}
 
 			for subKey, subValue := range values {
-				if err := handleField(subKey, subValue); err != nil {
+				// Pass struct name for sub-fields
+				if err := handleField(key, subKey, subValue); err != nil {
 					return nil, err
 				}
 			}
 		} else {
-			if err := handleField(key, value); err != nil {
+			// Pass empty string for regular fields
+			if err := handleField("", key, value); err != nil {
 				return nil, err
 			}
 		}
@@ -360,7 +375,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return int32(num), nil
-	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+	case schemapb.DataType_Int64:
 		value, ok := obj.(json.Number)
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
@@ -546,16 +561,21 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
 
-		geomT, err := wkt.Unmarshal(wktValue)
+		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, r.wrapTypeError(wktValue, fieldID)
 		}
-		wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
-		if err != nil {
-			return nil, r.wrapTypeError(wktValue, fieldID)
-		}
-
 		return wkbValue, nil
+	case schemapb.DataType_Timestamptz:
+		strValue, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, r.timezone)
+		if err != nil {
+			return nil, err
+		}
+		return tz, nil
 	case schemapb.DataType_Array:
 		arr, ok := obj.([]interface{})
 		if !ok {
@@ -699,26 +719,6 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
 				DoubleData: &schemapb.DoubleArray{
-					Data: values,
-				},
-			},
-		}, nil
-	case schemapb.DataType_Timestamptz:
-		values := make([]int64, len(arr))
-		for i, v := range arr {
-			value, ok := v.(json.Number)
-			if !ok {
-				return nil, r.wrapArrayValueTypeError(arr, eleType)
-			}
-			num, err := strconv.ParseInt(value.String(), 0, 64)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse int64: %w", err)
-			}
-			values[i] = num
-		}
-		return &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_TimestamptzData{
-				TimestamptzData: &schemapb.TimestamptzArray{
 					Data: values,
 				},
 			},

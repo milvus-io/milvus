@@ -256,3 +256,20 @@ func newLayout(channels map[string]int, vchannels map[string]map[string]int64, s
 	}
 	return layout
 }
+
+func TestAssignmentClone(t *testing.T) {
+	snapshot := assignmentSnapshot{
+		Assignments: map[types.ChannelID]types.PChannelInfoAssigned{
+			newChannelID("c1"): {
+				Channel: types.PChannelInfo{
+					Name: "c1",
+				},
+			},
+		},
+	}
+	clonedSnapshot := snapshot.Clone()
+	clonedSnapshot.Assignments[newChannelID("c2")] = types.PChannelInfoAssigned{}
+	assert.Len(t, snapshot.Assignments, 1)
+	assert.Equal(t, snapshot.Assignments[newChannelID("c1")], clonedSnapshot.Assignments[newChannelID("c1")])
+	assert.Len(t, clonedSnapshot.Assignments, 2)
+}

@@ -25,6 +25,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkbcommon"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -91,6 +94,8 @@ const (
 	MinimalScalarIndexEngineVersion = int32(0)
 	CurrentScalarIndexEngineVersion = int32(2)
 )
+
+const DefaultTimezone = "UTC"
 
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
@@ -243,9 +248,8 @@ const (
 	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
-	DatabaseDefaultTimezone   = "database.timezone"
-	CollectionDefaultTimezone = "collection.timezone"
-	AllowInsertAutoIDKey      = "allow_insert_auto_id"
+	TimezoneKey          = "timezone"
+	AllowInsertAutoIDKey = "allow_insert_auto_id"
 )
 
 const (
@@ -308,6 +312,28 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 				}
 			}
 			return false
+		}
+	}
+	// Check struct array fields
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			for _, kv := range structField.GetTypeParams() {
+				if kv.Key == MmapEnabledKey {
+					return true
+				}
+			}
+			return false
+		}
+		// Check fields inside struct
+		for _, field := range structField.GetFields() {
+			if field.GetFieldID() == fieldID {
+				for _, kv := range field.GetTypeParams() {
+					if kv.Key == MmapEnabledKey {
+						return true
+					}
+				}
+				return false
+			}
 		}
 	}
 	return false
@@ -569,4 +595,12 @@ func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+func ConvertWKTToWKB(wktStr string) ([]byte, error) {
+	geomT, err := wkt.Unmarshal(wktStr)
+	if err != nil {
+		return nil, err
+	}
+	return wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
 }
