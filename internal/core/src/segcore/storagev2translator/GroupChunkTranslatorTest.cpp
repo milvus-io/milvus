@@ -97,9 +97,13 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
 };
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
+    auto temp_dir =
+        std::filesystem::temp_directory_path() / "gctt_test_with_mmap";
+    std::filesystem::create_directory(temp_dir);
+
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
-    auto column_group_info = FieldDataInfo(0, 3000, "");
+    auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
@@ -165,17 +169,23 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     EXPECT_EQ(meta->chunk_memory_size_.size(), num_cells);
     EXPECT_EQ(expected_total_size, chunked_column_group->memory_size());
 
+    // Verify the mmap files for cell 0 and 1 are created
+    std::vector<std::string> mmap_paths = {
+        (temp_dir / "seg_0_cg_0_0").string(),
+        (temp_dir / "seg_0_cg_0_1").string()};
     // Verify mmap directory and files if in mmap mode
     if (use_mmap) {
-        std::string mmap_dir = std::to_string(segment_id_);
-        EXPECT_TRUE(std::filesystem::exists(mmap_dir));
+        for (const auto& mmap_path : mmap_paths) {
+            EXPECT_TRUE(std::filesystem::exists(mmap_path));
+        }
+    }
 
-        // DO NOT Verify each field has a corresponding file: files are unlinked immediately after being mmaped.
-        // for (size_t i = 0; i < field_id_list.size(); ++i) {
-        //     auto field_id = field_id_list.Get(i);
-        //     std::string field_file = mmap_dir + "/" + std::to_string(field_id);
-        //     EXPECT_TRUE(std::filesystem::exists(field_file));
-        // }
+    // Clean up mmap files
+    if (use_mmap) {
+        for (const auto& mmap_path : mmap_paths) {
+            std::filesystem::remove(mmap_path);
+        }
+        std::filesystem::remove(temp_dir);
     }
 }
 
@@ -229,7 +239,10 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         AssertInfo(status.ok(), "failed to close file reader");
     }
 
-    auto column_group_info = FieldDataInfo(0, total_rows, "");
+    auto temp_dir =
+        std::filesystem::temp_directory_path() / "gctt_test_multiple_files";
+    std::filesystem::create_directory(temp_dir);
+    auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
@@ -311,6 +324,10 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         if (std::filesystem::exists(file_path)) {
             std::filesystem::remove(file_path);
         }
+    }
+    // Clean up cached column group files
+    if (use_mmap && std::filesystem::exists(temp_dir)) {
+        std::filesystem::remove_all(temp_dir);
     }
 }
 
