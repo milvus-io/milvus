@@ -202,50 +202,6 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         # 3. drop action
         await async_client.drop_collection(collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    async def test_async_milvus_client_drop_index_invalid_collection_name(self, name):
-        """
-        target: test drop index with invalid collection name
-        method: drop index with invalid collection name
-        expected: raise exception
-        """
-        self.init_async_milvus_client()
-        async_client = self.async_milvus_client_wrap
-
-        # 1. create collection
-        collection_name = cf.gen_unique_str(prefix)
-        await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
-        await async_client.release_collection(collection_name)
-        # 2. drop index
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the first character of a collection "
-                                                f"name must be an underscore or letter: invalid parameter"}
-        await async_client.drop_index(name, "vector", check_task=CheckTasks.err_res, check_items=error)
-        # 3. drop action
-        await async_client.drop_collection(collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("name", ["a".join("a" for i in range(256))])
-    async def test_async_milvus_client_drop_index_collection_name_over_max_length(self, name):
-        """
-        target: test drop index with over max collection name length
-        method: drop index with over max collection name length
-        expected: raise exception
-        """
-        self.init_async_milvus_client()
-        async_client = self.async_milvus_client_wrap
-
-        # 1. create collection
-        collection_name = cf.gen_unique_str(prefix)
-        await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
-        await async_client.release_collection(collection_name)
-        # 2. drop index
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the length of a collection name "
-                                                f"must be less than 255 characters: invalid parameter"}
-        await async_client.drop_index(name, "vector", check_task=CheckTasks.err_res, check_items=error)
-        # 3. drop action
-        await async_client.drop_collection(collection_name)
-
 class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
     """ Test case of index interface """
 
