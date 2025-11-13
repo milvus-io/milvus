@@ -25,12 +25,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -38,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -51,6 +46,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestMain(m *testing.M) {
@@ -1779,7 +1779,7 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		isBM25Field: map[int64]bool{101: true},
+		functionFieldType: map[int64]schemapb.FunctionType{101: schemapb.FunctionType_BM25},
 	}
 
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
@@ -1885,5 +1885,67 @@ func TestNewRowCountBasedEvaluator_PartialResultAcceptance(t *testing.T) {
 		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
 		assert.True(t, shouldReturn) // 0.9 > 0.7, should return partial
 		assert.Equal(t, 0.9, accessedRatio)
+	})
+}
+
+// MinHash Function test
+func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
+	// miss parametres
+	minHashFunctionSchema := &schemapb.FunctionSchema{
+		Type:           schemapb.FunctionType_MinHash,
+		InputFieldIds:  []int64{109},
+		OutputFieldIds: []int64{101, 102}, // invalid output field
+	}
+	schema1 := &schemapb.CollectionSchema{
+		Name: "TestCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			}, {
+				Name:         "binary_vector",
+				FieldID:      101,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "1024",
+					},
+				},
+			}, {
+				Name:     "text",
+				FieldID:  102,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxLengthKey,
+						Value: "256",
+					},
+				},
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{minHashFunctionSchema},
+	}
+	function.MockMinHashFunctionSchema(schema1)
+
+	s.Run("init function failed", func() {
+		manager := segments.NewManager()
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		s.Error(err)
+	})
+
+	s.Run("init function ", func() {
+		minHashFunctionSchema.OutputFieldIds = []int64{102}
+		manager := segments.NewManager()
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		s.NoError(err)
 	})
 }
