@@ -1670,6 +1670,16 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
 		}
 
+		// Re-validate segment health to prevent race condition with drop collection
+		// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
+		if !isSegmentHealthy(segment) {
+			log.Warn("input segment was dropped during compaction mutation",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int64("segmentID", segmentID),
+				zap.String("state", segment.GetState().String()))
+			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+		}
+
 		cloned := segment.Clone()
 
 		compactFromSegInfos = append(compactFromSegInfos, cloned)
@@ -1747,6 +1757,16 @@ func (m *meta) completeMixCompactionMutation(
 		segment := m.segments.GetSegment(segmentID)
 		if segment == nil {
 			return nil, nil, merr.WrapErrSegmentNotFound(segmentID)
+		}
+
+		// Re-validate segment health to prevent race condition with drop collection
+		// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
+		if !isSegmentHealthy(segment) {
+			log.Warn("input segment was dropped during compaction mutation",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int64("segmentID", segmentID),
+				zap.String("state", segment.GetState().String()))
+			return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
 		}
 
 		cloned := segment.Clone()
@@ -2235,6 +2255,16 @@ func (m *meta) completeSortCompactionMutation(
 	oldSegment := m.segments.GetSegment(compactFromSegID)
 	if oldSegment == nil {
 		return nil, nil, merr.WrapErrSegmentNotFound(compactFromSegID)
+	}
+
+	// Re-validate segment health to prevent race condition with drop collection
+	// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
+	if !isSegmentHealthy(oldSegment) {
+		log.Warn("input segment was dropped during compaction mutation",
+			zap.Int64("planID", t.GetPlanID()),
+			zap.Int64("segmentID", compactFromSegID),
+			zap.String("state", oldSegment.GetState().String()))
+		return nil, nil, merr.WrapErrSegmentNotFound(compactFromSegID, "input segment was dropped")
 	}
 
 	resultInvisible := oldSegment.GetIsInvisible()
