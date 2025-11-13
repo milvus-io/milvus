@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -153,7 +154,7 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 	}
 	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
 		Functions: []*schemapb.FunctionSchema{functionSchema},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	nq := int64(2)
@@ -408,7 +409,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 	}
 	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
 		Functions: []*schemapb.FunctionSchema{functionSchema},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	task := &searchTask{
@@ -478,7 +479,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 	}
 	funcScore, err := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
 		Functions: []*schemapb.FunctionSchema{functionSchema},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	task := &searchTask{
@@ -754,7 +755,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 	}
 	funcScore, _ := rerank.NewFunctionScore(schema, &schemapb.FunctionScore{
 		Functions: []*schemapb.FunctionSchema{functionSchema},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	task := &searchTask{
 		ctx:            context.Background(),
 		collectionName: collName,

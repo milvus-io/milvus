@@ -25,6 +25,7 @@ type functionConfig struct {
 	RerankModelProviders   ParamGroup `refreshable:"true"`
 	LocalResourcePath      ParamItem  `refreshable:"true"`
 	LinderaDownloadUrls    ParamGroup `refreshable:"true"`
+	ZillizProviders        ParamGroup `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -145,11 +146,13 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:   "2.5.16",
 	}
 	p.LinderaDownloadUrls.Init(base.mgr)
-}
 
-const (
-	textEmbeddingKey string = "textEmbedding"
-)
+	p.ZillizProviders = ParamGroup{
+		KeyPrefix: "function.models.zilliz.",
+		Version:   "2.6.5",
+	}
+	p.ZillizProviders.Init(base.mgr)
+}
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {
 	matchedParam := make(map[string]string)
