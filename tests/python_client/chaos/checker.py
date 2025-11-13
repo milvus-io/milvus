@@ -1223,7 +1223,7 @@ class PartialUpdateChecker(Checker):
             collection_name = cf.gen_unique_str("PartialUpdateChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         schema = self.get_schema()
-        self.data = cf.gen_row_data_by_schema(nb=4, schema=schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
 
     @trace()
     def partial_update_entities(self):
@@ -1240,26 +1240,21 @@ class PartialUpdateChecker(Checker):
         schema = self.get_schema()
         pk_field_name = self.int64_field_name
         rows = len(self.data)
-        half = rows // 2
-        num_fields = len(schema.fields)
 
-        pk_old = [d[pk_field_name] for d in self.data[:half]]
+        # if count is even, use partial update; if count is odd, use full insert
+        if count % 2 == 0:
+            # Generate a fresh full batch (used for inserts and as a source of values)
+            full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
+            self.data = full_rows
+        else:
+            num_fields = len(schema.fields)
+            # Choose subset fields to update: always include PK + one non-PK field if available
+            num = count % num_fields
+            desired_fields = [pk_field_name, schema.fields[num if num != 0 else 1].name]
+            partial_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema,
+                                                    desired_field_names=desired_fields)
+            self.data = partial_rows
 
-        # Generate a fresh full batch (used for inserts and as a source of values)
-        full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
-
-        # Choose subset fields to update: always include PK + one non-PK field if available
-        num = count % num_fields
-        desired_fields = [pk_field_name, schema.fields[num if num != 0 else 1].name]
-        partial_rows = cf.gen_row_data_by_schema(nb=half, schema=schema,
-                                                 desired_field_names=desired_fields)
-
-        # Override PKs for partial updates to target existing rows
-        for i in range(half):
-            partial_rows[i][pk_field_name] = pk_old[i]
-
-        # Assemble final batch: first half partial updates, second half full inserts
-        self.data = partial_rows + full_rows[half:]
         res, result = self.partial_update_entities()
         return res, result
 
