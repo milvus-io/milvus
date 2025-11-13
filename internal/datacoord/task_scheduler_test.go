@@ -1300,15 +1300,10 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		// set job info failed --> state: Finished
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("set job info failed")).Once()
 
-		// set job success, drop job on task failed --> state: Finished
+		// set job success, drop job on task failed --> state: Finished (skip drop error, task success)
 		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
 		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
 		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Status(errors.New("drop job failed")), nil).Once()
-
-		// drop job success --> no task
-		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil).Once()
-		workerManager.EXPECT().GetClientByID(mock.Anything).Return(in, true).Once()
-		in.EXPECT().DropJobsV2(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
 
 		for {
 			if scheduler.pendingTasks.TaskCount() == 0 {
