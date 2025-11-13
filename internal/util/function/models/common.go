@@ -123,6 +123,17 @@ const (
 	SiliconflowAKEnvStr string = "MILVUS_SILICONFLOW_API_KEY"
 )
 
+// cometapi
+
+const (
+	// CometAPI embedding models
+	CometAPITextEmbedding3Small string = "text-embedding-3-small"
+	CometAPITextEmbedding3Large string = "text-embedding-3-large"
+	CometAPITextEmbeddingAda002 string = "text-embedding-ada-002"
+
+	CometAPIAKEnvStr string = "MILVUS_COMETAPI_API_KEY"
+)
+
 // TEI and vllm
 
 const (
