@@ -1354,23 +1354,8 @@ func reconstructStructArrayForCSV(structField *schemapb.StructArrayFieldSchema, 
 		return "", err
 	}
 
-	// Convert to CSV format: each sub-field value needs to be JSON-encoded
-	csvArray := make([]map[string]string, len(structArray))
-	for i, elem := range structArray {
-		csvElem := make(map[string]string)
-		for key, value := range elem {
-			// Convert each value to JSON string for CSV
-			jsonBytes, err := json.Marshal(value)
-			if err != nil {
-				return "", err
-			}
-			csvElem[key] = string(jsonBytes)
-		}
-		csvArray[i] = csvElem
-	}
-
 	// Convert the entire struct array to JSON string
-	jsonBytes, err := json.Marshal(csvArray)
+	jsonBytes, err := json.Marshal(structArray)
 	if err != nil {
 		return "", err
 	}
