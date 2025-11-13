@@ -96,6 +96,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 			// the schema may be changed even the collection is loaded
 			collection.schema.Store(schema)
 			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
+			collection.ccollection.UpdateIndexMeta(meta)
 			collection.schemaVersion = loadMeta.GetSchemaVersion()
 			log.Info("update collection schema",
 				zap.Int64("collectionID", collectionID),
@@ -270,6 +271,11 @@ func (c *Collection) Ref(count uint32) uint32 {
 }
 
 func (c *Collection) Unref(count uint32) uint32 {
+	// ensure the Sub() is not underflow
+	current := c.refCount.Load()
+	if count > current {
+		count = current
+	}
 	refCount := c.refCount.Sub(count)
 	log.Debug("collection ref decrement",
 		zap.Int64("nodeID", paramtable.GetNodeID()),
