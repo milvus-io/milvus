@@ -644,7 +644,7 @@ make_chunk(const FieldMeta& field_meta,
                                                      chunk_mmap_guard);
         case milvus::DataType::VECTOR_BINARY:
             return std::make_unique<FixedWidthChunk>(row_nums,
-                                                     dim,
+                                                     dim / 8,
                                                      data,
                                                      size,
                                                      sizeof(knowhere::bin1),
