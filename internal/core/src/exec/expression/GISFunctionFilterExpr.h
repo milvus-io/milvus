@@ -74,6 +74,9 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     VectorPtr
     EvalForDataSegment();
 
+    bool
+    CanUseIndex(proto::plan::GISFunctionFilterExpr_GISOp op) const;
+
  private:
     std::shared_ptr<const milvus::expr::GISFunctionFilterExpr> expr_;
 
