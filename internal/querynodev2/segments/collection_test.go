@@ -19,6 +19,7 @@ package segments
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -51,6 +52,45 @@ func (s *CollectionManagerSuite) SetupTest() {
 		},
 	})
 	s.Require().NoError(err)
+}
+
+func (s *CollectionManagerSuite) TestRefUnref() {
+	var id int64 = 1
+	s.cm = NewCollectionManager()
+
+	// create a new Collection
+	schema1 := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
+	indexMeta1 := mock_segcore.GenTestIndexMeta(id, schema1)
+	err := s.cm.PutOrRef(id, schema1, indexMeta1, &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 1,
+	})
+	s.Require().NoError(err)
+
+	col := s.cm.Get(id)
+	s.Require().NotNil(col)
+	s.Require().Equal(schema1, col.Schema())
+	segCol := col.GetCCollection()
+	s.Require().Equal(indexMeta1, segCol.IndexMeta())
+
+	exist := s.cm.Ref(id, 1)
+	s.Require().True(exist)
+
+	// update the Collection
+	schema2 := mock_segcore.GenTestBM25CollectionSchema("bm25")
+	indexMeta2 := mock_segcore.GenTestIndexMeta(id, schema2)
+	indexMeta2.IndexMetas = indexMeta2.IndexMetas[:1]
+	err = s.cm.PutOrRef(id, schema2, indexMeta2, &querypb.LoadMetaInfo{
+		LoadType:      querypb.LoadType_LoadCollection,
+		SchemaVersion: 2,
+	})
+	s.Require().NoError(err)
+
+	col = s.cm.Get(id)
+	s.Require().NotNil(col)
+	s.Require().Equal(schema2, col.Schema())
+	segCol = col.GetCCollection()
+	s.Require().Equal(indexMeta2, segCol.IndexMeta())
 }
 
 func (s *CollectionManagerSuite) TestUpdateSchema() {
@@ -90,4 +130,28 @@ func (s *CollectionManagerSuite) TestUpdateSchema() {
 
 func TestCollectionManager(t *testing.T) {
 	suite.Run(t, new(CollectionManagerSuite))
+}
+
+func TestCollection(t *testing.T) {
+	schema := mock_segcore.GenTestCollectionSchema("collection", schemapb.DataType_Int64, false)
+	indexMeta := mock_segcore.GenTestIndexMeta(1, schema)
+	col, err := NewCollection(1, schema, indexMeta, &querypb.LoadMetaInfo{
+		LoadType:     querypb.LoadType_LoadCollection,
+		DbProperties: []*commonpb.KeyValuePair{},
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, col)
+
+	refCount := col.Ref(1)
+	assert.Equal(t, uint32(1), refCount)
+	refCount = col.Ref(10)
+	assert.Equal(t, uint32(11), refCount)
+	refCount = col.Ref(0)
+	assert.Equal(t, uint32(11), refCount)
+	refCount = col.Unref(1)
+	assert.Equal(t, uint32(10), refCount)
+	refCount = col.Unref(0)
+	assert.Equal(t, uint32(10), refCount)
+	refCount = col.Unref(100)
+	assert.Equal(t, uint32(0), refCount)
 }
