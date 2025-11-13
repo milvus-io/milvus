@@ -158,9 +158,12 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 		}
 	}
 	// call the ack callback until done.
+	bt.ObserveAckCallbackBegin()
 	if err := s.callMessageAckCallbackUntilDone(s.notifier.Context(), msg, makeMap); err != nil {
 		return err
 	}
+	bt.ObserveAckCallbackDone()
+
 	logger.Debug("ack callback done")
 	if err := bt.MarkAckCallbackDone(s.notifier.Context()); err != nil {
 		// The catalog is reliable to write, so we can mark the ack callback done without retrying.
