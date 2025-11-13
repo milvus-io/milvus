@@ -788,12 +788,15 @@ class SegmentExpr : public Expr {
         size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
 
         // prefetch chunks to reduce cache miss latency
-        std::vector<int64_t> pf_chunk_ids;
-        pf_chunk_ids.reserve(num_data_chunk_ - start_chunk);
-        for (size_t i = start_chunk; i < num_data_chunk_; i++) {
-            pf_chunk_ids.push_back(i);
+        if (!prefetched_) {
+            std::vector<int64_t> pf_chunk_ids;
+            pf_chunk_ids.reserve(num_data_chunk_ - start_chunk);
+            for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+                pf_chunk_ids.push_back(i);
+            }
+            segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
+            prefetched_ = true;
         }
-        segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
 
         for (size_t i = start_chunk; i < num_data_chunk_; i++) {
             auto data_pos =
@@ -1484,6 +1487,8 @@ class SegmentExpr : public Expr {
     // sometimes need to skip index and using raw data
     // default true means use index as much as possible
     bool use_index_{true};
+    // used for reducing cache miss latency in tiered storage
+    bool prefetched_{false};
     std::vector<PinWrapper<const index::IndexBase*>> pinned_index_{};
 
     int64_t active_count_{0};
