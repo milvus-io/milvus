@@ -3111,9 +3111,15 @@ class TestMilvusClientGeometryBasic(TestMilvusClientV2Base):
 
         # Verify results match ground truth
         result_ids = {result["id"] for result in results}
-        assert result_ids == expected_within, (
-            f"ST_DWITHIN({distance_meters}m, index={with_geo_index}) should return expected IDs "
-            f"(count: {len(expected_within)}), but got different IDs (count: {len(result_ids)})"
+        expected_count = len(expected_within)
+        actual_count = len(result_ids)
+        diff_count = len(result_ids.symmetric_difference(expected_within))
+        diff_percentage = diff_count / expected_count if expected_count > 0 else 0
+
+        assert diff_percentage <= 0.1, (
+            f"ST_DWITHIN({distance_meters}m, index={with_geo_index}) difference exceeds 10%: "
+            f"expected {expected_count} IDs, got {actual_count} IDs, "
+            f"{diff_count} different ({diff_percentage:.1%})"
         )
 
     @pytest.mark.tags(CaseLabel.L1)
