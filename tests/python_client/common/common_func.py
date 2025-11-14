@@ -2330,7 +2330,10 @@ def gen_timestamptz_str():
             return base.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
         # otherwise use explicit offset
         offset_hours = random.randint(-12, 14)
-        offset_minutes = random.choice([0, 30])
+        if offset_hours == -12 or offset_hours == 14:
+            offset_minutes = 0
+        else:
+            offset_minutes = random.choice([0, 30])
         tz = timezone(timedelta(hours=offset_hours, minutes=offset_minutes))
         local_dt = base.astimezone(tz)
         tz_str = local_dt.strftime("%z")  # "+0800"

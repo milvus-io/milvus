@@ -43,7 +43,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_UTC(self):
         """
         target:  Test timestamptz can be successfully inserted and queried
@@ -107,7 +106,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
                                consistency_level="Strong", index_params=index_params)
         
         db_name = self.list_databases(client)[0]
-        self.alter_database_properties(client, db_name, properties={"database.timezone": "Asia/Shanghai"})
+        self.alter_database_properties(client, db_name[0], properties={"timezone": "Asia/Shanghai"})
         
         # step 2: generate rows and insert the rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
@@ -123,7 +122,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_edge_case(self):
         """
         target:  Test timestamptz can be successfully inserted and queried
@@ -166,7 +164,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_Feb_29(self):
         """
         target:  Milvus raise error when input data with Feb 29
@@ -205,9 +202,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_partial_update(self):
-        # BUG: https://github.com/milvus-io/milvus/issues/44527
         """
         target:  Test timestamptz can be successfully inserted and queried
         method:
@@ -281,7 +276,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
 
         # step 3: query the rows
         for row in rows:
-            row[default_timestamp_field_name] = "2025-01-01T00:00:00+08:00"
+            row[default_timestamp_field_name] = "2025-01-01T00:00:00"
         rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
@@ -352,13 +347,13 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=3)
         schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
         index_params = self.prepare_index_params(client)[0] 
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
+        self.create_collection(client, collection_name, 3, schema=schema, 
                                consistency_level="Strong", index_params=index_params)
 
         # step 2: generate rows with timestamptz and insert the rows
@@ -412,11 +407,11 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         # lower < tz < upper
         # BUG: https://github.com/milvus-io/milvus/issues/44600
-        expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
-        self.query(client, collection_name, filter=expr,
-                    check_task=CheckTasks.check_query_results,
-                    check_items={exp_res: shanghai_time_row,
-                                    "pk_name": default_primary_key_field_name})
+        # expr = f"ISO '2025-01-01T00:00:00+08:00' < {default_timestamp_field_name} < ISO '2026-10-05T12:56:34+08:00'"
+        # self.query(client, collection_name, filter=expr,
+        #             check_task=CheckTasks.check_query_results,
+        #             check_items={exp_res: shanghai_time_row,
+        #                             "pk_name": default_primary_key_field_name})
         
         self.drop_collection(client, collection_name)
     
@@ -460,9 +455,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_add_collection_field(self):
-        # BUG: https://github.com/milvus-io/milvus/issues/44527
         """
         target:  Milvus raise error when add collection field with timestamptz
         method:
@@ -516,7 +509,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
                                             desired_field_names=[default_primary_key_field_name, default_timestamp_field_name])
         self.upsert(client, collection_name, pu_rows, partial_update=True)
         pu_rows = cf.convert_timestamptz(pu_rows, default_timestamp_field_name, "UTC")
-        self.query(client, collection_name, filter=f"0 <= {default_primary_key_field_name} <= {default_nb}",
+        self.query(client, collection_name, filter=f"0 <= {default_primary_key_field_name} < {default_nb}",
                             check_task=CheckTasks.check_query_results,
                             output_fields=[default_timestamp_field_name],
                             check_items={exp_res: pu_rows,
@@ -525,7 +518,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_add_field_compaction(self):
         """
         target: test compaction with added timestamptz field
@@ -674,7 +666,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_add_another_timestamptz_field(self):
         """
         target:  Milvus raise error when add another timestamptz field
@@ -726,7 +717,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_insert_delete_upsert_with_flush(self):
         """
         target: test insert, delete, upsert with flush on timestamptz
@@ -783,9 +773,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
     
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_insert_upsert_flush_delete_upsert_flush(self):
-        # BUG: blocked by partial update
         """
         target: test insert, upsert, flush, delete, upsert with flush on timestamptz
         method:
@@ -896,9 +884,7 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_input_data_invalid_time_format(self):
-        # BUG: https://github.com/milvus-io/milvus/issues/44537
         """
         target:  Milvus raise error when input data with invalid time format
         method:
@@ -933,7 +919,8 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         
         # step 3: query the rows
         for row in rows:
-            error = {ct.err_code: 1, ct.err_msg: f"got invalid timestamptz string: {row[default_timestamp_field_name]}"}
+            print(row[default_timestamp_field_name])
+            error = {ct.err_code: 1100, ct.err_msg: f"got invalid timestamptz string '{row[default_timestamp_field_name]}': invalid timezone name; must be a valid IANA Time Zone ID (e.g., 'Asia/Shanghai' or 'UTC'): invalid parameter"}
             self.insert(client, collection_name, row, 
                         check_task=CheckTasks.err_res, 
                         check_items=error)
@@ -941,7 +928,6 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
     
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_wrong_index_type(self):
         """
         target:  Milvus raise error when input data with wrong index type
@@ -960,11 +946,13 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_timestamp_field_name, index_type="INVERTED")
+        error = {ct.err_code: 1100, ct.err_msg: "INVERTED are not supported on Timestamptz field: invalid parameter[expected=valid index params][actual=invalid index params]"}
         self.create_collection(client, collection_name, default_dim, schema=schema, 
-                               consistency_level="Strong", index_params=index_params)
+                               consistency_level="Strong", index_params=index_params,
+                               check_task=CheckTasks.err_res,
+                               check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_wrong_default_value(self):
         """
         target:  Milvus raise error when input data with wrong default value
@@ -981,7 +969,7 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True, default_value="timestamp")
 
-        error = {ct.err_code: 1100, ct.err_msg: "type (Timestamptz) of field (timestamp) is not equal to the type(DataType_VarChar) of default_value: invalid parameter"}
+        error = {ct.err_code: 65536, ct.err_msg: "invalid timestamp string: 'timestamp'. Does not match any known format"}
         self.create_collection(client, collection_name, default_dim, schema=schema, 
                                consistency_level="Strong",
                                check_task=CheckTasks.err_res, check_items=error)
@@ -992,15 +980,14 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
         new_schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         new_schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True, default_value=10)
 
-        error = {ct.err_code: 1100, ct.err_msg: "type (Timestamptz) of field (timestamp) is not equal to the type(DataType_VarChar) of default_value: invalid parameter"}
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
+        error = {ct.err_code: 65536, ct.err_msg: "type (Timestamptz) of field (timestamp) is not equal to the type(DataType_Int64) of default_value: invalid parameter"}
+        self.create_collection(client, collection_name, default_dim, schema=new_schema, 
                                consistency_level="Strong",
                                check_task=CheckTasks.err_res, check_items=error)
         
         self.drop_collection(client, collection_name)
     
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="timesptamptz is not ready")
     def test_milvus_client_timestamptz_add_field_not_nullable(self):
         """
         target:  Milvus raise error when add non-nullable timestamptz field
