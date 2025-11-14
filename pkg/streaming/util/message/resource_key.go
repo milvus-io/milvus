@@ -47,6 +47,14 @@ func (r ResourceKey) String() string {
 	return fmt.Sprintf("%s:%s@X", domain, r.Key)
 }
 
+func (r ResourceKey) ShortString() string {
+	domain, _ := strings.CutPrefix(r.Domain.String(), "ResourceDomain")
+	if r.Shared {
+		return fmt.Sprintf("%s@R", domain)
+	}
+	return fmt.Sprintf("%s@X", domain)
+}
+
 // NewSharedClusterResourceKey creates a shared cluster resource key.
 func NewSharedClusterResourceKey() ResourceKey {
 	return ResourceKey{
