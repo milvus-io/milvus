@@ -1009,8 +1009,8 @@ func (rm *ResourceManager) GetResourceGroupsJSON(ctx context.Context) string {
 }
 
 func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
-	rm.rwmutex.RLock()
-	defer rm.rwmutex.RUnlock()
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
 
 	// clean stopping/offline nodes
 	assignedNodes := typeutil.NewUniqueSet()
