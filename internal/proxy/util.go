@@ -787,7 +787,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
 }
 
-func validateFunction(coll *schemapb.CollectionSchema) error {
+func validateFunction(coll *schemapb.CollectionSchema, disableRuntimeCheck bool) error {
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
@@ -853,8 +853,10 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			return err
 		}
 	}
-	if err := embedding.ValidateFunctions(coll, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
-		return err
+	if !disableRuntimeCheck {
+		if err := embedding.ValidateFunctions(coll, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

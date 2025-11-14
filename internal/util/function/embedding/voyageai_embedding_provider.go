@@ -116,7 +116,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 }
 
 func (provider *VoyageAIEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *VoyageAIEmbeddingProvider) FieldDim() int64 {

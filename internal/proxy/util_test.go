@@ -2546,7 +2546,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
 	})
 
@@ -2571,7 +2571,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate function name")
 	})
@@ -2590,7 +2590,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "input field not found")
 	})
@@ -2609,7 +2609,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "output field not found")
 	})
@@ -2629,7 +2629,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
 	})
 
@@ -2648,7 +2648,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be primary key")
 	})
@@ -2668,7 +2668,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2688,7 +2688,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2708,7 +2708,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be nullable")
 	})
@@ -2761,7 +2761,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
 	})
 
@@ -2794,7 +2794,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 	})
 }

@@ -192,7 +192,7 @@ func NewVertexAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 }
 
 func (provider *VertexAIEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *VertexAIEmbeddingProvider) FieldDim() int64 {

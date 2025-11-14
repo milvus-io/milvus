@@ -106,7 +106,7 @@ func NewCohereEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 }
 
 func (provider *CohereEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *CohereEmbeddingProvider) FieldDim() int64 {
