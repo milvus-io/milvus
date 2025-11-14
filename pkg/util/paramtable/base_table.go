@@ -57,6 +57,7 @@ const (
 	DefaultMinioRegion                                   = ""
 	DefaultMinioUseVirtualHost                           = "false"
 	DefaultMinioRequestTimeout                           = "10000"
+	DefaultMinioMaxConnections                           = "100"
 )
 
 // Const of Global Config List

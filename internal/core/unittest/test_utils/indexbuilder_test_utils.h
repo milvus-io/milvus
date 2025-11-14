@@ -406,7 +406,8 @@ GenSortedArr<std::string>(int64_t n) {
 std::vector<ScalarTestParams>
 GenBoolParams() {
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
+    ret.emplace_back(
+        ScalarTestParams(MapParams(), {{"index_type", "STL_SORT"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -414,7 +415,7 @@ GenBoolParams() {
 std::vector<ScalarTestParams>
 GenStringParams() {
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "marisa"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "Trie"}}));
     return ret;
 }
 
@@ -432,7 +433,8 @@ GenParams() {
     }
 
     std::vector<ScalarTestParams> ret;
-    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "sort"}}));
+    ret.emplace_back(
+        ScalarTestParams(MapParams(), {{"index_type", "STL_SORT"}}));
     ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
     return ret;
 }
@@ -465,27 +467,28 @@ GenDsFromPB(const google::protobuf::Message& msg) {
 template <typename T>
 inline std::vector<std::string>
 GetIndexTypes() {
-    return std::vector<std::string>{"sort", milvus::index::BITMAP_INDEX_TYPE};
+    return std::vector<std::string>{"STL_SORT",
+                                    milvus::index::BITMAP_INDEX_TYPE};
 }
 
 template <>
 inline std::vector<std::string>
 GetIndexTypes<std::string>() {
     return std::vector<std::string>{
-        "sort", "marisa", milvus::index::BITMAP_INDEX_TYPE};
+        "STL_SORT", "Trie", milvus::index::BITMAP_INDEX_TYPE};
 }
 
 template <typename T>
 inline std::vector<std::string>
 GetIndexTypesV2() {
-    return std::vector<std::string>{"sort", milvus::index::INVERTED_INDEX_TYPE};
+    return std::vector<std::string>{"STL_SORT",
+                                    milvus::index::INVERTED_INDEX_TYPE};
 }
 
 template <>
 inline std::vector<std::string>
 GetIndexTypesV2<std::string>() {
-    return std::vector<std::string>{"marisa",
-                                    milvus::index::INVERTED_INDEX_TYPE};
+    return std::vector<std::string>{"Trie", milvus::index::INVERTED_INDEX_TYPE};
 }
 
 }  // namespace

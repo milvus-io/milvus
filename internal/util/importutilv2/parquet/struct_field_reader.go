@@ -102,12 +102,48 @@ func (r *StructFieldReader) Next(count int64) (any, any, error) {
 	}
 }
 
-func (r *StructFieldReader) toScalarField(data []interface{}) *schemapb.ScalarField {
+func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarField, error) {
 	if len(data) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	switch r.field.GetElementType() {
+	case schemapb.DataType_Bool:
+		boolData := make([]bool, len(data))
+		for i, v := range data {
+			if val, ok := v.(bool); ok {
+				boolData[i] = val
+			}
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{Data: boolData},
+			},
+		}, nil
+	case schemapb.DataType_Int8:
+		intData := make([]int32, len(data))
+		for i, v := range data {
+			if val, ok := v.(int8); ok {
+				intData[i] = int32(val)
+			}
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: intData},
+			},
+		}, nil
+	case schemapb.DataType_Int16:
+		intData := make([]int32, len(data))
+		for i, v := range data {
+			if val, ok := v.(int16); ok {
+				intData[i] = int32(val)
+			}
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: intData},
+			},
+		}, nil
 	case schemapb.DataType_Int32:
 		intData := make([]int32, len(data))
 		for i, v := range data {
@@ -119,7 +155,19 @@ func (r *StructFieldReader) toScalarField(data []interface{}) *schemapb.ScalarFi
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: intData},
 			},
+		}, nil
+	case schemapb.DataType_Int64:
+		intData := make([]int64, len(data))
+		for i, v := range data {
+			if val, ok := v.(int64); ok {
+				intData[i] = val
+			}
 		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: intData},
+			},
+		}, nil
 	case schemapb.DataType_Float:
 		floatData := make([]float32, len(data))
 		for i, v := range data {
@@ -131,7 +179,19 @@ func (r *StructFieldReader) toScalarField(data []interface{}) *schemapb.ScalarFi
 			Data: &schemapb.ScalarField_FloatData{
 				FloatData: &schemapb.FloatArray{Data: floatData},
 			},
+		}, nil
+	case schemapb.DataType_Double:
+		floatData := make([]float64, len(data))
+		for i, v := range data {
+			if val, ok := v.(float64); ok {
+				floatData[i] = val
+			}
 		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{Data: floatData},
+			},
+		}, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		strData := make([]string, len(data))
 		for i, v := range data {
@@ -143,10 +203,10 @@ func (r *StructFieldReader) toScalarField(data []interface{}) *schemapb.ScalarFi
 			Data: &schemapb.ScalarField_StringData{
 				StringData: &schemapb.StringArray{Data: strData},
 			},
-		}
+		}, nil
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported element type for struct field: %v", r.field.GetDataType()))
 	}
-
-	return nil
 }
 
 func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, error) {
@@ -208,7 +268,10 @@ func (r *StructFieldReader) readArrayField(chunked *arrow.Chunked) (any, any, er
 			}
 
 			// Create a single ScalarField for this row
-			scalarField := r.toScalarField(combinedData)
+			scalarField, err := r.toScalarField(combinedData)
+			if err != nil {
+				return nil, nil, err
+			}
 			if scalarField != nil {
 				result = append(result, scalarField)
 			}

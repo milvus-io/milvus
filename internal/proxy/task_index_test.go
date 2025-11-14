@@ -723,7 +723,7 @@ func Test_parseIndexParams(t *testing.T) {
 				ExtraParams: []*commonpb.KeyValuePair{
 					{
 						Key:   common.IndexTypeKey,
-						Value: "marisa-trie",
+						Value: "Trie",
 					},
 				},
 				IndexName: "",

@@ -72,6 +72,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             false,
             std::string(c_storage_config.gcp_credential_json),
             c_storage_config.use_custom_part_upload,
+            c_storage_config.max_connections,
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
@@ -315,6 +316,7 @@ GetFileSizeWithStorageConfig(const char* path,
             false,
             std::string(c_storage_config.gcp_credential_json),
             c_storage_config.use_custom_part_upload,
+            c_storage_config.max_connections,
         });
 
         if (!trueFs) {

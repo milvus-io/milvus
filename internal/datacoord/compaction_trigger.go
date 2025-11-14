@@ -363,7 +363,10 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		coll, err := t.getCollection(group.collectionID)
 		if err != nil {
 			log.Warn("get collection info failed, skip handling compaction", zap.Error(err))
-			return err
+			if signal.collectionID != 0 {
+				return err
+			}
+			continue
 		}
 
 		if !signal.isForce && !isCollectionAutoCompactionEnabled(coll) {

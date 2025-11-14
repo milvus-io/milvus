@@ -497,10 +497,10 @@ func (suite *SessionWithVersionSuite) SetupSuite() {
 	u, err := url.Parse("http://localhost:0")
 	suite.Require().NoError(err)
 
-	config.LCUrls = []url.URL{*u}
+	config.ListenClientUrls = []url.URL{*u}
 	u, err = url.Parse("http://localhost:0")
 	suite.Require().NoError(err)
-	config.LPUrls = []url.URL{*u}
+	config.ListenPeerUrls = []url.URL{*u}
 
 	etcdServer, err := embed.StartEtcd(config)
 	suite.Require().NoError(err)
@@ -677,7 +677,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		log.Debug("Session 1 livenessCheck callback")
 		flag = true
 		close(signal)
-		s1.cancelKeepAlive()
+		s1.cancelKeepAlive(true)
 	})
 	assert.False(t, s1.isStandby.Load().(bool))
 
@@ -834,10 +834,10 @@ func (s *SessionSuite) SetupSuite() {
 	u, err := url.Parse("http://localhost:0")
 	s.Require().NoError(err)
 
-	config.LCUrls = []url.URL{*u}
+	config.ListenClientUrls = []url.URL{*u}
 	u, err = url.Parse("http://localhost:0")
 	s.Require().NoError(err)
-	config.LPUrls = []url.URL{*u}
+	config.ListenPeerUrls = []url.URL{*u}
 
 	etcdServer, err := embed.StartEtcd(config)
 	s.Require().NoError(err)
@@ -1025,10 +1025,10 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	ch, err := session.registerService()
 	s.Require().NoError(err)
 	session.liveCh = make(chan struct{})
-	session.processKeepAliveResponse(ch)
+	session.startKeepAliveLoop(ch)
 	session.LivenessCheck(ctx, nil)
 	// active cancel, should not retry connect
-	session.cancelKeepAlive()
+	session.cancelKeepAlive(true)
 
 	// wait workers exit
 	session.wg.Wait()
@@ -1049,7 +1049,7 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	session.liveCh = make(chan struct{})
 	closeChan := make(chan *clientv3.LeaseKeepAliveResponse)
 	sendChan := (<-chan *clientv3.LeaseKeepAliveResponse)(closeChan)
-	session.processKeepAliveResponse(sendChan)
+	session.startKeepAliveLoop(sendChan)
 	session.LivenessCheck(ctx, nil)
 	// close channel, should retry connect
 	close(closeChan)
@@ -1091,4 +1091,43 @@ func (s *SessionSuite) TestGetSessions() {
 
 func TestSessionSuite(t *testing.T) {
 	suite.Run(t, new(SessionSuite))
+}
+
+func (s *SessionSuite) TestKeepAliveCancelWithoutStop() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+	_, err := session.registerService()
+	assert.NoError(s.T(), err)
+
+	// Override liveCh and LeaseKeepAliveResponse channel for testing
+	session.liveCh = make(chan struct{})
+	kaCh := make(chan *clientv3.LeaseKeepAliveResponse)
+	session.startKeepAliveLoop(kaCh)
+
+	session.keepAliveMu.Lock()
+	cancelOld := session.keepAliveCancel
+	session.keepAliveCancel = func() {
+		// only cancel, not setting isStopped, to simulate not "stop"
+	}
+	session.keepAliveMu.Unlock()
+	if cancelOld != nil {
+		cancelOld()
+	}
+
+	// send a nil (simulate closed keepalive channel)
+	go func() {
+		kaCh <- nil
+	}()
+
+	// Give time for retry logic to trigger
+	time.Sleep(200 * time.Millisecond)
+
+	// should not be disconnected, session could recover
+	assert.False(s.T(), session.Disconnected())
+
+	// Routine clean up
+	session.Stop()
 }

@@ -68,40 +68,52 @@ func (suite *RowParserSuite) setSchema(autoID bool, hasNullable bool, hasDynamic
 	suite.schema = suite.createAllTypesSchema()
 }
 
+func (suite *RowParserSuite) createArrayFieldSchema(id int64, name string, elementType schemapb.DataType, nullable bool) *schemapb.FieldSchema {
+	return &schemapb.FieldSchema{
+		FieldID:     id,
+		Name:        name,
+		DataType:    schemapb.DataType_Array,
+		ElementType: elementType,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "4",
+			},
+			{
+				Key:   common.MaxLengthKey,
+				Value: "8",
+			},
+		},
+		Nullable: nullable,
+	}
+}
+
 func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 	structArray := &schemapb.StructArrayFieldSchema{
-		FieldID: 110,
+		FieldID: 1000,
 		Name:    "struct_array",
 		Fields: []*schemapb.FieldSchema{
+			suite.createArrayFieldSchema(1001, "struct_array[sub_bool]", schemapb.DataType_Bool, false),
+			suite.createArrayFieldSchema(1002, "struct_array[sub_int8]", schemapb.DataType_Int8, false),
+			suite.createArrayFieldSchema(1003, "struct_array[sub_int16]", schemapb.DataType_Int16, false),
+			suite.createArrayFieldSchema(1004, "struct_array[sub_int32]", schemapb.DataType_Int32, false),
+			suite.createArrayFieldSchema(1005, "struct_array[sub_int64]", schemapb.DataType_Int64, false),
+			suite.createArrayFieldSchema(1006, "struct_array[sub_float]", schemapb.DataType_Float, false),
+			suite.createArrayFieldSchema(1007, "struct_array[sub_double]", schemapb.DataType_Double, false),
+			suite.createArrayFieldSchema(1008, "struct_array[sub_str]", schemapb.DataType_VarChar, false),
 			{
-				FieldID:     111,
+				FieldID:     1009,
 				Name:        "struct_array[sub_float_vector]",
 				DataType:    schemapb.DataType_ArrayOfVector,
 				ElementType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
+						Key:   common.MaxCapacityKey,
+						Value: "4",
+					},
+					{
 						Key:   common.DimKey,
 						Value: "2",
-					},
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-			},
-			{
-				FieldID:     112,
-				Name:        "struct_array[sub_str]",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-					{
-						Key:   "max_length",
-						Value: "8",
 					},
 				},
 			},
@@ -161,114 +173,14 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				IsFunctionOutput: true,
 			},
 
-			{
-				FieldID:     50,
-				Name:        "array_bool",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Bool,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     51,
-				Name:        "array_int8",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Int8,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     52,
-				Name:        "array_int16",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Int16,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     53,
-				Name:        "array_int32",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Int32,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     54,
-				Name:        "array_int64",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Int64,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     55,
-				Name:        "array_float",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Float,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     56,
-				Name:        "array_double",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Double,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
-			{
-				FieldID:     57,
-				Name:        "array_varchar",
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "max_capacity",
-						Value: "4",
-					},
-					{
-						Key:   "max_length",
-						Value: "8",
-					},
-				},
-				Nullable: suite.hasNullable,
-			},
+			suite.createArrayFieldSchema(50, "array_bool", schemapb.DataType_Bool, suite.hasNullable),
+			suite.createArrayFieldSchema(51, "array_int8", schemapb.DataType_Int8, suite.hasNullable),
+			suite.createArrayFieldSchema(52, "array_int16", schemapb.DataType_Int16, suite.hasNullable),
+			suite.createArrayFieldSchema(53, "array_int32", schemapb.DataType_Int32, suite.hasNullable),
+			suite.createArrayFieldSchema(54, "array_int64", schemapb.DataType_Int64, suite.hasNullable),
+			suite.createArrayFieldSchema(55, "array_float", schemapb.DataType_Float, suite.hasNullable),
+			suite.createArrayFieldSchema(56, "array_double", schemapb.DataType_Double, suite.hasNullable),
+			suite.createArrayFieldSchema(57, "array_varchar", schemapb.DataType_VarChar, suite.hasNullable),
 
 			{
 				FieldID:  101,
@@ -387,8 +299,11 @@ func (suite *RowParserSuite) genAllTypesRowData(resetKey string, resetVal string
 	rawContent["json"] = "{\"a\": 1}"
 	rawContent["x"] = "2"
 	rawContent["$meta"] = "{\"dynamic\": \"dummy\"}"
-	rawContent["struct_array"] = "[{\"sub_float_vector\": \"[0.1, 0.2]\", \"sub_str\": \"hello1\"}, " +
-		"{\"sub_float_vector\": \"[0.3, 0.4]\", \"sub_str\": \"hello2\"}]"
+
+	rawContent["struct_array"] = "[{\"sub_bool\": true, \"sub_int8\": 3, \"sub_int16\": 4, \"sub_int16\": 5, \"sub_int32\": 6," +
+		"\"sub_int64\": 7, \"sub_float\": 3.1415, \"sub_double\": 99.99, \"sub_float_vector\": [0.1, 0.2], \"sub_str\": \"hello1\"}, " +
+		"{\"sub_bool\": false, \"sub_int8\": 13, \"sub_int16\": 14, \"sub_int16\": 15, \"sub_int32\": 16," +
+		"\"sub_int64\": 17, \"sub_float\": 13.1415, \"sub_double\": 199.99, \"sub_float_vector\": [0.3, 0.4], \"sub_str\": \"hello2\"}]"
 	rawContent["geometry"] = "POINT (30.123 -10.456)"
 	rawContent[resetKey] = resetVal // reset a value
 	for _, deleteKey := range deleteKeys {
@@ -661,12 +576,9 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 					suite.True(ok, "Sub-field %s should be a VectorField", subFieldName)
 
 					// Extract expected vectors from struct array data
-					var expectedVectors [][]float32
+					var expectedVectors [][]any
 					for _, elem := range structArrayData {
-						if vecStr, ok := elem[originalSubFieldName].(string); ok {
-							var vec []float32
-							err := json.Unmarshal([]byte(vecStr), &vec)
-							suite.NoError(err)
+						if vec, ok := elem[originalSubFieldName].([]any); ok {
 							expectedVectors = append(expectedVectors, vec)
 						}
 					}
@@ -674,7 +586,13 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 					// Flatten and compare
 					var expectedFlat []float32
 					for _, vec := range expectedVectors {
-						expectedFlat = append(expectedFlat, vec...)
+						var vecFlat []float32
+						for _, val := range vec {
+							jval := val.(json.Number)
+							fval, _ := jval.Float64()
+							vecFlat = append(vecFlat, float32(fval))
+						}
+						expectedFlat = append(expectedFlat, vecFlat...)
 					}
 					suite.Equal(expectedFlat, vf.GetFloatVector().GetData())
 

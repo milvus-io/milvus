@@ -49,12 +49,12 @@ func startEmbedEtcdServer() (*embed.Etcd, error) {
 	if err != nil {
 		return nil, err
 	}
-	config.LCUrls = []url.URL{*u}
+	config.ListenClientUrls = []url.URL{*u}
 	u, err = url.Parse("http://localhost:0")
 	if err != nil {
 		return nil, err
 	}
-	config.LPUrls = []url.URL{*u}
+	config.ListenPeerUrls = []url.URL{*u}
 
 	return embed.StartEtcd(config)
 }

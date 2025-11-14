@@ -28,7 +28,7 @@
  *   root_path, storage_type, cloud_provider, iam_endpoint, log_level,
  *   region, ssl_ca_cert, gcp_credential_json
  * - Boolean fields: use_ssl, use_iam, use_virtual_host, use_custom_part_upload
- * - Integer fields: request_timeout_ms
+ * - Integer fields: request_timeout_ms, max_connections
  *
  * @param c_storage_config The storage configuration to convert
  * @return std::shared_ptr<Properties> Shared pointer to the created Properties
