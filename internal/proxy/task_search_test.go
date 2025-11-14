@@ -4884,3 +4884,193 @@ func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchTask_AddHighlightTask(t *testing.T) {
+	paramtable.Init()
+
+	// Create a schema with BM25 function
+	schema := &schemapb.CollectionSchema{
+		Name: "test_highlight_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "text_field",
+				DataType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID:  101,
+				Name:     "sparse_field",
+				DataType: schemapb.DataType_SparseFloatVector,
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text_field"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse_field"},
+				OutputFieldIds:   []int64{101},
+			},
+		},
+	}
+
+	placeholder := &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{
+			Type:   commonpb.PlaceholderType_VarChar,
+			Values: [][]byte{[]byte("test_str")},
+		}},
+	}
+
+	placeholderBytes, err := proto.Marshal(placeholder)
+	require.NoError(t, err)
+
+	t.Run("lexical highlight success", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.highlightTasks))
+		assert.Equal(t, int64(100), task.highlightTasks[0].FieldId)
+		assert.Equal(t, "text_field", task.highlightTasks[0].FieldName)
+	})
+
+	t.Run("Lexical highlight with custom tags", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}, {Key: "pre_tags", Value: `["<b>"]`}, {Key: "post_tags", Value: `["</b>"]`}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.highlightTasks))
+		assert.Equal(t, 1, len(task.highlightTasks[0].preTags))
+		assert.Equal(t, []byte("<b>"), task.highlightTasks[0].preTags[0])
+		assert.Equal(t, 1, len(task.highlightTasks[0].postTags))
+		assert.Equal(t, []byte("</b>"), task.highlightTasks[0].postTags[0])
+	})
+
+	t.Run("lexical highlight with wrong metric type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+			SearchRequest: &internalpb.SearchRequest{},
+			request:       &milvuspb.SearchRequest{},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.L2, 101, placeholderBytes, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("lexical highlight with invalid pre_tags type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}, {Key: "pre_tags", Value: "not_a_list"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("default lexical highlight but not BM25 field", func(t *testing.T) {
+		schemaWithoutBM25 := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "vector_field",
+					DataType: schemapb.DataType_FloatVector,
+				},
+			},
+		}
+
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schemaWithoutBM25,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 100, placeholderBytes, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("highlight without highlight search text", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "false"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.NoError(t, err)
+	})
+
+	t.Run("highlight with invalid highlight search key", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   commonpb.HighlightType_Lexical,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "invalid"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("highlight with unknown type", func(t *testing.T) {
+		task := &searchTask{
+			schema: &schemaInfo{
+				CollectionSchema: schema,
+			},
+		}
+
+		highlighter := &commonpb.Highlighter{
+			Type:   4,
+			Params: []*commonpb.KeyValuePair{{Key: HighlightSearchTextKey, Value: "true"}},
+		}
+
+		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
+		assert.Error(t, err)
+	})
+}
