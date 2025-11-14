@@ -91,38 +91,56 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 
 	nodeID := scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
-			NodeID:         1,
-			AvailableSlots: 30,
+			NodeID:              1,
+			AvailableCpuSlot:    12,
+			AvailableMemorySlot: 32,
+			TotalCpuSlot:        12,
+			TotalMemorySlot:     32,
 		},
 		2: {
-			NodeID:         2,
-			AvailableSlots: 30,
+			NodeID:              2,
+			AvailableCpuSlot:    12,
+			AvailableMemorySlot: 32,
+			TotalCpuSlot:        12,
+			TotalMemorySlot:     32,
 		},
-	}, 1)
+	}, 1, 4, taskcommon.Stats)
 	assert.True(t, nodeID == int64(1) || nodeID == int64(2)) // random
 
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
-			NodeID:         1,
-			AvailableSlots: 20,
+			NodeID:              1,
+			AvailableCpuSlot:    4,
+			AvailableMemorySlot: 8,
+			TotalCpuSlot:        12,
+			TotalMemorySlot:     32,
 		},
 		2: {
-			NodeID:         2,
-			AvailableSlots: 30,
+			NodeID:              2,
+			AvailableCpuSlot:    12,
+			AvailableMemorySlot: 32,
+			TotalCpuSlot:        12,
+			TotalMemorySlot:     32,
 		},
-	}, 100)
+	}, 100, 100, taskcommon.Index)
 	assert.Equal(t, int64(2), nodeID) // taskSlot > available, but node 2 has more available slots
 
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
-			NodeID:         1,
-			AvailableSlots: 0,
+			NodeID:              1,
+			AvailableCpuSlot:    0,
+			AvailableMemorySlot: 0,
+			TotalCpuSlot:        12,
+			TotalMemorySlot:     32,
 		},
 		2: {
-			NodeID:         2,
-			AvailableSlots: 0,
+			NodeID:              2,
+			AvailableCpuSlot:    0,
+			AvailableMemorySlot: 0,
+			TotalCpuSlot:        12,
+			TotalMemorySlot:     32,
 		},
-	}, 1)
+	}, 1, 1, taskcommon.Compaction)
 	assert.Equal(t, int64(NullNodeID), nodeID) // no available slots
 }
 
@@ -131,12 +149,18 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		cluster := session.NewMockCluster(t)
 		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
 			1: {
-				NodeID:         1,
-				AvailableSlots: 100,
+				NodeID:              1,
+				AvailableCpuSlot:    12,
+				AvailableMemorySlot: 32,
+				TotalCpuSlot:        12,
+				TotalMemorySlot:     32,
 			},
 			2: {
-				NodeID:         2,
-				AvailableSlots: 100,
+				NodeID:              2,
+				AvailableCpuSlot:    12,
+				AvailableMemorySlot: 32,
+				TotalCpuSlot:        12,
+				TotalMemorySlot:     32,
 			},
 		}).Maybe()
 		return cluster
@@ -147,7 +171,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().GetTaskID().Return(1).Maybe()
 		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
-		task.EXPECT().GetTaskSlot().Return(1).Maybe()
+		task.EXPECT().GetTaskSlot().Return(1, 1).Maybe()
 		return task
 	}
 

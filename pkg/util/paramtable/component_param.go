@@ -4492,6 +4492,16 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+
+	StatsTaskMemoryFactor       ParamItem `refreshable:"true"`
+	ScalarIndexTaskMemoryFactor ParamItem `refreshable:"true"`
+	VectorIndexTaskMemoryFactor ParamItem `refreshable:"true"`
+	MixCompactionMemoryFactor   ParamItem `refreshable:"true"`
+
+	StatsTaskCPUFactor       ParamItem `refreshable:"true"`
+	ScalarIndexTaskCPUFactor ParamItem `refreshable:"true"`
+	VectorIndexTaskCPUFactor ParamItem `refreshable:"true"`
+	MixCompactionCPUFactor   ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -5624,6 +5634,78 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.JSONStatsWriteBatchSize.Init(base.mgr)
+
+	p.StatsTaskMemoryFactor = ParamItem{
+		Key:          "dataCoord.statsTaskMemoryFactor",
+		Version:      "2.6.5",
+		DefaultValue: "4",
+		Doc:          "The memory expansion multiple of each segment when performing stats tasks",
+		Export:       false,
+	}
+	p.StatsTaskMemoryFactor.Init(base.mgr)
+
+	p.ScalarIndexTaskMemoryFactor = ParamItem{
+		Key:          "dataCoord.scalarIndexTaskMemoryFactor",
+		Version:      "2.6.5",
+		DefaultValue: "4",
+		Doc:          "The memory expansion multiple of each segment when performing scalar index tasks",
+		Export:       false,
+	}
+	p.ScalarIndexTaskMemoryFactor.Init(base.mgr)
+
+	p.VectorIndexTaskMemoryFactor = ParamItem{
+		Key:          "dataCoord.VectorIndexTaskMemoryFactor",
+		Version:      "2.6.5",
+		DefaultValue: "4",
+		Doc:          "The memory expansion multiple of each segment when performing vector index tasks",
+		Export:       false,
+	}
+	p.VectorIndexTaskMemoryFactor.Init(base.mgr)
+
+	p.MixCompactionMemoryFactor = ParamItem{
+		Key:          "dataCoord.mixCompactionMemoryFactor",
+		Version:      "2.6.5",
+		DefaultValue: "2",
+		Doc:          "The memory expansion multiple of each segment when performing vector index tasks",
+		Export:       false,
+	}
+	p.MixCompactionMemoryFactor.Init(base.mgr)
+
+	p.StatsTaskCPUFactor = ParamItem{
+		Key:          "dataCoord.statsTaskCpuFactor",
+		Version:      "2.6.5",
+		DefaultValue: "1",
+		Doc:          "Estimated number of CPU cores used by each stats task during execution",
+		Export:       false,
+	}
+	p.StatsTaskCPUFactor.Init(base.mgr)
+
+	p.ScalarIndexTaskCPUFactor = ParamItem{
+		Key:          "dataCoord.scalarIndexTaskCpuFactor",
+		Version:      "2.6.5",
+		DefaultValue: "2",
+		Doc:          "Estimated number of CPU cores used by each scalar index task during execution",
+		Export:       false,
+	}
+	p.ScalarIndexTaskCPUFactor.Init(base.mgr)
+
+	p.VectorIndexTaskCPUFactor = ParamItem{
+		Key:          "dataCoord.vectorIndexTaskCpuFactor",
+		Version:      "2.6.5",
+		DefaultValue: "8",
+		Doc:          "Estimated number of CPU cores used by each vector index task during execution",
+		Export:       false,
+	}
+	p.VectorIndexTaskCPUFactor.Init(base.mgr)
+
+	p.MixCompactionCPUFactor = ParamItem{
+		Key:          "dataCoord.mixCompactionCPUFactor",
+		Version:      "2.6.5",
+		DefaultValue: "1",
+		Doc:          "Estimated number of CPU cores used by each vector index task during execution",
+		Export:       false,
+	}
+	p.MixCompactionCPUFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -6074,7 +6156,7 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.compaction.maxConcurrency",
 		Version:      "2.6.0",
 		Doc:          "The maximum number of compaction tasks that can run concurrently on a datanode",
-		DefaultValue: "10",
+		DefaultValue: "1024",
 		Export:       false,
 	}
 	p.MaxCompactionConcurrency.Init(base.mgr)
