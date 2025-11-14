@@ -284,6 +284,12 @@ DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_all,
                           internal_cgo_cancel_before_execute_total,
                           {});
 
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_cancel_during_execute_total,
+                                 "[cpp]async cgo cancel during execute count");
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_all,
+                          internal_cgo_cancel_during_execute_total,
+                          {});
+
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_pool_size,
                                "[cpp]async cgo pool size");
 DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_all, internal_cgo_pool_size, {});

@@ -93,7 +93,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
         auto& group_by_values = search_result->group_by_values_.value();
@@ -146,7 +146,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
         auto& group_by_values = search_result->group_by_values_.value();
@@ -196,7 +196,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
         auto& group_by_values = search_result->group_by_values_.value();
@@ -247,7 +247,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
         auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
@@ -297,7 +297,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
         auto& group_by_values = search_result->group_by_values_.value();
         ASSERT_EQ(20, group_by_values.size());
@@ -347,7 +347,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
         auto& group_by_values = search_result->group_by_values_.value();
@@ -398,7 +398,7 @@ TEST(GroupBY, SealedIndex) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
         auto& group_by_values = search_result->group_by_values_.value();
         int size = group_by_values.size();
@@ -471,7 +471,7 @@ TEST(GroupBY, SealedData) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
         CheckGroupBySearchResult(*search_result, topK, num_queries, false);
 
         auto& group_by_values = search_result->group_by_values_.value();
@@ -584,11 +584,11 @@ TEST(GroupBY, Reduce) {
 
         CSearchResult c_search_res_1;
         CSearchResult c_search_res_2;
-        auto status =
-            CSearch(c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
+        auto status = CSearch(
+            c_segment_1, c_plan, c_ph_group, MAX_TIMESTAMP, &c_search_res_1);
         ASSERT_EQ(status.error_code, Success);
-        status =
-            CSearch(c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
+        status = CSearch(
+            c_segment_2, c_plan, c_ph_group, MAX_TIMESTAMP, &c_search_res_2);
         ASSERT_EQ(status.error_code, Success);
         std::vector<CSearchResult> results;
         results.push_back(c_search_res_1);
@@ -756,7 +756,7 @@ TEST(GroupBY, GrowingRawData) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     auto search_result =
-        segment_growing_impl->Search(plan.get(), ph_group.get(), 1L << 63);
+        segment_growing_impl->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     CheckGroupBySearchResult(*search_result, topK, num_queries, true);
 
     auto& group_by_values = search_result->group_by_values_.value();
@@ -856,7 +856,7 @@ TEST(GroupBY, GrowingIndex) {
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     auto search_result =
-        segment_growing_impl->Search(plan.get(), ph_group.get(), 1L << 63);
+        segment_growing_impl->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     CheckGroupBySearchResult(*search_result, topK, num_queries, true);
 
     auto& group_by_values = search_result->group_by_values_.value();

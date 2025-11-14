@@ -23,14 +23,15 @@
 #include <folly/Executor.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <folly/Optional.h>
+#include <folly/CancellationToken.h>
 
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/Exception.h"
+#include "common/OpContext.h"
 #include "segcore/SegmentInterface.h"
 
-namespace milvus {
-namespace exec {
+namespace milvus::exec {
 
 enum class ContextScope { GLOBAL = 0, SESSION = 1, QUERY = 2, Executor = 3 };
 
@@ -119,7 +120,8 @@ class QueryConfig : public MemConfig {
     static constexpr const char* kExprEvalBatchSize =
         "expression.eval_batch_size";
 
-    QueryConfig(const std::unordered_map<std::string, std::string>& values)
+    explicit QueryConfig(
+        const std::unordered_map<std::string, std::string>& values)
         : MemConfig(values) {
     }
 
@@ -335,7 +337,7 @@ class QueryContext : public Context {
 // TODO: add more class member such as memory pool
 class ExecContext : public Context {
  public:
-    ExecContext(QueryContext* query_context)
+    explicit ExecContext(QueryContext* query_context)
         : Context(ContextScope::Executor), query_context_(query_context) {
     }
 
@@ -353,5 +355,20 @@ class ExecContext : public Context {
     QueryContext* query_context_;
 };
 
-}  // namespace exec
-}  // namespace milvus
+/// @brief Helper function to check cancellation token and throw if cancelled.
+/// This function safely checks the cancellation token from QueryContext and throws
+/// folly::FutureCancellation if the operation has been cancelled.
+/// @param query_context Pointer to QueryContext (can be nullptr)
+inline void
+checkCancellation(QueryContext* query_context) {
+    if (query_context == nullptr) {
+        return;
+    }
+    auto* op_context = query_context->get_op_context();
+    if (op_context != nullptr &&
+        op_context->cancellation_token.isCancellationRequested()) {
+        throw folly::FutureCancellation();
+    }
+}
+
+}  // namespace milvus::exec
