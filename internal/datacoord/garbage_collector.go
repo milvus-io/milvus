@@ -541,6 +541,17 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			log.Info("skip GC segment since it is loaded", zap.Int64("segmentID", segmentID))
 			continue
 		}
+
+		if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
+			log.Info("skip GC segment since it is referenced by snapshot",
+				zap.Int64("collectionID", segment.GetCollectionID()),
+				zap.Int64("partitionID", segment.GetPartitionID()),
+				zap.String("channel", segInsertChannel),
+				zap.Int64("segmentID", segmentID),
+				zap.Int64s("snapshotIDs", snapshotIDs))
+			continue
+		}
+
 		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
 			continue
 		}
@@ -765,6 +776,13 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 				zap.Int64("buildID", segIdx.BuildID),
 				zap.Int64("nodeID", segIdx.NodeID),
 				zap.Int("indexFiles", len(indexFiles)))
+
+			if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
+				log.Info("skip GC segment index since it is referenced by snapshot",
+					zap.Int64s("snapshotIDs", snapshotIDs))
+				continue
+			}
+
 			log.Info("GC Segment Index file start...")
 
 			// Remove index files first.

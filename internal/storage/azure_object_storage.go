@@ -194,3 +194,16 @@ func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, 
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).Delete(ctx, &blob.DeleteOptions{})
 	return checkObjectStorageError(objectName, err)
 }
+
+func (AzureObjectStorage *AzureObjectStorage) CopyObject(ctx context.Context, bucketName, srcObjectName, dstObjectName string) error {
+	containerClient := AzureObjectStorage.Client.NewContainerClient(bucketName)
+	srcBlobClient := containerClient.NewBlockBlobClient(srcObjectName)
+	dstBlobClient := containerClient.NewBlockBlobClient(dstObjectName)
+
+	// Get source blob URL
+	srcURL := srcBlobClient.URL()
+
+	// Start copy operation
+	_, err := dstBlobClient.StartCopyFromURL(ctx, srcURL, &blob.StartCopyFromURLOptions{})
+	return checkObjectStorageError(dstObjectName, err)
+}
