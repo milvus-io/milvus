@@ -26,18 +26,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage/gcp"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage/huawei"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage/tencent"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage/volcengine"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 const (
-	CloudProviderGCP       = "gcp"
-	CloudProviderGCPNative = "gcpnative"
-	CloudProviderAWS       = "aws"
-	CloudProviderAliyun    = "aliyun"
-	CloudProviderAzure     = "azure"
-	CloudProviderTencent   = "tencent"
-	CloudProviderHuawei    = "huawei"
+	CloudProviderGCP        = "gcp"
+	CloudProviderGCPNative  = "gcpnative"
+	CloudProviderAWS        = "aws"
+	CloudProviderAliyun     = "aliyun"
+	CloudProviderAzure      = "azure"
+	CloudProviderTencent    = "tencent"
+	CloudProviderHuawei     = "huawei"
+	CloudProviderVolcengine = "volcengine"
 )
 
 var CheckBucketRetryAttempts uint = 20
@@ -78,6 +80,13 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		if !c.UseIAM {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
+	case CloudProviderVolcengine:
+		bucketLookupType = minio.BucketLookupDNS
+		newMinioFn = volcengine.NewMinioClient
+		if !c.UseIAM {
+			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
+		}
+
 	default: // aws, minio
 		matchedDefault = true
 	}
