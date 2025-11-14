@@ -1,7 +1,7 @@
 mod filter;
 mod regex_filter;
 mod remove_punct_filter;
-pub(crate) mod stop_words;
+pub mod stop_words;
 mod util;
 
 use regex_filter::RegexFilter;
