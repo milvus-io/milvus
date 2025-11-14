@@ -1334,6 +1334,7 @@ type MinioConfig struct {
 	Region             ParamItem `refreshable:"false"`
 	UseVirtualHost     ParamItem `refreshable:"false"`
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
+	MaxConnections     ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 }
 
@@ -1536,6 +1537,14 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.MaxConnections = ParamItem{
+		Key:          "minio.maxConnections",
+		Version:      "2.6.6",
+		DefaultValue: DefaultMinioMaxConnections,
+		Doc:          "Maximum concurrent HTTP connections to object storage",
+	}
+	p.MaxConnections.Init(base.mgr)
 
 	p.ListObjectsMaxKeys = ParamItem{
 		Key:          "minio.listObjectsMaxKeys",

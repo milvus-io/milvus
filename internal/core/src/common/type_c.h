@@ -91,6 +91,7 @@ typedef struct CStorageConfig {
     int64_t requestTimeoutMs;
     const char* gcp_credential_json;
     bool use_custom_part_upload;
+    uint32_t max_connections;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {

@@ -104,6 +104,7 @@ struct StorageConfig {
     int64_t requestTimeoutMs = 3000;
     bool gcp_native_without_auth = false;
     std::string gcp_credential_json = "";
+    uint32_t max_connections = 100;
 
     std::string
     ToString() const {
@@ -117,6 +118,7 @@ struct StorageConfig {
            << ", useIAM=" << std::boolalpha << useIAM
            << ", useVirtualHost=" << std::boolalpha << useVirtualHost
            << ", requestTimeoutMs=" << requestTimeoutMs
+           << ", maxConnections=" << max_connections
            << ", gcp_native_without_auth=" << std::boolalpha
            << gcp_native_without_auth << "]";
 

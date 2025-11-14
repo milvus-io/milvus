@@ -33,20 +33,6 @@ func parseMD(rawToken string) (username, password string) {
 	return
 }
 
-func validSourceID(ctx context.Context, authorization []string) bool {
-	if len(authorization) < 1 {
-		// log.Warn("key not found in header", zap.String("key", util.HeaderSourceID))
-		return false
-	}
-	// token format: base64<sourceID>
-	token := authorization[0]
-	sourceID, err := crypto.Base64Decode(token)
-	if err != nil {
-		return false
-	}
-	return sourceID == util.MemberCredID
-}
-
 func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var newCtx context.Context
@@ -77,48 +63,44 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	if globalMetaCache == nil {
 		return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
-	// check:
-	//	1. if rpc call from a member (like index/query/data component)
-	// 	2. if rpc call from sdk
+	// check if rpc call from sdk
 	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) {
-			authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
+		authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
 
-			if len(authStrArr) < 1 {
-				log.Warn("key not found in header")
-				return nil, status.Error(codes.Unauthenticated, "missing authorization in header")
-			}
+		if len(authStrArr) < 1 {
+			log.Warn("key not found in header")
+			return nil, status.Error(codes.Unauthenticated, "missing authorization in header")
+		}
 
-			// token format: base64<username:password>
-			// token := strings.TrimPrefix(authorization[0], "Bearer ")
-			token := authStrArr[0]
-			rawToken, err := crypto.Base64Decode(token)
+		// token format: base64<username:password>
+		// token := strings.TrimPrefix(authorization[0], "Bearer ")
+		token := authStrArr[0]
+		rawToken, err := crypto.Base64Decode(token)
+		if err != nil {
+			log.Warn("fail to decode the token", zap.Error(err))
+			return nil, status.Error(codes.Unauthenticated, "invalid token format")
+		}
+
+		if !strings.Contains(rawToken, util.CredentialSeperator) {
+			user, err := VerifyAPIKey(rawToken)
 			if err != nil {
-				log.Warn("fail to decode the token", zap.Error(err))
-				return nil, status.Error(codes.Unauthenticated, "invalid token format")
+				log.Warn("fail to verify apikey", zap.Error(err))
+				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 			}
-
-			if !strings.Contains(rawToken, util.CredentialSeperator) {
-				user, err := VerifyAPIKey(rawToken)
-				if err != nil {
-					log.Warn("fail to verify apikey", zap.Error(err))
-					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
-				}
-				metrics.UserRPCCounter.WithLabelValues(user).Inc()
-				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, util.PasswordHolder)
-				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
-				md[util.HeaderToken] = []string{rawToken}
-				ctx = metadata.NewIncomingContext(ctx, md)
-			} else {
-				// username+password authentication
-				username, password := parseMD(rawToken)
-				if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {
-					log.Warn("fail to verify password", zap.String("username", username))
-					// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
-					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
-				}
-				metrics.UserRPCCounter.WithLabelValues(username).Inc()
+			metrics.UserRPCCounter.WithLabelValues(user).Inc()
+			userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, util.PasswordHolder)
+			md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
+			md[util.HeaderToken] = []string{rawToken}
+			ctx = metadata.NewIncomingContext(ctx, md)
+		} else {
+			// username+password authentication
+			username, password := parseMD(rawToken)
+			if !passwordVerify(ctx, username, password, privilege.GetPrivilegeCache()) {
+				log.Warn("fail to verify password", zap.String("username", username))
+				// NOTE: don't use the merr, because it will cause the wrong retry behavior in the sdk
+				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
 			}
+			metrics.UserRPCCounter.WithLabelValues(username).Inc()
 		}
 	}
 	return ctx, nil
