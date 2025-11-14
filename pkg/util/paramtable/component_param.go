@@ -4384,22 +4384,23 @@ type dataCoordConfig struct {
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
-	CompactionRPCTimeout             ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
-	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	SegmentSmallProportion           ParamItem `refreshable:"true"`
-	SegmentCompactableProportion     ParamItem `refreshable:"true"`
-	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
-	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
-	CompactionScheduleInterval       ParamItem `refreshable:"false"`
-	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
-	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
-	GlobalCompactionInterval         ParamItem `refreshable:"false"`
-	CompactionExpiryTolerance        ParamItem `refreshable:"true"`
+	CompactionRPCTimeout              ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks     ParamItem `refreshable:"true"`
+	CompactionMaxFullSegmentThreshold ParamItem `refreshable:"true"`
+	MinSegmentToMerge                 ParamItem `refreshable:"true"`
+	SegmentSmallProportion            ParamItem `refreshable:"true"`
+	SegmentCompactableProportion      ParamItem `refreshable:"true"`
+	SegmentExpansionRate              ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"` // deprecated
+	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds     ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval        ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval      ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval       ParamItem `refreshable:"false"`
+	GlobalCompactionInterval          ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance         ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -4839,6 +4840,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms",
 	}
 	p.CompactionScheduleInterval.Init(base.mgr)
+
+	p.CompactionMaxFullSegmentThreshold = ParamItem{
+		Key:          "dataCoord.compaction.maxFullSegmentThreshold",
+		Version:      "2.6.6",
+		DefaultValue: "100",
+		Doc:          "Maximum number of segments to use maxFull algorithm (O(n³) complexity) for optimal full segment count. For larger counts, uses faster larger algorithm (O(n)).",
+		Export:       false,
+	}
+	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
 
 	p.SingleCompactionRatioThreshold = ParamItem{
 		Key:          "dataCoord.compaction.single.ratio.threshold",
