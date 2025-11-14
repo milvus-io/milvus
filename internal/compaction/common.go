@@ -20,56 +20,71 @@ import (
 	"context"
 	sio "io"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func ComposeDeleteFromDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
-	pk2Ts := make(map[interface{}]typeutil.Timestamp)
+func isStorageV2(deltalog *datapb.FieldBinlog) bool {
+	return len(deltalog.ChildFields) > 0
+}
 
+func ComposeDeleteFromDeltalogs(
+	ctx context.Context,
+	pkField *schemapb.FieldSchema,
+	deltalogs []*datapb.FieldBinlog,
+	option ...storage.RwOption,
+) (map[any]typeutil.Timestamp, error) {
+	pk2Ts := make(map[any]typeutil.Timestamp)
 	log := log.Ctx(ctx)
-	if len(paths) == 0 {
-		log.Debug("input deltalog paths is empty, skip")
-		return pk2Ts, nil
-	}
 
-	blobs := make([]*storage.Blob, 0)
-	binaries, err := io.Download(ctx, paths)
-	if err != nil {
-		log.Warn("compose delete wrong, fail to download deltalogs",
-			zap.Strings("path", paths),
-			zap.Error(err))
-		return nil, err
-	}
-
-	for i := range binaries {
-		blobs = append(blobs, &storage.Blob{Value: binaries[i]})
-	}
-	reader, err := storage.CreateDeltalogReader(blobs)
-	if err != nil {
-		log.Error("compose delete wrong, malformed delta file", zap.Error(err))
-		return nil, err
-	}
-	defer reader.Close()
-
-	for {
-		dl, err := reader.NextValue()
-		if err != nil {
-			if err == sio.EOF {
-				break
+	for _, deltalog := range deltalogs {
+		opts := option
+		if isStorageV2(deltalog) {
+			opts = append(option, storage.WithVersion(storage.StorageV2))
+		}
+		for _, binlog := range deltalog.Binlogs {
+			path := binlog.GetLogPath()
+			reader, err := storage.NewDeltalogReader(pkField, []string{path}, opts...)
+			if err != nil {
+				log.Error("compose delete wrong, malformed delta file", zap.Error(err))
+				return nil, err
 			}
-			log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
-			return nil, err
-		}
+			defer reader.Close()
+			for {
+				rec, err := reader.Next()
+				if err != nil {
+					if err == sio.EOF {
+						break
+					}
+					log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
+					return nil, err
+				}
 
-		if ts, ok := pk2Ts[(*dl).Pk.GetValue()]; ok && ts > (*dl).Ts {
-			continue
+				for i := 0; i < rec.Len(); i++ {
+					var pk any
+					switch pkField.DataType {
+					case schemapb.DataType_Int64:
+						pk = rec.Column(pkField.FieldID).(*array.Int64).Value(i)
+					case schemapb.DataType_VarChar:
+						pk = rec.Column(pkField.FieldID).(*array.String).Value(i)
+					}
+
+					ts := typeutil.Timestamp(rec.Column(common.TimeStampField).(*array.Int64).Value(i))
+					if tsExisting, ok := pk2Ts[pk]; ok && tsExisting > ts {
+						// skip if existing entry is newer
+						continue
+					}
+					pk2Ts[pk] = ts
+				}
+			}
 		}
-		pk2Ts[(*dl).Pk.GetValue()] = (*dl).Ts
 	}
 
 	log.Info("compose delete end", zap.Int("delete entries counts", len(pk2Ts)))
