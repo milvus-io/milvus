@@ -673,6 +673,18 @@ func (s *Server) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	return s.proxy.AlterCollectionField(ctx, request)
 }
 
+func (s *Server) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.proxy.AddCollectionFunction(ctx, request)
+}
+
+func (s *Server) AlterCollectionFunction(ctx context.Context, request *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterCollectionFunction(ctx, request)
+}
+
+func (s *Server) DropCollectionFunction(ctx context.Context, request *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.proxy.DropCollectionFunction(ctx, request)
+}
+
 // CreatePartition notifies Proxy to create a partition
 func (s *Server) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.proxy.CreatePartition(ctx, request)

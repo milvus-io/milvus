@@ -463,6 +463,18 @@ func (s *mixCoordImpl) AlterCollectionField(ctx context.Context, req *milvuspb.A
 	return s.rootcoordServer.AlterCollectionField(ctx, req)
 }
 
+func (s *mixCoordImpl) AddCollectionFunction(ctx context.Context, req *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.AddCollectionFunction(ctx, req)
+}
+
+func (s *mixCoordImpl) AlterCollectionFunction(ctx context.Context, req *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.AlterCollectionFunction(ctx, req)
+}
+
+func (s *mixCoordImpl) DropCollectionFunction(ctx context.Context, req *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DropCollectionFunction(ctx, req)
+}
+
 func (s *mixCoordImpl) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.CreatePartition(ctx, req)
 }
