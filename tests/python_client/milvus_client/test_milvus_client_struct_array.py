@@ -105,7 +105,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             )
 
         # Create struct schema with optional mmap for sub-fields
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("clip_str", DataType.VARCHAR, max_length=65535)
 
         if subfield1_mmap is not None:
@@ -150,7 +150,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         return schema
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_create_struct_array_with_clip_embedding1(self):
+    def test_create_struct_array_with_vector_field(self):
         """
         target: test create collection with struct array containing vector field
         method: create collection with struct array field that contains FLOAT_VECTOR
@@ -165,8 +165,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection
         collection_name = cf.gen_unique_str(f"{prefix}_vector")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Verify collection exists
         has_collection, _ = self.has_collection(client, collection_name)
@@ -191,7 +190,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create struct schema with only scalar fields
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("int_field", DataType.INT64)
         struct_schema.add_field("float_field", DataType.FLOAT)
         struct_schema.add_field("string_field", DataType.VARCHAR, max_length=512)
@@ -208,8 +207,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection
         collection_name = cf.gen_unique_str(f"{prefix}_scalar")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
+        
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -243,7 +242,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create struct schema with the specific scalar field type
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("scalar_field", scalar_type, **scalar_params)
 
         # Add struct array field
@@ -256,8 +255,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create collection
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
+        
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_query_struct_with_all_scalar_types(self):
@@ -278,7 +277,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create struct schema with all supported scalar field types
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("bool_field", DataType.BOOL)
         struct_schema.add_field("int8_field", DataType.INT8)
         struct_schema.add_field("int16_field", DataType.INT16)
@@ -298,58 +297,34 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create collection
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
+        nb = 1000
+        
 
         # Insert data with all scalar types
         data = [
             {
-                "id": 0,
+                "id": i,
                 "normal_vector": [random.random() for _ in range(default_dim)],
                 "data_records": [
                     {
-                        "bool_field": True,
-                        "int8_field": 127,
-                        "int16_field": 32767,
-                        "int32_field": 2147483647,
-                        "int64_field": 9223372036854775807,
-                        "float_field": 3.14,
-                        "double_field": 3.141592653589793,
-                        "varchar_field": "test_string_0",
-                    },
-                    {
-                        "bool_field": False,
-                        "int8_field": -128,
-                        "int16_field": -32768,
-                        "int32_field": -2147483648,
-                        "int64_field": -9223372036854775808,
-                        "float_field": -2.71,
-                        "double_field": -2.718281828459045,
-                        "varchar_field": "test_string_1",
-                    },
-                ],
-            },
-            {
-                "id": 1,
-                "normal_vector": [random.random() for _ in range(default_dim)],
-                "data_records": [
-                    {
-                        "bool_field": True,
-                        "int8_field": 0,
-                        "int16_field": 0,
-                        "int32_field": 0,
-                        "int64_field": 0,
-                        "float_field": 0.0,
-                        "double_field": 0.0,
-                        "varchar_field": "test_string_2",
-                    }
-                ],
-            },
+                        "bool_field": random.choice([True, False]),
+                        "int8_field": random.randint(-128, 127),
+                        "int16_field": random.randint(-32768, 32767),
+                        "int32_field": random.randint(-2147483648, 2147483647),
+                        "int64_field": random.randint(-9223372036854775808, 9223372036854775807),
+                        "float_field": random.random() * 100,
+                        "double_field": random.random() * 1000,
+                        "varchar_field": f"varchar_{i}",
+                    } for _ in range(random.randint(1, 10))
+ 
+                ]
+            } for i in range(nb)
         ]
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
-        assert res["insert_count"] == 2
+        res, _ = self.insert(client, collection_name, data)
+        
+        assert res["insert_count"] == nb
 
         # Create index and load collection for query
         index_params = client.prepare_index_params()
@@ -360,22 +335,20 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             params={"nlist": 128},
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.create_index(client, collection_name, index_params)
+        
+        self.load_collection(client, collection_name)
+        
 
         # Query to verify data
-        results, check = self.query(
+        results, _ = self.query(
             client,
             collection_name,
             filter="id >= 0",
             output_fields=["id", "data_records"],
-            limit=10,
+            limit=nb,
         )
-        assert check
-        assert len(results) == 2
+        assert len(results) == nb
 
         # Verify the data
         for result in results:
@@ -424,7 +397,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create struct schema with mixed types
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("embedding1", DataType.FLOAT_VECTOR, dim=64)
         struct_schema.add_field("embedding2", DataType.FLOAT_VECTOR, dim=128)
         struct_schema.add_field("category", DataType.VARCHAR, max_length=256)
@@ -442,8 +415,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection
         collection_name = cf.gen_unique_str(f"{prefix}_mixed")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
+        
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_multiple_struct_array_fields(self):
@@ -464,12 +437,12 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create first struct schema
-        struct_schema1 = client.create_struct_field_schema()
+        struct_schema1, _ = self.create_struct_field_schema(client)
         struct_schema1.add_field("vec1", DataType.FLOAT_VECTOR, dim=64)
         struct_schema1.add_field("label1", DataType.VARCHAR, max_length=128)
 
         # Create second struct schema
-        struct_schema2 = client.create_struct_field_schema()
+        struct_schema2, _ = self.create_struct_field_schema(client)
         struct_schema2.add_field("vec2", DataType.FLOAT_VECTOR, dim=256)
         struct_schema2.add_field("value2", DataType.FLOAT)
 
@@ -492,8 +465,8 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection
         collection_name = cf.gen_unique_str(f"{prefix}_multiple")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
+        
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_multiple_struct_arrays_with_same_subfield_names(self):
@@ -514,13 +487,13 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create first struct schema with common subfield names
-        struct_schema1 = client.create_struct_field_schema()
+        struct_schema1, _ = self.create_struct_field_schema(client)
         struct_schema1.add_field("embedding", DataType.FLOAT_VECTOR, dim=128)
         struct_schema1.add_field("label", DataType.VARCHAR, max_length=128)
         struct_schema1.add_field("score", DataType.FLOAT)
 
         # Create second struct schema with same subfield names but potentially different semantics
-        struct_schema2 = client.create_struct_field_schema()
+        struct_schema2, _ = self.create_struct_field_schema(client)
         struct_schema2.add_field(
             "embedding", DataType.FLOAT_VECTOR, dim=128
         )  # Same name
@@ -545,14 +518,15 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         )
 
         # Create collection
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
+        
 
         # Insert data to verify the structure works
         # Use fixed random seed for reproducibility in verification
         data = []
         data_map = {}  # Map to store inserted data for verification
-        for i in range(10):
+        nb = 10
+        for i in range(nb):
             image_features_list = []
             for j in range(2):  # Fixed count for easier verification
                 image_features_list.append(
@@ -585,9 +559,9 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             data_map[i] = row  # Store for later verification
 
         # Insert data
-        res, check = self.insert(client, collection_name, data)
-        assert check
-        assert res["insert_count"] == 10
+        res, _ = self.insert(client, collection_name, data)
+        
+        assert res["insert_count"] == nb
 
         # Create indexes for both struct array vector fields
         index_params = client.prepare_index_params()
@@ -612,15 +586,15 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
+
 
         # Load collection
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.load_collection(client, collection_name)
+        
 
         # Query to verify data integrity with specific output fields
-        results, check = self.query(
+        results, _ = self.query(
             client,
             collection_name,
             filter="id >= 0",
@@ -633,8 +607,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             ],
             limit=10,
         )
-        assert check
-        assert len(results) == 10
+        assert len(results) == nb
 
         # Verify query results match inserted data
         for result in results:
@@ -688,7 +661,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
 
-        results1, check = self.search(
+        results1, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -697,7 +670,6 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             output_fields=["id", "image_features[score]", "image_features[label]"],
             limit=5,
         )
-        assert check
         assert len(results1[0]) > 0
 
         # Verify image_features fields in search results match original data
@@ -726,7 +698,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 )
 
         # Test search on second struct array with output fields and verify data correctness
-        results2, check = self.search(
+        results2, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -735,7 +707,6 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             output_fields=["id", "text_features[score]", "text_features[label]"],
             limit=5,
         )
-        assert check
         assert len(results2[0]) > 0
 
         # Verify text_features fields in search results match original data
@@ -762,7 +733,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
                 )
 
         # Test query with both struct arrays' subfields and verify no confusion between same-named fields
-        query_results, check = self.query(
+        query_results, _ = self.query(
             client,
             collection_name,
             filter="id < 5",
@@ -775,7 +746,6 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             ],
             limit=5,
         )
-        assert check
         assert len(query_results) > 0
 
         # Verify that image_features[score] and text_features[score] are correctly distinguished
@@ -819,7 +789,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Test search while returning both struct arrays with same-named subfields
         # This verifies that we can output fields from multiple struct arrays simultaneously
         # without confusion between same-named subfields
-        results_multi_output, check = self.search(
+        results_multi_output, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -834,7 +804,6 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             ],
             limit=3,
         )
-        assert check
         assert len(results_multi_output[0]) > 0
 
         # Verify both struct arrays are correctly returned without field confusion
@@ -881,13 +850,11 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection with struct array
         schema = self.create_struct_array_schema(client)
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Generate and insert data
         data = self.generate_struct_array_data(default_nb)
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -903,8 +870,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection
         schema = self.create_struct_array_schema(client)
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Generate data with some empty struct arrays
         data = []
@@ -919,8 +885,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             data.append(row)
 
         # Insert data
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == 10
         # verify data
         index_params = client.prepare_index_params()
@@ -942,12 +907,9 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             metric_type="L2",
             params={"nlist": 128},
         )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-        res, check = self.load_collection(client, collection_name)
-        assert check
-        results, check = self.query(client, collection_name, filter="id >= 0", output_fields=["id", "clips"], limit=10)
-        assert check
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
+        results, _ = self.query(client, collection_name, filter="id >= 0", output_fields=["id", "clips"], limit=10)
         assert len(results) == 10
         for result in results:
             assert "clips" in result
@@ -967,8 +929,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection
         schema = self.create_struct_array_schema(client, capacity=50)
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Generate data with varied array lengths
         data = []
@@ -992,8 +953,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             data.append(row)
 
         # Insert data
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == 20
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1010,8 +970,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
 
         # Create collection with small capacity
         schema = self.create_struct_array_schema(client, capacity=capacity)
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Generate data at max capacity
         data = []
@@ -1033,8 +992,7 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
             data.append(row)
 
         # Insert data
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == 5
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1052,13 +1010,11 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create collection with specified dimension
         schema = self.create_struct_array_schema(client, dim=dim)
         collection_name = cf.gen_unique_str(f"{prefix}_dim_{dim}")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Generate and insert data
         data = self.generate_struct_array_data(10, dim=dim)
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == 10
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1076,13 +1032,11 @@ class TestMilvusClientStructArrayBasic(TestMilvusClientV2Base):
         # Create collection with specified capacity
         schema = self.create_struct_array_schema(client, capacity=capacity)
         collection_name = cf.gen_unique_str(f"{prefix}_cap_{capacity}")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Generate and insert data (respecting capacity)
         data = self.generate_struct_array_data(5, capacity=capacity)
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == 5
 
 
@@ -1105,7 +1059,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         )
 
         # Create struct schema with vector field
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=dim)
         struct_schema.add_field("scalar_field", DataType.INT64)
 
@@ -1118,8 +1072,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         )
 
         # Create collection
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Insert data
         data = []
@@ -1140,8 +1093,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
         return data
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1176,8 +1128,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_emb_list_hnsw_index_ip(self):
@@ -1211,11 +1162,10 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_create_index_on_multiple_clip_embedding1s(self):
+    def test_create_index_on_multiple_vector_fields_in_struct_array(self):
         """
         target: test create index on multiple vector fields in struct array
         method: create collection with multiple vector fields and create indexes
@@ -1233,7 +1183,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
         )
 
         # Create struct schema with multiple vector fields
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("vector1", DataType.FLOAT_VECTOR, dim=64)
         struct_schema.add_field("vector2", DataType.FLOAT_VECTOR, dim=128)
         struct_schema.add_field("scalar_field", DataType.INT64)
@@ -1248,8 +1198,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
 
         # Create collection
         collection_name = cf.gen_unique_str(f"{prefix}_multi_vec")
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Insert data
         data = []
@@ -1269,8 +1218,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Create indexes on all vector fields
         index_params = client.prepare_index_params()
@@ -1295,8 +1243,8 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_drop_struct_array_index(self):
@@ -1328,12 +1276,11 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
+        
 
         # Drop the struct array index
-        res, check = self.drop_index(client, collection_name, "struct_vector_index")
-        assert check
+        self.drop_index(client, collection_name, "struct_vector_index")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rebuild_struct_array_index(self):
@@ -1365,12 +1312,12 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params={"M": 16, "efConstruction": 200},
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
+        
 
         # Drop index
-        res, check = self.drop_index(client, collection_name, "struct_vector_index")
-        assert check
+        self.drop_index(client, collection_name, "struct_vector_index")
+        
 
         # Recreate index with different parameters
         new_index_params = client.prepare_index_params()
@@ -1382,8 +1329,8 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params={"M": 32, "efConstruction": 400},
         )
 
-        res, check = self.create_index(client, collection_name, new_index_params)
-        assert check
+        self.create_index(client, collection_name, new_index_params)
+        
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric_type", METRICS)
@@ -1417,8 +1364,7 @@ class TestMilvusClientStructArrayIndex(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
 
 class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
@@ -1440,7 +1386,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         )
 
         # Create struct schema
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("clip_embedding1", DataType.FLOAT_VECTOR, dim=dim)
         struct_schema.add_field("scalar_field", DataType.INT64)
         struct_schema.add_field("category", DataType.VARCHAR, max_length=128)
@@ -1457,8 +1403,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         schema.add_field("category", datatype=DataType.VARCHAR, max_length=128)
         schema.add_field("score", datatype=DataType.FLOAT)
         # Create collection
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Insert data
         data = []
@@ -1483,8 +1428,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Create indexes
         index_params = client.prepare_index_params()
@@ -1502,12 +1446,10 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
         # Load collection
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.load_collection(client, collection_name)
 
         return data
 
@@ -1531,13 +1473,13 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data and index
-        data = self.create_collection_with_index(client, collection_name)
+        self.create_collection_with_index(client, collection_name)
 
         # Create search vector
         search_vector = [random.random() for _ in range(default_dim)]
 
         # Search using normal vector field first (for comparison)
-        normal_search_results, check = self.search(
+        normal_search_results, _ = self.search(
             client,
             collection_name,
             data=[search_vector],
@@ -1545,12 +1487,11 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             search_params={"metric_type": "L2", "params": {"nprobe": 10}},
             limit=10,
         )
-        assert check
         assert len(normal_search_results[0]) > 0
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
         # Search using struct array vector field
-        struct_search_results, check = self.search(
+        struct_search_results, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -1558,8 +1499,6 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        print(struct_search_results)
-        assert check
         assert len(struct_search_results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1580,7 +1519,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         embedding_list = self.create_embedding_list(default_dim, 3)
 
         # Search using EmbeddingList
-        results, check = self.search(
+        results, _ = self.search(
             client,
             collection_name,
             data=[embedding_list],  # Multiple vectors as embedding list
@@ -1588,7 +1527,6 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=10,
         )
-        assert check
         assert len(results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1610,24 +1548,20 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
         # Search with scalar filter
-        results, check = self.search(
+        results, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
             anns_field="clips[clip_embedding1]",
             search_params={"metric_type": "MAX_SIM_COSINE"},
             filter=f"scalar_field == {scalar_field_array_lists[0]}",  # Filter on scalar field
+            output_fields=["scalar_field"],
             limit=10,
         )
-        print(results)
-        assert check
 
-        # Verify filter worked (if results exist)
-        if len(results[0]) > 0:
-            for hit in results[0]:
-                # Check that returned data respects the filter
-                # This depends on what fields are returned
-                assert hit is not None
+        assert len(results[0]) > 0
+        for hit in results[0]:
+            assert hit.entity["scalar_field"] == scalar_field_array_lists[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_different_array_lengths(self):
@@ -1647,7 +1581,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         for num_vectors in [1, 2, 5, 10]:
             embedding_list = self.create_embedding_list(default_dim, num_vectors)
 
-            results, check = self.search(
+            results, _ = self.search(
                 client,
                 collection_name,
                 data=[embedding_list],
@@ -1655,8 +1589,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
                 search_params={"metric_type": "MAX_SIM_COSINE"},
                 limit=5,
             )
-            assert check
             assert len(results) > 0
+            for result in results:
+                assert len(result) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_struct_array(self):
@@ -1677,7 +1612,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         struct_vectors = self.create_embedding_list(default_dim, 2)
 
         # Search normal vector field
-        normal_results, check = self.search(
+        normal_results, _ = self.search(
             client,
             collection_name,
             data=[normal_vector],
@@ -1685,10 +1620,9 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             search_params={"metric_type": "L2", "params": {"nprobe": 10}},
             limit=5,
         )
-        assert check
 
         # Search struct array vector field
-        struct_results, check = self.search(
+        struct_results, _ = self.search(
             client,
             collection_name,
             data=[struct_vectors],
@@ -1696,7 +1630,6 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=5,
         )
-        assert check
 
         # Both should return results
         assert len(normal_results[0]) > 0
@@ -1724,7 +1657,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -1736,8 +1669,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             max_capacity=50,
         )
 
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Insert data
         data = []
@@ -1752,8 +1684,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Create index with specified metric
         index_params = client.prepare_index_params()
@@ -1771,18 +1702,16 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
         # Load collection
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.load_collection(client, collection_name)
 
         # Search with the metric
         search_vector = [random.random() for _ in range(default_dim)]
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
-        results, check = self.search(
+        results, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -1790,7 +1719,6 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             search_params={"metric_type": metric_type},
             limit=5,
         )
-        assert check
         assert len(results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1812,7 +1740,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         search_tensor = EmbeddingList()
         search_tensor.add(search_vector)
         # Search with specific output fields
-        results, check = self.search(
+        results, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -1821,7 +1749,107 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             limit=5,
             output_fields=["id", "clips"],  # Include struct array in output
         )
-        assert check
+        assert len(results[0]) > 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_type", ["HNSW", "DISKANN"])
+    @pytest.mark.xfail(reason="DISKANN is not supported yet https://github.com/milvus-io/milvus/issues/45412")
+    def test_search_struct_array_different_index_types(self, index_type):
+        """
+        target: test search with different index types for struct array subvector fields
+        method: create index with different types (HNSW, DISKANN) and search
+        expected: search works correctly with all supported index types
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_idx_{index_type.lower()}")
+        client = self._client()
+
+        # Create schema
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+        schema.add_field(
+            field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
+        )
+
+        struct_schema, _ = self.create_struct_field_schema(client)
+        struct_schema.add_field(
+            "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
+        )
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=50,
+        )
+
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert data
+        data = []
+        for i in range(100):
+            struct_array = [
+                {"clip_embedding1": [random.random() for _ in range(default_dim)]}
+            ]
+            row = {
+                "id": i,
+                "normal_vector": [random.random() for _ in range(default_dim)],
+                "clips": struct_array,
+            }
+            data.append(row)
+
+        self.insert(client, collection_name, data)
+
+        # Create index with specified index type
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="normal_vector",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+
+        # Configure index parameters based on index type
+        if index_type == "HNSW":
+            index_params.add_index(
+                field_name="clips[clip_embedding1]",
+                index_name=f"struct_index_{index_type.lower()}",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params=INDEX_PARAMS,
+            )
+        elif index_type == "DISKANN":
+            index_params.add_index(
+                field_name="clips[clip_embedding1]",
+                index_name=f"struct_index_{index_type.lower()}",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params={},
+            )
+
+        self.create_index(client, collection_name, index_params)
+
+        # Load collection
+        self.load_collection(client, collection_name)
+
+        # Search with the index type
+        search_vector = [random.random() for _ in range(default_dim)]
+        search_tensor = EmbeddingList()
+        search_tensor.add(search_vector)
+
+        # Prepare search params based on index type
+        search_params = {"metric_type": "MAX_SIM_COSINE"}
+        if index_type == "DISKANN":
+            # DISKANN requires search_list parameter
+            search_params["params"] = {"search_list": 30}
+
+        results, _ = self.search(
+            client,
+            collection_name,
+            data=[search_tensor],
+            anns_field="clips[clip_embedding1]",
+            search_params=search_params,
+            limit=10,
+        )
         assert len(results[0]) > 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1845,7 +1873,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
         search_tensor.add(search_vector)
 
         # Search with retrieval_ann_ratio parameter
-        results, check = self.search(
+        results, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -1856,12 +1884,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
             },
             limit=10,
         )
-        assert check
         assert len(results[0]) > 0
-
-        # Verify results are returned
-        for hit in results[0]:
-            assert hit is not None
 
 
 class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
@@ -1888,7 +1911,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         )
 
         # Create struct schema with vector field
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("clip_str", DataType.VARCHAR, max_length=65535)
         struct_schema.add_field(
             "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
@@ -1917,10 +1940,9 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
+        self.create_collection(
             client, collection_name, schema=schema, index_params=index_params
         )
-        assert check
 
         # Insert data
         num_entities = 100
@@ -1945,8 +1967,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Load collection
         client.load_collection(collection_name)
@@ -1981,7 +2002,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         req_list.append(AnnSearchRequest(**search_param_2))
 
         # Perform hybrid search with RRFRanker
-        hybrid_res, check = self.hybrid_search(
+        hybrid_res, _ = self.hybrid_search(
             client,
             collection_name,
             req_list,
@@ -1989,10 +2010,8 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             default_limit,
             output_fields=["random"],
         )
-        assert check
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
-        log.info(f"Hybrid search with RRFRanker returned {len(hybrid_res[0])} results")
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_struct_array_with_weighted_ranker(self):
@@ -2014,7 +2033,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -2041,10 +2060,9 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
+        self.create_collection(
             client, collection_name, schema=schema, index_params=index_params
         )
-        assert check
 
         # Insert data
         num_entities = 100
@@ -2061,8 +2079,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Load collection
         client.load_collection(collection_name)
@@ -2110,9 +2127,6 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
-        log.info(
-            f"Hybrid search with WeightedRanker returned {len(hybrid_res[0])} results"
-        )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_multiple_struct_array_vectors(self):
@@ -2134,7 +2148,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -2161,10 +2175,9 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
+        self.create_collection(
             client, collection_name, schema=schema, index_params=index_params
         )
-        assert check
 
         # Insert data
         num_entities = 100
@@ -2181,8 +2194,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Load collection
         client.load_collection(collection_name)
@@ -2229,9 +2241,6 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
 
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
-        log.info(
-            f"Hybrid search with multiple vector sources returned {len(hybrid_res[0])} results"
-        )
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
@@ -2255,7 +2264,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -2282,10 +2291,9 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_collection(
+        self.create_collection(
             client, collection_name, schema=schema, index_params=index_params
         )
-        assert check
 
         # Insert data
         num_entities = 100
@@ -2301,8 +2309,7 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Load collection
         client.load_collection(collection_name)
@@ -2344,6 +2351,136 @@ class TestMilvusClientStructArrayHybridSearch(TestMilvusClientV2Base):
         assert len(hybrid_res) > 0
         assert len(hybrid_res[0]) > 0
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index_type", ["HNSW", "DISKANN"])
+    @pytest.mark.xfail(reason="DISKANN is not supported yet https://github.com/milvus-io/milvus/issues/45412")
+    def test_hybrid_search_struct_array_different_index_types(self, index_type):
+        """
+        target: test hybrid search with different index types for struct array subvector fields
+        method: perform hybrid search with different index types (HNSW, DISKANN)
+        expected: hybrid search works correctly with all supported index types
+        """
+        collection_name = cf.gen_unique_str(f"{prefix}_hybrid_idx_{index_type.lower()}")
+        client = self._client()
+
+        # Create schema
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field(
+            field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=100
+        )
+        schema.add_field(
+            field_name="embeddings", datatype=DataType.FLOAT_VECTOR, dim=default_dim
+        )
+
+        struct_schema, _ = self.create_struct_field_schema(client)
+        struct_schema.add_field(
+            "clip_embedding", DataType.FLOAT_VECTOR, dim=default_dim
+        )
+        schema.add_field(
+            "clips",
+            datatype=DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=struct_schema,
+            max_capacity=50,
+        )
+
+        # Create indexes with specified index type
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="embeddings",
+            index_type="IVF_FLAT",
+            metric_type="L2",
+            params={"nlist": 128},
+        )
+
+        # Configure index parameters based on index type
+        if index_type == "HNSW":
+            index_params.add_index(
+                field_name="clips[clip_embedding]",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params=INDEX_PARAMS,
+            )
+        elif index_type == "DISKANN":
+            index_params.add_index(
+                field_name="clips[clip_embedding]",
+                index_type=index_type,
+                metric_type="MAX_SIM_COSINE",
+                params={},
+            )
+
+        self.create_collection(
+            client, collection_name, schema=schema, index_params=index_params
+        )
+
+        # Insert data
+        num_entities = 100
+        rng = np.random.default_rng(seed=19530)
+        data = []
+        for i in range(num_entities):
+            clips = [{"clip_embedding": rng.random(default_dim).tolist()}]
+
+            row = {
+                "pk": str(i),
+                "embeddings": rng.random(default_dim).tolist(),
+                "clips": clips,
+            }
+            data.append(row)
+
+        self.insert(client, collection_name, data)
+
+        # Load collection
+        client.load_collection(collection_name)
+
+        # Prepare hybrid search
+        default_limit = 5
+        req_list = []
+
+        # First search request on normal vector field
+        vectors_to_search = rng.random((1, default_dim)).tolist()
+        req_list.append(
+            AnnSearchRequest(
+                **{
+                    "data": vectors_to_search,
+                    "anns_field": "embeddings",
+                    "param": {"metric_type": "L2", "params": {"nprobe": 10}},
+                    "limit": default_limit,
+                }
+            )
+        )
+
+        # Second search request on struct array vector field
+        search_tensor = EmbeddingList()
+        search_tensor.add(rng.random(default_dim).tolist())
+
+        # Prepare search params based on index type
+        search_param = {"metric_type": "MAX_SIM_COSINE"}
+        if index_type == "DISKANN":
+            # DISKANN requires search_list parameter
+            search_param["params"] = {"search_list": 30}
+
+        req_list.append(
+            AnnSearchRequest(
+                **{
+                    "data": [search_tensor],
+                    "anns_field": "clips[clip_embedding]",
+                    "param": search_param,
+                    "limit": default_limit,
+                }
+            )
+        )
+
+        # Perform hybrid search
+        hybrid_res = client.hybrid_search(
+            collection_name, req_list, RRFRanker(), default_limit
+        )
+
+        assert len(hybrid_res) > 0
+        assert len(hybrid_res[0]) > 0
+        log.info(
+            f"Hybrid search with {index_type} index type returned {len(hybrid_res[0])} results"
+        )
+
 
 class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
     """Test case of struct array query functionality"""
@@ -2360,7 +2497,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         )
 
         # Create struct schema
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -2380,8 +2517,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         schema.add_field("score", datatype=DataType.FLOAT)
 
         # Create collection
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Insert data
         data = []
@@ -2407,12 +2543,10 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Flush data to ensure it's persisted
-        res, check = self.flush(client, collection_name)
-        assert check
+        self.flush(client, collection_name)
 
         # Create indexes for query operations
         index_params = client.prepare_index_params()
@@ -2430,12 +2564,10 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
         # Load collection
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.load_collection(client, collection_name)
 
         return data
 
@@ -2451,11 +2583,10 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         client = self._client()
 
         # Create collection with data
-        data = self.create_collection_with_data(client, collection_name)
+        self.create_collection_with_data(client, collection_name)
 
         # Query all data
-        results, check = self.query(client, collection_name, filter="id >= 0", limit=10)
-        assert check
+        results, _ = self.query(client, collection_name, filter="id >= 0", limit=10)
         assert len(results) > 0
 
         # Verify struct array fields are present
@@ -2479,14 +2610,13 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         self.create_collection_with_data(client, collection_name)
 
         # Query with specific output fields
-        results, check = self.query(
+        results, _ = self.query(
             client,
             collection_name,
             filter="id >= 0",
             output_fields=["id", "clips"],
             limit=10,
         )
-        assert check
         assert len(results) > 0
 
         # Verify only specified fields are present
@@ -2510,14 +2640,13 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         self.create_collection_with_data(client, collection_name)
 
         # Query with expression filter on struct array scalar field
-        results, check = self.query(
+        results, _ = self.query(
             client,
             collection_name,
             filter="scalar_field < 50",
             output_fields=["id", "clips"],
             limit=20,
         )
-        assert check
 
         # Verify filter was applied (if results exist)
         if len(results) > 0:
@@ -2544,14 +2673,13 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         self.create_collection_with_data(client, collection_name)
 
         # Query with varchar filter
-        results, check = self.query(
+        results, _ = self.query(
             client,
             collection_name,
             filter='category == "cat_0"',
             output_fields=["id", "clips"],
             limit=20,
         )
-        assert check
 
         # Verify filter was applied
         if len(results) > 0:
@@ -2596,7 +2724,7 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
         self.create_collection_with_data(client, collection_name, nb=30)
 
         # Query first page
-        results_page1, check = self.query(
+        results_page1, _ = self.query(
             client,
             collection_name,
             filter="id >= 0",
@@ -2604,7 +2732,6 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             limit=10,
             offset=0,
         )
-        assert check
         assert len(results_page1) == 10
 
         # Query second page
@@ -2616,7 +2743,6 @@ class TestMilvusClientStructArrayQuery(TestMilvusClientV2Base):
             limit=10,
             offset=10,
         )
-        assert check
         assert len(results_page2) == 10
 
         # Verify no overlap between pages
@@ -2636,7 +2762,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -2651,8 +2777,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             max_capacity=100,
         )
 
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
         return schema
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2686,8 +2811,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             }
         ]
 
-        res, check = self.insert(client, collection_name, initial_data)
-        assert check
+        self.insert(client, collection_name, initial_data)
         # create index and load collection
         index_params = client.prepare_index_params()
         index_params.add_index(
@@ -2702,10 +2826,8 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             metric_type="MAX_SIM_COSINE",
             params=INDEX_PARAMS,
         )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.create_index(client, collection_name, index_params)
+        self.load_collection(client, collection_name)
 
         # Upsert with modified data
         upsert_data = [
@@ -2724,15 +2846,12 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             }
         ]
 
-        res, check = self.upsert(client, collection_name, upsert_data)
-        assert check
+        self.upsert(client, collection_name, upsert_data)
 
         # Verify upsert worked
-        res, check = self.flush(client, collection_name)
-        assert check
+        self.flush(client, collection_name)
 
-        results, check = self.query(client, collection_name, filter="id == 1")
-        assert check
+        results, _ = self.query(client, collection_name, filter="id == 1")
         assert len(results) == 1
         assert results[0]["clips"][0]["label"] == "updated"
 
@@ -2767,8 +2886,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
         # create index and load collection
         index_params = client.prepare_index_params()
         index_params.add_index(
@@ -2783,22 +2901,17 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             metric_type="MAX_SIM_COSINE",
             params=INDEX_PARAMS,
         )
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.create_index(client, collection_name, index_params) 
+        self.load_collection(client, collection_name)
 
         # Delete some records
         delete_ids = [1, 3, 5]
-        res, check = self.delete(client, collection_name, filter=f"id in {delete_ids}")
-        assert check
+        self.delete(client, collection_name, filter=f"id in {delete_ids}")
 
         # Verify deletion
-        res, check = self.flush(client, collection_name)
-        assert check
+        self.flush(client, collection_name)
 
-        results, check = self.query(client, collection_name, filter="id >= 0")
-        assert check
+        results, _ = self.query(client, collection_name, filter="id >= 0")
 
         remaining_ids = {result["id"] for result in results}
         for delete_id in delete_ids:
@@ -2837,8 +2950,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             }
             data.append(row)
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        res, _ = self.insert(client, collection_name, data)
         assert res["insert_count"] == batch_size
 
         # Batch upsert (update first 100 records)
@@ -2859,8 +2971,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             }
             upsert_data.append(row)
 
-        res, check = self.upsert(client, collection_name, upsert_data)
-        assert check
+        self.upsert(client, collection_name, upsert_data)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_operations(self):
@@ -2893,8 +3004,7 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             }
         ]
 
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Create index for loading
         index_params = client.prepare_index_params()
@@ -2911,24 +3021,20 @@ class TestMilvusClientStructArrayCRUD(TestMilvusClientV2Base):
             params=INDEX_PARAMS,
         )
 
-        res, check = self.create_index(client, collection_name, index_params)
-        assert check
+        self.create_index(client, collection_name, index_params)
 
         # Load collection
-        res, check = self.load_collection(client, collection_name)
-        assert check
+        self.load_collection(client, collection_name)
 
         # Verify collection is loaded
         load_state = client.get_load_state(collection_name)
         assert str(load_state["state"]) == "Loaded"
 
         # Release collection
-        res, check = self.release_collection(client, collection_name)
-        assert check
+        self.release_collection(client, collection_name)
 
         # Drop collection
-        res, check = self.drop_collection(client, collection_name)
-        assert check
+        self.drop_collection(client, collection_name)
 
         # Verify collection is dropped
         has_collection, _ = self.has_collection(client, collection_name)
@@ -2949,7 +3055,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         client = self._client()
 
         # Create struct schema
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
 
         # Try to add unsupported field type to struct schema (this should fail immediately)
         try:
@@ -2994,7 +3100,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("binary_vector_field", DataType.BINARY_VECTOR, dim=default_dim)
         schema.add_field(
             "struct_array",
@@ -3034,7 +3140,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("json_field", DataType.JSON)
         schema.add_field(
             "struct_array",
@@ -3073,7 +3179,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("geometry_field", DataType.GEOMETRY)
         schema.add_field(
             "struct_array",
@@ -3112,7 +3218,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("scalar_field", DataType.INT64)
 
         schema.add_field(
@@ -3123,8 +3229,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=2,
         )  # Very small capacity
 
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Try to insert data exceeding capacity
         data = [
@@ -3166,7 +3271,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding1", DataType.FLOAT_VECTOR, dim=0
         )  # Invalid
@@ -3209,7 +3314,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
 
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("field1", DataType.INT64)
         struct_schema.add_field("field2", DataType.VARCHAR, max_length=128)
 
@@ -3221,8 +3326,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             max_capacity=100,
         )
 
-        res, check = self.create_collection(client, collection_name, schema=schema)
-        assert check
+        self.create_collection(client, collection_name, schema=schema)
 
         # Insert invalid data, lack of field1
         invalid_data = [
@@ -3297,7 +3401,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         )
 
         # Try to create struct with unsupported vector type
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
 
         # SPARSE_FLOAT_VECTOR doesn't need dim parameter
         if vector_type == DataType.SPARSE_FLOAT_VECTOR:
@@ -3346,7 +3450,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         schema.add_field(
             field_name="normal_vector", datatype=DataType.FLOAT_VECTOR, dim=default_dim
         )
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field(
             "clip_embedding1", DataType.FLOAT_VECTOR, dim=default_dim
         )
@@ -3370,10 +3474,9 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             metric_type="MAX_SIM_COSINE",
             params=INDEX_PARAMS,
         )
-        res, check = self.create_collection(
+        self.create_collection(
             client, collection_name, schema=schema, index_params=index_params
         )
-        assert check
         nb = 3000
         data = []
         for i in range(nb):
@@ -3388,8 +3491,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
                 "clips": struct_array,
             }
             data.append(tmp_data)
-        res, check = self.insert(client, collection_name, data)
-        assert check
+        self.insert(client, collection_name, data)
 
         # Create search vector
         search_vector = [random.random() for _ in range(default_dim)]
@@ -3397,7 +3499,7 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
         search_tensor.add(search_vector)
 
         # Step 1: First search with large limit to get distance distribution
-        initial_results, check = self.search(
+        initial_results, _ = self.search(
             client,
             collection_name,
             data=[search_tensor],
@@ -3405,7 +3507,6 @@ class TestMilvusClientStructArrayInvalid(TestMilvusClientV2Base):
             search_params={"metric_type": "MAX_SIM_COSINE"},
             limit=50,
         )
-        assert check
         assert len(initial_results[0]) > 0
 
         # Get distances and sort them
@@ -3659,8 +3760,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [1000])
-    @pytest.mark.parametrize("array_capacity", [100])
-    @pytest.mark.xfail(reason="issue")
+    @pytest.mark.parametrize("array_capacity", [10])
     def test_import_struct_array_with_parquet(self, dim, entities, array_capacity):
         """
         Test bulk import of struct array data from parquet file
@@ -3692,7 +3792,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         schema.add_field(field_name="float_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema with all supported types
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("struct_varchar", DataType.VARCHAR, max_length=65535)
         struct_schema.add_field("struct_int8", DataType.INT8)
         struct_schema.add_field("struct_int16", DataType.INT16)
@@ -3799,7 +3899,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         schema.add_field(field_name="float_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema with all supported types
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("struct_varchar", DataType.VARCHAR, max_length=65535)
         struct_schema.add_field("struct_int8", DataType.INT8)
         struct_schema.add_field("struct_int16", DataType.INT16)
@@ -3874,9 +3974,8 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("entities", [1000])
-    @pytest.mark.parametrize("array_capacity", [100])
+    @pytest.mark.parametrize("array_capacity", [10])
     @pytest.mark.parametrize("file_type", ["PARQUET", "JSON"])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/pymilvus/issues/3050")
     def test_import_struct_array_with_local_bulk_writer(self, dim, entities, array_capacity, file_type):
         """
         Test bulk import of struct array data using LocalBulkWriter
@@ -3910,7 +4009,7 @@ class TestMilvusClientStructArrayImport(TestMilvusClientV2Base):
         schema.add_field(field_name="float_vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
 
         # Create struct schema with all supported types
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("struct_varchar", DataType.VARCHAR, max_length=65535)
         struct_schema.add_field("struct_int8", DataType.INT8)
         struct_schema.add_field("struct_int16", DataType.INT16)
@@ -4238,7 +4337,7 @@ class TestMilvusClientStructArrayMmap(TestMilvusClientV2Base):
             )
 
         # Create struct schema with optional mmap for sub-fields
-        struct_schema = client.create_struct_field_schema()
+        struct_schema, _ = self.create_struct_field_schema(client)
         struct_schema.add_field("clip_str", DataType.VARCHAR, max_length=65535)
 
         if subfield1_mmap is not None:
