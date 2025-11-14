@@ -250,8 +250,16 @@ class CachedSearchIteratorTest
             memcpy(chunk_data.data(),
                    base_dataset_.cbegin() + offset * dim_,
                    rows * dim_ * sizeof(float));
-            chunks.emplace_back(std::make_unique<FixedWidthChunk>(
-                rows, dim_, chunk_data.data(), buf_size, sizeof(float), false));
+            auto chunk_mmap_guard =
+                std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+            chunks.emplace_back(
+                std::make_unique<FixedWidthChunk>(rows,
+                                                  dim_,
+                                                  chunk_data.data(),
+                                                  buf_size,
+                                                  sizeof(float),
+                                                  false,
+                                                  chunk_mmap_guard));
             offset += rows;
         }
         auto translator = std::make_unique<TestChunkTranslator>(
