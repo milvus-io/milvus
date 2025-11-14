@@ -66,6 +66,12 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
 void
 SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority);
 
+CStatus
+AppendLoadFieldDataContext(CLoadFieldDataInfo c_load_field_data_info,
+                           int64_t collection_id,
+                           int64_t partition_id,
+                           int64_t segment_id);
+
 #ifdef __cplusplus
 }
 #endif

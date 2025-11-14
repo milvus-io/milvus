@@ -178,6 +178,8 @@ std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(
     ChunkManager* remote_chunk_manager,
     const std::vector<std::string>& remote_files,
+    FieldDataMeta field_meta,
+    IndexMeta index_meta,
     milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH,
     bool is_field_data = true);
 
@@ -247,7 +249,10 @@ using DataTypeToOffsetMap =
     std::unordered_map<DataTypeNativeOrVoid<T>, int64_t>;
 
 std::vector<FieldDataPtr>
-FetchFieldData(ChunkManager* cm, const std::vector<std::string>& batch_files);
+FetchFieldData(ChunkManager* cm,
+               const std::vector<std::string>& batch_files,
+               FieldDataMeta field_meta,
+               IndexMeta index_meta);
 
 inline void
 SortByPath(std::vector<std::string>& paths) {

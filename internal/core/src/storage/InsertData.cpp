@@ -54,9 +54,6 @@ InsertData::serialize_to_remote_file() {
     DescriptorEvent descriptor_event;
     auto& des_event_data = descriptor_event.event_data;
     auto& des_fix_part = des_event_data.fix_part;
-    des_fix_part.collection_id = field_data_meta_->collection_id;
-    des_fix_part.partition_id = field_data_meta_->partition_id;
-    des_fix_part.segment_id = field_data_meta_->segment_id;
     des_fix_part.field_id = field_data_meta_->field_id;
     des_fix_part.start_timestamp = time_range_.first;
     des_fix_part.end_timestamp = time_range_.second;

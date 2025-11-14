@@ -31,6 +31,9 @@
 
 namespace milvus::storage {
 
+// Forward declaration
+struct FileManagerContext;
+
 class DataCodec {
  public:
     explicit DataCodec(std::shared_ptr<PayloadReader>& reader, CodecType type)
@@ -145,6 +148,8 @@ class DataCodec {
 std::unique_ptr<DataCodec>
 DeserializeFileData(const std::shared_ptr<uint8_t[]> input,
                     int64_t length,
-                    bool is_field_data = true);
+                    bool is_field_data,
+                    storage::FieldDataMeta field_meta,
+                    storage::IndexMeta index_meta);
 
 }  // namespace milvus::storage
