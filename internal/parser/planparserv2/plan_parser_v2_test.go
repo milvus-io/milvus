@@ -1922,6 +1922,10 @@ func TestExpr_GISFunctions(t *testing.T) {
 		`ST_DWITHIN(GeometryField, "POINT(0.5 0.5)", 2.0)`,
 		`st_dwithin(GeometryField, "POINT(1.0 1.0)", 1)`,
 
+		// ST_ISVALID tests
+		`st_isvalid(GeometryField)`,
+		`ST_ISVALID(GeometryField)`,
+
 		// Case insensitive tests
 		`St_Equals(GeometryField, "POINT(0 0)")`,
 		`sT_iNtErSeCts(GeometryField, "POINT(1 1)")`,
@@ -1964,6 +1968,11 @@ func TestExpr_GISFunctionsInvalidExpressions(t *testing.T) {
 		// Non-existent fields
 		`st_equals(NonExistentField, "POINT(0 0)")`,
 		`st_dwithin(UnknownGeometryField, "POINT(0 0)", 5.0)`,
+
+		// ST_ISVALID invalid usage
+		`st_isvalid(Int64Field)`,
+		`st_isvalid()`,
+		`st_isvalid(GeometryField, 1)`,
 	}
 
 	for _, expr := range invalidExprs {
@@ -1990,6 +1999,7 @@ func TestExpr_GISFunctionsComplexExpressions(t *testing.T) {
 		`not st_equals(GeometryField, "POINT(0 0)")`,
 		`!(st_intersects(GeometryField, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"))`,
 		`not (st_dwithin(GeometryField, "POINT(0 0)", 1.0))`,
+		`not st_isvalid(GeometryField)`,
 
 		// Mixed with other field types
 		`st_contains(GeometryField, "POINT(0 0)") and StringField == "test"`,
@@ -1999,6 +2009,7 @@ func TestExpr_GISFunctionsComplexExpressions(t *testing.T) {
 		// Nested expressions
 		`(st_equals(GeometryField, "POINT(0 0)") and Int64Field > 0) or (st_intersects(GeometryField, "POINT(1 1)") and StringField != "")`,
 		`st_dwithin(GeometryField, "POINT(0 0)", 5.0) and (Int32Field > 10 or BoolField == true)`,
+		`st_isvalid(GeometryField) and Int64Field > 0`,
 	}
 
 	for _, expr := range complexExprs {

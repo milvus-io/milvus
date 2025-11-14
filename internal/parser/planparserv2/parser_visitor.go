@@ -1653,6 +1653,31 @@ func (v *ParserVisitor) VisitSTEuqals(ctx *parser.STEuqalsContext) interface{} {
 	}
 }
 
+func (v *ParserVisitor) VisitSTIsValid(ctx *parser.STIsValidContext) interface{} {
+	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	columnInfo := toColumnInfo(childExpr)
+	if columnInfo == nil ||
+		(!typeutil.IsGeometryType(columnInfo.GetDataType())) {
+		return fmt.Errorf(
+			"STIsValid operation are only supported on geometry fields now, got: %s", ctx.GetText())
+	}
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_GisfunctionFilterExpr{
+			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
+				ColumnInfo: columnInfo,
+				Op:         planpb.GISFunctionFilterExpr_IsValidOp,
+			},
+		},
+	}
+	return &ExprWithType{
+		expr:     expr,
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
 func (v *ParserVisitor) VisitSTTouches(ctx *parser.STTouchesContext) interface{} {
 	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	if err != nil {
