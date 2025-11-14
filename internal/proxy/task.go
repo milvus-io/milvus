@@ -362,7 +362,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.schema.AutoID = false
 
-	if err := validateFunction(t.schema); err != nil {
+	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
+	if err != nil {
+		return err
+	}
+	if err := validateFunction(t.schema, disableCheck); err != nil {
 		return err
 	}
 

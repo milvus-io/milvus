@@ -73,7 +73,7 @@ func NewZillizEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchem
 }
 
 func (provider *ZillizEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *ZillizEmbeddingProvider) FieldDim() int64 {

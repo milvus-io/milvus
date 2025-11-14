@@ -175,7 +175,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 
 func (provider *BedrockEmbeddingProvider) MaxBatch() int {
 	// The bedrock model does not support batches, we support a small batch on the milvus side.
-	return 12 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *BedrockEmbeddingProvider) FieldDim() int64 {
