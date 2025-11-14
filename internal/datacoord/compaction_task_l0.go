@@ -203,18 +203,39 @@ func newL0CompactionTask(t *datapb.CompactionTask, allocator allocator.Allocator
 // Note: return True means exit this state machine.
 // ONLY return True for Completed, Failed
 func (t *l0CompactionTask) Process() bool {
+	lastState := t.GetTaskProto().GetState().String()
+	processResult := true
 	switch t.GetTaskProto().GetState() {
 	case datapb.CompactionTaskState_meta_saved:
-		return t.processMetaSaved()
+		processResult = t.processMetaSaved()
 	case datapb.CompactionTaskState_completed:
-		return t.processCompleted()
+		processResult = t.processCompleted()
 	case datapb.CompactionTaskState_failed:
-		return true
+		processResult = true
 	case datapb.CompactionTaskState_timeout:
-		return true
+		processResult = true
 	default:
-		return false
+		processResult = false
 	}
+	currentState := t.GetTaskProto().State.String()
+	if currentState != lastState {
+		ts := time.Now().Unix()
+		lastStateDuration := ts - t.GetTaskProto().GetLastStateStartTime()
+		log.Info("l0 compaction task state changed", zap.String("lastState", lastState), zap.String("currentState", currentState), zap.Int64("elapse seconds", lastStateDuration))
+		metrics.DataCoordCompactionLatency.
+			WithLabelValues("false", t.GetTaskProto().GetChannel(), t.GetTaskProto().GetType().String(), lastState).
+			Observe(float64(lastStateDuration * 1000))
+
+		updateOps := []compactionTaskOpt{setLastStateStartTime(ts)}
+		if t.GetTaskProto().State == datapb.CompactionTaskState_completed || t.GetTaskProto().State == datapb.CompactionTaskState_failed {
+			updateOps = append(updateOps, setEndTime(ts))
+		}
+		err := t.updateAndSaveTaskMeta(updateOps...)
+		if err != nil {
+			log.Warn("Failed to updateAndSaveTaskMeta", zap.Error(err))
+		}
+	}
+	return processResult
 }
 
 func (t *l0CompactionTask) processMetaSaved() bool {
