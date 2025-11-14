@@ -30,22 +30,20 @@ import (
 )
 
 func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
+	if a == nil {
+		return 0, merr.WrapErrServiceInternal("unexpected input: nil arrow.Array found")
+	}
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
-		if a == nil {
-			if defaultValue != nil {
-				b.Append(defaultValue.GetBoolData())
-				return 1, nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		ba, ok := a.(*array.Boolean)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetBoolData())
+				return 1, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -53,20 +51,15 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 1, nil
 		}
 	case *array.Int8Builder:
-		if a == nil {
-			if defaultValue != nil {
-				b.Append(int8(defaultValue.GetIntData()))
-				return 1, nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		ia, ok := a.(*array.Int8)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(int8(defaultValue.GetIntData()))
+				return 1, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -74,20 +67,15 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 1, nil
 		}
 	case *array.Int16Builder:
-		if a == nil {
-			if defaultValue != nil {
-				b.Append(int16(defaultValue.GetIntData()))
-				return 2, nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		ia, ok := a.(*array.Int16)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(int16(defaultValue.GetIntData()))
+				return 2, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -95,20 +83,15 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 2, nil
 		}
 	case *array.Int32Builder:
-		if a == nil {
-			if defaultValue != nil {
-				b.Append(defaultValue.GetIntData())
-				return 4, nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		ia, ok := a.(*array.Int32)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetIntData())
+				return 4, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -116,20 +99,15 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 4, nil
 		}
 	case *array.Int64Builder:
-		if a == nil {
-			if defaultValue != nil {
-				b.Append(defaultValue.GetLongData())
-				return 8, nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		ia, ok := a.(*array.Int64)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetLongData())
+				return 8, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -137,20 +115,15 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 8, nil
 		}
 	case *array.Float32Builder:
-		if a == nil {
-			if defaultValue != nil {
-				b.Append(defaultValue.GetFloatData())
-				return 4, nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		fa, ok := a.(*array.Float32)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetFloatData())
+				return 4, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -179,21 +152,16 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return 8, nil
 		}
 	case *array.StringBuilder:
-		if a == nil {
-			if defaultValue != nil {
-				val := defaultValue.GetStringData()
-				b.Append(val)
-				return uint64(len(val)), nil
-			} else {
-				b.AppendNull()
-				return 0, nil
-			}
-		}
 		sa, ok := a.(*array.String)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if sa.IsNull(idx) {
+			if defaultValue != nil {
+				val := defaultValue.GetStringData()
+				b.Append(val)
+				return uint64(len(val)), nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -202,16 +170,17 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 			return uint64(len(val)), nil
 		}
 	case *array.BinaryBuilder:
-		// array type, not support defaultValue now
-		if a == nil {
-			b.AppendNull()
-			return 0, nil
-		}
 		ba, ok := a.(*array.Binary)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
+			// could be internal $meta json
+			if defaultValue != nil {
+				val := defaultValue.GetBytesData()
+				b.Append(val)
+				return uint64(len(val)), nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -234,10 +203,6 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 		}
 	case *array.ListBuilder:
 		// Handle ListBuilder for ArrayOfVector type
-		if a == nil {
-			b.AppendNull()
-			return 0, nil
-		}
 		la, ok := a.(*array.List)
 		if !ok {
 			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
