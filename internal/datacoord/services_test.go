@@ -1778,8 +1778,9 @@ func TestServer_AddFileResource(t *testing.T) {
 
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			mixCoord:    newMockMixCoord(),
 			meta: &meta{
-				resourceMeta: make(map[string]*model.FileResource),
+				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
 			},
 		}
@@ -1791,9 +1792,9 @@ func TestServer_AddFileResource(t *testing.T) {
 			Path: "/path/to/resource",
 		}
 
-		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.MatchedBy(func(resource *model.FileResource) bool {
+		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.MatchedBy(func(resource *internalpb.FileResourceInfo) bool {
 			return resource.Name == "test_resource" && resource.Path == "/path/to/resource"
-		})).Return(nil)
+		}), mock.Anything).Return(nil)
 
 		resp, err := server.AddFileResource(context.Background(), req)
 		assert.NoError(t, err)
@@ -1822,7 +1823,7 @@ func TestServer_AddFileResource(t *testing.T) {
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
 			meta: &meta{
-				resourceMeta: make(map[string]*model.FileResource),
+				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
 			},
 		}
@@ -1846,7 +1847,7 @@ func TestServer_AddFileResource(t *testing.T) {
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
 			meta: &meta{
-				resourceMeta: make(map[string]*model.FileResource),
+				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
 			},
 		}
@@ -1857,7 +1858,7 @@ func TestServer_AddFileResource(t *testing.T) {
 			Path: "/path/to/resource",
 		}
 
-		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything).Return(errors.New("catalog error"))
+		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("catalog error"))
 
 		resp, err := server.AddFileResource(context.Background(), req)
 		assert.NoError(t, err)
@@ -1869,8 +1870,8 @@ func TestServer_AddFileResource(t *testing.T) {
 		mockAllocator := tso.NewMockAllocator()
 		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
 
-		existingResource := &model.FileResource{
-			ID:   1,
+		existingResource := &internalpb.FileResourceInfo{
+			Id:   1,
 			Name: "test_resource",
 			Path: "/existing/path",
 		}
@@ -1878,7 +1879,7 @@ func TestServer_AddFileResource(t *testing.T) {
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
 			meta: &meta{
-				resourceMeta: map[string]*model.FileResource{
+				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"test_resource": existingResource,
 				},
 				catalog: mockCatalog,
@@ -1902,19 +1903,20 @@ func TestServer_RemoveFileResource(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mockCatalog := mocks.NewDataCoordCatalog(t)
 
-		existingResource := &model.FileResource{
-			ID:   1,
+		existingResource := &internalpb.FileResourceInfo{
+			Id:   1,
 			Name: "test_resource",
 			Path: "/path/to/resource",
 		}
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: map[string]*model.FileResource{
+				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"test_resource": existingResource,
 				},
 				catalog: mockCatalog,
 			},
+			mixCoord: newMockMixCoord(),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -1923,7 +1925,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			Name: "test_resource",
 		}
 
-		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1)).Return(nil)
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		resp, err := server.RemoveFileResource(context.Background(), req)
 		assert.NoError(t, err)
@@ -1948,9 +1950,10 @@ func TestServer_RemoveFileResource(t *testing.T) {
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: make(map[string]*model.FileResource),
+				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
 			},
+			mixCoord: newMockMixCoord(),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -1966,15 +1969,15 @@ func TestServer_RemoveFileResource(t *testing.T) {
 	t.Run("catalog remove error", func(t *testing.T) {
 		mockCatalog := mocks.NewDataCoordCatalog(t)
 
-		existingResource := &model.FileResource{
-			ID:   1,
+		existingResource := &internalpb.FileResourceInfo{
+			Id:   1,
 			Name: "test_resource",
 			Path: "/path/to/resource",
 		}
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: map[string]*model.FileResource{
+				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"test_resource": existingResource,
 				},
 				catalog: mockCatalog,
@@ -1986,7 +1989,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			Name: "test_resource",
 		}
 
-		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1)).Return(errors.New("catalog error"))
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1), mock.Anything).Return(errors.New("catalog error"))
 
 		resp, err := server.RemoveFileResource(context.Background(), req)
 		assert.NoError(t, err)
@@ -2000,7 +2003,7 @@ func TestServer_ListFileResources(t *testing.T) {
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: make(map[string]*model.FileResource),
+				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 				catalog:      mockCatalog,
 			},
 		}
@@ -2020,20 +2023,20 @@ func TestServer_ListFileResources(t *testing.T) {
 	t.Run("success with resources", func(t *testing.T) {
 		mockCatalog := mocks.NewDataCoordCatalog(t)
 
-		resource1 := &model.FileResource{
-			ID:   1,
+		resource1 := &internalpb.FileResourceInfo{
+			Id:   1,
 			Name: "resource1",
 			Path: "/path/to/resource1",
 		}
-		resource2 := &model.FileResource{
-			ID:   2,
+		resource2 := &internalpb.FileResourceInfo{
+			Id:   2,
 			Name: "resource2",
 			Path: "/path/to/resource2",
 		}
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: map[string]*model.FileResource{
+				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"resource1": resource1,
 					"resource2": resource2,
 				},

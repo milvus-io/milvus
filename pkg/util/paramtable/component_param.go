@@ -2387,6 +2387,7 @@ type queryCoordConfig struct {
 	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
 
 	BalanceCheckCollectionMaxCount ParamItem `refreshable:"true"`
+	FileResourceMode               ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2397,6 +2398,13 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		DefaultValue: "5",
 	}
 	p.RetryNum.Init(base.mgr)
+
+	p.FileResourceMode = ParamItem{
+		Key:          "queryCoord.fileResource.mode",
+		Version:      "2.6.3",
+		DefaultValue: "sync",
+	}
+	p.FileResourceMode.Init(base.mgr)
 
 	p.RetryInterval = ParamItem{
 		Key:          "queryCoord.task.retryinterval",
@@ -4492,6 +4500,7 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+	FileResourceMode      ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4503,6 +4512,13 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
+
+	p.FileResourceMode = ParamItem{
+		Key:          "dataCoord.fileResource.mode",
+		Version:      "2.6.3",
+		DefaultValue: "sync",
+	}
+	p.FileResourceMode.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",

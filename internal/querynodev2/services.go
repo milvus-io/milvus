@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -1739,5 +1740,22 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 		segment.DropIndex(ctx, indexID)
 	}
 
+	return merr.Success(), nil
+}
+
+func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Uint64("version", req.GetVersion()))
+	log.Info("sync file resource")
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		log.Warn("failed to sync file resource, QueryNode is not healthy")
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	err := fileresource.Sync(req.GetResources())
+	if err != nil {
+		return merr.Status(err), nil
+	}
 	return merr.Success(), nil
 }

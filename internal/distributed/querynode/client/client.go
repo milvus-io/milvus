@@ -405,3 +405,10 @@ func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 		return client.ValidateAnalyzer(ctx, req)
 	})
 }
+
+func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+		return client.SyncFileResource(ctx, req)
+	})
+}
