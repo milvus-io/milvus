@@ -41,12 +41,6 @@ func (r *recoveryStorageImpl) recoverFromStream(
 			r.Logger().Warn("recovery from wal stream failed", zap.Error(err))
 			return
 		}
-		r.Logger().Info("recovery from wal stream done",
-			zap.Int("vchannels", len(snapshot.VChannels)),
-			zap.Int("segments", len(snapshot.SegmentAssignments)),
-			zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
-			zap.Uint64("timetick", snapshot.Checkpoint.TimeTick),
-		)
 	}()
 L:
 	for {
@@ -66,6 +60,15 @@ L:
 	}
 	snapshot = r.getSnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
+	r.Logger().Info("recovery from wal stream done",
+		zap.String("channel", recoveryStreamBuilder.Channel().String()),
+		zap.Int("vchannels", len(snapshot.VChannels)),
+		zap.Int("segments", len(snapshot.SegmentAssignments)),
+		zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
+		zap.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
+		zap.Bool("foundAlterWALMsg", snapshot.FoundAlterWALMsg),
+		zap.String("targetWALName", snapshot.TargetWALName),
+	)
 	return snapshot, nil
 }
 
@@ -89,5 +92,8 @@ func (r *recoveryStorageImpl) getSnapshot() *RecoverySnapshot {
 		VChannels:          vchannels,
 		SegmentAssignments: segments,
 		Checkpoint:         r.checkpoint.Clone(),
+		FoundAlterWALMsg:   r.foundAlterWALMsg,
+		TargetWALName:      r.targetWALName,
+		AlterWALConfig:     r.alterWALConfig,
 	}
 }

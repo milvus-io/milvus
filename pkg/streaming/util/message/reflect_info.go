@@ -64,6 +64,7 @@ const (
 	MessageTypeCreateIndex          MessageType = MessageType(messagespb.MessageType_CreateIndex)
 	MessageTypeAlterIndex           MessageType = MessageType(messagespb.MessageType_AlterIndex)
 	MessageTypeDropIndex            MessageType = MessageType(messagespb.MessageType_DropIndex)
+	MessageTypeAlterWAL             MessageType = MessageType(messagespb.MessageType_AlterWAL)
 )
 
 // Export extra message type
@@ -164,6 +165,8 @@ type (
 	AlterIndexMessageBody             = messagespb.AlterIndexMessageBody
 	DropIndexMessageHeader            = messagespb.DropIndexMessageHeader
 	DropIndexMessageBody              = messagespb.DropIndexMessageBody
+	AlterWALMessageHeader             = messagespb.AlterWALMessageHeader
+	AlterWALMessageBody               = messagespb.AlterWALMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -1826,6 +1829,47 @@ var MustAsBroadcastDropIndexMessageV2 = MustAsSpecializedBroadcastMessage[*DropI
 // NewDropIndexMessageBuilderV2 creates a new message builder for DropIndexMessageV2
 var NewDropIndexMessageBuilderV2 = newMutableMessageBuilder[*DropIndexMessageHeader, *DropIndexMessageBody]
 
+// Type aliases for AlterWALMessageV1
+type (
+	MutableAlterWALMessageV1         = specializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+	ImmutableAlterWALMessageV1       = SpecializedImmutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+	BroadcastAlterWALMessageV1       = SpecializedBroadcastMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+	BroadcastResultAlterWALMessageV1 = BroadcastResult[*AlterWALMessageHeader, *AlterWALMessageBody]
+)
+
+// MessageTypeWithVersion for AlterWALMessageV1
+var MessageTypeAlterWALV1 = MessageTypeWithVersion{
+	MessageType: MessageTypeAlterWAL,
+	Version:     VersionV1,
+}
+
+// MessageSpecializedType for AlterWALMessageV1
+var SpecializedTypeAlterWALV1 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AlterWALMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AlterWALMessageHeader)(nil)),
+}
+
+// AsMutableAlterWALMessageV1 converts a BasicMessage to MutableAlterWALMessageV1
+var AsMutableAlterWALMessageV1 = asSpecializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// MustAsMutableAlterWALMessageV1 converts a BasicMessage to MutableAlterWALMessageV1, panics on error
+var MustAsMutableAlterWALMessageV1 = mustAsSpecializedMutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// AsImmutableAlterWALMessageV1 converts an ImmutableMessage to ImmutableAlterWALMessageV1
+var AsImmutableAlterWALMessageV1 = asSpecializedImmutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// MustAsImmutableAlterWALMessageV1 converts an ImmutableMessage to ImmutableAlterWALMessageV1, panics on error
+var MustAsImmutableAlterWALMessageV1 = MustAsSpecializedImmutableMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// AsBroadcastAlterWALMessageV1 converts a BasicMessage to BroadcastAlterWALMessageV1
+var AsBroadcastAlterWALMessageV1 = asSpecializedBroadcastMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// MustAsBroadcastAlterWALMessageV1 converts a BasicMessage to BroadcastAlterWALMessageV1, panics on error
+var MustAsBroadcastAlterWALMessageV1 = MustAsSpecializedBroadcastMessage[*AlterWALMessageHeader, *AlterWALMessageBody]
+
+// NewAlterWALMessageBuilderV1 creates a new message builder for AlterWALMessageV1
+var NewAlterWALMessageBuilderV1 = newMutableMessageBuilder[*AlterWALMessageHeader, *AlterWALMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
@@ -1840,6 +1884,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterRoleMessageHeader{}):            MessageTypeAlterRole,
 	reflect.TypeOf(&messagespb.AlterUserMessageHeader{}):            MessageTypeAlterUser,
 	reflect.TypeOf(&messagespb.AlterUserRoleMessageHeader{}):        MessageTypeAlterUserRole,
+	reflect.TypeOf(&messagespb.AlterWALMessageHeader{}):             MessageTypeAlterWAL,
 	reflect.TypeOf(&messagespb.BeginTxnMessageHeader{}):             MessageTypeBeginTxn,
 	reflect.TypeOf(&messagespb.CommitTxnMessageHeader{}):            MessageTypeCommitTxn,
 	reflect.TypeOf(&messagespb.CreateCollectionMessageHeader{}):     MessageTypeCreateCollection,
@@ -1901,6 +1946,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeAlterRoleV2:            SpecializedTypeAlterRoleV2,
 	MessageTypeAlterUserRoleV2:        SpecializedTypeAlterUserRoleV2,
 	MessageTypeAlterUserV2:            SpecializedTypeAlterUserV2,
+	MessageTypeAlterWALV1:             SpecializedTypeAlterWALV1,
 	MessageTypeBeginTxnV2:             SpecializedTypeBeginTxnV2,
 	MessageTypeCommitTxnV2:            SpecializedTypeCommitTxnV2,
 	MessageTypeCreateCollectionV1:     SpecializedTypeCreateCollectionV1,
@@ -1946,6 +1992,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeAlterRoleV2:            MessageTypeAlterRoleV2,
 	SpecializedTypeAlterUserRoleV2:        MessageTypeAlterUserRoleV2,
 	SpecializedTypeAlterUserV2:            MessageTypeAlterUserV2,
+	SpecializedTypeAlterWALV1:             MessageTypeAlterWALV1,
 	SpecializedTypeBeginTxnV2:             MessageTypeBeginTxnV2,
 	SpecializedTypeCommitTxnV2:            MessageTypeCommitTxnV2,
 	SpecializedTypeCreateCollectionV1:     MessageTypeCreateCollectionV1,

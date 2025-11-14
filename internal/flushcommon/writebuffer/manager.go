@@ -31,6 +31,8 @@ type BufferManager interface {
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
 	// which will cause segment start flush procedure.
 	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
+	// SealAllSegments notifies writeBuffer corresponding to provided channel to seal all segments.
+	SealAllSegments(ctx context.Context, channel string) error
 	// FlushChannel set the flushTs of the provided write buffer.
 	FlushChannel(ctx context.Context, channel string, flushTs uint64) error
 	// RemoveChannel removes a write buffer from manager.
@@ -197,6 +199,18 @@ func (m *bufferManager) SealSegments(ctx context.Context, channel string, segmen
 	}
 
 	return buf.SealSegments(ctx, segmentIDs)
+}
+
+// SealAllSegments call sync segment and change segments state to Flushed of the channel.
+func (m *bufferManager) SealAllSegments(ctx context.Context, channel string) error {
+	buf, loaded := m.buffers.Get(channel)
+	if !loaded {
+		log.Ctx(ctx).Warn("write buffer not found when flush segments",
+			zap.String("channel", channel))
+		return merr.WrapErrChannelNotFound(channel)
+	}
+
+	return buf.SealAllSegments(ctx)
 }
 
 func (m *bufferManager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {
