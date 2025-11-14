@@ -186,6 +186,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     FinishLoad() override;
 
+    void
+    SetLoadInfo(
+        const milvus::proto::segcore::SegmentLoadInfo& load_info) override;
+
+    void
+    Load(milvus::tracer::TraceContext& trace_ctx) override;
+
  public:
     size_t
     GetMemoryUsageInBytes() const override {
@@ -505,6 +512,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_proxy_column,
         std::optional<ParquetStatistics> statistics = {});
 
+    // Convert proto::segcore::FieldIndexInfo to LoadIndexInfo
+    LoadIndexInfo
+    ConvertFieldIndexInfoToLoadIndexInfo(
+        const milvus::proto::segcore::FieldIndexInfo* field_index_info) const;
+
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {
         std::shared_ptr<ChunkedColumnInterface> res;
@@ -558,6 +570,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
+    milvus::proto::segcore::SegmentLoadInfo segment_load_info_;
 
     SchemaPtr schema_;
     int64_t id_;

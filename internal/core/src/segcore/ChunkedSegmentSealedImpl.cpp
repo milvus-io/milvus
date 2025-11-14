@@ -243,6 +243,77 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         request.has_raw_data);
 }
 
+LoadIndexInfo
+ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
+    const milvus::proto::segcore::FieldIndexInfo* field_index_info) const {
+    LoadIndexInfo load_index_info;
+
+    load_index_info.segment_id = id_;
+    // Extract field ID
+    auto field_id = FieldId(field_index_info->fieldid());
+    load_index_info.field_id = field_id.get();
+
+    // Get field type from schema
+    const auto& field_meta = get_schema()[field_id];
+    load_index_info.field_type = field_meta.get_data_type();
+    load_index_info.element_type = field_meta.get_element_type();
+
+    // Set index metadata
+    load_index_info.index_id = field_index_info->indexid();
+    load_index_info.index_build_id = field_index_info->buildid();
+    load_index_info.index_version = field_index_info->index_version();
+    load_index_info.index_store_version =
+        field_index_info->index_store_version();
+    load_index_info.index_engine_version =
+        static_cast<IndexVersion>(field_index_info->current_index_version());
+    load_index_info.index_size = field_index_info->index_size();
+    load_index_info.num_rows = field_index_info->num_rows();
+    load_index_info.schema = field_meta.ToProto();
+
+    // Copy index file paths, excluding indexParams file
+    for (const auto& file_path : field_index_info->index_file_paths()) {
+        size_t last_slash = file_path.find_last_of('/');
+        std::string filename = (last_slash != std::string::npos)
+                                   ? file_path.substr(last_slash + 1)
+                                   : file_path;
+
+        if (filename != "indexParams") {
+            load_index_info.index_files.push_back(file_path);
+        }
+    }
+
+    bool mmap_enabled = false;
+    // Set index params
+    for (const auto& kv_pair : field_index_info->index_params()) {
+        if (kv_pair.key() == "mmap.enable") {
+            std::string lower;
+            std::transform(kv_pair.value().begin(),
+                           kv_pair.value().end(),
+                           std::back_inserter(lower),
+                           ::tolower);
+            mmap_enabled = lower == "true";
+        }
+        load_index_info.index_params[kv_pair.key()] = kv_pair.value();
+    }
+
+    size_t dim =
+        IsVectorDataType(field_meta.get_data_type()) &&
+                !IsSparseFloatVectorDataType(field_meta.get_data_type())
+            ? field_meta.get_dim()
+            : 1;
+    load_index_info.dim = dim;
+    auto remote_chunk_manager =
+        milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    load_index_info.mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
+    load_index_info.enable_mmap = mmap_enabled;
+
+    return load_index_info;
+}
+
 void
 ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
     switch (load_info.storage_version) {
@@ -2743,6 +2814,178 @@ ChunkedSegmentSealedImpl::LoadGeometryCache(
                   field_id.get(),
                   e.what());
     }
+}
+
+void
+ChunkedSegmentSealedImpl::SetLoadInfo(
+    const proto::segcore::SegmentLoadInfo& load_info) {
+    std::unique_lock lck(mutex_);
+    segment_load_info_ = load_info;
+    LOG_INFO(
+        "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
+        "storage_version: {}",
+        id_,
+        load_info.num_of_rows(),
+        load_info.index_infos_size(),
+        load_info.storageversion());
+}
+
+void
+ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
+    // Get load info from segment_load_info_
+    auto num_rows = segment_load_info_.num_of_rows();
+    LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
+
+    // Step 1: Separate indexed and non-indexed fields
+    std::map<FieldId, const proto::segcore::FieldIndexInfo*>
+        field_id_to_index_info;
+    std::set<FieldId> indexed_fields;
+
+    for (int i = 0; i < segment_load_info_.index_infos_size(); i++) {
+        const auto& index_info = segment_load_info_.index_infos(i);
+        if (index_info.index_file_paths_size() == 0) {
+            continue;
+        }
+        auto field_id = FieldId(index_info.fieldid());
+        field_id_to_index_info[field_id] = &index_info;
+        indexed_fields.insert(field_id);
+    }
+
+    // Step 2: Load indexes in parallel using thread pool
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    std::vector<std::future<void>> load_index_futures;
+
+    for (const auto& pair : field_id_to_index_info) {
+        auto field_id = pair.first;
+        auto index_info_ptr = pair.second;
+        auto future = pool.Submit(
+            [this, trace_ctx, field_id, index_info_ptr, num_rows]() mutable
+            -> void {
+                // Convert proto FieldIndexInfo to LoadIndexInfo
+                auto load_index_info =
+                    ConvertFieldIndexInfoToLoadIndexInfo(index_info_ptr);
+
+                LOG_INFO("Loading index for segment {} field {} with {} files",
+                         id_,
+                         field_id.get(),
+                         load_index_info.index_files.size());
+
+                // Download & compose index
+                LoadIndexData(trace_ctx, &load_index_info);
+
+                // Load index into segment
+                LoadIndex(load_index_info);
+            });
+
+        load_index_futures.push_back(std::move(future));
+    }
+
+    // Wait for all index loading to complete and collect exceptions
+    std::vector<std::exception_ptr> index_exceptions;
+    for (auto& future : load_index_futures) {
+        try {
+            future.get();
+        } catch (...) {
+            index_exceptions.push_back(std::current_exception());
+        }
+    }
+
+    // If any exceptions occurred during index loading, handle them
+    if (!index_exceptions.empty()) {
+        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
+                  index_exceptions.size(),
+                  load_index_futures.size(),
+                  id_);
+
+        // Rethrow the first exception
+        std::rethrow_exception(index_exceptions[0]);
+    }
+
+    LOG_INFO("Finished loading {} indexes for segment {}",
+             field_id_to_index_info.size(),
+             id_);
+
+    // Step 3: Prepare field data info for non-indexed fields
+    std::map<FieldId, LoadFieldDataInfo> field_data_to_load;
+    for (int i = 0; i < segment_load_info_.binlog_paths_size(); i++) {
+        LoadFieldDataInfo load_field_data_info;
+        load_field_data_info.storage_version =
+            segment_load_info_.storageversion();
+
+        const auto& field_binlog = segment_load_info_.binlog_paths(i);
+        auto field_id = FieldId(field_binlog.fieldid());
+
+        // Skip if this field has an index with raw data
+        auto iter = index_has_raw_data_.find(field_id);
+        if (iter != index_has_raw_data_.end() && iter->second) {
+            LOG_INFO(
+                "Skip loading binlog for segment {} field {} because index "
+                "has raw data",
+                id_,
+                field_id.get());
+            continue;
+        }
+
+        // Build FieldBinlogInfo
+        FieldBinlogInfo field_binlog_info;
+        field_binlog_info.field_id = field_id.get();
+
+        // Calculate total row count and collect binlog paths
+        int64_t total_entries = 0;
+        for (const auto& binlog : field_binlog.binlogs()) {
+            field_binlog_info.insert_files.push_back(binlog.log_path());
+            field_binlog_info.entries_nums.push_back(binlog.entries_num());
+            field_binlog_info.memory_sizes.push_back(binlog.memory_size());
+            total_entries += binlog.entries_num();
+        }
+        field_binlog_info.row_count = total_entries;
+
+        // Store in map
+        load_field_data_info.field_infos[field_id.get()] = field_binlog_info;
+
+        field_data_to_load[field_id] = load_field_data_info;
+    }
+
+    // Step 4: Load field data for non-indexed fields
+    if (!field_data_to_load.empty()) {
+        LOG_INFO("Loading field data for {} fields in segment {}",
+                 field_data_to_load.size(),
+                 id_);
+        std::vector<std::future<void>> load_field_futures;
+
+        for (const auto& [field_id, load_field_data_info] :
+             field_data_to_load) {
+            // Create a local copy to capture in lambda (C++17 compatible)
+            const auto field_data = load_field_data_info;
+            auto future = pool.Submit(
+                [this, field_data]() -> void { LoadFieldData(field_data); });
+
+            load_field_futures.push_back(std::move(future));
+        }
+
+        // Wait for all field data loading to complete and collect exceptions
+        std::vector<std::exception_ptr> field_exceptions;
+        for (auto& future : load_field_futures) {
+            try {
+                future.get();
+            } catch (...) {
+                field_exceptions.push_back(std::current_exception());
+            }
+        }
+
+        // If any exceptions occurred during field data loading, handle them
+        if (!field_exceptions.empty()) {
+            LOG_ERROR("Failed to load {} out of {} field data for segment {}",
+                      field_exceptions.size(),
+                      load_field_futures.size(),
+                      id_);
+
+            // Rethrow the first exception
+            std::rethrow_exception(field_exceptions[0]);
+        }
+    }
+
+    LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
 
 }  // namespace milvus::segcore

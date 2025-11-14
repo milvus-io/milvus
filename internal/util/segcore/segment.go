@@ -66,7 +66,8 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var status C.CStatus
 	if req.LoadInfo != nil {
-		loadInfoBlob, err := proto.Marshal(req.LoadInfo)
+		segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -309,6 +310,13 @@ func (s *cSegmentImpl) FinishLoad() error {
 		return errors.Wrap(err, "failed to finish load segment")
 	}
 	return nil
+}
+
+func (s *cSegmentImpl) Load(ctx context.Context) error {
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	status := C.SegmentLoad(traceCtx.ctx, s.ptr)
+	return ConsumeCStatusIntoError(&status)
 }
 
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {

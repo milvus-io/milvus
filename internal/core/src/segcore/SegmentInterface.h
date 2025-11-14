@@ -200,6 +200,9 @@ class SegmentInterface {
 
     virtual void
     SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
+
+    virtual void
+    Load(milvus::tracer::TraceContext& trace_ctx) = 0;
 };
 
 // internal API for DSL calculation

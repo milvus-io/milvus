@@ -1327,6 +1327,48 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 }
 
 void
+SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
+    // Convert load_info_ (SegmentLoadInfo) to LoadFieldDataInfo
+    LoadFieldDataInfo field_data_info;
+
+    // Set storage version
+    field_data_info.storage_version = load_info_.storageversion();
+
+    // Set load priority
+    field_data_info.load_priority = load_info_.priority();
+
+    // Convert binlog_paths to field_infos
+    for (const auto& field_binlog : load_info_.binlog_paths()) {
+        FieldBinlogInfo binlog_info;
+        binlog_info.field_id = field_binlog.fieldid();
+
+        // Process each binlog
+        int64_t total_row_count = 0;
+        for (const auto& binlog : field_binlog.binlogs()) {
+            binlog_info.entries_nums.push_back(binlog.entries_num());
+            binlog_info.insert_files.push_back(binlog.log_path());
+            binlog_info.memory_sizes.push_back(binlog.memory_size());
+            total_row_count += binlog.entries_num();
+        }
+        binlog_info.row_count = total_row_count;
+
+        // Set child field ids
+        for (const auto& child_field : field_binlog.child_fields()) {
+            binlog_info.child_field_ids.push_back(child_field);
+        }
+
+        // Add to field_infos map
+        field_data_info.field_infos[binlog_info.field_id] =
+            std::move(binlog_info);
+    }
+
+    // Call LoadFieldData with the converted info
+    if (!field_data_info.field_infos.empty()) {
+        LoadFieldData(field_data_info);
+    }
+}
+
+void
 SegmentGrowingImpl::FinishLoad() {
     for (const auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
