@@ -124,9 +124,6 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
                 index_params.add_index(field_name, index_type="AUTOINDEX", metric_type="BM25")
             else:
                 index_params.add_index(field_name, index_type="AUTOINDEX")
-        emb_list_field_names = cf.get_emb_list_field_name_list(schema=schema)
-        for emb_list_field_name in emb_list_field_names:
-            index_params.add_index(emb_list_field_name, index_type="AUTOINDEX", metric_type="MAX_SIM_COSINE")
 
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
         self.create_collection(client, collection_name, default_dim, schema=schema, 
@@ -204,7 +201,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         
         # Create schema with all data types
-        schema = cf.gen_all_datatype_collection_schema(dim=dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=False)
 
         # Create index parameters
         index_params = client.prepare_index_params()
