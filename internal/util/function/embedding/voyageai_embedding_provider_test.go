@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -77,7 +78,7 @@ func createVoyageAIProvider(url string, schema *schemapb.FieldSchema, providerNa
 	}
 	switch providerName {
 	case voyageAIProvider:
-		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		return NewVoyageAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -94,7 +95,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			r, err2 := provider.CallEmbedding(data, models.InsertMode)
+			r, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
@@ -102,7 +103,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbedding() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			_, err := provider.CallEmbedding(data, models.SearchMode)
+			_, err := provider.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.NoError(err)
 		}
 	}
@@ -124,7 +125,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingIn8() {
 		s.Equal("int8", provider.(*VoyageAIEmbeddingProvider).outputType)
 		{
 			data := []string{"sentence"}
-			r, err2 := provider.CallEmbedding(data, models.InsertMode)
+			r, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			ret := r.([][]int8)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
@@ -132,7 +133,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingIn8() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			_, err := provider.CallEmbedding(data, models.SearchMode)
+			_, err := provider.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.NoError(err)
 		}
 	}
@@ -168,7 +169,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 			// embedding dim not match
 			data := []string{"sentence", "sentence"}
-			_, err2 := provider.CallEmbedding(data, models.InsertMode)
+			_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			s.Error(err2)
 		}
 	}
@@ -209,7 +210,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provider.CallEmbedding(data, models.InsertMode)
+		_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -239,7 +240,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 			// embedding dim not match
 			data := []string{"sentence", "sentence2"}
-			_, err2 := provider.CallEmbedding(data, models.InsertMode)
+			_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 			s.Error(err2)
 		}
 	}
@@ -274,7 +275,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provider.CallEmbedding(data, models.InsertMode)
+		_, err2 := provider.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -294,7 +295,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 			{Key: models.TruncationParamKey, Value: "true"},
 		},
 	}
-	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(1024))
 	s.True(provider.MaxBatch() > 0)
@@ -302,7 +303,7 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 	// Invalid truncation
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: models.TruncationParamKey, Value: "Invalid"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: models.TruncationParamKey, Value: "false"}
 	}
@@ -310,14 +311,14 @@ func (s *VoyageAITextEmbeddingProviderSuite) TestNewVoyageAIEmbeddingProvider() 
 	// Invalid dim
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.DimParamKey, Value: "9"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
 	// Invalid dim type
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.DimParamKey, Value: "Invalied"}
-		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewVoyageAIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 }

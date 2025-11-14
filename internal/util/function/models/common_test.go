@@ -38,27 +38,31 @@ func TestCommon(t *testing.T) {
 
 func (s *CommonSuite) TestParseAKAndURL() {
 	{
-		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr)
+		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr, &ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Equal(apiKey, "")
 	}
 	{
 		os.Setenv(OpenaiAKEnvStr, "TEST")
-		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr)
+		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr, &ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Equal(apiKey, "TEST")
 		os.Unsetenv(OpenaiAKEnvStr)
 	}
 	{
 		os.Setenv("MILVUSAI_OPENAI_API_KEY", "OLD_TEST")
-		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr)
+		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr, &ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Equal(apiKey, "OLD_TEST")
 		os.Unsetenv("MILVUSAI_OPENAI_API_KEY")
 	}
 	{
 		os.Setenv(OpenaiAKEnvStr, "TEST")
 		os.Setenv("MILVUSAI_OPENAI_API_KEY", "OLD_TEST")
-		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr)
+		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{}, map[string]string{}, OpenaiAKEnvStr, &ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Equal(apiKey, "TEST")
 		os.Unsetenv("MILVUSAI_OPENAI_API_KEY")
 		os.Unsetenv(OpenaiAKEnvStr)
+	}
+	{
+		apiKey, _, _ := ParseAKAndURL(&credentials.Credentials{}, []*commonpb.KeyValuePair{{Key: "integration_id", Value: "test-integration"}}, map[string]string{}, OpenaiAKEnvStr, &ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.Equal(apiKey, "test-integration|test-cluster|test-db")
 	}
 }
