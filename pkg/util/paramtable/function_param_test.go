@@ -84,4 +84,6 @@ func TestFunctionConfig(t *testing.T) {
 		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")
 	}
 	assert.True(t, cfg.RerankModelProviders.GetDoc("Unknow") == "")
+
+	assert.Equal(t, 5, cfg.GetBatchFactor())
 }

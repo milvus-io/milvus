@@ -145,8 +145,9 @@ const (
 )
 
 type ModelExtraInfo struct {
-	ClusterID string
-	DBName    string
+	ClusterID   string
+	DBName      string
+	BatchFactor int
 }
 
 func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string, extraInfo *ModelExtraInfo) (string, string, error) {
