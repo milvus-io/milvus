@@ -1100,7 +1100,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
             const std::unordered_set<int> elements_index) {
         auto executor = [&](size_t i) -> bool {
             const auto& json = data[i];
-            auto doc = json.doc();
+            auto doc = json.dom_doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return false;
@@ -1638,7 +1638,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
             const std::vector<proto::plan::GenericValue>& elements) {
         auto executor = [&](const size_t i) {
             auto& json = data[i];
-            auto doc = json.doc();
+            auto doc = json.dom_doc();
             auto array = doc.at_pointer(pointer).get_array();
             if (array.error()) {
                 return false;
