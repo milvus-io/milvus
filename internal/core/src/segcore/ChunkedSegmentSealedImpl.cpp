@@ -351,7 +351,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     }
                     // var_column->Seal();
                     field_data_size = var_column->DataByteSize();
-                    stats_.mem_size += var_column->DataByteSize();
                     LoadStringSkipIndex(field_id, 0, *var_column);
                     column = std::move(var_column);
                     break;
@@ -366,7 +365,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();
-                    stats_.mem_size += var_column->DataByteSize();
                     field_data_size = var_column->DataByteSize();
                     column = std::move(var_column);
                     break;
@@ -381,7 +379,6 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();
-                    stats_.mem_size += var_column->DataByteSize();
                     field_data_size = var_column->DataByteSize();
 
                     // Construct GeometryCache for the entire field
@@ -449,6 +446,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                                column->NumRows(),
                                num_rows));
 
+        stats_.mem_size += column->DataByteSize();
         {
             std::unique_lock lck(mutex_);
             fields_.emplace(field_id, column);
