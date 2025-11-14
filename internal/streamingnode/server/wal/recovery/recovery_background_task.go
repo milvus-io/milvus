@@ -152,11 +152,24 @@ func (rs *recoveryStorageImpl) sampleTruncateCheckpoint(checkpoint *WALCheckpoin
 	if flusherCP == nil {
 		return
 	}
-	// use the smaller one to truncate the wal.
 	if flusherCP.MessageID.LTE(checkpoint.MessageID) {
-		rs.truncator.SampleCheckpoint(flusherCP)
-	} else {
-		rs.truncator.SampleCheckpoint(checkpoint)
+		// Truncate WAL with backoff retry until success.
+		// Use background task context to ensure graceful shutdown.
+		go func() {
+			ctx := rs.backgroundTaskNotifier.Context()
+			logger := rs.Logger().With(
+				zap.String("op", "truncateWAL"),
+				zap.String("channel", rs.channel.Name),
+				zap.String("messageID", flusherCP.MessageID.String()),
+			)
+
+			if err := rs.retryOperationWithBackoff(ctx, logger, func(ctx context.Context) error {
+				return rs.truncator.Truncate(ctx, flusherCP.MessageID)
+			}); err != nil {
+				// Log error if truncation failed due to context cancellation during shutdown
+				logger.Warn("failed to truncate WAL", zap.Error(err))
+			}
+		}()
 	}
 }
 
