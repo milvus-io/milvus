@@ -104,5 +104,5 @@ func formatResourceKeys(rks []message.ResourceKey) string {
 	for _, rk := range rks {
 		keys = append(keys, rk.ShortString())
 	}
-	return strings.Join(keys, "/")
+	return strings.Join(keys, "|")
 }
