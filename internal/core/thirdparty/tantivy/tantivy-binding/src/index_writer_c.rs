@@ -1,4 +1,3 @@
-use core::slice;
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
@@ -18,7 +17,7 @@ macro_rules! convert_to_rust_slice {
         match $arr {
             // there is a UB in slice::from_raw_parts if the pointer is null
             x if x.is_null() => &[],
-            _ => slice::from_raw_parts($arr, $len),
+            _ => ::core::slice::from_raw_parts($arr, $len),
         }
     };
 }
