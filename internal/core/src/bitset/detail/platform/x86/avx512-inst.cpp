@@ -83,6 +83,9 @@ namespace avx512 {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template void
+bitset_batch_set_avx512<uint64_t>(uint64_t*, const uint32_t*, const size_t);
+
 //
 #define INSTANTIATE_COMPARE_VAL_AVX512(TTYPE, OP)                             \
     template bool OpCompareValImpl<TTYPE, CompareOpType::OP>::op_compare_val( \

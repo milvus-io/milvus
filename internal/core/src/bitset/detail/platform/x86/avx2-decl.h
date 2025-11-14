@@ -196,6 +196,12 @@ ALL_DATATYPES_1(DECLARE_PARTIAL_OP_ARITH_COMPARE)
 #undef DECLARE_PARTIAL_OP_ARITH_COMPARE
 
 ///////////////////////////////////////////////////////////////////////////
+// bitset_batch_set avx implementation
+template <typename ElementType>
+void
+bitset_batch_set_avx2(ElementType* data, const uint32_t* idxs, const size_t n);
+
+///////////////////////////////////////////////////////////////////////////
 
 // forward ops
 template <typename ElementT>

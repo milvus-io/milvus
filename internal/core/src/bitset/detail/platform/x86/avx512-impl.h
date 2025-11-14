@@ -50,6 +50,60 @@ get_mask(const size_t count) {
 
 ///////////////////////////////////////////////////////////////////////////
 
+template <typename ElementType>
+void
+bitset_batch_set_avx512(ElementType* data,
+                        const uint32_t* idxs,
+                        const size_t n) {
+    constexpr size_t data_bits = sizeof(ElementType) * 8;
+    constexpr int shift_bits = __builtin_ctz(data_bits);
+    constexpr uint32_t mask = (data_bits - 1);
+    constexpr size_t batch_size = 32;
+
+    if (n == 0) {
+        return;
+    }
+
+    const __m512i mask_vec = _mm512_set1_epi32(mask);
+    alignas(64) uint32_t elems[batch_size];
+    alignas(64) uint32_t bits[batch_size];
+
+    auto num_batches = n / batch_size;
+    for (size_t batch = 0; batch < num_batches; batch++) {
+        size_t base_idx = batch * batch_size;
+
+        for (size_t j = 0; j < batch_size; j += 16) {
+            __m512i v = _mm512_loadu_si512((const void*)(idxs + base_idx + j));
+            __m512i e = _mm512_srli_epi32(v, shift_bits);
+            __m512i b = _mm512_and_si512(v, mask_vec);
+            _mm512_store_si512((void*)(elems + j), e);
+            _mm512_store_si512((void*)(bits + j), b);
+        }
+
+        ElementType cur_mask = 0;
+        uint32_t cur_elem = elems[0];
+        for (size_t j = 0; j < batch_size; j++) {
+            if (elems[j] == cur_elem) {
+                cur_mask |= (static_cast<ElementType>(1) << bits[j]);
+            } else {
+                _mm_prefetch((const char*)&data[elems[j]], _MM_HINT_T0);
+                data[cur_elem] |= cur_mask;
+                cur_elem = elems[j];
+                cur_mask = (static_cast<ElementType>(1) << bits[j]);
+            }
+        }
+        data[cur_elem] |= cur_mask;
+    }
+
+    for (size_t i = num_batches * batch_size; i < n; i++) {
+        auto element_index = idxs[i] >> shift_bits;
+        auto bit_in_element = idxs[i] & mask;
+        data[element_index] |= (static_cast<ElementType>(1) << bit_in_element);
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 constexpr size_t N_BLOCKS = 8;
 constexpr size_t PAGE_SIZE = 4096;
 constexpr size_t BLOCKS_PREFETCH_AHEAD = 4;

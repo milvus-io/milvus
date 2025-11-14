@@ -28,6 +28,11 @@ namespace detail {
 namespace dynamic {
 
 ///////////////////////////////////////////////////////////////////////////
+
+template <typename ElementType>
+void
+bitset_batch_set(ElementType* data, const uint32_t* idxs, const size_t n);
+
 // a facility to run through all acceptable data types
 #define ALL_DATATYPES_1(FUNC) \
     FUNC(int8_t);             \

@@ -197,6 +197,15 @@ ALL_DATATYPES_1(DECLARE_PARTIAL_OP_ARITH_COMPARE)
 
 ///////////////////////////////////////////////////////////////////////////
 
+// bitset_batch_set avx512 implementation
+template <typename ElementType>
+void
+bitset_batch_set_avx512(ElementType* data,
+                        const uint32_t* idxs,
+                        const size_t n);
+
+///////////////////////////////////////////////////////////////////////////
+
 // forward ops
 template <typename ElementT>
 struct ForwardOpsImpl {
