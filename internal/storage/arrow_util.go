@@ -30,9 +30,7 @@ import (
 )
 
 func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
-	if a == nil {
-		return 0, merr.WrapErrServiceInternal("unexpected input: nil arrow.Array found")
-	}
+	// a could never be nil here
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
 		ba, ok := a.(*array.Boolean)
