@@ -425,6 +425,10 @@ func (t *mixCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }
 
+func (t *mixCompactionTask) GetSlotUsageV2() (float64, float64) {
+	return t.plan.GetCpuSlot(), t.plan.GetMemorySlot()
+}
+
 func GetBM25FieldIDs(coll *schemapb.CollectionSchema) []int64 {
 	return lo.FilterMap(coll.GetFunctions(), func(function *schemapb.FunctionSchema, _ int) (int64, bool) {
 		if function.GetType() == schemapb.FunctionType_BM25 {
