@@ -244,12 +244,12 @@ func (mt *MetaTable) reload() error {
 				mt.generalCnt += pn * int(collection.ShardsNum)
 				collectionNum++
 				partitionNum += int64(pn)
+				metrics.RootCoordNumOfPartitions.WithLabelValues(dbName, collection.Name).Set(float64(pn))
 			}
 		}
 
 		metrics.RootCoordNumOfDatabases.Inc()
 		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
-		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 		log.Ctx(mt.ctx).Info("collections recovered from db", zap.String("db_name", dbName),
 			zap.Int64("collection_num", collectionNum),
 			zap.Int64("partition_num", partitionNum),
@@ -298,6 +298,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 			mt.generalCnt += pn * int(collection.ShardsNum)
 			collectionNum++
 			partitionNum += int64(pn)
+			metrics.RootCoordNumOfPartitions.WithLabelValues(util.DefaultDBName, collection.Name).Set(float64(pn))
 		}
 	}
 
@@ -314,7 +315,6 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 	}
 
 	metrics.RootCoordNumOfCollections.WithLabelValues(util.DefaultDBName).Add(float64(collectionNum))
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	return nil
 }
 
@@ -530,7 +530,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	pn := coll.GetPartitionNum(true)
 	mt.generalCnt += pn * int(coll.ShardsNum)
 	metrics.RootCoordNumOfCollections.WithLabelValues(coll.DBName).Inc()
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(pn))
+	metrics.RootCoordNumOfPartitions.WithLabelValues(coll.DBName, coll.Name).Set(float64(pn))
 
 	channel.StaticPChannelStatsManager.MustGet().AddVChannel(coll.VirtualChannelNames...)
 	log.Ctx(ctx).Info("add collection to meta table",
@@ -574,7 +574,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
 	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
 	metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(pn))
+	metrics.RootCoordNumOfPartitions.DeleteLabelValues(db.Name, coll.Name)
 
 	log.Ctx(ctx).Info("drop collection from meta table", zap.Int64("collection", collectionID),
 		zap.String("state", coll.State.String()), zap.Uint64("ts", ts))
@@ -1113,7 +1113,8 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
 	mt.generalCnt += int(coll.ShardsNum) // 1 partition * shardNum
 	// support Dynamic load/release partitions
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
+	pn := coll.GetPartitionNum(true)
+	metrics.RootCoordNumOfPartitions.WithLabelValues(coll.DBName, coll.Name).Set(float64(pn))
 
 	return nil
 }
@@ -1145,7 +1146,8 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 				zap.Uint64("ts", ts))
 
 			mt.generalCnt -= int(coll.ShardsNum) // 1 partition * shardNum
-			metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
+			pn := coll.GetPartitionNum(true)
+			metrics.RootCoordNumOfPartitions.WithLabelValues(coll.DBName, coll.Name).Set(float64(pn))
 			return nil
 		}
 	}
