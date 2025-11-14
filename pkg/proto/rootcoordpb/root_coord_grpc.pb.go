@@ -41,6 +41,9 @@ const (
 	RootCoord_ShowCollectionIDs_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/ShowCollectionIDs"
 	RootCoord_AlterCollection_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AlterCollection"
 	RootCoord_AlterCollectionField_FullMethodName          = "/milvus.proto.rootcoord.RootCoord/AlterCollectionField"
+	RootCoord_AddCollectionFunction_FullMethodName         = "/milvus.proto.rootcoord.RootCoord/AddCollectionFunction"
+	RootCoord_AlterCollectionFunction_FullMethodName       = "/milvus.proto.rootcoord.RootCoord/AlterCollectionFunction"
+	RootCoord_DropCollectionFunction_FullMethodName        = "/milvus.proto.rootcoord.RootCoord/DropCollectionFunction"
 	RootCoord_CreatePartition_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/CreatePartition"
 	RootCoord_DropPartition_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/DropPartition"
 	RootCoord_HasPartition_FullMethodName                  = "/milvus.proto.rootcoord.RootCoord/HasPartition"
@@ -139,6 +142,9 @@ type RootCoordClient interface {
 	ShowCollectionIDs(ctx context.Context, in *ShowCollectionIDsRequest, opts ...grpc.CallOption) (*ShowCollectionIDsResponse, error)
 	AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// *
 	// @brief This method is used to create partition
 	//
@@ -367,6 +373,33 @@ func (c *rootCoordClient) AlterCollection(ctx context.Context, in *milvuspb.Alte
 func (c *rootCoordClient) AlterCollectionField(ctx context.Context, in *milvuspb.AlterCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, RootCoord_AlterCollectionField_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AddCollectionFunction_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_AlterCollectionFunction_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, RootCoord_DropCollectionFunction_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -789,6 +822,9 @@ type RootCoordServer interface {
 	ShowCollectionIDs(context.Context, *ShowCollectionIDsRequest) (*ShowCollectionIDsResponse, error)
 	AlterCollection(context.Context, *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
 	AlterCollectionField(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error)
+	AddCollectionFunction(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)
+	AlterCollectionFunction(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error)
+	DropCollectionFunction(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error)
 	// *
 	// @brief This method is used to create partition
 	//
@@ -910,6 +946,15 @@ func (UnimplementedRootCoordServer) AlterCollection(context.Context, *milvuspb.A
 }
 func (UnimplementedRootCoordServer) AlterCollectionField(context.Context, *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AlterCollectionField not implemented")
+}
+func (UnimplementedRootCoordServer) AddCollectionFunction(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddCollectionFunction not implemented")
+}
+func (UnimplementedRootCoordServer) AlterCollectionFunction(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AlterCollectionFunction not implemented")
+}
+func (UnimplementedRootCoordServer) DropCollectionFunction(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropCollectionFunction not implemented")
 }
 func (UnimplementedRootCoordServer) CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePartition not implemented")
@@ -1363,6 +1408,60 @@ func _RootCoord_AlterCollectionField_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).AlterCollectionField(ctx, req.(*milvuspb.AlterCollectionFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_AddCollectionFunction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AddCollectionFunctionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AddCollectionFunction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AddCollectionFunction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AddCollectionFunction(ctx, req.(*milvuspb.AddCollectionFunctionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_AlterCollectionFunction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AlterCollectionFunctionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).AlterCollectionFunction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_AlterCollectionFunction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).AlterCollectionFunction(ctx, req.(*milvuspb.AlterCollectionFunctionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_DropCollectionFunction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.DropCollectionFunctionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).DropCollectionFunction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_DropCollectionFunction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).DropCollectionFunction(ctx, req.(*milvuspb.DropCollectionFunctionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2165,6 +2264,18 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AlterCollectionField",
 			Handler:    _RootCoord_AlterCollectionField_Handler,
+		},
+		{
+			MethodName: "AddCollectionFunction",
+			Handler:    _RootCoord_AddCollectionFunction_Handler,
+		},
+		{
+			MethodName: "AlterCollectionFunction",
+			Handler:    _RootCoord_AlterCollectionFunction_Handler,
+		},
+		{
+			MethodName: "DropCollectionFunction",
+			Handler:    _RootCoord_DropCollectionFunction_Handler,
 		},
 		{
 			MethodName: "CreatePartition",
