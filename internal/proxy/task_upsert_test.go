@@ -1356,3 +1356,111 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 	assert.NotNil(t, valueField)
 	assert.Equal(t, []int32{600, 700}, valueField.GetScalars().GetIntData().GetData())
 }
+
+// Test ToCompressedFormatNullable for Geometry and Timestamptz types
+func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
+	t.Run("timestamptz with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Timestamptz,
+			FieldName: "timestamp_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: []int64{1000, 0, 3000, 0},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, []int64{1000, 3000}, field.GetScalars().GetTimestamptzData().GetData())
+		assert.Equal(t, []bool{true, false, true, false}, field.ValidData)
+	})
+
+	t.Run("geometry WKT with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "geometry_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{
+							Data: []string{"POINT (1 2)", "", "POINT (5 6)"},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"POINT (1 2)", "POINT (5 6)"}, field.GetScalars().GetGeometryWktData().GetData())
+	})
+
+	t.Run("geometry WKB with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "geometry_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{
+							Data: [][]byte{{0x01, 0x02}, nil, {0x05, 0x06}},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true},
+		}
+
+		err := ToCompressedFormatNullable(field)
+		assert.NoError(t, err)
+		assert.Equal(t, [][]byte{{0x01, 0x02}, {0x05, 0x06}}, field.GetScalars().GetGeometryData().GetData())
+	})
+}
+
+// Test GenNullableFieldData for Geometry and Timestamptz types
+func TestGenNullableFieldData_GeometryAndTimestamptz(t *testing.T) {
+	t.Run("generate timestamptz nullable field", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:   100,
+			Name:      "timestamp_field",
+			DataType:  schemapb.DataType_Timestamptz,
+			IsDynamic: false,
+		}
+
+		upsertIDSize := 5
+		fieldData, err := GenNullableFieldData(field, upsertIDSize)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData)
+		assert.Equal(t, int64(100), fieldData.FieldId)
+		assert.Equal(t, "timestamp_field", fieldData.FieldName)
+		assert.Len(t, fieldData.ValidData, upsertIDSize)
+		assert.Len(t, fieldData.GetScalars().GetTimestamptzData().GetData(), upsertIDSize)
+	})
+
+	t.Run("generate geometry nullable field", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:   101,
+			Name:      "geometry_field",
+			DataType:  schemapb.DataType_Geometry,
+			IsDynamic: false,
+		}
+
+		upsertIDSize := 3
+		fieldData, err := GenNullableFieldData(field, upsertIDSize)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldData)
+		assert.Equal(t, int64(101), fieldData.FieldId)
+		assert.Equal(t, "geometry_field", fieldData.FieldName)
+		assert.Len(t, fieldData.ValidData, upsertIDSize)
+		assert.Len(t, fieldData.GetScalars().GetGeometryWktData().GetData(), upsertIDSize)
+	})
+}

@@ -7188,3 +7188,72 @@ func Test_validateUtil_checkAligned_ArrayOfVector(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+// Test FillWithNullValue for Geometry fields
+func TestFillWithNullValue_Geometry(t *testing.T) {
+	t.Run("geometry WKT with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "geo_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryWktData{
+						GeometryWktData: &schemapb.GeometryWktArray{
+							Data: []string{"POINT (1 2)", "POINT (3 4)"},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "geo_field",
+			DataType: schemapb.DataType_Geometry,
+			Nullable: true,
+		}
+
+		numRows := 4
+		err := FillWithNullValue(field, fieldSchema, numRows)
+
+		assert.NoError(t, err)
+		assert.Len(t, field.GetScalars().GetGeometryWktData().GetData(), numRows)
+		assert.Equal(t, "POINT (1 2)", field.GetScalars().GetGeometryWktData().GetData()[0])
+		assert.Equal(t, "", field.GetScalars().GetGeometryWktData().GetData()[1])
+		assert.Equal(t, "POINT (3 4)", field.GetScalars().GetGeometryWktData().GetData()[2])
+		assert.Equal(t, "", field.GetScalars().GetGeometryWktData().GetData()[3])
+	})
+
+	t.Run("geometry WKB with null values", func(t *testing.T) {
+		field := &schemapb.FieldData{
+			Type:      schemapb.DataType_Geometry,
+			FieldName: "geo_field",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{
+							Data: [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+						},
+					},
+				},
+			},
+			ValidData: []bool{true, false, true, false},
+		}
+
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     "geo_field",
+			DataType: schemapb.DataType_Geometry,
+			Nullable: true,
+		}
+
+		numRows := 4
+		err := FillWithNullValue(field, fieldSchema, numRows)
+
+		assert.NoError(t, err)
+		assert.Len(t, field.GetScalars().GetGeometryData().GetData(), numRows)
+		assert.Equal(t, []byte{0x01, 0x02}, field.GetScalars().GetGeometryData().GetData()[0])
+		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[1])
+		assert.Equal(t, []byte{0x03, 0x04}, field.GetScalars().GetGeometryData().GetData()[2])
+		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
+	})
+}
