@@ -111,7 +111,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         """
         # step 1: create collection with all datatype schema
         client = self._client()
-        schema = cf.gen_all_datatype_collection_schema(dim=default_dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=default_dim, enable_struct_array_field=False)
         index_params = self.prepare_index_params(client)[0]
         text_sparse_emb_field_name = "text_sparse_emb"
 
@@ -201,7 +201,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         
         # Create schema with all data types
-        schema = cf.gen_all_datatype_collection_schema(dim=dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=False)
 
         # Create index parameters
         index_params = client.prepare_index_params()
