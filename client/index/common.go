@@ -47,6 +47,8 @@ const (
 	IvfSQ8     IndexType = "IVF_SQ8"
 	IvfRabitQ  IndexType = "IVF_RABITQ"
 	HNSW       IndexType = "HNSW"
+	HNSWSQ     IndexType = "HNSW_SQ"
+	HNSWPQ     IndexType = "HNSW_PQ"
 	IvfHNSW    IndexType = "IVF_HNSW"
 	AUTOINDEX  IndexType = "AUTOINDEX"
 	DISKANN    IndexType = "DISKANN"
