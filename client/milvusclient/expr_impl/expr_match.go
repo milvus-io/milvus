@@ -1118,6 +1118,14 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		WithFilter(fmt.Sprintf(`text_match(%s, "%s")`, titleFieldName, query)).
 		WithSearchParam("metric_type", "BM25")
 
+	// Example of using a function reranker to boost the title search with a phrase match filter
+	// priorityTitleSearch.WithFunctionReranker(entity.NewFunction().
+	// 	WithName("priority_title_reranker").
+	// 	WithType(entity.FunctionTypeRerank).
+	// 	WithParam("reranker", "boost").
+	// 	WithParam("filter", fmt.Sprintf(`phrase_match(%s, "%s")`, titleFieldName, query)).
+	// 	WithParam("weight", "2.0"))
+
 	// Search 2: Text search with minimum_should_match (medium weight)
 	standardTextSearch := milvusclient.NewAnnRequest(textSparseFieldName, 15, textVector).
 		WithFilter(fmt.Sprintf(`text_match(%s, "%s", minimum_should_match=2)`,
@@ -1136,20 +1144,28 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		WithParam("reranker", "weighted").
 		WithParam("weights", "[0.5, 0.3, 0.2]")
 
+	// Boost Ranker for featured category items
+	// This will boost documents with category="featured" by 1.5x
+	boostReranker := entity.NewFunction().
+		WithName("category_boost_reranker").
+		WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "boost").
+		WithParam("filter", "category == \"featured\"").
+		WithParam("weight", "1.5")
+
 	// Complex expression reranker combining quality, popularity, recency, and category
 	complexExprCode := fmt.Sprintf(
 		"let age_days = (%d - fields[\"created_at\"]) / 86400000; "+
 			"let recency = exp(-0.01 * age_days); "+
 			"let quality = fields[\"quality_score\"] / 100.0; "+
 			"let pop_boost = 1.0 + log(fields[\"popularity\"] + 1) / 20.0; "+
-			"let boost = fields[\"category\"] == \"featured\" ? 1.5 : 1.0; "+
-			"score * quality * pop_boost * recency * boost",
+			"score * quality * pop_boost * recency ",
 		now)
 
 	complexExprReranker := entity.NewFunction().
 		WithName("multi_factor_reranker").
 		WithType(entity.FunctionTypeRerank).
-		WithInputFields(createdAtFieldName, qualityFieldName, popularityFieldName).
+		WithInputFields(createdAtFieldName, qualityFieldName, popularityFieldName, categoryFieldName).
 		WithParam("reranker", "expr").
 		WithParam("expr_code", complexExprCode)
 
@@ -1203,6 +1219,7 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 		milvusclient.NewHybridSearchOption(collectionName, 8, priorityTitleSearch, standardTextSearch, exactTitleSearch).
 			WithFunctionRerankers(tripleWeightedFunction).
 			WithFunctionRerankers(complexExprReranker).
+			WithFunctionRerankers(boostReranker).
 			WithOutputFields("id", titleFieldName, createdAtFieldName, qualityFieldName, popularityFieldName, categoryFieldName))
 	if err != nil {
 		return fmt.Errorf("complex hybrid search failed: %v", err)
@@ -1248,7 +1265,7 @@ func runWeightedWithLexicalSearchTest(ctx context.Context, client *milvusclient.
 			log.Printf("        2. Expression: score × quality × pop_boost × recency × boost = %.6f", finalScore)
 			log.Printf("        3. Combined Multiplier: quality × pop_boost × recency × boost = %.6f", combinedMultiplier)
 			log.Printf("        4. Verification: %.6f × %.6f × %.6f × %.6f × %.6f = %.6f", complexIntermediateScores[title], qualityFactor, popBoost, recencyFactor, boostFactor, finalScore)
-			if finalScore-expectedFinal > 0.0001 {
+			if math.Abs(finalScore-expectedFinal) > 0.0001 {
 				log.Printf("      Verification failed: %.6f != %.6f ❌", finalScore, expectedFinal)
 			} else {
 				log.Printf("      Verification passed: %.6f == %.6f ✅", finalScore, expectedFinal)
