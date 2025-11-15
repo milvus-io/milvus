@@ -56,7 +56,7 @@ func ReduceSearchOnQueryNode(ctx context.Context, results []*internalpb.SearchRe
 		zap.Int64("topk", info.GetTopK()),
 	)
 	if info.GetIsAdvance() {
-		return ReduceAdvancedSearchResults(ctx, results)
+		return ReduceAdvancedSearchResults(ctx, results, info)
 	}
 	return ReduceSearchResults(ctx, results, info)
 }
@@ -65,15 +65,6 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
 		return result != nil && result.GetSlicedBlob() != nil
 	})
-
-	// if len(results) == 1 {
-	//     // Do not shortcut if rerank is requested; we need to decode and apply rerank even for single result
-	//     if info.GetRerankFunction() == nil || info.GetCollectionSchema() == nil {
-	//         log.Debug("Shortcut return ReduceSearchResults (no rerank)", zap.Any("result info", info))
-	//         return results[0], nil
-	//     }
-	//     log.Info("EXPR_RERANK: Single-result reduce path with rerank present; proceeding to decode and rerank")
-	// }
 
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResults")
 	defer sp.End()
@@ -170,12 +161,117 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	return searchResults, nil
 }
 
-func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
+func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *reduce.ResultInfo) (*internalpb.SearchResults, error) {
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceAdvancedSearchResults")
 	defer sp.End()
 
 	log := log.Ctx(ctx)
-	log.Info("EXPR_RERANK: Advanced reduce path - rerank will not run on QueryNode (deferred to proxy)")
+
+	// Check if we need to apply QueryNode-level reranking
+	hasQueryNodeReranker := info.GetRerankFunction() != nil && info.GetCollectionSchema() != nil
+	if hasQueryNodeReranker {
+		log.Debug("EXPR_RERANK: Advanced reduce path - applying QueryNode-level reranking before proxy fusion",
+			zap.String("reranker_name", info.GetRerankFunction().GetName()),
+			zap.Int32("reranker_type", int32(info.GetRerankFunction().GetType())),
+		)
+	} else {
+		log.Debug("EXPR_RERANK: Advanced reduce path - no QueryNode reranker, deferring all reranking to proxy")
+	}
+
+	// Apply QueryNode-level reranking to each sub-search result independently
+	// This allows expr/wasm rerankers to run at QueryNode before Proxy does weighted/rrf fusion
+	if hasQueryNodeReranker {
+		rerankedResults := make([]*internalpb.SearchResults, 0, len(results))
+		for idx, result := range results {
+			if result == nil || result.GetSlicedBlob() == nil {
+				rerankedResults = append(rerankedResults, result)
+				continue
+			}
+
+			searchResultData, err := DecodeSearchResults(ctx, []*internalpb.SearchResults{result})
+			if err != nil {
+				log.Warn("EXPR_RERANK: Failed to decode sub-search result for reranking, using original",
+					zap.Int("sub_index", idx),
+					zap.Error(err))
+				rerankedResults = append(rerankedResults, result)
+				continue
+			}
+
+			if len(searchResultData) == 0 {
+				rerankedResults = append(rerankedResults, result)
+				continue
+			}
+
+			// DEBUG: Log what we decoded
+			decoded := searchResultData[0]
+			log.Debug("EXPR_RERANK: Decoded sub-search result for reranking",
+				zap.Int("sub_index", idx),
+				zap.Int("num_ids", typeutil.GetSizeOfIDs(decoded.GetIds())),
+				zap.Int("num_scores", len(decoded.GetScores())),
+				zap.Int("num_fields", len(decoded.GetFieldsData())),
+				zap.Int64s("field_ids", lo.Map(decoded.GetFieldsData(), func(f *schemapb.FieldData, _ int) int64 { return f.GetFieldId() })),
+				zap.Strings("field_names", lo.Map(decoded.GetFieldsData(), func(f *schemapb.FieldData, _ int) string { return f.GetFieldName() })),
+			)
+
+			// Apply reranking to this sub-search result
+			log.Debug("EXPR_RERANK: Calling ApplyRerankOnSearchResultData",
+				zap.Int("sub_index", idx),
+				zap.String("metric_type", result.GetMetricType()),
+				zap.Int64("nq", result.GetNumQueries()),
+				zap.Int64("topk", result.GetTopK()),
+			)
+			reranked, rerr := rerank.ApplyRerankOnSearchResultData(
+				ctx,
+				searchResultData[0],
+				info.GetCollectionSchema(),
+				info.GetRerankFunction(),
+				result.GetMetricType(),
+				result.GetNumQueries(),
+				result.GetTopK(),
+			)
+			if rerr != nil {
+				log.Warn("EXPR_RERANK: Failed to apply reranking to sub-search result, using original",
+					zap.Int("sub_index", idx),
+					zap.Error(rerr))
+				rerankedResults = append(rerankedResults, result)
+				continue
+			}
+
+			// DEBUG: Log reranked scores
+			sampleSize := len(reranked.GetScores())
+			if sampleSize > 5 {
+				sampleSize = 5
+			}
+			log.Debug("EXPR_RERANK: Reranking completed",
+				zap.Int("sub_index", idx),
+				zap.Int("num_reranked_scores", len(reranked.GetScores())),
+				zap.Float32s("sample_scores", reranked.GetScores()[:sampleSize]),
+			)
+
+			// Re-encode the reranked result
+			rerankedEncoded, err := EncodeSearchResultData(ctx, reranked, result.GetNumQueries(), result.GetTopK(), result.GetMetricType())
+			if err != nil {
+				log.Warn("EXPR_RERANK: Failed to encode reranked sub-search result, using original",
+					zap.Int("sub_index", idx),
+					zap.Error(err))
+				rerankedResults = append(rerankedResults, result)
+				continue
+			}
+
+			// Preserve metadata from original result
+			rerankedEncoded.ChannelsMvcc = result.GetChannelsMvcc()
+			rerankedEncoded.CostAggregation = result.GetCostAggregation()
+			rerankedEncoded.IsTopkReduce = result.GetIsTopkReduce()
+			rerankedEncoded.ScannedRemoteBytes = result.GetScannedRemoteBytes()
+			rerankedEncoded.ScannedTotalBytes = result.GetScannedTotalBytes()
+
+			rerankedResults = append(rerankedResults, rerankedEncoded)
+			log.Debug("EXPR_RERANK: Successfully applied QueryNode reranking to sub-search result",
+				zap.Int("sub_index", idx))
+		}
+		results = rerankedResults
+		log.Debug("EXPR_RERANK: Completed QueryNode-level reranking for all sub-search results")
+	}
 
 	channelsMvcc := make(map[string]uint64)
 	relatedDataSize := int64(0)

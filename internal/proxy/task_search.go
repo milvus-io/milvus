@@ -452,6 +452,54 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
 	}
 
+	// Collect field IDs required by QueryNode-level rerankers (expr/wasm)
+	// These must be loaded in search results for reranking at QueryNode
+	queryNodeRerankFieldIDs := typeutil.NewSet[int64]()
+	if t.request.FunctionScore != nil {
+		nameToID := make(map[string]int64)
+		for _, f := range t.schema.CollectionSchema.GetFields() {
+			nameToID[f.GetName()] = f.GetFieldID()
+		}
+		for _, fn := range t.request.FunctionScore.Functions {
+			if rerank.IsQueryNodeRanker(fn) {
+				// Add explicitly declared input fields
+				for _, fieldName := range fn.GetInputFieldNames() {
+					if id, ok := nameToID[fieldName]; ok {
+						queryNodeRerankFieldIDs.Insert(id)
+					}
+				}
+				// For expr rerankers, also infer fields from expression code
+				var exprCode string
+				for _, p := range fn.GetParams() {
+					if strings.EqualFold(p.GetKey(), "expr_code") {
+						exprCode = p.GetValue()
+						break
+					}
+				}
+				if exprCode != "" {
+					available := make([]string, 0, len(t.schema.CollectionSchema.GetFields()))
+					for _, f := range t.schema.CollectionSchema.GetFields() {
+						if !typeutil.IsVectorType(f.GetDataType()) {
+							available = append(available, f.GetName())
+						}
+					}
+					if usedNames, err := rerank.AnalyzeExprRequiredFields(exprCode, available); err == nil {
+						for _, name := range usedNames {
+							if id, ok := nameToID[name]; ok {
+								queryNodeRerankFieldIDs.Insert(id)
+							}
+						}
+					}
+				}
+			}
+		}
+		if queryNodeRerankFieldIDs.Len() > 0 {
+			log.Debug("EXPR_RERANK: Collected QueryNode reranker field requirements for advanced search",
+				zap.Int64s("field_ids", queryNodeRerankFieldIDs.Collect()),
+			)
+		}
+	}
+
 	t.SearchRequest.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	queryFieldIDs := []int64{}
@@ -512,7 +560,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		if t.needRequery {
-			plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
+			allFieldIDs := typeutil.NewSet(t.functionScore.GetAllInputFieldIDs()...)
+			// Add QueryNode reranker fields
+			allFieldIDs.Insert(queryNodeRerankFieldIDs.Collect()...)
+			plan.OutputFieldIds = allFieldIDs.Collect()
 		} else {
 			primaryFieldSchema, err := t.schema.GetPkField()
 			if err != nil {
@@ -521,8 +572,17 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			allFieldIDs := typeutil.NewSet(t.SearchRequest.OutputFieldsId...)
 			allFieldIDs.Insert(t.functionScore.GetAllInputFieldIDs()...)
 			allFieldIDs.Insert(primaryFieldSchema.FieldID)
+			// Add QueryNode reranker fields
+			allFieldIDs.Insert(queryNodeRerankFieldIDs.Collect()...)
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
+		}
+
+		if index == 0 && len(plan.OutputFieldIds) > 0 {
+			log.Info("EXPR_RERANK: Sub-search plan output fields configured",
+				zap.Int("sub_search_index", index),
+				zap.Int64s("output_field_ids", plan.OutputFieldIds),
+			)
 		}
 
 		internalSubReq.SerializedExprPlan, err = proto.Marshal(plan)
