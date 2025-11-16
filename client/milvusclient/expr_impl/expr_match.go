@@ -1318,12 +1318,12 @@ func main() {
 		log.Fatalf("failed to run tests: %v", err)
 	}
 
-	/*log.Println("\n⚖️  Running Weighted Reranker + Lexical Search tests...")
+	log.Println("\n⚖️  Running Weighted Reranker + Lexical Search tests...")
 	err = runWeightedWithLexicalSearchTest(ctx, milvusClient)
 	if err != nil {
 		log.Fatalf("failed to run Weighted reranker tests: %v", err)
 	}
-	*/
+
 	log.Println("\n🧹 Cleaning up...")
 	err = milvusClient.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
 	if err != nil {
