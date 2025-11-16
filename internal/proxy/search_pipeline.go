@@ -303,6 +303,32 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		rankMetrics = append(rankMetrics, metrics[idx])
 	}
 
+	// Check if there's a proxy-level reranker to apply
+	if op.functionScore == nil || op.functionScore.RerankName() == "" {
+		log.Ctx(ctx).Info("EXPR_RERANK: No proxy-level reranker, skipping proxy-level reranking",
+			zap.Int64("nq", op.nq),
+			zap.Int64("topk", op.topK),
+			zap.Int64("offset", op.offset),
+			zap.Int("num_search_results", len(reducedResults)),
+		)
+		// Return the first result if available, otherwise return empty result
+		if len(reducedResults) > 0 {
+			return []any{reducedResults[0]}, nil
+		}
+		// Return empty result if no results
+		return []any{&milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: op.nq,
+				TopK:       op.topK,
+				FieldsData: make([]*schemapb.FieldData, 0),
+				Scores:     []float32{},
+				Ids:        &schemapb.IDs{},
+				Topks:      make([]int64, op.nq),
+			},
+		}}, nil
+	}
+
 	log.Ctx(ctx).Info("EXPR_RERANK: Applying proxy-level reranking",
 		zap.Int64("nq", op.nq),
 		zap.Int64("topk", op.topK),

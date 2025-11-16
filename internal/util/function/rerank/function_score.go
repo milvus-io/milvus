@@ -262,6 +262,10 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 }
 
 func (fScore *FunctionScore) Process(ctx context.Context, searchParams *SearchParams, multipleMilvusResults []*milvuspb.SearchResults) (*milvuspb.SearchResults, error) {
+	if fScore == nil || fScore.reranker == nil {
+		return nil, fmt.Errorf("reranker is not initialized")
+	}
+
 	if len(multipleMilvusResults) == 0 {
 		return &milvuspb.SearchResults{
 			Status: merr.Success(),
@@ -298,28 +302,28 @@ func (fScore *FunctionScore) Process(ctx context.Context, searchParams *SearchPa
 }
 
 func (fScore *FunctionScore) GetAllInputFieldNames() []string {
-	if fScore == nil {
+	if fScore == nil || fScore.reranker == nil {
 		return []string{}
 	}
 	return fScore.reranker.GetInputFieldNames()
 }
 
 func (fScore *FunctionScore) GetAllInputFieldIDs() []int64 {
-	if fScore == nil {
+	if fScore == nil || fScore.reranker == nil {
 		return []int64{}
 	}
 	return fScore.reranker.GetInputFieldIDs()
 }
 
 func (fScore *FunctionScore) IsSupportGroup() bool {
-	if fScore == nil {
+	if fScore == nil || fScore.reranker == nil {
 		return true
 	}
 	return fScore.reranker.IsSupportGroup()
 }
 
 func (fScore *FunctionScore) RerankName() string {
-	if fScore == nil {
+	if fScore == nil || fScore.reranker == nil {
 		return ""
 	}
 	return fScore.reranker.GetRankName()
