@@ -21,6 +21,7 @@ import (
 	sio "io"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -35,13 +36,16 @@ func isStorageV2(deltalog *datapb.FieldBinlog) bool {
 	return len(deltalog.ChildFields) > 0
 }
 
-func ComposeDeleteFromDeltalogs(
+// readDeltalogsInternal is the core function that reads deltalogs and processes delete records.
+// It returns both the ordered slices of primary keys and timestamps.
+func readDeltalogsInternal(
 	ctx context.Context,
-	pkField *schemapb.FieldSchema,
+	pkType schemapb.DataType,
 	deltalogs []*datapb.FieldBinlog,
 	option ...storage.RwOption,
-) (map[any]typeutil.Timestamp, error) {
-	pk2Ts := make(map[any]typeutil.Timestamp)
+) ([]storage.PrimaryKey, []typeutil.Timestamp, error) {
+	orderedPks := []storage.PrimaryKey{}
+	orderedTss := []typeutil.Timestamp{}
 	log := log.Ctx(ctx)
 
 	for _, deltalog := range deltalogs {
@@ -51,10 +55,10 @@ func ComposeDeleteFromDeltalogs(
 		}
 		for _, binlog := range deltalog.Binlogs {
 			path := binlog.GetLogPath()
-			reader, err := storage.NewDeltalogReader(pkField, []string{path}, opts...)
+			reader, err := storage.NewDeltalogReader(pkType, []string{path}, opts...)
 			if err != nil {
 				log.Error("compose delete wrong, malformed delta file", zap.Error(err))
-				return nil, err
+				return nil, nil, err
 			}
 			defer reader.Close()
 			for {
@@ -64,29 +68,86 @@ func ComposeDeleteFromDeltalogs(
 						break
 					}
 					log.Error("compose delete wrong, failed to read deltalogs", zap.Error(err))
-					return nil, err
+					return nil, nil, err
 				}
 
 				for i := 0; i < rec.Len(); i++ {
-					var pk any
-					switch pkField.DataType {
+					var primaryKey storage.PrimaryKey
+					switch pkType {
 					case schemapb.DataType_Int64:
-						pk = rec.Column(pkField.FieldID).(*array.Int64).Value(i)
+						pkVal := rec.Column(0).(*array.Int64).Value(i)
+						primaryKey = storage.NewInt64PrimaryKey(pkVal)
 					case schemapb.DataType_VarChar:
-						pk = rec.Column(pkField.FieldID).(*array.String).Value(i)
+						pkVal := rec.Column(0).(*array.String).Value(i)
+						primaryKey = storage.NewVarCharPrimaryKey(pkVal)
 					}
 
 					ts := typeutil.Timestamp(rec.Column(common.TimeStampField).(*array.Int64).Value(i))
-					if tsExisting, ok := pk2Ts[pk]; ok && tsExisting > ts {
-						// skip if existing entry is newer
-						continue
-					}
-					pk2Ts[pk] = ts
+
+					orderedPks = append(orderedPks, primaryKey)
+					orderedTss = append(orderedTss, ts)
 				}
 			}
+			log.Debug("finished reading deltalog file", zap.String("path", path))
 		}
 	}
 
-	log.Info("compose delete end", zap.Int("delete entries counts", len(pk2Ts)))
-	return pk2Ts, nil
+	log.Info("compose delete end", zap.Int("delete entries counts", len(orderedPks)))
+
+	return orderedPks, orderedTss, nil
+}
+
+// ComposeDeleteFromDeltalogs reads deltalogs and returns a map of primary key to timestamp.
+// For duplicate PKs, only the latest timestamp is kept.
+func ComposeDeleteFromDeltalogs(
+	ctx context.Context,
+	pkType schemapb.DataType,
+	deltalogs []*datapb.FieldBinlog,
+	option ...storage.RwOption,
+) (map[any]typeutil.Timestamp, error) {
+	orderedPks, orderedTss, err := readDeltalogsInternal(ctx, pkType, deltalogs, option...)
+	if err != nil {
+		return nil, err
+	}
+	switch pkType {
+	case schemapb.DataType_Int64:
+		pk2Ts := make(map[any]typeutil.Timestamp)
+		for i, pk := range orderedPks {
+			// if pk already exists, skip if the existing is newer
+			if existing, ok := pk2Ts[pk.(*storage.Int64PrimaryKey).Value]; ok && existing > orderedTss[i] {
+				continue
+			}
+			pk2Ts[pk.(*storage.Int64PrimaryKey).Value] = orderedTss[i]
+		}
+		return pk2Ts, nil
+	case schemapb.DataType_VarChar:
+		pk2Ts := make(map[any]typeutil.Timestamp)
+		for i, pk := range orderedPks {
+			// if pk already exists, skip if the existing is newer
+			if existing, ok := pk2Ts[pk.(*storage.VarCharPrimaryKey).Value]; ok && existing > orderedTss[i] {
+				continue
+			}
+			pk2Ts[pk.(*storage.VarCharPrimaryKey).Value] = orderedTss[i]
+		}
+		return pk2Ts, nil
+	default:
+		return nil, errors.Newf("unsupported pk type %s", pkType.String())
+	}
+}
+
+// ComposeDeleteDataFromDeltalogs reads deltalogs and returns a DeleteData structure.
+// For duplicate PKs, only the latest timestamp is kept.
+// The order of delete records is preserved as they appear in the deltalogs (first occurrence).
+func ComposeDeleteDataFromDeltalogs(
+	ctx context.Context,
+	pkType schemapb.DataType,
+	deltalogs []*datapb.FieldBinlog,
+	option ...storage.RwOption,
+) (*storage.DeleteData, error) {
+	orderedPks, orderedTss, err := readDeltalogsInternal(ctx, pkType, deltalogs, option...)
+	if err != nil {
+		return nil, err
+	}
+
+	return storage.NewDeleteData(orderedPks, orderedTss), nil
 }

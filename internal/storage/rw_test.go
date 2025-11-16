@@ -748,18 +748,12 @@ func TestDeltalogReaderWriter(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Read phase
-			pkField := &schemapb.FieldSchema{
-				FieldID:  0,
-				Name:     "pk",
-				DataType: tt.pkType,
-			}
-
 			if tt.version == StorageV1 {
 				opts = append(opts, WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 					return [][]byte{blob.Value}, nil
 				}))
 			}
-			reader, err := NewDeltalogReader(pkField, []string{path}, opts...)
+			reader, err := NewDeltalogReader(tt.pkType, []string{path}, opts...)
 			assert.NoError(t, err)
 			assert.NotNil(t, reader)
 
@@ -770,7 +764,7 @@ func TestDeltalogReaderWriter(t *testing.T) {
 
 			// Verify pk data matches
 			origPkCol := origData.Column(0)
-			readPkCol := readData.Column(pkField.FieldID)
+			readPkCol := readData.Column(0)
 			assert.NotNil(t, readPkCol)
 			assert.Equal(t, origPkCol.Len(), readPkCol.Len())
 
@@ -802,14 +796,8 @@ func TestDeltalogErrorHandling(t *testing.T) {
 	})
 
 	t.Run("ReaderUnsupportedVersion", func(t *testing.T) {
-		pkField := &schemapb.FieldSchema{
-			FieldID:  100,
-			Name:     "pk",
-			DataType: schemapb.DataType_Int64,
-		}
-
 		_, err := NewDeltalogReader(
-			pkField, []string{"test.bin"},
+			schemapb.DataType_Int64, []string{"test.bin"},
 			WithVersion(999), // Invalid version
 			WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 				return nil, nil

@@ -760,7 +760,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsMultiSegment() {
 
 			pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
 			s.Require().NoError(err)
-			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField,
+			got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField.DataType,
 				[]*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
@@ -800,7 +800,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsOneSegment() {
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
 	s.Require().NoError(err)
-	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField,
+	got, err := compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField.DataType,
 		[]*datapb.FieldBinlog{
 			{
 				Binlogs: []*datapb.Binlog{
@@ -813,7 +813,7 @@ func (s *MixCompactionTaskStorageV1Suite) TestMergeDeltalogsOneSegment() {
 	s.Error(err)
 	s.Nil(got)
 
-	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField,
+	got, err = compaction.ComposeDeleteFromDeltalogs(s.task.ctx, pkField.DataType,
 		[]*datapb.FieldBinlog{
 			{
 				Binlogs: []*datapb.Binlog{

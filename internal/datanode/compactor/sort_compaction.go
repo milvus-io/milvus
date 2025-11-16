@@ -175,7 +175,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, t.plan.SegmentBinlogs[0].GetDeltalogs(),
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, t.plan.SegmentBinlogs[0].GetDeltalogs(),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {

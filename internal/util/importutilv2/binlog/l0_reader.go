@@ -110,7 +110,7 @@ func (r *l0Reader) filter(dl *storage.DeleteLog) bool {
 func (r *l0Reader) Read() (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	readInternal := func(path string, opts []storage.RwOption) error {
-		reader, err := storage.NewDeltalogReader(r.pkField, []string{path}, opts...)
+		reader, err := storage.NewDeltalogReader(r.pkField.DataType, []string{path}, opts...)
 		if err != nil {
 			return err
 		}

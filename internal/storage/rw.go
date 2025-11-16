@@ -397,7 +397,7 @@ func NewDeltalogWriter(
 }
 
 func NewDeltalogReader(
-	pkField *schemapb.FieldSchema,
+	pkType schemapb.DataType,
 	paths []string,
 	option ...RwOption,
 ) (RecordReader, error) {
@@ -411,12 +411,16 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
+		return NewLegacyDeltalogReader(pkType, rwOptions.downloader, paths)
 	case StorageV2:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				pkField,
+				{
+					FieldID:      0,
+					DataType:     pkType,
+					IsPrimaryKey: true,
+				},
 				{
 					FieldID:  common.TimeStampField,
 					Name:     "ts",

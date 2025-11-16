@@ -313,7 +313,6 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint
 	default:
 		return nil, 0, 0, errors.Newf("unsupported primary key type %T", pks[0])
 	}
-	defer pkArray.Release()
 
 	// Build timestamp array
 	tsBuilder := array.NewInt64Builder(allocator)
@@ -328,7 +327,6 @@ func BuildDeleteRecord(pks []PrimaryKey, tss []Timestamp) (r Record, tsFrom uint
 		tsBuilder.Append(int64(ts))
 	}
 	tsArray := tsBuilder.NewArray()
-	defer tsArray.Release()
 
 	// Create schema
 	pkArrowType := pkArray.DataType()

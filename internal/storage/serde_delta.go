@@ -540,7 +540,7 @@ func (w *LegacyDeltalogWriter) GetWrittenUncompressed() uint64 {
 
 type LegacyDeltalogReader struct {
 	RecordReader
-	pkField *schemapb.FieldSchema
+	pkType schemapb.DataType
 }
 
 var _ RecordReader = (*LegacyDeltalogReader)(nil)
@@ -561,7 +561,7 @@ func (r *LegacyDeltalogReader) deserialize(rec Record) (Record, error) {
 		if !ok {
 			return nil, fmt.Errorf("unexpected column type %T", aRec.Column(0))
 		}
-		arrowType := serdeMap[r.pkField.DataType].arrowType(0, schemapb.DataType_None)
+		arrowType := serdeMap[r.pkType].arrowType(0, schemapb.DataType_None)
 		pkBuilder := array.NewBuilder(memory.DefaultAllocator, arrowType)
 		defer pkBuilder.Release()
 		tsBuilder := array.NewInt64Builder(memory.DefaultAllocator)
@@ -572,13 +572,13 @@ func (r *LegacyDeltalogReader) deserialize(rec Record) (Record, error) {
 			if err := v.Parse(strVal); err != nil {
 				return nil, err
 			}
-			switch r.pkField.DataType {
+			switch r.pkType {
 			case schemapb.DataType_Int64:
 				pkBuilder.(*array.Int64Builder).Append(v.Pk.GetValue().(int64))
 			case schemapb.DataType_VarChar:
 				pkBuilder.(*array.StringBuilder).Append(v.Pk.GetValue().(string))
 			default:
-				return nil, fmt.Errorf("unexpected pk type %v", r.pkField.DataType)
+				return nil, fmt.Errorf("unexpected pk type %v", r.pkType)
 			}
 			tsBuilder.Append(int64(v.Ts))
 		}
@@ -588,7 +588,7 @@ func (r *LegacyDeltalogReader) deserialize(rec Record) (Record, error) {
 			{Name: "pk", Type: arrowType},
 			{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
 		}, nil), []arrow.Array{pkArray, tsArray}, int64(arr.Len())), map[FieldID]int{
-			r.pkField.FieldID:     0,
+			0:                     0,
 			common.TimeStampField: 1,
 		}), nil
 	case 2:
@@ -598,7 +598,7 @@ func (r *LegacyDeltalogReader) deserialize(rec Record) (Record, error) {
 	}
 }
 
-func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
+func NewLegacyDeltalogReader(pkType schemapb.DataType, downloader downloaderFn, paths []string) (RecordReader, error) {
 	chunkPos := 0
 	blobsReader := func() (*Blob, error) {
 		if chunkPos >= len(paths) {
@@ -622,13 +622,13 @@ func NewLegacyDeltalogReader(pkField *schemapb.FieldSchema, downloader downloade
 			if err != nil {
 				return nil, err
 			}
-			reader, err := newBinlogRecordReader(blob, pkField.FieldID, common.TimeStampField)
+			reader, err := newBinlogRecordReader(blob, 0, common.TimeStampField)
 			if err != nil {
 				return nil, err
 			}
 			return &LegacyDeltalogReader{
 				RecordReader: reader,
-				pkField:      pkField,
+				pkType:       pkType,
 			}, nil
 		},
 	}, nil

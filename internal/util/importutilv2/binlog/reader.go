@@ -183,7 +183,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 		if err != nil {
 			return err
 		}
-		reader, err := storage.NewDeltalogReader(pkField, []string{path}, opts...)
+		reader, err := storage.NewDeltalogReader(pkField.DataType, []string{path}, opts...)
 		if err != nil {
 			return err
 		}

@@ -51,7 +51,7 @@ type LevelZeroCompactionTaskSuite struct {
 	mockBinlogIO *mock_util.MockBinlogIO
 	task         *LevelZeroCompactionTask
 
-	dData map[any]typeutil.Timestamp
+	dData *storage.DeleteData
 }
 
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
@@ -63,29 +63,55 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 			Begin: 200,
 			End:   2000,
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams())
 	var err error
 	s.task.compactionParams, err = compaction.ParseParamsFromJSON("")
 	s.Require().NoError(err)
 
-	s.dData = map[any]typeutil.Timestamp{
-		int64(1): 20000,
-		int64(2): 20001,
-		int64(3): 20002,
-	}
-
-	deleteData := storage.NewDeleteData([]storage.PrimaryKey{}, []typeutil.Timestamp{})
-	for pk, ts := range s.dData {
-		deleteData.Append(storage.NewInt64PrimaryKey(pk.(int64)), ts)
-	}
+	s.dData = storage.NewDeleteData([]storage.PrimaryKey{
+		storage.NewInt64PrimaryKey(1),
+		storage.NewInt64PrimaryKey(2),
+		storage.NewInt64PrimaryKey(3),
+	}, []typeutil.Timestamp{20000, 20001, 20002})
 
 	dataCodec := storage.NewDeleteCodec()
-	blob, err := dataCodec.Serialize(0, 0, 0, deleteData)
+	blob, err := dataCodec.Serialize(0, 0, 0, s.dData)
 	s.Require().NoError(err)
 
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{blob.GetValue()}, nil).Maybe()
+	// Create a map to store uploaded data
+	uploadedData := make(map[string][]byte)
+
+	// Mock Upload to capture uploaded data
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.MatchedBy(func(kvs map[string][]byte) bool {
+		for k, v := range kvs {
+			uploadedData[k] = v
+		}
+		return true
+	})).Return(nil).Maybe()
+
+	// Mock Download to return uploaded data or original data
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, paths []string) ([][]byte, error) {
+			result := make([][]byte, 0, len(paths))
+			for _, path := range paths {
+				if data, ok := uploadedData[path]; ok {
+					result = append(result, data)
+				} else {
+					// Return original data for paths not found
+					result = append(result, blob.GetValue())
+				}
+			}
+			return result, nil
+		}).Maybe()
 
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "false")
 }
@@ -185,7 +211,7 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadByCheckFail() {
 		},
 	}}
 
-	segments, err := s.task.process(context.Background(), 2, targetSegments, lo.Values(deltaLogs)...)
+	segments, err := s.task.process(context.Background(), 2, targetSegments, lo.Values(deltaLogs))
 	s.Error(err)
 	s.Empty(segments)
 }
@@ -292,7 +318,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 			}
 		}
 	}
-	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(totalDeltalogs)...)
+	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(totalDeltalogs))
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -389,7 +415,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 			totalDeltalogs = append(totalDeltalogs, d)
 		}
 	}
-	segments, err := s.task.process(context.TODO(), 2, targetSegments, totalDeltalogs...)
+	segments, err := s.task.process(context.TODO(), 2, targetSegments, totalDeltalogs)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -422,13 +448,102 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitAndWrite() {
 	segments, err := s.task.splitAndWrite(context.TODO(), s.dData, segmentBFs)
 	s.NoError(err)
 
+	// Verify basic structure
 	s.NotEmpty(segments)
 	s.ElementsMatch(predicted, lo.Map(segments, func(seg *datapb.CompactionSegment, _ int) int64 {
 		return seg.GetSegmentID()
 	}))
+
+	// Verify each segment has deltalogs and check content
 	for _, segment := range segments {
 		s.NotNil(segment.GetDeltalogs())
+		s.NotEmpty(segment.GetDeltalogs(), "segment %d should have deltalogs", segment.GetSegmentID())
+
+		// Each segment should have exactly 1 deltalog field
+		s.Len(segment.GetDeltalogs(), 1, "segment %d should have 1 deltalog field", segment.GetSegmentID())
+
+		// Each deltalog field should have at least 1 binlog
+		deltalogField := segment.GetDeltalogs()[0]
+		s.NotEmpty(deltalogField.GetBinlogs(), "segment %d should have binlog entries", segment.GetSegmentID())
 	}
+
+	// Verify the expected data distribution based on bloom filter hits
+	// Test data: PK 1 (ts 20000), PK 2 (ts 20001), PK 3 (ts 20002)
+	// bfs1 (seg 100): contains 1, 3
+	// bfs2 (seg 101): contains 3
+	// bfs3 (seg 102): contains 3
+	// So: seg 100 should have 2 PKs (1 and 3), seg 101 and 102 should each have 1 PK (3)
+
+	segmentMap := lo.SliceToMap(segments, func(seg *datapb.CompactionSegment) (int64, *datapb.CompactionSegment) {
+		return seg.GetSegmentID(), seg
+	})
+
+	// Helper function to read and verify deltalog content
+	assertDeltalog := func(segmentID int64, expectedPKs []int64, expectedTSs []uint64) {
+		seg := segmentMap[segmentID]
+		s.NotNil(seg, "segment %d should exist", segmentID)
+		s.NotEmpty(seg.GetDeltalogs(), "segment %d should have deltalogs", segmentID)
+
+		deltalogField := seg.GetDeltalogs()[0]
+		s.NotEmpty(deltalogField.GetBinlogs(), "segment %d should have binlogs", segmentID)
+
+		// Read each binlog and collect all PKs and timestamps
+		var allPKs []int64
+		var allTSs []uint64
+
+		for _, binlog := range deltalogField.GetBinlogs() {
+			path := binlog.GetLogPath()
+			s.NotEmpty(path, "binlog path should not be empty")
+
+			// Download the deltalog data
+			blobs, err := s.task.BinlogIO.Download(context.TODO(), []string{path})
+			s.NoError(err, "should be able to download deltalog for segment %d", segmentID)
+			s.NotEmpty(blobs, "downloaded blobs should not be empty")
+
+			// Convert [][]byte to []*Blob
+			blobPtrs := make([]*storage.Blob, len(blobs))
+			for i, b := range blobs {
+				blobPtrs[i] = &storage.Blob{
+					Key:   path,
+					Value: b,
+				}
+			}
+
+			// Deserialize the deltalog
+			codec := storage.NewDeleteCodec()
+			_, _, deltaData, err := codec.Deserialize(blobPtrs)
+			s.NoError(err, "should be able to deserialize deltalog for segment %d", segmentID)
+			s.NotNil(deltaData, "deltaData should not be nil")
+
+			// Extract PKs and timestamps using DeltaData methods
+			pks := deltaData.DeletePks()
+			tss := deltaData.DeleteTimestamps()
+
+			for i := 0; i < int(deltaData.DeleteRowCount()); i++ {
+				pk := pks.Get(i).(*storage.Int64PrimaryKey)
+				allPKs = append(allPKs, pk.Value)
+				allTSs = append(allTSs, tss[i])
+			}
+		}
+
+		// Verify the PKs and timestamps
+		s.ElementsMatch(expectedPKs, allPKs, "segment %d should have expected PKs", segmentID)
+		s.ElementsMatch(expectedTSs, allTSs, "segment %d should have expected timestamps", segmentID)
+
+		log.Info("verified deltalog content",
+			zap.Int64("segmentID", segmentID),
+			zap.Int64s("pks", allPKs),
+			zap.Uint64s("tss", allTSs))
+	}
+
+	// Segment 100 should have PKs 1 and 3 with their timestamps
+	assertDeltalog(100, []int64{1, 3}, []uint64{20000, 20002})
+
+	// Segment 101 should have PK 3 with its timestamp
+	assertDeltalog(101, []int64{3}, []uint64{20002})
+
+	// Segment 102 should have PK 3 with its timestamp
+	assertDeltalog(102, []int64{3}, []uint64{20002})
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {

@@ -27,7 +27,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -156,7 +155,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		}
 	}
 
-	resultSegments, err := t.process(ctx, memorySize, targetSegments, totalDeltalogs...)
+	resultSegments, err := t.process(ctx, memorySize, targetSegments, totalDeltalogs)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +195,7 @@ func getMaxBatchSize(baseMemSize, memLimit float64) int {
 
 func (t *LevelZeroCompactionTask) splitAndWrite(
 	ctx context.Context,
-	allDelta map[any]typeutil.Timestamp,
+	allDelta *storage.DeleteData,
 	segmentBfs map[int64]*pkoracle.BloomFilterSet,
 ) ([]*datapb.CompactionSegment, error) {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitAndWrite")
@@ -207,11 +206,10 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			return segment.GetSegmentID(), segment
 		})
 
-	// Convert map to slices for batch processing
-	pks := lo.Keys(allDelta)
-	tss := lo.Map(pks, func(pk any, _ int) typeutil.Timestamp {
-		return allDelta[pk]
-	})
+	pkField, err := typeutil.GetPrimaryFieldSchema(t.plan.GetSchema())
+	if err != nil {
+		return nil, err
+	}
 
 	// spilt all delete data to segments
 	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segmentBfs)
@@ -236,16 +234,11 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 							tss: make([]typeutil.Timestamp, 0),
 						}
 					}
-					pk := pks[startIdx+i]
-					var primaryKey storage.PrimaryKey
-					switch v := pk.(type) {
-					case int64:
-						primaryKey = storage.NewInt64PrimaryKey(v)
-					case string:
-						primaryKey = storage.NewVarCharPrimaryKey(v)
-					}
-					segmentData[segmentID].pks = append(segmentData[segmentID].pks, primaryKey)
-					segmentData[segmentID].tss = append(segmentData[segmentID].tss, tss[startIdx+i])
+					pk := allDelta.Pks[startIdx+i]
+					ts := allDelta.Tss[startIdx+i]
+
+					segmentData[segmentID].pks = append(segmentData[segmentID].pks, pk)
+					segmentData[segmentID].tss = append(segmentData[segmentID].tss, ts)
 				}
 			}
 		}
@@ -271,7 +264,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 
 		writer, err := storage.NewDeltalogWriter(ctx,
 			segment.GetCollectionID(), segment.GetPartitionID(), segment.GetSegmentID(),
-			logID, schemapb.DataType_Int64, path,
+			logID, pkField.GetDataType(), path,
 			storage.WithUploader(t.Upload),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		)
@@ -286,6 +279,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			log.Warn("L0 compaction build delete record fail", zap.Int64("segmentID", segmentID), zap.Error(err))
 			return nil, err
 		}
+		defer record.Release()
 
 		// Write the entire record at once
 		if err := writer.Write(record); err != nil {
@@ -303,6 +297,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 			childFields = []int64{0, 1}
 		}
 
+		log.Info("L0 compaction write record success", zap.String("path", path), zap.Int64("entries", int64(len(deletes.pks))))
 		results = append(results, &datapb.CompactionSegment{
 			SegmentID: segmentID,
 			Channel:   t.plan.GetChannel(),
@@ -334,8 +329,9 @@ type BatchApplyRet = struct {
 	Segment2Hits map[int64][]bool
 }
 
-func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context,
-	deltaData map[any]typeutil.Timestamp,
+func (t *LevelZeroCompactionTask) applyBFInParallel(
+	ctx context.Context,
+	deltaData *storage.DeleteData,
 	pool *conc.Pool[any],
 	segmentBfs map[int64]*pkoracle.BloomFilterSet,
 ) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
@@ -343,19 +339,9 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context,
 	defer span.End()
 	batchSize := t.compactionParams.BloomFilterApplyBatchSize
 
-	batchPredict := func(pks []any) map[int64][]bool {
+	batchPredict := func(pks []storage.PrimaryKey) map[int64][]bool {
 		segment2Hits := make(map[int64][]bool, 0)
-		pkPrimaryKeys := lo.Map(pks, func(pk any, _ int) storage.PrimaryKey {
-			switch pk := pk.(type) {
-			case int64:
-				return storage.NewInt64PrimaryKey(pk)
-			case string:
-				return storage.NewVarCharPrimaryKey(pk)
-			default:
-				return nil
-			}
-		})
-		lc := storage.NewBatchLocationsCache(pkPrimaryKeys)
+		lc := storage.NewBatchLocationsCache(pks)
 		for segmentID, bf := range segmentBfs {
 			hits := bf.BatchPkExist(lc)
 			segment2Hits[segmentID] = hits
@@ -366,7 +352,7 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context,
 	retIdx := 0
 	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
 	var futures []*conc.Future[any]
-	pks := lo.Keys(deltaData)
+	pks := deltaData.Pks
 	for idx := 0; idx < len(pks); idx += batchSize {
 		startIdx := idx
 		endIdx := startIdx + batchSize
@@ -391,7 +377,7 @@ func (t *LevelZeroCompactionTask) applyBFInParallel(ctx context.Context,
 }
 
 func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, targetSegments []*datapb.CompactionSegmentBinlogs,
-	deltaLogs ...*datapb.FieldBinlog,
+	deltaLogs []*datapb.FieldBinlog,
 ) ([]*datapb.CompactionSegment, error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
@@ -408,11 +394,11 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 		return nil, err
 	}
 
-	allDelta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, deltaLogs,
+	allDelta, err := compaction.ComposeDeleteDataFromDeltalogs(ctx, pkField.DataType, deltaLogs,
 		storage.WithDownloader(t.BinlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
-		log.Warn("L0 compaction composeDeleteFromDeltalogs fail", zap.Error(err))
+		log.Warn("L0 compaction compose delete data fail", zap.Error(err))
 		return nil, err
 	}
 
@@ -446,7 +432,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 
 		log.Info("L0 compaction finished one batch",
 			zap.Int("batch no.", i),
-			zap.Int("total deltaRowCount", len(allDelta)),
+			zap.Int64("total deltaRowCount", allDelta.RowCount),
 			zap.Int("batch segment count", len(batchResults)))
 		results = append(results, batchResults...)
 	}

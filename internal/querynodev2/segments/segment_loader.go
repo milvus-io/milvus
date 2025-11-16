@@ -1391,7 +1391,7 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 		paths := lo.Map(lo.Filter(deltalog.Binlogs, valid), func(binlog *datapb.Binlog, _ int) string {
 			return binlog.GetLogPath()
 		})
-		reader, err := storage.NewDeltalogReader(pkField, paths, opts...)
+		reader, err := storage.NewDeltalogReader(pkField.DataType, paths, opts...)
 		if err != nil {
 			return err
 		}

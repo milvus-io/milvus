@@ -206,7 +206,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 	)
 
-	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, st.req.GetDeltaLogs(),
+	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, st.req.GetDeltaLogs(),
 		storage.WithDownloader(st.binlogIO.Download),
 		storage.WithStorageConfig(st.req.GetStorageConfig()))
 	if err != nil {

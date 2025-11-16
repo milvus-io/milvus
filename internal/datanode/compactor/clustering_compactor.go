@@ -570,7 +570,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	}
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField, segment.GetDeltalogs(), options...)
+	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, t.primaryKeyField.DataType, segment.GetDeltalogs(), options...)
 	if err != nil {
 		return err
 	}

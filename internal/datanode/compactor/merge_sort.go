@@ -70,7 +70,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			return nil, err
 		}
 		segmentReaders[i] = reader
-		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField, s.GetDeltalogs(),
+		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s.GetDeltalogs(),
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithStorageConfig(compactionParams.StorageConfig))
 		if err != nil {
