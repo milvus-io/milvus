@@ -32,6 +32,7 @@
 #include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
+#include "common/Exception.h"
 #include "folly/CancellationToken.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
@@ -17797,9 +17798,9 @@ TEST_P(ExprTest, TestCancellationInExprEval) {
                                        proto->SerializeAsString().data(),
                                        proto->SerializeAsString().size());
 
-    // This should throw FutureCancellation when visiting the plan
+    // This should throw ExecOperatorException (wrapping FutureCancellation) when visiting the plan
     ASSERT_THROW({ auto result = visitor.get_moved_result(*plan->plan_node_); },
-                 folly::FutureCancellation);
+                 milvus::ExecOperatorException);
 }
 
 TEST(ExprTest, TestCancellationHelper) {
