@@ -114,6 +114,7 @@ func runComponent[T component](ctx context.Context,
 ) *conc.Future[component] {
 	sign := make(chan struct{})
 	future := conc.Go(func() (component, error) {
+		defer close(sign)
 		factory := dependency.NewFactory(localMsg)
 		var err error
 		role, err := creator(ctx, factory)
@@ -123,7 +124,6 @@ func runComponent[T component](ctx context.Context,
 		if err := role.Prepare(); err != nil {
 			return nil, errors.Wrap(err, "prepare component failed")
 		}
-		close(sign)
 		healthz.Register(role)
 		metricRegister(Registry.GoRegistry)
 		if err := role.Run(); err != nil {
