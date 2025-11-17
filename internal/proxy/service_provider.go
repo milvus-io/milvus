@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -204,6 +205,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	// Restore struct field names from internal format (structName[fieldName]) to original format
 	if err := restoreStructFieldNames(resp.Schema); err != nil {
 		log.Error("failed to restore struct field names", zap.Error(err))
+		return nil, err
+	}
+
+	err = timestamptz.RewriteTimestampTzDefaultValueToString(resp.Schema)
+	if err != nil {
+		log.Info("failed to rewrite timestamp value", zap.Error(err))
 		return nil, err
 	}
 

@@ -843,7 +843,6 @@ func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvusp
 				CollectionName: collectionName,
 			}
 		}
-
 		responses = append(responses, describeCollectionResponse)
 	}
 
