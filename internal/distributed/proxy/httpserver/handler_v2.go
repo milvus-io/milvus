@@ -1394,7 +1394,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req.SearchParams = searchParams
-	req.PlaceholderGroup = placeholderGroup
+	req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+		PlaceholderGroup: placeholderGroup,
+	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
@@ -1512,14 +1514,16 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchReq := &milvuspb.SearchRequest{
-			DbName:           dbName,
-			CollectionName:   httpReq.CollectionName,
-			Dsl:              subReq.Filter,
-			PlaceholderGroup: placeholderGroup,
-			DslType:          commonpb.DslType_BoolExprV1,
-			OutputFields:     httpReq.OutputFields,
-			PartitionNames:   httpReq.PartitionNames,
-			SearchParams:     searchParams,
+			DbName:         dbName,
+			CollectionName: httpReq.CollectionName,
+			Dsl:            subReq.Filter,
+			SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+				PlaceholderGroup: placeholderGroup,
+			},
+			DslType:        commonpb.DslType_BoolExprV1,
+			OutputFields:   httpReq.OutputFields,
+			PartitionNames: httpReq.PartitionNames,
+			SearchParams:   searchParams,
 		}
 		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
 		req.Requests = append(req.Requests, searchReq)
