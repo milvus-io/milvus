@@ -765,11 +765,13 @@ type SessionEvent struct {
 
 type sessionWatcher struct {
 	s         *Session
+	cancel    context.CancelFunc
 	rch       clientv3.WatchChan
 	eventCh   chan *SessionEvent
 	prefix    string
 	rewatch   Rewatch
 	validate  func(*Session) bool
+	wg        sync.WaitGroup
 	closeOnce sync.Once
 }
 
@@ -779,15 +781,17 @@ func (w *sessionWatcher) closeEventCh() {
 	})
 }
 
-func (w *sessionWatcher) start() {
+func (w *sessionWatcher) start(ctx context.Context) {
+	w.wg.Add(1)
 	go func() {
-		defer w.closeEventCh()
+		defer w.wg.Done()
 		for {
 			select {
-			case <-w.s.ctx.Done():
+			case <-ctx.Done():
 				return
 			case wresp, ok := <-w.rch:
 				if !ok {
+					w.closeEventCh()
 					log.Warn("session watch channel closed")
 					return
 				}
@@ -795,6 +799,11 @@ func (w *sessionWatcher) start() {
 			}
 		}
 	}()
+}
+
+func (w *sessionWatcher) Stop() {
+	w.cancel()
+	w.wg.Wait()
 }
 
 // WatchServices watches the service's up and down in etcd, and sends event to
@@ -805,17 +814,19 @@ func (w *sessionWatcher) start() {
 // in GetSessions.
 // If a server up, an event will be add to channel with eventType SessionAddType.
 // If a server down, an event will be add to channel with eventType SessionDelType.
-func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
+func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (watcher SessionWatcher) {
+	ctx, cancel := context.WithCancel(s.ctx)
 	w := &sessionWatcher{
 		s:        s,
+		cancel:   cancel,
 		eventCh:  make(chan *SessionEvent, 100),
 		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
 		prefix:   prefix,
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return true },
 	}
-	w.start()
-	return w.eventCh
+	w.start(ctx)
+	return w
 }
 
 // WatchServicesWithVersionRange watches the service's up and down in etcd, and sends event to event Channel.
@@ -824,17 +835,19 @@ func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) 
 // revision is a etcd reversion to prevent missing key events and can be obtained in GetSessions.
 // If a server up, an event will be add to channel with eventType SessionAddType.
 // If a server down, an event will be add to channel with eventType SessionDelType.
-func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
+func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (watcher SessionWatcher) {
+	ctx, cancel := context.WithCancel(s.ctx)
 	w := &sessionWatcher{
 		s:        s,
+		cancel:   cancel,
 		eventCh:  make(chan *SessionEvent, 100),
 		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
 		prefix:   prefix,
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return r(s.Version) },
 	}
-	w.start()
-	return w.eventCh
+	w.start(ctx)
+	return w
 }
 
 func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
@@ -917,6 +930,10 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 
 	w.rch = w.s.etcdCli.Watch(w.s.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return nil
+}
+
+func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {
+	return w.eventCh
 }
 
 // LivenessCheck performs liveness check with provided context and channel

@@ -158,7 +158,7 @@ func TestUpdateSessions(t *testing.T) {
 	sessions, rev, err := s.GetSessions("test")
 	assert.NoError(t, err)
 	assert.Equal(t, len(sessions), 0)
-	eventCh := s.WatchServices("test", rev, nil)
+	watcher := s.WatchServices("test", rev, nil)
 
 	sList := []*Session{}
 
@@ -203,7 +203,7 @@ LOOP:
 		select {
 		case <-ch:
 			t.FailNow()
-		case sessionEvent := <-eventCh:
+		case sessionEvent := <-watcher.EventChannel():
 
 			if sessionEvent.EventType == SessionAddEvent {
 				addEventLen++
@@ -616,7 +616,7 @@ func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
 		_, rev, err := s.GetSessionsWithVersionRange(suite.serverName, r)
 		suite.Require().NoError(err)
 
-		ch := s.WatchServicesWithVersionRange(suite.serverName, r, rev, nil)
+		watcher := s.WatchServicesWithVersionRange(suite.serverName, r, rev, nil)
 
 		// remove all sessions
 		go func() {
@@ -626,7 +626,7 @@ func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
 		}()
 
 		select {
-		case evt := <-ch:
+		case evt := <-watcher.EventChannel():
 			suite.Equal(suite.sessions[1].ServerID, evt.Session.ServerID)
 		case <-time.After(time.Second):
 			suite.Fail("no event received, failing")
