@@ -629,18 +629,19 @@ func constructTestSearchRequest(dbName, collectionName, floatVecField, expr stri
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 expr,
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: false,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
@@ -725,18 +726,19 @@ func constructTestEmbeddingListSearchRequest(dbName, collectionName, structFVec,
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 expr,
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: false,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
@@ -774,18 +776,19 @@ func constructSearchByPksRequest(t *testing.T, dbName, collectionName, floatVecF
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 "",
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: true,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            "",
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
