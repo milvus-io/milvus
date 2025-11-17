@@ -904,3 +904,140 @@ func (s *ChannelManagerSuite) TestGetChannelWatchInfos() {
 	infos = cm.GetChannelWatchInfos()
 	s.Equal(0, len(infos))
 }
+
+func (s *ChannelManagerSuite) TestStartupIdempotency() {
+	s.Run("repeated Startup calls should be idempotent", func() {
+		chNodes := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
+		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false).Maybe()
+
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc, withCheckerV2())
+		s.Require().NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var (
+			legacyNodes = []int64{1}
+			allNodes    = []int64{1, 2}
+		)
+
+		// First Startup
+		err = m.Startup(ctx, legacyNodes, allNodes)
+		s.NoError(err)
+		s.True(m.started)
+		s.checkAssignment(m, 1, "ch1", Legacy)
+		s.checkAssignment(m, 1, "ch2", Legacy)
+
+		// Wait a bit for goroutine to start
+		// Second Startup - should close and restart
+		err = m.Startup(ctx, legacyNodes, allNodes)
+		s.NoError(err)
+		s.True(m.started)
+		s.checkAssignment(m, 1, "ch1", Legacy)
+		s.checkAssignment(m, 1, "ch2", Legacy)
+
+		// Third Startup - should still work
+		err = m.Startup(ctx, legacyNodes, allNodes)
+		s.NoError(err)
+		s.True(m.started)
+	})
+}
+
+func (s *ChannelManagerSuite) TestStartupAfterClose() {
+	s.Run("Startup after Close should restart successfully", func() {
+		chNodes := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
+		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false).Maybe()
+
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc, withCheckerV2())
+		s.Require().NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var (
+			legacyNodes = []int64{1}
+			allNodes    = []int64{1}
+		)
+
+		// First Startup
+		err = m.Startup(ctx, legacyNodes, allNodes)
+		s.NoError(err)
+		s.True(m.started)
+		s.checkAssignment(m, 1, "ch1", Legacy)
+		s.checkAssignment(m, 1, "ch2", Legacy)
+
+		// Close
+		m.Close()
+		s.False(m.started)
+
+		// Startup again after Close
+		ctx2, cancel2 := context.WithCancel(context.Background())
+		defer cancel2()
+
+		err = m.Startup(ctx2, legacyNodes, allNodes)
+		s.NoError(err)
+		s.True(m.started)
+		s.checkAssignment(m, 1, "ch1", Legacy)
+		s.checkAssignment(m, 1, "ch2", Legacy)
+
+		// Close again
+		m.Close()
+		s.False(m.started)
+	})
+}
+
+func (s *ChannelManagerSuite) TestCloseIdempotency() {
+	s.Run("multiple Close calls should be idempotent", func() {
+		chNodes := map[string]int64{
+			"ch1": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_WatchSuccess)
+		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false).Maybe()
+
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc, withCheckerV2())
+		s.Require().NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Startup first
+		err = m.Startup(ctx, []int64{1}, []int64{1})
+		s.NoError(err)
+		s.True(m.started)
+
+		// First Close
+		m.Close()
+		s.False(m.started)
+
+		// Second Close - should be safe
+		m.Close()
+		s.False(m.started)
+
+		// Third Close - should still be safe
+		m.Close()
+		s.False(m.started)
+	})
+
+	s.Run("Close without Startup should be safe", func() {
+		s.prepareMeta(nil, 0)
+		m, err := NewChannelManager(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		s.Require().NoError(err)
+
+		s.False(m.started)
+
+		// Close without Startup should not panic
+		s.NotPanics(func() {
+			m.Close()
+		})
+
+		s.False(m.started)
+	})
+}

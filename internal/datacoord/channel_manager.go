@@ -84,6 +84,9 @@ type ChannelManagerImpl struct {
 	legacyNodes typeutil.UniqueSet
 
 	lastActiveTimestamp time.Time
+
+	// Idempotency and restart support
+	started bool
 }
 
 // ChannelBGChecker are goroutining running background
@@ -130,6 +133,23 @@ func NewChannelManager(
 }
 
 func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes []int64) error {
+	m.mu.Lock()
+	if m.started {
+		// Already started, need to close first then restart
+		m.mu.Unlock()
+		m.Close()
+		m.mu.Lock()
+	}
+	m.mu.Unlock()
+
+	return m.doStartup(ctx, legacyNodes, allNodes)
+}
+
+func (m *ChannelManagerImpl) doStartup(ctx context.Context, legacyNodes, allNodes []int64) error {
+	m.mu.Lock()
+	m.started = true
+	m.mu.Unlock()
+
 	ctx, m.cancel = context.WithCancel(ctx)
 
 	m.legacyNodes = typeutil.NewUniqueSet(legacyNodes...)
@@ -184,10 +204,21 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 }
 
 func (m *ChannelManagerImpl) Close() {
+	m.mu.Lock()
+	if !m.started {
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+
 	if m.cancel != nil {
 		m.cancel()
 		m.wg.Wait()
 	}
+
+	m.mu.Lock()
+	m.started = false
+	m.mu.Unlock()
 }
 
 func (m *ChannelManagerImpl) AddNode(nodeID UniqueID) error {
