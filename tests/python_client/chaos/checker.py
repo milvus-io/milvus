@@ -389,7 +389,8 @@ class Checker:
             schema = CollectionSchema.construct_from_dict(collection_info)
         else:
             enable_struct_array_field = kwargs.get("enable_struct_array_field", True)
-            schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field) if schema is None else schema
+            enable_dynamic_field = kwargs.get("enable_dynamic_field", True)
+            schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field, enable_dynamic_field=enable_dynamic_field) if schema is None else schema
 
         log.info(f"schema: {schema}")
         self.schema = schema
@@ -2335,17 +2336,19 @@ class AlterCollectionChecker(Checker):
     def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AlterCollectionChecker")
-        super().__init__(collection_name=collection_name, schema=schema)
+        super().__init__(collection_name=collection_name, schema=schema, enable_dynamic_field=False)
         self.milvus_client.release_collection(collection_name=self.c_name)
         res = self.milvus_client.describe_collection(collection_name=self.c_name)
-        log.info(f"before alter collection {self.c_name} properties: {res}")
+        log.info(f"before alter collection {self.c_name} schema: {res}")
         # alter collection attributes
         self.milvus_client.alter_collection_properties(collection_name=self.c_name,
-        properties={"mmap.enabled": True})
+                                                       properties={"mmap.enabled": True})
         self.milvus_client.alter_collection_properties(collection_name=self.c_name,
-        properties={"collection.ttl.seconds": 3600})
+                                                       properties={"collection.ttl.seconds": 3600})
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+                                                       properties={"dynamicfield.enabled": True})
         res = self.milvus_client.describe_collection(collection_name=self.c_name)
-        log.info(f"after alter collection {self.c_name} properties: {res}")
+        log.info(f"after alter collection {self.c_name} schema: {res}")
         
     @trace()
     def alter_check(self):
@@ -2355,6 +2358,8 @@ class AlterCollectionChecker(Checker):
             if properties.get("mmap.enabled") != "True":
                 return res, False
             if properties.get("collection.ttl.seconds") != "3600":
+                return res, False
+            if res["enable_dynamic_field"] != True:
                 return res, False
             return res, True
         except Exception as e:
