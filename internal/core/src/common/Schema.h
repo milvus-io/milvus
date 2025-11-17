@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -397,5 +398,5 @@ class Schema {
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
-
+using SafeSchemaPtr = std::atomic<SchemaPtr*>;
 }  // namespace milvus
