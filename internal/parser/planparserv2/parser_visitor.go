@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -1988,7 +1988,7 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 
 	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 
-	timestamptzInt64, err := funcutil.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
+	timestamptzInt64, err := timestamptz.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
 		return err
 	}
@@ -2052,7 +2052,7 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 		return fmt.Errorf("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
 	}
 
-	timestamptzInt64, err := funcutil.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
+	timestamptzInt64, err := timestamptz.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
 		return err
 	}
