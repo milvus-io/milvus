@@ -57,19 +57,11 @@ class TestBase:
 class TestOperations(TestBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, host, port, user, password, milvus_ns):
-        if user and password:
-            # log.info(f"connect to {host}:{port} with user {user} and password {password}")
-            connections.connect('default', host=host, port=port, user=user, password=password)
-        else:
-            connections.connect('default', host=host, port=port)
+    def connection(self, upstream_uri, upstream_token, milvus_ns):
+        connections.connect('default', uri=upstream_uri, token=upstream_token)
         if connections.has_connection("default") is False:
             raise Exception("no connections")
         log.info("connect to milvus successfully")
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
         self.milvus_sys = MilvusSys(alias='default')
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
