@@ -1051,6 +1051,7 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 		}, nil).Build()
 
 		task := createTestUpdateTask()
+		task.req.FieldsData = []*schemapb.FieldData{}
 		task.req.NumRows = 0 // Invalid num_rows
 
 		err := task.PreExecute(context.Background())
@@ -1533,4 +1534,335 @@ func TestUpsertTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		assert.NotNil(t, capturedPlan.Namespace)
 		assert.Equal(t, *task.req.Namespace, *capturedPlan.Namespace)
 	})
+}
+
+func TestUpsertTask_Deduplicate_Int64PK(t *testing.T) {
+	// Test deduplication with Int64 primary key
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:         "id",
+		FieldID:      100,
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+
+	collSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			primaryFieldSchema,
+			{
+				Name:     "float_field",
+				FieldID:  101,
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	// Create field data with duplicate IDs: [1, 2, 3, 2, 1]
+	// Expected to keep last occurrence of each: [3, 2, 1] (indices 2, 3, 4)
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3, 2, 1},
+						},
+					},
+				},
+			},
+		},
+		{
+			FieldName: "float_field",
+			Type:      schemapb.DataType_Float,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: []float32{1.1, 2.2, 3.3, 2.4, 1.5},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deduplicatedFields, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, fieldsData, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(3), newNumRows)
+	assert.Equal(t, 2, len(deduplicatedFields))
+
+	// Check deduplicated primary keys
+	pkField := deduplicatedFields[0]
+	pkData := pkField.GetScalars().GetLongData().GetData()
+	assert.Equal(t, 3, len(pkData))
+	assert.Equal(t, []int64{3, 2, 1}, pkData)
+
+	// Check corresponding float values (should be 3.3, 2.4, 1.5)
+	floatField := deduplicatedFields[1]
+	floatData := floatField.GetScalars().GetFloatData().GetData()
+	assert.Equal(t, 3, len(floatData))
+	assert.Equal(t, []float32{3.3, 2.4, 1.5}, floatData)
+}
+
+func TestUpsertTask_Deduplicate_VarCharPK(t *testing.T) {
+	// Test deduplication with VarChar primary key
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:         "id",
+		FieldID:      100,
+		DataType:     schemapb.DataType_VarChar,
+		IsPrimaryKey: true,
+	}
+
+	collSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			primaryFieldSchema,
+			{
+				Name:     "int_field",
+				FieldID:  101,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	// Create field data with duplicate IDs: ["a", "b", "c", "b", "a"]
+	// Expected to keep last occurrence of each: ["c", "b", "a"] (indices 2, 3, 4)
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			Type:      schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{"a", "b", "c", "b", "a"},
+						},
+					},
+				},
+			},
+		},
+		{
+			FieldName: "int_field",
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{100, 200, 300, 201, 101},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deduplicatedFields, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, fieldsData, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(3), newNumRows)
+	assert.Equal(t, 2, len(deduplicatedFields))
+
+	// Check deduplicated primary keys
+	pkField := deduplicatedFields[0]
+	pkData := pkField.GetScalars().GetStringData().GetData()
+	assert.Equal(t, 3, len(pkData))
+	assert.Equal(t, []string{"c", "b", "a"}, pkData)
+
+	// Check corresponding int64 values (should be 300, 201, 101)
+	int64Field := deduplicatedFields[1]
+	int64Data := int64Field.GetScalars().GetLongData().GetData()
+	assert.Equal(t, 3, len(int64Data))
+	assert.Equal(t, []int64{300, 201, 101}, int64Data)
+}
+
+func TestUpsertTask_Deduplicate_NoDuplicates(t *testing.T) {
+	// Test with no duplicates - should return original data
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:         "id",
+		FieldID:      100,
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+
+	collSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			primaryFieldSchema,
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3, 4, 5},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deduplicatedFields, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, fieldsData, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(5), newNumRows)
+	assert.Equal(t, 1, len(deduplicatedFields))
+
+	// Should be unchanged
+	pkField := deduplicatedFields[0]
+	pkData := pkField.GetScalars().GetLongData().GetData()
+	assert.Equal(t, []int64{1, 2, 3, 4, 5}, pkData)
+}
+
+func TestUpsertTask_Deduplicate_WithVector(t *testing.T) {
+	// Test deduplication with vector field
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:         "id",
+		FieldID:      100,
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+
+	collSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			primaryFieldSchema,
+			{
+				Name:     "vector",
+				FieldID:  101,
+				DataType: schemapb.DataType_FloatVector,
+			},
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	dim := 4
+	// Create field data with duplicate IDs: [1, 2, 1]
+	// Expected to keep indices [1, 2] (last occurrence of 2, last occurrence of 1)
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 1},
+						},
+					},
+				},
+			},
+		},
+		{
+			FieldName: "vector",
+			Type:      schemapb.DataType_FloatVector,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{
+								1.0, 1.1, 1.2, 1.3, // vector for ID 1 (first occurrence)
+								2.0, 2.1, 2.2, 2.3, // vector for ID 2
+								1.4, 1.5, 1.6, 1.7, // vector for ID 1 (second occurrence - keep this)
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deduplicatedFields, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, fieldsData, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(2), newNumRows)
+	assert.Equal(t, 2, len(deduplicatedFields))
+
+	// Check deduplicated primary keys
+	pkField := deduplicatedFields[0]
+	pkData := pkField.GetScalars().GetLongData().GetData()
+	assert.Equal(t, 2, len(pkData))
+	assert.Equal(t, []int64{2, 1}, pkData)
+
+	// Check corresponding vector (should keep vectors for ID 2 and ID 1's last occurrence)
+	vectorField := deduplicatedFields[1]
+	vectorData := vectorField.GetVectors().GetFloatVector().GetData()
+	assert.Equal(t, 8, len(vectorData)) // 2 vectors * 4 dimensions
+	expectedVector := []float32{
+		2.0, 2.1, 2.2, 2.3, // vector for ID 2
+		1.4, 1.5, 1.6, 1.7, // vector for ID 1 (last occurrence)
+	}
+	assert.Equal(t, expectedVector, vectorData)
+}
+
+func TestUpsertTask_Deduplicate_EmptyData(t *testing.T) {
+	// Test with empty data
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:         "id",
+		FieldID:      100,
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+
+	collSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			primaryFieldSchema,
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	fieldsData := []*schemapb.FieldData{}
+
+	deduplicatedFields, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, fieldsData, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(0), newNumRows)
+	assert.Equal(t, 0, len(deduplicatedFields))
+}
+
+func TestUpsertTask_Deduplicate_MissingPrimaryKey(t *testing.T) {
+	// Test with missing primary key field
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:         "id",
+		FieldID:      100,
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+
+	collSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			primaryFieldSchema,
+			{
+				Name:     "other_field",
+				FieldID:  101,
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	}
+	schema := newSchemaInfo(collSchema)
+
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "other_field",
+			Type:      schemapb.DataType_Float,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: []float32{1.1, 2.2},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, _, err := DeduplicateFieldData(primaryFieldSchema, fieldsData, schema)
+	assert.Error(t, err)
+	// validateFieldDataColumns will fail first due to column count mismatch
+	// or the function will fail when trying to find primary key
+	assert.True(t, err != nil)
 }

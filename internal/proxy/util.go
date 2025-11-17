@@ -1046,6 +1046,103 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 	return primaryData, nil
 }
 
+// findLastOccurrenceIndices finds indices of last occurrences for each unique ID
+func findLastOccurrenceIndices[T comparable](ids []T) []int {
+	lastOccurrence := make(map[T]int, len(ids))
+	for idx, id := range ids {
+		lastOccurrence[id] = idx
+	}
+
+	keepIndices := make([]int, 0, len(lastOccurrence))
+	for idx, id := range ids {
+		if lastOccurrence[id] == idx {
+			keepIndices = append(keepIndices, idx)
+		}
+	}
+	return keepIndices
+}
+
+// DeduplicateFieldData removes duplicate primary keys from field data,
+// keeping the last occurrence of each ID
+func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData []*schemapb.FieldData, schema *schemaInfo) ([]*schemapb.FieldData, uint32, error) {
+	if len(fieldsData) == 0 {
+		return fieldsData, 0, nil
+	}
+
+	if err := fillFieldPropertiesOnly(fieldsData, schema); err != nil {
+		return nil, 0, err
+	}
+
+	// find primary field data
+	var primaryFieldData *schemapb.FieldData
+	for _, field := range fieldsData {
+		if field.GetFieldName() == primaryFieldSchema.GetName() {
+			primaryFieldData = field
+			break
+		}
+	}
+
+	if primaryFieldData == nil {
+		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.GetName()))
+	}
+
+	// get row count
+	var numRows int
+	switch primaryFieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := primaryFieldData.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			numRows = len(scalarField.GetLongData().GetData())
+		case *schemapb.ScalarField_StringData:
+			numRows = len(scalarField.GetStringData().GetData())
+		default:
+			return nil, 0, merr.WrapErrParameterInvalidMsg("unsupported primary key type")
+		}
+	default:
+		return nil, 0, merr.WrapErrParameterInvalidMsg("primary field must be scalar type")
+	}
+
+	if numRows == 0 {
+		return fieldsData, 0, nil
+	}
+
+	// build map to track last occurrence of each primary key
+	var keepIndices []int
+	switch primaryFieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := primaryFieldData.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			// for Int64 primary keys
+			intIDs := scalarField.GetLongData().GetData()
+			keepIndices = findLastOccurrenceIndices(intIDs)
+
+		case *schemapb.ScalarField_StringData:
+			// for VarChar primary keys
+			strIDs := scalarField.GetStringData().GetData()
+			keepIndices = findLastOccurrenceIndices(strIDs)
+		}
+	}
+
+	// if no duplicates found, return original data
+	if len(keepIndices) == numRows {
+		return fieldsData, uint32(numRows), nil
+	}
+
+	log.Info("duplicate primary keys detected in upsert request, deduplicating",
+		zap.Int("original_rows", numRows),
+		zap.Int("deduplicated_rows", len(keepIndices)))
+
+	// use typeutil.AppendFieldData to rebuild field data with deduplicated rows
+	result := typeutil.PrepareResultFieldData(fieldsData, int64(len(keepIndices)))
+	for _, idx := range keepIndices {
+		typeutil.AppendFieldData(result, fieldsData, int64(idx))
+	}
+
+	return result, uint32(len(keepIndices)), nil
+}
+
 // autoGenPrimaryFieldData generate primary data when autoID == true
 func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}) (*schemapb.FieldData, error) {
 	var fieldData schemapb.FieldData
@@ -1105,53 +1202,70 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 	}
 }
 
-// fillFieldPropertiesBySchema set fieldID to fieldData according FieldSchemas
-func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
-
+// validateFieldDataColumns validates that all required fields are present and no unknown fields exist.
+// It checks:
+// 1. The number of columns matches the expected count (excluding BM25 output fields)
+// 2. All field names exist in the schema
+// Returns detailed error message listing expected and provided fields if validation fails.
+func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	expectColumnNum := 0
+
+	// Count expected columns
 	for _, field := range schema.GetFields() {
-		fieldName2Schema[field.Name] = field
-		if !typeutil.IsBM25FunctionOutputField(field, schema) {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-
 	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			fieldName2Schema[field.Name] = field
-			expectColumnNum++
-		}
+		expectColumnNum += len(structField.GetFields())
 	}
 
+	// Validate column count
 	if len(columns) != expectColumnNum {
 		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
 			expectColumnNum, len(columns))
 	}
 
+	// Validate field existence using schemaHelper
 	for _, fieldData := range columns {
-		if fieldSchema, ok := fieldName2Schema[fieldData.FieldName]; ok {
-			fieldData.FieldId = fieldSchema.FieldID
-			fieldData.Type = fieldSchema.DataType
-
-			// Set the ElementType because it may not be set in the insert request.
-			if fieldData.Type == schemapb.DataType_Array {
-				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-				if !ok || fd.Scalars.GetArrayData() == nil {
-					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
-						" collectionName:%s", fieldData.FieldName, schema.Name)
-				}
-				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
-			} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
-				fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
-				if !ok || fd.Vectors.GetVectorArray() == nil {
-					return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s,"+
-						" collectionName:%s", fieldData.FieldName, schema.Name)
-				}
-				fd.Vectors.GetVectorArray().ElementType = fieldSchema.ElementType
-			}
-		} else {
+		_, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		if err != nil {
 			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
+		}
+	}
+
+	return nil
+}
+
+// fillFieldPropertiesOnly fills field properties (FieldId, Type, ElementType) from schema.
+// It assumes that columns have been validated and does not perform validation.
+// Use validateFieldDataColumns before calling this function if validation is needed.
+func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
+	for _, fieldData := range columns {
+		// Use schemaHelper to get field schema, automatically handles dynamic fields
+		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		if err != nil {
+			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
+		}
+
+		fieldData.FieldId = fieldSchema.FieldID
+		fieldData.Type = fieldSchema.DataType
+
+		// Set the ElementType because it may not be set in the insert request.
+		if fieldData.Type == schemapb.DataType_Array {
+			fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
+			if !ok || fd.Scalars.GetArrayData() == nil {
+				return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s, collectionName: %s",
+					fieldData.FieldName, schema.Name)
+			}
+			fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
+		} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
+			fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
+			if !ok || fd.Vectors.GetVectorArray() == nil {
+				return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s, collectionName: %s",
+					fieldData.FieldName, schema.Name)
+			}
+			fd.Vectors.GetVectorArray().ElementType = fieldSchema.ElementType
 		}
 	}
 
