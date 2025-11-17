@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -88,14 +89,14 @@ func mergeSortMultipleSegments(ctx context.Context,
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:
 		predicate = func(r storage.Record, ri, i int) bool {
-			pk := r.Column(0).(*array.Int64).Value(i)
-			ts := r.Column(1).(*array.Int64).Value(i)
+			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			return !segmentFilters[ri].Filtered(pk, uint64(ts))
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
-			pk := r.Column(0).(*array.String).Value(i)
-			ts := r.Column(1).(*array.Int64).Value(i)
+			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
+			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			return !segmentFilters[ri].Filtered(pk, uint64(ts))
 		}
 	default:

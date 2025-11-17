@@ -149,11 +149,7 @@ func TestLegacyDeltalogReaderWriter(t *testing.T) {
 			require.NoError(t, err)
 
 			// Test round trip
-			reader, err := NewLegacyDeltalogReader(&schemapb.FieldSchema{
-				FieldID:  pkFieldID,
-				Name:     "pk",
-				DataType: tt.pkType,
-			}, func(ctx context.Context, paths []string) ([][]byte, error) {
+			reader, err := NewLegacyDeltalogReader(tt.pkType, func(ctx context.Context, paths []string) ([][]byte, error) {
 				return [][]byte{blob.Value}, nil
 			}, []string{blob.Key})
 			require.NoError(t, err)
@@ -254,12 +250,7 @@ func writeDeltalogNewFormat(size int, pkType schemapb.DataType) (*Blob, error) {
 
 // readDeltaLog reads deltalog data and returns any error
 func readDeltaLog(size int, blob *Blob, pkType schemapb.DataType) error {
-	pkField := &schemapb.FieldSchema{
-		FieldID:  100,
-		Name:     "pk",
-		DataType: pkType,
-	}
-	reader, err := NewLegacyDeltalogReader(pkField, func(ctx context.Context, paths []string) ([][]byte, error) {
+	reader, err := NewLegacyDeltalogReader(pkType, func(ctx context.Context, paths []string) ([][]byte, error) {
 		return [][]byte{blob.Value}, nil
 	}, []string{blob.Key})
 	if err != nil {
