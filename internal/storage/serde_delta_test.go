@@ -167,7 +167,7 @@ func TestLegacyDeltalogReaderWriter(t *testing.T) {
 			// The original record has field IDs: 0 for pk, 1 for ts
 
 			// Verify pk column
-			pkCol := rec.Column(pkFieldID)
+			pkCol := rec.Column(0)
 			origPkCol := record.Column(0)
 			require.NotNil(t, pkCol)
 			require.NotNil(t, origPkCol)
