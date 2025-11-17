@@ -561,14 +561,16 @@ func constructSearchRequest(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     nil,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
