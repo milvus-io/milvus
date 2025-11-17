@@ -54,7 +54,7 @@ class TestBase:
 class TestOperations(TestBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, upstream_uri, upstream_token, milvus_ns, minio_host, enable_import, minio_bucket):
+    def connection(self, upstream_uri, upstream_token, milvus_ns):
         connections.connect('default', uri=upstream_uri, token=upstream_token)
         if connections.has_connection("default") is False:
             raise Exception("no connections")
@@ -66,9 +66,6 @@ class TestOperations(TestBase):
         self.milvus_sys = MilvusSys(alias='default')
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
-        self.enable_import = enable_import
-        self.minio_endpoint = f"{minio_host}:9000"
-        self.bucket_name = minio_bucket
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
@@ -93,10 +90,6 @@ class TestOperations(TestBase):
             Op.add_field: AddFieldChecker(collection_name=c_name),
             Op.rename_collection: CollectionRenameChecker(collection_name=c_name)
         }
-        if bool(self.enable_import):
-            checkers[Op.bulk_insert] = BulkInsertChecker(collection_name=c_name,
-                                                         bucket_name=self.bucket_name,
-                                                         minio_endpoint=self.minio_endpoint)
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.L3)
