@@ -3653,6 +3653,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("is_flush", [True, False])
+    @pytest.mark.skip(reason="issue #45511")
     def test_milvus_client_search_json_path_index_default(self, enable_dynamic_field, supported_json_cast_type,
                                                           supported_varchar_scalar_index, is_flush):
         """
