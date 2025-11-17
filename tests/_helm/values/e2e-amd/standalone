@@ -30,8 +30,8 @@ standalone:
       cpu: "6"
       memory: 12Gi
     requests:
-      cpu: "2"
-      memory: 4Gi
+      cpu: "3"
+      memory: 6Gi
 log:
   level: debug
 extraConfigFiles:

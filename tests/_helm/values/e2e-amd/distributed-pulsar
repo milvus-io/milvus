@@ -32,7 +32,7 @@ dataNode:
       memory: 8Gi
     requests:
       cpu: "0.5"
-      memory: 500Mi
+      memory: 2Gi
 indexNode:
   enabled: false
   disk:
@@ -53,7 +53,7 @@ queryNode:
       memory: 4Gi
     requests:
       cpu: "0.5"
-      memory: 512Mi
+      memory: 1Gi
 streamingNode:
   resources:
     limits:
@@ -61,7 +61,7 @@ streamingNode:
       memory: 8Gi
     requests:
       cpu: "0.5"
-      memory: 512Mi
+      memory: 3Gi
 mixCoordinator:
   resources:
     limits:
