@@ -1703,7 +1703,7 @@ func (v *ParserVisitor) VisitSTIsValid(ctx *parser.STIsValidContext) interface{}
 		Expr: &planpb.Expr_GisfunctionFilterExpr{
 			GisfunctionFilterExpr: &planpb.GISFunctionFilterExpr{
 				ColumnInfo: columnInfo,
-				Op:         planpb.GISFunctionFilterExpr_IsValidOp,
+				Op:         planpb.GISFunctionFilterExpr_STIsValid,
 			},
 		},
 	}

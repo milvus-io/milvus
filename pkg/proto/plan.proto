@@ -190,7 +190,9 @@ message GISFunctionFilterExpr{
     Intersects = 6;
     Within = 7;
     DWithin = 8;
-    IsValidOp = 9;
+    // STIsValid is a special operator that conflicts with proto-generated default methods.
+    // Using STIsValid instead of IsValid to avoid naming conflicts with IsValid() method.
+    STIsValid = 9;
   }
   GISOp op = 3;
   double distance = 4;  // Distance parameter for DWithin

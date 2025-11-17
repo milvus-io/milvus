@@ -178,7 +178,7 @@ PhyGISFunctionFilterExpr::CanUseIndex(
         return false;
     }
     switch (op) {
-        case proto::plan::GISFunctionFilterExpr_GISOp_IsValidOp:
+        case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
             return false;
         default:
             return true;
@@ -209,7 +209,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
     valid_res.set();
 
-    if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_IsValidOp) {
+    if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
         if (segment_->type() == SegmentType::Growing &&
             !storage::MmapManager::GetInstance()
                  .GetMmapConfig()

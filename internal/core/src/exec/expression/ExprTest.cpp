@@ -17457,7 +17457,7 @@ TEST_P(ExprTest, TestSTIsValidFunction) {
 
     auto is_valid_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
         milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
-        proto::plan::GISFunctionFilterExpr_GISOp_IsValidOp,
+        proto::plan::GISFunctionFilterExpr_GISOp_STIsValid,
         "");
     auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
                                                        is_valid_expr);
