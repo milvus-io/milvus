@@ -1410,11 +1410,11 @@ func (loader *segmentLoader) loadDeltalogs(ctx context.Context, segment Segment,
 				var pk storage.PrimaryKey
 				switch pkField.DataType {
 				case schemapb.DataType_Int64:
-					pk = storage.NewInt64PrimaryKey(dl.Column(pkField.FieldID).(*array.Int64).Value(i))
+					pk = storage.NewInt64PrimaryKey(dl.Column(0).(*array.Int64).Value(i))
 				case schemapb.DataType_VarChar:
-					pk = storage.NewVarCharPrimaryKey(dl.Column(pkField.FieldID).(*array.String).Value(i))
+					pk = storage.NewVarCharPrimaryKey(dl.Column(0).(*array.String).Value(i))
 				}
-				ts := typeutil.Timestamp(dl.Column(common.TimeStampField).(*array.Int64).Value(i))
+				ts := typeutil.Timestamp(dl.Column(1).(*array.Int64).Value(i))
 				err = deltaData.Append(pk, ts)
 				if err != nil {
 					return err

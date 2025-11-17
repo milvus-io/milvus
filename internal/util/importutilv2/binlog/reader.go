@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -200,16 +199,16 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 			}
 
 			for i := 0; i < rec.Len(); i++ {
-				ts := typeutil.Timestamp(rec.Column(common.TimeStampField).(*array.Int64).Value(i))
+				ts := typeutil.Timestamp(rec.Column(1).(*array.Int64).Value(i))
 				if ts < tsStart || ts > tsEnd {
 					continue
 				}
 				var pk any
 				switch pkField.DataType {
 				case schemapb.DataType_Int64:
-					pk = rec.Column(pkField.FieldID).(*array.Int64).Value(i)
+					pk = rec.Column(0).(*array.Int64).Value(i)
 				case schemapb.DataType_VarChar:
-					pk = rec.Column(pkField.FieldID).(*array.String).Value(i)
+					pk = rec.Column(0).(*array.String).Value(i)
 				}
 				if tsExisting, ok := deleteData[pk]; ok && tsExisting > ts {
 					// skip if existing entry is newer
