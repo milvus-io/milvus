@@ -23,12 +23,14 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
 
@@ -90,20 +92,22 @@ func (p *ServiceParam) WoodpeckerEnable() bool {
 // --- etcd ---
 type EtcdConfig struct {
 	// --- ETCD ---
-	Endpoints         ParamItem          `refreshable:"false"`
-	RootPath          ParamItem          `refreshable:"false"`
-	MetaSubPath       ParamItem          `refreshable:"false"`
-	KvSubPath         ParamItem          `refreshable:"false"`
-	MetaRootPath      CompositeParamItem `refreshable:"false"`
-	KvRootPath        CompositeParamItem `refreshable:"false"`
-	EtcdLogLevel      ParamItem          `refreshable:"false"`
-	EtcdLogPath       ParamItem          `refreshable:"false"`
-	EtcdUseSSL        ParamItem          `refreshable:"false"`
-	EtcdTLSCert       ParamItem          `refreshable:"false"`
-	EtcdTLSKey        ParamItem          `refreshable:"false"`
-	EtcdTLSCACert     ParamItem          `refreshable:"false"`
-	EtcdTLSMinVersion ParamItem          `refreshable:"false"`
-	RequestTimeout    ParamItem          `refreshable:"false"`
+	Endpoints            ParamItem          `refreshable:"false"`
+	RootPath             ParamItem          `refreshable:"false"`
+	MetaSubPath          ParamItem          `refreshable:"false"`
+	KvSubPath            ParamItem          `refreshable:"false"`
+	MetaRootPath         CompositeParamItem `refreshable:"false"`
+	KvRootPath           CompositeParamItem `refreshable:"false"`
+	EtcdLogLevel         ParamItem          `refreshable:"false"`
+	EtcdLogPath          ParamItem          `refreshable:"false"`
+	EtcdUseSSL           ParamItem          `refreshable:"false"`
+	EtcdTLSCert          ParamItem          `refreshable:"false"`
+	EtcdTLSKey           ParamItem          `refreshable:"false"`
+	EtcdTLSCACert        ParamItem          `refreshable:"false"`
+	EtcdTLSMinVersion    ParamItem          `refreshable:"false"`
+	RequestTimeout       ParamItem          `refreshable:"false"`
+	DialKeepAliveTime    ParamItem          `refreshable:"false"`
+	DialKeepAliveTimeout ParamItem          `refreshable:"false"`
 
 	// --- Embed ETCD ---
 	UseEmbedEtcd ParamItem `refreshable:"false"`
@@ -286,6 +290,24 @@ We recommend using version 1.2 and above.`,
 	}
 	p.RequestTimeout.Init(base.mgr)
 
+	p.DialKeepAliveTime = ParamItem{
+		Key:          "etcd.dialKeepAliveTime",
+		DefaultValue: "3000",
+		Version:      "2.6.6",
+		Doc:          `Interval in milliseconds for gRPC dial keepalive pings sent to etcd endpoints.`,
+		Export:       true,
+	}
+	p.DialKeepAliveTime.Init(base.mgr)
+
+	p.DialKeepAliveTimeout = ParamItem{
+		Key:          "etcd.dialKeepAliveTimeout",
+		DefaultValue: "2000",
+		Version:      "2.6.6",
+		Doc:          `Timeout in milliseconds waiting for keepalive responses before marking the connection as unhealthy.`,
+		Export:       true,
+	}
+	p.DialKeepAliveTimeout.Init(base.mgr)
+
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
 		DefaultValue: "false",
@@ -318,17 +340,31 @@ We recommend using version 1.2 and above.`,
 
 func (p *EtcdConfig) GetAll() map[string]string {
 	return map[string]string{
-		"etcd.endpoints":         p.Endpoints.GetValue(),
-		"etcd.metaRootPath":      p.MetaRootPath.GetValue(),
-		"etcd.ssl.enabled":       p.EtcdUseSSL.GetValue(),
-		"etcd.ssl.tlsCert":       p.EtcdTLSCert.GetValue(),
-		"etcd.ssl.tlsKey":        p.EtcdTLSKey.GetValue(),
-		"etcd.ssl.tlsCACert":     p.EtcdTLSCACert.GetValue(),
-		"etcd.ssl.tlsMinVersion": p.EtcdTLSMinVersion.GetValue(),
-		"etcd.requestTimeout":    p.RequestTimeout.GetValue(),
-		"etcd.auth.enabled":      p.EtcdEnableAuth.GetValue(),
-		"etcd.auth.userName":     p.EtcdAuthUserName.GetValue(),
-		"etcd.auth.password":     p.EtcdAuthPassword.GetValue(),
+		"etcd.endpoints":            p.Endpoints.GetValue(),
+		"etcd.metaRootPath":         p.MetaRootPath.GetValue(),
+		"etcd.ssl.enabled":          p.EtcdUseSSL.GetValue(),
+		"etcd.ssl.tlsCert":          p.EtcdTLSCert.GetValue(),
+		"etcd.ssl.tlsKey":           p.EtcdTLSKey.GetValue(),
+		"etcd.ssl.tlsCACert":        p.EtcdTLSCACert.GetValue(),
+		"etcd.ssl.tlsMinVersion":    p.EtcdTLSMinVersion.GetValue(),
+		"etcd.requestTimeout":       p.RequestTimeout.GetValue(),
+		"etcd.dialKeepAliveTime":    p.DialKeepAliveTime.GetValue(),
+		"etcd.dialKeepAliveTimeout": p.DialKeepAliveTimeout.GetValue(),
+		"etcd.auth.enabled":         p.EtcdEnableAuth.GetValue(),
+		"etcd.auth.userName":        p.EtcdAuthUserName.GetValue(),
+		"etcd.auth.password":        p.EtcdAuthPassword.GetValue(),
+	}
+}
+
+func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {
+	dialKeepAliveTime := p.DialKeepAliveTime.GetAsDuration(time.Millisecond)
+	dialKeepAliveTimeout := p.DialKeepAliveTimeout.GetAsDuration(time.Millisecond)
+
+	if dialKeepAliveTime <= 0 && dialKeepAliveTimeout <= 0 {
+		return nil
+	}
+	return []etcd.ClientOption{
+		etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout),
 	}
 }
 
