@@ -2068,15 +2068,18 @@ class AlterCollectionChecker(Checker):
             collection_name = cf.gen_unique_str("AlterCollectionChecker")
         super().__init__(collection_name=collection_name, schema=schema)
         self.c_wrap.release()
-        res, result = self.c_wrap.describe()
+        res, _ = self.c_wrap.describe()
         log.info(f"before alter collection {self.c_name} properties: {res}")
         # alter collection attributes
         self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
         properties={"mmap.enabled": True})
         self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
         properties={"collection.ttl.seconds": 3600})
-        res, result = self.c_wrap.describe()
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        properties={"dynamicfield.enabled": True})
+        res, _ = self.c_wrap.describe()
         log.info(f"after alter collection {self.c_name} properties: {res}")
+        
         
     @trace()
     def alter_check(self):
@@ -2086,6 +2089,8 @@ class AlterCollectionChecker(Checker):
             if properties["mmap.enabled"] != "True":
                 return res, False
             if properties["collection.ttl.seconds"] != "3600":
+                return res, False
+            if properties["dynamicfield.enabled"] != "True":
                 return res, False
         return res, result
 
