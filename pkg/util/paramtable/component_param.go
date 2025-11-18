@@ -6378,10 +6378,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxCount = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxCount",
 		Version: "2.6.0",
-		Doc: `The max count of tombstone, 256 by default. 
+		Doc: `The max count of tombstone, 8192 by default. 
 Tombstone is used to reject duplicate submissions of DDL messages,
 too few tombstones may lead to ABA issues in the state of milvus cluster.`,
-		DefaultValue: "256",
+		DefaultValue: "8192",
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxCount.Init(base.mgr)
@@ -6389,10 +6389,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
 		Version: "2.6.0",
-		Doc: `The max lifetime of tombstone, 30m by default.
+		Doc: `The max lifetime of tombstone, 24h by default.
 Tombstone is used to reject duplicate submissions of DDL messages,
 too few tombstones may lead to ABA issues in the state of milvus cluster.`,
-		DefaultValue: "30m",
+		DefaultValue: "24h",
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
