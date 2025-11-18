@@ -20,6 +20,7 @@
 #include "common/ChunkTarget.h"
 #include "arrow/record_batch.h"
 #include "common/Chunk.h"
+#include "pb/common.pb.h"
 
 namespace milvus {
 class ChunkWriterBase {
@@ -289,6 +290,35 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
     write_to_target(const arrow::ArrayVector& array_vec,
                     const std::shared_ptr<ChunkTarget>& target) override;
 };
+
+// A reusable buffer that holds the raw chunk memory and its mmap guard.
+// This can be used to create multiple Chunk instances that share the same
+// underlying memory.
+struct ChunkBuffer {
+    char* data{nullptr};
+    size_t size{0};
+    size_t row_nums{0};
+    std::shared_ptr<ChunkMmapGuard> guard;
+};
+
+// Build a chunk buffer from Arrow arrays, but do not materialize the Chunk
+// object yet. This is useful when multiple Chunk instances need to share
+// the same underlying memory.
+ChunkBuffer
+create_chunk_buffer(const FieldMeta& field_meta,
+                    const arrow::ArrayVector& array_vec,
+                    bool mmap_populate = true,
+                    const std::string& file_path = "",
+                    proto::common::LoadPriority load_priority =
+                        proto::common::LoadPriority::HIGH);
+
+// Create a Chunk view from an existing ChunkBuffer. Multiple Chunk instances
+// created from the same buffer will share the same underlying memory via
+// the shared ChunkMmapGuard in the buffer.
+std::unique_ptr<Chunk>
+make_chunk_from_buffer(const FieldMeta& field_meta,
+                       const ChunkBuffer& buffer,
+                       size_t row_nums_override = 0);
 
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
