@@ -62,7 +62,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	}
 	defer broadcaster.Close()
 
-	// prepare and validate the create collection message.
+	// prepare and validate the creation collection message.
 	createCollectionTask := createCollectionTask{
 		Core:   c,
 		Req:    req,
@@ -77,7 +77,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		return err
 	}
 
-	// setup the broadcast virtual channels and control channel, then make a broadcast message.
+	// set up the broadcast virtual channels and control channel, then make a broadcast message.
 	broadcastChannel := make([]string, 0, createCollectionTask.Req.ShardsNum+1)
 	broadcastChannel = append(broadcastChannel, streaming.WAL().ControlChannel())
 	for i := 0; i < int(createCollectionTask.Req.ShardsNum); i++ {
