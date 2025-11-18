@@ -33,6 +33,7 @@ packages:
       SubCluster:
       StatsJobManager:
       ImportMeta:
+      CollectionTopologyQuerier:
   github.com/milvus-io/milvus/internal/datacoord/allocator:
     interfaces:
       Allocator:
