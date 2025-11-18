@@ -105,22 +105,28 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		segmentIDs := make([]string, 0, len(header.GetPartitions()))
 		rows := make([]string, 0)
+		partitionIDs := make([]string, 0, len(header.GetPartitions()))
 		for _, partition := range header.GetPartitions() {
+			partitionIDs = append(partitionIDs, strconv.FormatInt(partition.GetPartitionId(), 10))
 			segmentIDs = append(segmentIDs, strconv.FormatInt(partition.GetSegmentAssignment().GetSegmentId(), 10))
 			rows = append(rows, strconv.FormatUint(partition.Rows, 10))
 		}
+		enc.AddString("partitionIDs", strings.Join(partitionIDs, "|"))
 		enc.AddString("segmentIDs", strings.Join(segmentIDs, "|"))
 		enc.AddString("rows", strings.Join(rows, "|"))
 	case *DeleteMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		segmentIDs := make([]string, 0, len(header.GetPartitions()))
 		rows := make([]string, 0)
+		partitionIDs := make([]string, 0, len(header.GetPartitions()))
 		for _, partition := range header.GetPartitions() {
+			partitionIDs = append(partitionIDs, strconv.FormatInt(partition.GetPartitionId(), 10))
 			segmentIDs = append(segmentIDs, strconv.FormatInt(partition.GetSegmentAssignment().GetSegmentId(), 10))
 			rows = append(rows, strconv.FormatUint(partition.Rows, 10))
 		}
+		enc.AddString("partitionIDs", strings.Join(partitionIDs, "|"))
 		enc.AddString("segmentIDs", strings.Join(segmentIDs, "|"))
-		enc.AddUint64("rows", header.GetRows())
+		enc.AddString("rows", strings.Join(rows, "|"))
 	case *CreateCollectionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *DropCollectionMessageHeader:
