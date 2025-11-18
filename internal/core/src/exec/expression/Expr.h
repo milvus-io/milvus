@@ -908,7 +908,7 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
-    ProcessIndexChunks(FUNC func, ValTypes... values) {
+    ProcessIndexChunks(FUNC func, const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
