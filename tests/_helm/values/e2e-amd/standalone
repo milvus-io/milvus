@@ -107,11 +107,11 @@ minio:
   mode: standalone
   resources:
     requests:
-      cpu: "0.2"
-      memory: 512Mi
+      cpu: "0.5"
+      memory: 3Gi
     limits:
       cpu: "1"
-      memory: 4Gi
+      memory: 6Gi
   tolerations:
   - effect: PreferNoSchedule
     key: jenkins-milvus-ci-only
