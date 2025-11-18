@@ -115,18 +115,29 @@ func runComponent[T component](ctx context.Context,
 ) *conc.Future[component] {
 	sign := make(chan struct{})
 	future := conc.Go(func() (component, error) {
-		factory := dependency.NewFactory(localMsg)
-		var err error
-		role, err := creator(ctx, factory)
+		// Wrap the creation and preparation phase to enable concurrent component startup
+		prepareFunc := func() (component, error) {
+			defer close(sign)
+			factory := dependency.NewFactory(localMsg)
+			var err error
+			role, err := creator(ctx, factory)
+			if err != nil {
+				return nil, errors.Wrap(err, "create component failed")
+			}
+			if err := role.Prepare(); err != nil {
+				return nil, errors.Wrap(err, "prepare component failed")
+			}
+			healthz.Register(role)
+			metricRegister(Registry.GoRegistry)
+			return role, nil
+		}
+
+		role, err := prepareFunc()
 		if err != nil {
-			return nil, errors.Wrap(err, "create component failed")
+			return nil, err
 		}
-		if err := role.Prepare(); err != nil {
-			return nil, errors.Wrap(err, "prepare component failed")
-		}
-		close(sign)
-		healthz.Register(role)
-		metricRegister(Registry.GoRegistry)
+
+		// Run() executes after sign is closed, allowing components to start concurrently
 		if err := role.Run(); err != nil {
 			return nil, errors.Wrap(err, "run component failed")
 		}
