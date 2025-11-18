@@ -180,6 +180,10 @@ type DataCoordCatalog interface {
 	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
 	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
 
+	ListUpdateExternalCollectionTasks(ctx context.Context) ([]*indexpb.UpdateExternalCollectionTask, error)
+	SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error
+	DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error
+
 	// Analyzer Resource
 	SaveFileResource(ctx context.Context, resource *model.FileResource) error
 	RemoveFileResource(ctx context.Context, resourceID int64) error

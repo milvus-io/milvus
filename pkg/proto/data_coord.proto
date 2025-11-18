@@ -32,6 +32,8 @@ service DataCoord {
   rpc Flush(FlushRequest) returns (FlushResponse) {}
   rpc FlushAll(FlushAllRequest) returns(FlushAllResponse) {}
 
+  rpc CreateExternalCollection(msg.CreateCollectionRequest) returns (CreateExternalCollectionResponse) {}
+
 
   // AllocSegment alloc a new growing segment, add it into segment meta.
   rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
@@ -1136,4 +1138,8 @@ message FileResourceInfo {
   string name = 1;
   string path = 2;
   int64 resource_id = 3;
+}
+
+message CreateExternalCollectionResponse {
+  common.Status status = 1;
 }
