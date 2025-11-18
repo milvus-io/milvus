@@ -86,7 +86,8 @@ type ChannelManagerImpl struct {
 	lastActiveTimestamp time.Time
 
 	// Idempotency and restart support
-	started bool
+	startupMu sync.Mutex // Protects Startup/Close operations
+	started   bool
 }
 
 // ChannelBGChecker are goroutining running background
@@ -133,24 +134,19 @@ func NewChannelManager(
 }
 
 func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes []int64) error {
-	m.mu.Lock()
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+
 	if m.started {
 		// Already started, need to close first then restart
-		m.mu.Unlock()
-		m.Close()
-		m.mu.Lock()
+		m.doClose()
 	}
-	m.mu.Unlock()
 
 	return m.doStartup(ctx, legacyNodes, allNodes)
 }
 
 func (m *ChannelManagerImpl) doStartup(ctx context.Context, legacyNodes, allNodes []int64) error {
-	m.mu.Lock()
-	m.started = true
-	m.mu.Unlock()
-
-	ctx, m.cancel = context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 
 	m.legacyNodes = typeutil.NewUniqueSet(legacyNodes...)
 
@@ -185,6 +181,10 @@ func (m *ChannelManagerImpl) doStartup(ctx context.Context, legacyNodes, allNode
 	}
 	m.mu.Unlock()
 
+	// All operations succeeded, now set the state
+	m.cancel = cancel
+	m.started = true
+
 	if m.balanceCheckLoop != nil {
 		log.Ctx(ctx).Info("starting channel balance loop")
 		m.wg.Add(1)
@@ -204,21 +204,24 @@ func (m *ChannelManagerImpl) doStartup(ctx context.Context, legacyNodes, allNode
 }
 
 func (m *ChannelManagerImpl) Close() {
-	m.mu.Lock()
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+	m.doClose()
+}
+
+// doClose is the internal implementation of Close without acquiring startupMu.
+// It should only be called when startupMu is already held.
+func (m *ChannelManagerImpl) doClose() {
 	if !m.started {
-		m.mu.Unlock()
 		return
 	}
-	m.mu.Unlock()
 
 	if m.cancel != nil {
 		m.cancel()
 		m.wg.Wait()
 	}
 
-	m.mu.Lock()
 	m.started = false
-	m.mu.Unlock()
 }
 
 func (m *ChannelManagerImpl) AddNode(nodeID UniqueID) error {
