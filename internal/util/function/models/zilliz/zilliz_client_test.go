@@ -205,12 +205,6 @@ func setupMockServer(t *testing.T) (*grpc.Server, *bufconn.Listener, func(contex
 		return lis.Dial()
 	}
 
-	go func() {
-		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
-		}
-	}()
-
 	return s, lis, dialer
 }
 
@@ -269,6 +263,12 @@ func TestZillizClient_Embedding(t *testing.T) {
 
 	modelservicepb.RegisterTextEmbeddingServiceServer(s, mockServer)
 
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
+
 	// Create connection
 	conn, err := grpc.DialContext(
 		context.Background(),
@@ -309,6 +309,12 @@ func TestZillizClient_Embedding_Error(t *testing.T) {
 	}
 
 	modelservicepb.RegisterTextEmbeddingServiceServer(s, mockServer)
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
 
 	// Create connection
 	conn, err := grpc.DialContext(
@@ -352,6 +358,12 @@ func TestZillizClient_Rerank(t *testing.T) {
 
 	modelservicepb.RegisterRerankServiceServer(s, mockServer)
 
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
+
 	// Create connection
 	conn, err := grpc.DialContext(
 		context.Background(),
@@ -391,6 +403,12 @@ func TestZillizClient_Rerank_Error(t *testing.T) {
 	}
 
 	modelservicepb.RegisterRerankServiceServer(s, mockServer)
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
 
 	// Create connection
 	conn, err := grpc.DialContext(
@@ -463,6 +481,12 @@ func TestNewZilliClient_WithMockServer(t *testing.T) {
 	defer s.Stop()
 	defer lis.Close()
 
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
+
 	// We need to test the client creation with a working connection
 	// Since NewZilliClient uses the global client manager, we need to test it differently
 	t.Run("valid config with mock server", func(t *testing.T) {
@@ -501,6 +525,12 @@ func TestZillizClient_Embedding_EmptyResponse(t *testing.T) {
 	}
 
 	modelservicepb.RegisterTextEmbeddingServiceServer(s, mockServer)
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
 
 	// Create connection
 	conn, err := grpc.DialContext(
