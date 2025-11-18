@@ -332,7 +332,7 @@ pipeline {
         
         }
         success {
-            echo 'I succeeeded!'
+            echo 'I succeeded!'
             container('main') {
                 dir ('tests/python_client/chaos/scripts') {
                     script {
