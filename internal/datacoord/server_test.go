@@ -1700,7 +1700,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		mockTriggerManager := NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
-		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
 
 		mockHandler := NewMockCompactionInspector(t)
 		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
