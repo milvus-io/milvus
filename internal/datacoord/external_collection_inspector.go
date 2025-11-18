@@ -88,7 +88,7 @@ func (i *externalCollectionInspector) reloadFromMeta() {
 			continue
 		}
 		// Enqueue active tasks for processing
-		updateTask := newUpdateExternalCollectionTask(t, i.mt)
+		updateTask := newUpdateExternalCollectionTask(t, i.mt, i.allocator)
 		i.scheduler.Enqueue(updateTask)
 	}
 }
@@ -253,7 +253,7 @@ func (i *externalCollectionInspector) SubmitUpdateTask(collectionID int64) error
 	}
 
 	// Create and enqueue task
-	updateTask := newUpdateExternalCollectionTask(t, i.mt)
+	updateTask := newUpdateExternalCollectionTask(t, i.mt, i.allocator)
 	i.scheduler.Enqueue(updateTask)
 
 	log.Info("external collection update task submitted",
