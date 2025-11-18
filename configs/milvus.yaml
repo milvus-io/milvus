@@ -89,7 +89,7 @@ localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
-  path: /var/lib/milvus/data/
+  path: /home/ubuntu/milvus-data/data
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -267,7 +267,7 @@ rocksmq:
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
   # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
-  path: /var/lib/milvus/rdb_data
+  path: /home/ubuntu/milvus-data/rdb_data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
   rocksmqPageSize: 67108864 # The maximum size of messages in each page in RocksMQ. Messages in RocksMQ are checked and cleared (when expired) in batch based on this parameters. Unit: Byte.
   retentionTimeInMinutes: 4320 # The maximum retention time of acked messages in RocksMQ. Acked messages in RocksMQ are retained for the specified period of time and then cleared. Unit: Minute.
@@ -310,7 +310,7 @@ proxy:
       bufSize: 512 # The maximum number of messages can be buffered in the timeTick message stream of the proxy when producing messages.
   maxNameLength: 255 # The maximum length of the name or alias that can be created in Milvus, including the collection name, collection alias, partition name, and field name.
   maxFieldNum: 64 # The maximum number of field can be created when creating in a collection. It is strongly DISCOURAGED to set maxFieldNum >= 64.
-  maxVectorFieldNum: 4 # The maximum number of vector fields that can be specified in a collection
+  maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
@@ -858,7 +858,7 @@ msgChannel:
 log:
   # Milvus log level. Option: trace, debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
-  level: info
+  level: error
   file:
     # Root path to the log files.
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
@@ -1477,4 +1477,4 @@ function:
           enable: true # Whether to enable voyageai model service
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
-    local_resource_path: /var/lib/milvus/analyzer
+    local_resource_path: /home/ubuntu/milvus-data/analyzer

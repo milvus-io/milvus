@@ -242,3 +242,5 @@ replace (
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
+
+replace github.com/milvus-io/milvus-proto/go-api/v2 => /home/ubuntu/milvus-proto/go-api
