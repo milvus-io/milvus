@@ -19,6 +19,7 @@ package hookutil
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"plugin"
 	"strconv"
@@ -132,7 +133,7 @@ func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID i
 			},
 			{
 				Key:   CipherConfigUnsafeEZK,
-				Value: string(key),
+				Value: base64.StdEncoding.EncodeToString(key),
 			},
 		}
 		return pluginContext
