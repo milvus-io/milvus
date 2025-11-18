@@ -146,6 +146,9 @@ func (impl *shardInterceptor) handleInsertOrDeleteMessage(ctx context.Context, m
 	// Assign segment for insert/delete message.
 	// !!! Current implementation a insert/delete message only has one parition, but we need to merge the message for partition-key in future.
 	for _, partition := range header.GetPartitions() {
+		if partition.PartitionId == 0 {
+			return nil, status.NewUnrecoverableError("partition id should not be 0, maybe milvus is on-upgrading")
+		}
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
 			// use payload size instead.
@@ -214,7 +217,7 @@ type assignSegmentHeader interface {
 }
 
 // prepareAssignSegment prepares the assign segment header and the callback to overwrite the header.
-func (impl *shardInterceptor) prepareAssignSegment(ctx context.Context, msg message.MutableMessage) *prepareAssignSegmentResult {
+func (impl *shardInterceptor) prepareAssignSegment(_ context.Context, msg message.MutableMessage) *prepareAssignSegmentResult {
 	type assignSegmentHeader interface {
 		GetPartitions() []*messagespb.PartitionSegmentAssignment
 		GetCollectionId() int64
