@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -31,10 +32,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
@@ -266,6 +271,94 @@ func (s *SearchPipelineSuite) TestOrganizeOp() {
 	fmt.Println(ret)
 }
 
+func (s *SearchPipelineSuite) TestHighlightOp() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	proxy := &Proxy{}
+	proxy.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	sched, err := newTaskScheduler(ctx, proxy.tsoAllocator)
+	s.Require().NoError(err)
+
+	err = sched.Start()
+	s.Require().NoError(err)
+	defer sched.Close()
+	proxy.sched = sched
+
+	collName := "test_coll_highlight"
+	fieldName2Types := map[string]schemapb.DataType{
+		testVarCharField: schemapb.DataType_VarChar,
+	}
+	schema := constructCollectionSchemaByDataType(collName, fieldName2Types, testVarCharField, false)
+
+	req := &milvuspb.SearchRequest{
+		CollectionName: collName,
+		DbName:         "default",
+	}
+
+	highlightTasks := []*highlightTask{
+		{
+			HighlightTask: &querypb.HighlightTask{
+				Texts:     []string{"target text"},
+				FieldName: testVarCharField,
+				FieldId:   100,
+			},
+			preTags:  [][]byte{[]byte(DefaultPreTag)},
+			postTags: [][]byte{[]byte(DefaultPostTag)},
+		},
+	}
+
+	mockLb := shardclient.NewMockLBPolicy(s.T())
+	searchTask := &searchTask{
+		node:           proxy,
+		highlightTasks: highlightTasks,
+		lb:             mockLb,
+		schema:         newSchemaInfo(schema),
+		request:        req,
+		collectionName: collName,
+		SearchRequest: &internalpb.SearchRequest{
+			CollectionID: 0,
+		},
+	}
+
+	op, err := opFactory[highlightOp](searchTask, map[string]any{})
+	s.Require().NoError(err)
+
+	// mockery
+	mockLb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload shardclient.CollectionWorkLoad) {
+		qn := mocks.NewMockQueryNodeClient(s.T())
+		qn.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
+			&querypb.GetHighlightResponse{
+				Status:  merr.Success(),
+				Results: []*querypb.HighlightResult{},
+			}, nil)
+		workload.Exec(ctx, 0, qn, "test_chan")
+	}).Return(nil)
+
+	_, err = op.run(ctx, s.span, &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			TopK:  3,
+			Topks: []int64{1},
+			FieldsData: []*schemapb.FieldData{{
+				FieldName: testVarCharField,
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"match text"},
+							},
+						},
+					},
+				},
+			}},
+		},
+	})
+	s.NoError(err)
+}
+
 func (s *SearchPipelineSuite) TestSearchPipeline() {
 	collectionName := "test"
 	task := &searchTask{
@@ -295,8 +388,11 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 	}
+
 	pipeline, err := newPipeline(searchPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
+
 	sr := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
 	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{sr}, segcore.StorageCost{ScannedRemoteBytes: 100, ScannedTotalBytes: 250})
 	s.NoError(err)
@@ -363,6 +459,8 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 
 	pipeline, err := newPipeline(searchWithRequeryPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
+
 	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{
 		genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false),
 	}, segcore.StorageCost{ScannedRemoteBytes: 100, ScannedTotalBytes: 200})
@@ -435,6 +533,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 
 	pipeline, err := newPipeline(searchWithRerankPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
 
 	searchResults := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
 	results, _, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults}, segcore.StorageCost{})
@@ -518,6 +617,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 
 	pipeline, err := newPipeline(searchWithRerankRequeryPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
 
 	searchResults := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
 	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults}, segcore.StorageCost{})
@@ -552,6 +652,7 @@ func (s *SearchPipelineSuite) TestHybridSearchPipe() {
 
 	pipeline, err := newPipeline(hybridSearchPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
 
 	f1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	f2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
@@ -665,6 +766,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 
 	pipeline, err := newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
 
 	d1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	d2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
@@ -707,6 +809,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 
 	pipeline, err := newPipeline(hybridSearchWithRequeryPipe, task)
 	s.NoError(err)
+	pipeline.AddNodes(task, filterFieldNode)
 
 	d1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	d2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)

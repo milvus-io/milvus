@@ -3040,3 +3040,9 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	}
 	return nil
 }
+
+func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSchema) (*schemapb.FunctionSchema, bool) {
+	return lo.Find(functions, func(function *schemapb.FunctionSchema) bool {
+		return function.GetType() == schemapb.FunctionType_BM25 && function.OutputFieldIds[0] == fieldID
+	})
+}
