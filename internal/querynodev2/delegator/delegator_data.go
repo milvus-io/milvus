@@ -1042,13 +1042,15 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 			}
 
 			for j := 0; j < int(topks[i]); j++ {
-				offsets := []int64{}
+				spans := SpanList{}
 				for _, token := range corpusResults[corpusIdx] {
 					if tokenSet.Contain(token.GetToken()) {
-						offsets = append(offsets, token.GetStartOffset(), token.GetEndOffset())
+						spans = append(spans, Span{token.GetStartOffset(), token.GetEndOffset()})
 					}
 				}
-				result = append(result, &querypb.HighlightResult{Fragments: []*querypb.HighlightFragment{{StartOffset: 0, EndOffset: int64(len(task.Texts[int(task.SearchTextNum)+corpusIdx])), Offsets: offsets}}})
+				spans = mergeOffsets(spans)
+				frags := fetchFragmentsFromOffsets(task.Texts[int(task.SearchTextNum)+corpusIdx], spans, task.GetOptions().GetFragmentSize(), task.GetOptions().GetNumOfFragments())
+				result = append(result, &querypb.HighlightResult{Fragments: frags})
 				corpusIdx++
 			}
 		}
