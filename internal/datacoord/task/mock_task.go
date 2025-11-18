@@ -407,6 +407,51 @@ func (_c *MockTask_QueryTaskOnWorker_Call) RunAndReturn(run func(session.Cluster
 	return _c
 }
 
+// RequiresExclusiveWorker provides a mock function with no fields
+func (_m *MockTask) RequiresExclusiveWorker() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequiresExclusiveWorker")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTask_RequiresExclusiveWorker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequiresExclusiveWorker'
+type MockTask_RequiresExclusiveWorker_Call struct {
+	*mock.Call
+}
+
+// RequiresExclusiveWorker is a helper method to define mock.On call
+func (_e *MockTask_Expecter) RequiresExclusiveWorker() *MockTask_RequiresExclusiveWorker_Call {
+	return &MockTask_RequiresExclusiveWorker_Call{Call: _e.mock.On("RequiresExclusiveWorker")}
+}
+
+func (_c *MockTask_RequiresExclusiveWorker_Call) Run(run func()) *MockTask_RequiresExclusiveWorker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_RequiresExclusiveWorker_Call) Return(_a0 bool) *MockTask_RequiresExclusiveWorker_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_RequiresExclusiveWorker_Call) RunAndReturn(run func() bool) *MockTask_RequiresExclusiveWorker_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetTaskTime provides a mock function with given fields: timeType, _a1
 func (_m *MockTask) SetTaskTime(timeType taskcommon.TimeType, _a1 time.Time) {
 	_m.Called(timeType, _a1)

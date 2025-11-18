@@ -415,3 +415,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		zap.Any("PreAllocatedLogIDs", logIDRange), zap.Any("segID2DeltaLogs", segIDMap))
 	return plan, nil
 }
+
+func (t *mixCompactionTask) RequiresExclusiveWorker() bool {
+	return false
+}

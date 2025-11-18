@@ -154,7 +154,7 @@ func (s *globalTaskScheduler) schedule() {
 			break
 		}
 		cpuSlot, memorySlot := task.GetTaskSlot()
-		nodeID := s.pickNode(nodeSlots, cpuSlot, memorySlot, task.GetTaskType())
+		nodeID := s.pickNode(nodeSlots, cpuSlot, memorySlot, task.RequiresExclusiveWorker())
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -312,7 +312,7 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 	}
 }
 
-func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, cpuSlot, memorySlot float64, taskType string) int64 {
+func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, cpuSlot, memorySlot float64, exclusiveWorker bool) int64 {
 	var nodeID int64 = NullNodeID
 	if len(workerSlots) <= 0 {
 		return nodeID
@@ -331,7 +331,7 @@ func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlot
 			nodeID = optimal.NodeID
 		}
 	} else {
-		if cpuSlot <= optimal.AvailableCpuSlot || taskType != taskcommon.Index || optimal.AvailableCpuSlot == optimal.TotalCpuSlot {
+		if cpuSlot <= optimal.AvailableCpuSlot || !exclusiveWorker || optimal.AvailableCpuSlot == optimal.TotalCpuSlot {
 			nodeID = optimal.NodeID
 		}
 	}

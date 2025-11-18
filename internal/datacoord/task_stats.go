@@ -383,3 +383,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))
 	return nil
 }
+
+func (st *statsTask) RequiresExclusiveWorker() bool {
+	return false
+}

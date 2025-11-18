@@ -224,3 +224,7 @@ func (p *preImportTask) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(importTask)
 }
+
+func (p *preImportTask) RequiresExclusiveWorker() bool {
+	return false
+}

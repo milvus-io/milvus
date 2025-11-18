@@ -426,3 +426,7 @@ func (t *l0CompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) 
 
 	return t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 }
+
+func (t *l0CompactionTask) RequiresExclusiveWorker() bool {
+	return false
+}

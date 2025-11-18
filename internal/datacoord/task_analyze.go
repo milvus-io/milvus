@@ -237,3 +237,7 @@ func (at *analyzeTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 func (at *analyzeTask) DropTaskOnWorker(cluster session.Cluster) {
 	at.tryDropTaskOnWorker(cluster)
 }
+
+func (at *analyzeTask) RequiresExclusiveWorker() bool {
+	return true
+}

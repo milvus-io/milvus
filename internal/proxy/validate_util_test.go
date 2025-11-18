@@ -7257,3 +7257,10 @@ func TestFillWithNullValue_Geometry(t *testing.T) {
 		assert.Nil(t, field.GetScalars().GetGeometryData().GetData()[3])
 	})
 }
+
+func TestConvertWKT(t *testing.T) {
+	wkt := "SRID=4326; POINT(0 0)"
+	defaultValueWkbBytes, err := common.ConvertWKTToWKB(wkt)
+	assert.NoError(t, err)
+	fmt.Println(defaultValueWkbBytes)
+}

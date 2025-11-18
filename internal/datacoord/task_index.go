@@ -46,8 +46,9 @@ import (
 type indexBuildTask struct {
 	*model.SegmentIndex
 
-	cpuSlot    float64
-	memorySlot float64
+	cpuSlot       float64
+	memorySlot    float64
+	isVectorIndex bool
 
 	times *taskcommon.Times
 
@@ -62,6 +63,7 @@ var _ globalTask.Task = (*indexBuildTask)(nil)
 func newIndexBuildTask(segIndex *model.SegmentIndex,
 	cpuSlot float64,
 	memorySlot float64,
+	isVectorIndex bool,
 	meta *meta,
 	handler Handler,
 	chunkManager storage.ChunkManager,
@@ -71,6 +73,7 @@ func newIndexBuildTask(segIndex *model.SegmentIndex,
 		SegmentIndex:              segIndex,
 		cpuSlot:                   cpuSlot,
 		memorySlot:                memorySlot,
+		isVectorIndex:             isVectorIndex,
 		times:                     taskcommon.NewTimes(),
 		meta:                      meta,
 		handler:                   handler,
@@ -420,4 +423,8 @@ func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 
 func (it *indexBuildTask) DropTaskOnWorker(cluster session.Cluster) {
 	it.tryDropTaskOnWorker(cluster)
+}
+
+func (it *indexBuildTask) RequiresExclusiveWorker() bool {
+	return it.isVectorIndex
 }

@@ -283,3 +283,7 @@ func (t *importTask) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(importTask)
 }
+
+func (t *importTask) RequiresExclusiveWorker() bool {
+	return false
+}

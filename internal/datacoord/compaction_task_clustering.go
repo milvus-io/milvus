@@ -845,3 +845,7 @@ func (t *clusteringCompactionTask) GetLabel() string {
 func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetTaskProto().GetState() == datapb.CompactionTaskState_pipelining && (t.GetTaskProto().GetNodeID() == 0 || t.GetTaskProto().GetNodeID() == NullNodeID)
 }
+
+func (t *clusteringCompactionTask) RequiresExclusiveWorker() bool {
+	return true
+}

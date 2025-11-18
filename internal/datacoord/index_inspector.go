@@ -213,6 +213,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	i.scheduler.Enqueue(newIndexBuildTask(model.CloneSegmentIndex(segIndex),
 		cpuSlot,
 		memorySlot,
+		isVectorIndex,
 		i.meta,
 		i.handler,
 		i.storageCli,
@@ -231,11 +232,13 @@ func (i *indexInspector) reloadFromMeta() {
 			}
 
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.GetCollectionID(), segIndex.IndexID)
-			cpuSlot, memorySlot := calculateIndexTaskSlot(segment.getSegmentSize(), IsVectorField(i.meta, segment.GetCollectionID(), fieldID))
+			isVectorIndex := IsVectorField(i.meta, segment.GetCollectionID(), fieldID)
+			cpuSlot, memorySlot := calculateIndexTaskSlot(segment.getSegmentSize(), isVectorIndex)
 			i.scheduler.Enqueue(newIndexBuildTask(
 				model.CloneSegmentIndex(segIndex),
 				cpuSlot,
 				memorySlot,
+				isVectorIndex,
 				i.meta,
 				i.handler,
 				i.storageCli,
