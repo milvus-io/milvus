@@ -15,7 +15,7 @@ import (
 var errFastLockFailed = errors.New("fast lock failed")
 
 // newResourceKeyLocker creates a new resource key locker.
-func newResourceKeyLocker(metrics *broadcasterMetrics) *resourceKeyLocker {
+func newResourceKeyLocker() *resourceKeyLocker {
 	return &resourceKeyLocker{
 		inner: lock.NewKeyLock[resourceLockKey](),
 	}
