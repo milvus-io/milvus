@@ -3953,7 +3953,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorIndex = ParamItem{
 		Key:          "queryNode.mmap.vectorIndex",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3968,7 +3968,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarField = ParamItem{
 		Key:          "queryNode.mmap.scalarField",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3983,7 +3983,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarIndex = ParamItem{
 		Key:          "queryNode.mmap.scalarIndex",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -4008,7 +4008,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
 		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data.
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
@@ -4568,22 +4568,25 @@ type dataCoordConfig struct {
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
-	CompactionRPCTimeout             ParamItem `refreshable:"true"`
-	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
-	MinSegmentToMerge                ParamItem `refreshable:"true"`
-	SegmentSmallProportion           ParamItem `refreshable:"true"`
-	SegmentCompactableProportion     ParamItem `refreshable:"true"`
-	SegmentExpansionRate             ParamItem `refreshable:"true"`
-	CompactionTimeoutInSeconds       ParamItem `refreshable:"true"` // deprecated
-	CompactionDropToleranceInSeconds ParamItem `refreshable:"true"`
-	CompactionGCIntervalInSeconds    ParamItem `refreshable:"true"`
-	CompactionCheckIntervalInSeconds ParamItem `refreshable:"false"` // deprecated
-	CompactionScheduleInterval       ParamItem `refreshable:"false"`
-	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
-	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
-	GlobalCompactionInterval         ParamItem `refreshable:"false"`
-	CompactionExpiryTolerance        ParamItem `refreshable:"true"`
+	CompactionRPCTimeout                      ParamItem `refreshable:"true"`
+	CompactionMaxParallelTasks                ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks             ParamItem `refreshable:"true"`
+	CompactionMaxFullSegmentThreshold         ParamItem `refreshable:"true"`
+	CompactionForceMergeDataNodeMemoryFactor  ParamItem `refreshable:"true"`
+	CompactionForceMergeQueryNodeMemoryFactor ParamItem `refreshable:"true"`
+	MinSegmentToMerge                         ParamItem `refreshable:"true"`
+	SegmentSmallProportion                    ParamItem `refreshable:"true"`
+	SegmentCompactableProportion              ParamItem `refreshable:"true"`
+	SegmentExpansionRate                      ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds                ParamItem `refreshable:"true"` // deprecated
+	CompactionDropToleranceInSeconds          ParamItem `refreshable:"true"`
+	CompactionGCIntervalInSeconds             ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds          ParamItem `refreshable:"false"` // deprecated
+	CompactionScheduleInterval                ParamItem `refreshable:"false"`
+	MixCompactionTriggerInterval              ParamItem `refreshable:"false"`
+	L0CompactionTriggerInterval               ParamItem `refreshable:"false"`
+	GlobalCompactionInterval                  ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance                 ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -5024,6 +5027,47 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms",
 	}
 	p.CompactionScheduleInterval.Init(base.mgr)
+
+	p.CompactionMaxFullSegmentThreshold = ParamItem{
+		Key:          "dataCoord.compaction.maxFullSegmentThreshold",
+		Version:      "2.6.8",
+		DefaultValue: "100",
+		Doc:          "Maximum number of segments to use maxFull algorithm (O(n³) complexity) for optimal full segment count. For larger counts, uses faster larger algorithm (O(n)).",
+		Export:       false,
+	}
+	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
+
+	p.CompactionForceMergeDataNodeMemoryFactor = ParamItem{
+		Key:          "dataCoord.compaction.forceMerge.dataNodeMemoryFactor",
+		Version:      "2.6.8",
+		DefaultValue: "3.0",
+		Doc:          "Memory safety factor for DataNode during force merge compaction. Max segment size = DataNode memory / factor. Default 3.0 means segments can use up to 1/3 of DataNode memory. Must be >= 1.0.",
+		Export:       false,
+		Formatter: func(value string) string {
+			factor, err := strconv.ParseFloat(value, 64)
+			if err != nil || factor < 1.0 {
+				factor = 1.0
+			}
+			return strconv.FormatFloat(factor, 'f', -1, 64)
+		},
+	}
+	p.CompactionForceMergeDataNodeMemoryFactor.Init(base.mgr)
+
+	p.CompactionForceMergeQueryNodeMemoryFactor = ParamItem{
+		Key:          "dataCoord.compaction.forceMerge.queryNodeMemoryFactor",
+		Version:      "2.6.8",
+		DefaultValue: "3.0",
+		Doc:          "Memory safety factor for QueryNode when loading segments after force merge. Max segment size = QueryNode memory / factor. Default 3.0 means segments can use up to 40% of QueryNode memory. Must be >= 1.0.",
+		Export:       false,
+		Formatter: func(value string) string {
+			factor, err := strconv.ParseFloat(value, 64)
+			if err != nil || factor < 1.0 {
+				factor = 1.0
+			}
+			return strconv.FormatFloat(factor, 'f', -1, 64)
+		},
+	}
+	p.CompactionForceMergeQueryNodeMemoryFactor.Init(base.mgr)
 
 	p.SingleCompactionRatioThreshold = ParamItem{
 		Key:          "dataCoord.compaction.single.ratio.threshold",

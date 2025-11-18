@@ -160,10 +160,11 @@ func (suite *SegmentSuite) TestResourceUsageEstimate() {
 	usage := suite.growing.ResourceUsageEstimate()
 	suite.Zero(usage.MemorySize)
 	suite.Zero(usage.DiskSize)
-	// growing segment has no resource usage
+	// sealed segment has resource usage
 	usage = suite.sealed.ResourceUsageEstimate()
-	suite.NotZero(usage.MemorySize)
-	suite.Zero(usage.DiskSize)
+	// mmap is on
+	suite.Zero(usage.MemorySize)
+	suite.NotZero(usage.DiskSize)
 	suite.Zero(usage.MmapFieldCount)
 }
 
