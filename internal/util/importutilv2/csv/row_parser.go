@@ -189,6 +189,15 @@ func (r *rowParser) reconstructArrayForStructArray(structName string, subFieldsM
 			flatStructs[fieldName] = append(flatStructs[fieldName], value)
 		}
 	}
+
+	// struct list can be empty, len(structs) can be zero
+	// fill flatStructs with empty list for each sub field if len(structs) is zero
+	if len(structs) == 0 {
+		for subFieldName := range subFieldsMap {
+			flatStructs[subFieldName] = make([]any, 0)
+		}
+	}
+
 	return flatStructs, nil
 }
 
