@@ -90,6 +90,7 @@ jobs:
           CCACHE_COMPRESSLEVEL: 9
           CCACHE_MAXSIZE: 1G
         run: |
+          brew list --versions llvm
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
