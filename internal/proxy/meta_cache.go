@@ -350,6 +350,10 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	return m.getCollectionFromCache(database, collectionName, collectionID)
+}
+
+func (m *MetaCache) getCollectionFromCache(database, collectionName string, collectionID UniqueID) (*collectionInfo, bool) {
 	db, ok := m.collInfo[database]
 	if !ok {
 		return nil, false
@@ -373,6 +377,21 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if collInfo, ok := m.getCollection(database, collectionName, collectionID); ok {
 		return collInfo, nil
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if collInfo, ok := m.getCollectionFromCache(database, collectionName, collectionID); ok {
+		return collInfo, nil
+	}
+
+	// following update operation should be protected by mutex, otherwise, the meta cache of proxy may be inconsistent with the coordinator.
+	// e.g. without mutex protection:
+	// There're 2 DDL operation A1 A2, and 1 query operation Q1.
+	// A1 is executed first, and the metacache is invalidated, the collection is on V1.
+	// Q1 and A2 are executed concurrently,
+	// Q1 see the empty cache, trigger a update operation, read collection info with V1.
+	// A2 update the collection meta into V2, then trigger a invalidate cache operation, invalidate with a empty cache and gone.
+	// Q1 update the cache with collection info with V1, which is not consistent with the coordinator with V2.
 
 	collection, err := m.describeCollection(ctx, database, collectionName, collectionID)
 	if err != nil {
@@ -413,8 +432,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 
 	schemaInfo := newSchemaInfo(collection.Schema)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
 	// Compatibility logic: if the rootcoord version is lower(requestTime = 0), update the cache directly.
 	if collection.GetRequestTime() < curVersion && collection.GetRequestTime() != 0 {
