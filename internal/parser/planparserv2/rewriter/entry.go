@@ -102,7 +102,6 @@ func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {
 }
 
 func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
-	// sortTermValues always runs regardless of config settings
 	sortTermValues(expr)
 	return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: expr}}
 }
