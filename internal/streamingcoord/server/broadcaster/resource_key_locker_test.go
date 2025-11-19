@@ -13,7 +13,7 @@ import (
 
 func TestResourceKeyLocker(t *testing.T) {
 	t.Run("concurrent lock/unlock", func(t *testing.T) {
-		locker := newResourceKeyLocker(newBroadcasterMetrics())
+		locker := newResourceKeyLocker()
 		const numGoroutines = 10
 		const numKeys = 5
 		const numIterations = 100
@@ -70,7 +70,7 @@ func TestResourceKeyLocker(t *testing.T) {
 	})
 
 	t.Run("deadlock prevention", func(t *testing.T) {
-		locker := newResourceKeyLocker(newBroadcasterMetrics())
+		locker := newResourceKeyLocker()
 		key1 := message.NewCollectionNameResourceKey("test_collection_1")
 		key2 := message.NewCollectionNameResourceKey("test_collection_2")
 
@@ -108,7 +108,7 @@ func TestResourceKeyLocker(t *testing.T) {
 	})
 
 	t.Run("fast lock", func(t *testing.T) {
-		locker := newResourceKeyLocker(newBroadcasterMetrics())
+		locker := newResourceKeyLocker()
 		key := message.NewCollectionNameResourceKey("test_collection")
 
 		// First fast lock should succeed

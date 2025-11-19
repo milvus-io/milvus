@@ -35,7 +35,7 @@ func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
-	rkLocker := newResourceKeyLocker(metrics)
+	rkLocker := newResourceKeyLocker()
 	ackScheduler := newAckCallbackScheduler(logger)
 
 	recoveryTasks := make([]*broadcastTask, 0, len(protos))
