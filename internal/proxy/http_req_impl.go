@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -348,6 +349,13 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
+		}
+
+		// Convert TIMESTAMPTZ default values back to string format for the user.
+		if err := timestamptz.RewriteTimestampTzDefaultValueToString(describeCollectionResp.Schema); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				mhttp.HTTPReturnMessage: err.Error(),
+			})
 		}
 
 		describePartitionResp, err := rootCoord.ShowPartitions(c, &milvuspb.ShowPartitionsRequest{
