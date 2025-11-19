@@ -90,12 +90,11 @@ jobs:
           CCACHE_COMPRESSLEVEL: 9
           CCACHE_MAXSIZE: 1G
         run: |
-          brew list --versions llvm
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
           ls -alh /var/tmp/ccache
-          brew install libomp ninja openblas ccache pkg-config
+          brew install llvm libomp ninja openblas ccache pkg-config
           pip3 install conan==1.64.1
           make milvus
       - name: Upload Cmake log
