@@ -97,6 +97,8 @@ if [[ "${MILVUS_HELM_RELEASE_NAME}" != *"msop"* ]]; then
   fi
 fi
 
+cd ${ROOT}/tests/python_client
+
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
   
