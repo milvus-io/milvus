@@ -205,6 +205,8 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		SchemaVersion:        0,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
+		ExternalSource:       body.CollectionSchema.ExternalSource,
+		ExternalSpec:         body.CollectionSchema.ExternalSpec,
 	}
 }
 

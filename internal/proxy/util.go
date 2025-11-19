@@ -721,7 +721,10 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 		}
 	}
 	if idx == -1 {
-		return errors.New("primary key is not specified")
+		// External collections may not have a primary key
+		if coll.ExternalSource == "" {
+			return errors.New("primary key is not specified")
+		}
 	}
 
 	for _, structArrayField := range coll.StructArrayFields {
@@ -741,6 +744,43 @@ func validateDynamicField(coll *schemapb.CollectionSchema) error {
 			return errors.New("cannot explicitly set a field as a dynamic field")
 		}
 	}
+	return nil
+}
+
+func validateExternalCollection(coll *schemapb.CollectionSchema) error {
+	// Check if this is an external collection
+	if coll.ExternalSource == "" {
+		return nil
+	}
+
+	// External collections cannot have dynamic field enabled
+	if coll.EnableDynamicField {
+		return errors.New("external collection cannot have dynamic field enabled")
+	}
+
+	// For external collections, all fields (except system fields) must have external_field mapping
+	for _, field := range coll.Fields {
+		// Skip system fields (RowID and Timestamp)
+		if field.Name == common.RowIDFieldName || field.Name == common.TimeStampFieldName {
+			continue
+		}
+
+		// Check if external_field is set
+		if field.ExternalField == "" {
+			return fmt.Errorf("field '%s' in external collection must have external_field mapping", field.Name)
+		}
+	}
+
+	// Validate struct array fields
+	for _, structArrayField := range coll.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.ExternalField == "" {
+				return fmt.Errorf("field '%s' in struct array field '%s' of external collection must have external_field mapping",
+					field.Name, structArrayField.Name)
+			}
+		}
+	}
+
 	return nil
 }
 
