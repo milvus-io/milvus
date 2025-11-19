@@ -37,16 +37,21 @@ StorageV2FSCache::Get(const Key& key) {
     std::promise<milvus_storage::ArrowFileSystemPtr> p;
     std::shared_future<milvus_storage::ArrowFileSystemPtr> f = p.get_future();
 
+    std::shared_lock lck(mutex_);
     auto [iter, inserted] =
         concurrent_map_.emplace(key, Value(std::move(p), f));
+    lck.unlock();
+
     if (!inserted) {
         std::shared_lock lck(mutex_);
-        // double check: avoid iter has been earsed by other thread
+        // double check: avoid iter has been erased by other thread
         auto it = concurrent_map_.find(key);
         if (it != concurrent_map_.end()) {
             return it->second.second.get();
         }
-        return nullptr;
+        lck.unlock();
+        // retry if already delete
+        return Get(key);
     }
 
     try {
