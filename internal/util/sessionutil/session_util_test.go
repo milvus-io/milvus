@@ -302,8 +302,8 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	defer s.Revoke(time.Second)
 
-	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
-		return &sessionWatcher{
+	getWatcher := func(s *Session, rewatch Rewatch) *SessionWatcher {
+		return &SessionWatcher{
 			s:        s,
 			prefix:   "test",
 			rewatch:  rewatch,
@@ -389,9 +389,16 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 			Canceled: true,
 		}
 
-		assert.Panics(t, func() {
+		assert.NotPanics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
+
+		select {
+		case _, ok := <-w.eventCh:
+			assert.False(t, ok)
+		case <-time.After(time.Second):
+			t.Fatal("event channel should be closed")
+		}
 	})
 
 	t.Run("err handled but rewatch failed", func(t *testing.T) {
@@ -401,9 +408,16 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		wresp := clientv3.WatchResponse{
 			CompactRevision: 1,
 		}
-		assert.Panics(t, func() {
+		assert.NotPanics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
+
+		select {
+		case _, ok := <-w.eventCh:
+			assert.False(t, ok)
+		case <-time.After(time.Second):
+			t.Fatal("event channel should be closed")
+		}
 	})
 
 	t.Run("err handled but list failed", func(t *testing.T) {
@@ -416,9 +430,16 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 			CompactRevision: 1,
 		}
 
-		assert.Panics(t, func() {
+		assert.NotPanics(t, func() {
 			w.handleWatchResponse(wresp)
 		})
+
+		select {
+		case _, ok := <-w.eventCh:
+			assert.False(t, ok)
+		case <-time.After(time.Second):
+			t.Fatal("event channel should be closed")
+		}
 	})
 }
 
