@@ -56,18 +56,23 @@ jobs:
           python-version: '<3.12'
       - name: Install CMake 3.31.8
         run: |
-          cmake --version
-          which cmake
-          brew uninstall cmake -f
+          cmake --version || true
+          which cmake || true
+          if ! brew list cmake &>/dev/null; then
+            brew uninstall cmake -f
+          fi
           curl -LO https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz
           tar -zxf cmake-3.31.8-macos-universal.tar.gz -C /tmp/
           sudo mv /tmp/cmake-3.31.8-macos-universal/CMake.app /Applications/
+          sudo rm -f /usr/local/bin/cmake /usr/local/bin/cpack /usr/local/bin/ctest
+          sudo rm -f /opt/homebrew/bin/cmake /opt/homebrew/bin/cpack /opt/homebrew/bin/ctest
           echo -e "\n=== Creating symlinks for CMake ==="
           sudo ln -s /Applications/CMake.app/Contents/bin/cmake /usr/local/bin/cmake
           sudo ln -s /Applications/CMake.app/Contents/bin/cpack /usr/local/bin/cpack
           sudo ln -s /Applications/CMake.app/Contents/bin/ctest /usr/local/bin/ctest
           CMAKE_MODULE_DIR="/Applications/CMake.app/Contents/share/cmake-3.31"
-          sudo ln -s "$CMAKE_MODULE_DIR" /usr/local/share/cmake-3.31          
+          sudo ln -s "$CMAKE_MODULE_DIR" /usr/local/share/cmake-3.31
+          export PATH="/usr/local/bin:$PATH"          
           cmake --version
           which cmake
       - name: Setup Go environment
