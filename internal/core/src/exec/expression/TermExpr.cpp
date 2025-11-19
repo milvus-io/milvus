@@ -878,16 +878,21 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return nullptr;
     }
 
-    std::vector<uint8_t> vals;
-    for (auto& val : expr_->vals_) {
-        vals.emplace_back(GetValueFromProto<bool>(val) ? 1 : 0);
+    if (!arg_inited_) {
+        std::vector<uint8_t> vals;
+        for (auto& val : expr_->vals_) {
+            vals.emplace_back(GetValueFromProto<bool>(val) ? 1 : 0);
+        }
+        arg_set_ = std::make_shared<FlatVectorElement<uint8_t>>(vals);
+        arg_inited_ = true;
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<uint8_t>& vals) {
         TermIndexFunc<bool> func;
         return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
     };
-    auto res = ProcessIndexChunks<bool>(execute_sub_batch, vals);
+    auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
+    auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
     return res;
 }
 

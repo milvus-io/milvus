@@ -554,6 +554,8 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
     std::shared_ptr<MultiElement> arg_set_double_;
+    std::shared_ptr<void>
+        arg_cached_set_;  // For caching std::set<T> or std::vector<T>
     PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
 };
 }  //namespace exec
