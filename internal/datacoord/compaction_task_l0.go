@@ -128,7 +128,7 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		log.Warn("l0CompactionTask failed to get compaction result", zap.Error(err))
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
 		if err != nil {
-			log.Warn("update clustering compaction task meta failed", zap.Error(err))
+			log.Warn("update l0 compaction task meta failed", zap.Error(err))
 		}
 		return
 	}
