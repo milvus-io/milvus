@@ -837,29 +837,36 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         return nullptr;
     }
 
-    std::vector<IndexInnerType> vals;
-    for (auto& val : expr_->vals_) {
-        if constexpr (std::is_same_v<T, double>) {
-            if (val.has_int64_val()) {
-                // only json field will cast int to double because other fields are casted in proxy
-                vals.emplace_back(static_cast<double>(val.int64_val()));
-                continue;
+    if (!arg_inited_) {
+        std::vector<IndexInnerType> vals;
+        for (auto& val : expr_->vals_) {
+            if constexpr (std::is_same_v<T, double>) {
+                if (val.has_int64_val()) {
+                    // only json field will cast int to double because other fields are casted in proxy
+                    vals.emplace_back(static_cast<double>(val.int64_val()));
+                    continue;
+                }
+            }
+
+            // Generic overflow handling for all types
+            bool overflowed = false;
+            auto converted_val =
+                GetValueFromProtoWithOverflow<T>(val, overflowed);
+            if (!overflowed) {
+                vals.emplace_back(converted_val);
             }
         }
-
-        // Generic overflow handling for all types
-        bool overflowed = false;
-        auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
-        if (!overflowed) {
-            vals.emplace_back(converted_val);
-        }
+        arg_set_ = std::make_shared<FlatVectorElement<IndexInnerType>>(vals);
+        arg_inited_ = true;
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {
         TermIndexFunc<T> func;
         return func(index_ptr, vals.size(), vals.data());
     };
-    auto res = ProcessIndexChunks<T>(execute_sub_batch, vals);
+    auto args =
+        std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
+    auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
