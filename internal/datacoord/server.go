@@ -649,11 +649,6 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 		datanodes = append(datanodes, info)
 	}
 
-	// if err := s.nodeManager.Startup(s.ctx, datanodes); err != nil {
-	// 	log.Warn("DataCoord failed to add datanode", zap.Error(err))
-	// 	return err
-	// }
-
 	log.Info("DataCoord Cluster Manager start up")
 	if err := s.cluster.Startup(s.ctx, datanodes); err != nil {
 		log.Warn("DataCoord Cluster Manager failed to start up", zap.Error(err))
