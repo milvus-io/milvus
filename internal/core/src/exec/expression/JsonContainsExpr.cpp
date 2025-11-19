@@ -539,11 +539,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    std::vector<proto::plan::Array> elements;
-    for (auto const& element : expr_->vals_) {
-        elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
+    if (!arg_inited_) {
+        auto elements = std::make_shared<std::vector<proto::plan::Array>>();
+        for (auto const& element : expr_->vals_) {
+            elements->emplace_back(
+                GetValueFromProto<proto::plan::Array>(element));
+        }
+        arg_cached_set_ = elements;
+        arg_inited_ = true;
     }
 
+    auto elements = std::static_pointer_cast<std::vector<proto::plan::Array>>(
+        arg_cached_set_);
     size_t processed_cursor = 0;
     auto execute_sub_batch =
         [&processed_cursor, &
@@ -608,14 +615,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
                                                             res,
                                                             valid_res,
                                                             pointer,
-                                                            elements);
+                                                            *elements);
     } else {
         processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
                                                          std::nullptr_t{},
                                                          res,
                                                          valid_res,
                                                          pointer,
-                                                         elements);
+                                                         *elements);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -734,11 +741,17 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-    std::set<GetType> elements;
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueWithCastNumber<GetType>(element));
+    if (!arg_inited_) {
+        auto elements = std::make_shared<std::set<GetType>>();
+        for (auto const& element : expr_->vals_) {
+            elements->insert(GetValueWithCastNumber<GetType>(element));
+        }
+        arg_cached_set_ = elements;
+        arg_inited_ = true;
     }
 
+    auto elements =
+        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
     auto execute_sub_batch =
         [&processed_cursor, &
@@ -786,10 +799,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
                                                     input,
                                                     res,
                                                     valid_res,
-                                                    elements);
+                                                    *elements);
     } else {
         processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, elements);
+            execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -827,11 +840,17 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    std::set<GetType> elements;
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<GetType>(element));
+    if (!arg_inited_) {
+        auto elements = std::make_shared<std::set<GetType>>();
+        for (auto const& element : expr_->vals_) {
+            elements->insert(GetValueFromProto<GetType>(element));
+        }
+        arg_cached_set_ = elements;
+        arg_inited_ = true;
     }
 
+    auto elements =
+        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
     int processed_cursor = 0;
     auto execute_sub_batch =
         [&processed_cursor, &
@@ -902,14 +921,14 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
                                                     res,
                                                     valid_res,
                                                     pointer,
-                                                    elements);
+                                                    *elements);
     } else {
         processed_size = ProcessDataChunks<Json>(execute_sub_batch,
                                                  std::nullptr_t{},
                                                  res,
                                                  valid_res,
                                                  pointer,
-                                                 elements);
+                                                 *elements);
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -930,12 +949,19 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    std::set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<GetType>(element));
+    if (!arg_inited_) {
+        auto elements = std::make_shared<std::set<GetType>>();
+        for (auto const& element : expr_->vals_) {
+            elements->insert(GetValueFromProto<GetType>(element));
+        }
+        arg_cached_set_ = elements;
+        arg_inited_ = true;
     }
-    if (elements.empty()) {
+
+    auto elements =
+        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+    if (elements->empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
             TargetBitmap(real_batch_size, false),
@@ -961,7 +987,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 pointer, milvus::index::JSONType::ARRAY);
             if (!target_field.empty()) {
                 ShreddingArrayBsonContainsAllExecutor<GetType> executor(
-                    elements);
+                    *elements);
 
                 index->ExecutorForShreddingData<std::string_view>(
                     op_ctx_,
@@ -984,7 +1010,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
                 return;
             }
 
-            std::set<GetType> tmp_elements(elements);
+            std::set<GetType> tmp_elements(*elements);
             for (const auto& element : val.value()) {
                 auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
                     element.get_value());

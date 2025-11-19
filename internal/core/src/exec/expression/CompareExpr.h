@@ -269,7 +269,7 @@ class PhyCompareFilterExpr : public Expr {
                           OffsetVector* input,
                           TargetBitmapView res,
                           TargetBitmapView valid_res,
-                          ValTypes... values) {
+                          const ValTypes&... values) {
         if (segment_chunk_reader_.segment_->is_chunked()) {
             return ProcessBothDataChunksForMultipleChunk<T,
                                                          U,
@@ -288,7 +288,7 @@ class PhyCompareFilterExpr : public Expr {
                              OffsetVector* input,
                              TargetBitmapView res,
                              TargetBitmapView valid_res,
-                             ValTypes... values) {
+                             const ValTypes&... values) {
         int64_t size = input->size();
         int64_t processed_size = 0;
         const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
@@ -380,7 +380,7 @@ class PhyCompareFilterExpr : public Expr {
     ProcessBothDataChunksForSingleChunk(FUNC func,
                                         TargetBitmapView res,
                                         TargetBitmapView valid_res,
-                                        ValTypes... values) {
+                                        const ValTypes&... values) {
         int64_t processed_size = 0;
 
         const auto active_count = segment_chunk_reader_.active_count_;
@@ -450,7 +450,7 @@ class PhyCompareFilterExpr : public Expr {
     ProcessBothDataChunksForMultipleChunk(FUNC func,
                                           TargetBitmapView res,
                                           TargetBitmapView valid_res,
-                                          ValTypes... values) {
+                                          const ValTypes&... values) {
         int64_t processed_size = 0;
 
         // only call this function when left and right are not indexed, so they have the same number of chunks
