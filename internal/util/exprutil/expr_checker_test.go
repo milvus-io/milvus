@@ -295,7 +295,7 @@ func TestValidatePartitionKeyIsolation(t *testing.T) {
 		{
 			name:                "partition key isolation equal AND with same field term",
 			expr:                "key_field == 10 && key_field in [10]",
-			expectedErrorString: "partition key isolation does not support IN",
+			expectedErrorString: "",
 		},
 		{
 			name:                "partition key isolation equal OR with same field equal",

@@ -43,6 +43,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 	out = append(out, others...)
 	for _, g := range groups {
 		if shouldMergeToIn(g.col.GetDataType(), len(g.values)) {
+			g.values = sortGenericValues(g.values)
 			out = append(out, newTermExpr(g.col, g.values))
 		} else {
 			for _, i := range g.origIndices {
@@ -92,6 +93,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 	out = append(out, others...)
 	for _, g := range groups {
 		if shouldMergeToIn(g.col.GetDataType(), len(g.values)) {
+			g.values = sortGenericValues(g.values)
 			in := newTermExpr(g.col, g.values)
 			out = append(out, notExpr(in))
 		} else {
@@ -268,9 +270,10 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		// union all equal values into term set
 		union := g.term.GetValues()
 		for i, ev := range g.eqVals {
-			union = unionValues(union, []*planpb.GenericValue{ev})
+			union = append(union, ev)
 			used[g.eqIdxs[i]] = true
 		}
+		union = sortGenericValues(union)
 		used[g.termIdx] = true
 		out = append(out, newTermExpr(g.col, union))
 	}
@@ -419,8 +422,9 @@ func (v *visitor) combineOrInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 		}
 		union := []*planpb.GenericValue{}
 		for _, vs := range g.values {
-			union = unionValues(union, vs)
+			union = append(union, vs...)
 		}
+		union = sortGenericValues(union)
 		for _, i := range g.idxs {
 			used[i] = true
 		}

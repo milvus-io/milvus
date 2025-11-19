@@ -149,7 +149,6 @@ func sortGenericValues(values []*planpb.GenericValue) []*planpb.GenericValue {
 }
 
 func newTermExpr(col *planpb.ColumnInfo, values []*planpb.GenericValue) *planpb.Expr {
-	values = sortGenericValues(values)
 	return &planpb.Expr{
 		Expr: &planpb.Expr_TermExpr{
 			TermExpr: &planpb.TermExpr{
@@ -281,7 +280,7 @@ func filterValuesByRange(dt schemapb.DataType, values []*planpb.GenericValue, lo
 			out = append(out, v)
 		}
 	}
-	return sortGenericValues(out)
+	return out
 }
 
 func unionValues(valuesA, valuesB []*planpb.GenericValue) []*planpb.GenericValue {
