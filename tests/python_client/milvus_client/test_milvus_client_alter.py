@@ -165,10 +165,10 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         self.drop_collection_properties(client, collection_name, property_keys=["lazyload.enabled"],
                                         check_task=CheckTasks.err_res, check_items=error)
         # TODO                                
-        # error = {ct.err_code: 999,
-        #          ct.err_msg: "can not delete dynamicfield properties"}
-        # self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
-        #                                 check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 999,
+                 ct.err_msg: "cannot delete key dynamicfield.enabled"}
+        self.drop_collection_properties(client, collection_name, property_keys=["dynamicfield.enabled"],
+                                        check_task=CheckTasks.err_res, check_items=error)
         res3 = self.describe_collection(client, collection_name)[0]
         assert len(res1.get('properties', {})) == 1
         self.drop_collection_properties(client, collection_name, property_keys=["collection.ttl.seconds"])
@@ -224,35 +224,52 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
         rows_new = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                      default_string_field_name: str(i), default_new_field_name: i,
-                     default_dynamic_field_name: i} for i in range(default_nb)]
+                     default_dynamic_field_name: {'a': {"b": i}}} for i in range(default_nb)]
         self.insert(client, collection_name, rows_new)
-        # 6. query using filter with dynamic field and new field
+        # 6. create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_dynamic_field_name,
+                               index_type="INVERTED",
+                               params={"json_cast_type": "DOUBLE",
+                                       "json_path": f"{default_dynamic_field_name}['a']['b']"})
+        self.create_index(client, collection_name, index_params)
+        index_name = "$meta/" + default_dynamic_field_name
+        self.describe_index(client, collection_name, index_name + "/a/b",
+                            check_task=CheckTasks.check_describe_index_property,
+                            check_items={
+                                "json_cast_type": "DOUBLE",
+                                "json_path": f"{default_dynamic_field_name}['a']['b']",
+                                "index_type": "INVERTED",
+                                "field_name": default_dynamic_field_name,
+                                "index_name": index_name + "/a/b"})
+        # 7. query using filter with dynamic field and new field
         res = self.query(client, collection_name,
-                         filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
+                         filter=f"{default_dynamic_field_name}['a']['b'] >= 0 and field_new < {default_value}",
                          output_fields=[default_dynamic_field_name],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: [{"id": item["id"],
                                                  default_dynamic_field_name: item[default_dynamic_field_name]}
                                                  for item in rows_new]})[0]
         assert set(res[0].keys()) == {default_dynamic_field_name, default_primary_key_field_name}
-        # 7. search using filter with dynamic field and new field
+        # 8. search using filter with dynamic field and new field
         vectors_to_search = [vectors[0]]
         insert_ids = [i for i in range(default_nb)]
         self.search(client, collection_name, vectors_to_search,
-                    filter="{} >= 0 and field_new < {}".format(default_dynamic_field_name, default_value),
+                    filter=f"{default_dynamic_field_name}['a']['b'] >= 0 and field_new < {default_value}",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
                                  "pk_name": default_primary_key_field_name,
                                  "limit": default_limit})
-        # 8. add new field same as dynamic field name
+        # 9. add new field same as dynamic field name
         self.add_collection_field(client, collection_name, field_name=default_dynamic_field_name,
                                   data_type=DataType.INT64, nullable=True, default_value=default_value)
-        # 9. query using filter with dynamic field and new field
+        # 10. query using filter with dynamic field and new field
         res = self.query(client, collection_name,
-                         filter='$meta["{}"] >= 0 and {} == {}'.format(default_dynamic_field_name,
-                                                                       default_dynamic_field_name, default_value),
+                         filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(default_dynamic_field_name,
+                                                                                 default_dynamic_field_name,
+                                                                                 default_value),
                          output_fields=[default_dynamic_field_name, f'$meta["{default_dynamic_field_name}"]'],
                          check_task=CheckTasks.check_query_results,
                          check_items={exp_res: [{"id": item["id"], default_dynamic_field_name: default_value}
@@ -260,10 +277,10 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
         # dynamic field same as new field name, output_fields contain dynamic field, result do not contain dynamic field
         # https://github.com/milvus-io/milvus/issues/41702
         assert set(res[0].keys()) == {default_dynamic_field_name, default_primary_key_field_name}
-        # 10. search using filter with dynamic field and new field
+        # 11. search using filter with dynamic field and new field
         self.search(client, collection_name, vectors_to_search,
-                    filter='$meta["{}"] >= 0 and {} == {}'.format(default_dynamic_field_name,
-                                                                  default_dynamic_field_name, default_value),
+                    filter='$meta["{}"]["a"]["b"] >= 0 and {} == {}'.format(default_dynamic_field_name,
+                                                                            default_dynamic_field_name, default_value),
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
