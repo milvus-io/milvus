@@ -43,7 +43,7 @@ concurrency:
 jobs:
   mac:
     name: Code Checker MacOS
-    runs-on: macos-14-intel
+    runs-on: macos-14
     timeout-minutes: 360
     steps:
       - name: Checkout
