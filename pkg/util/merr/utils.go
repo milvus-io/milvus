@@ -1121,6 +1121,12 @@ func WrapErrInconsistentRequery(msg ...string) error {
 	return err
 }
 
+func WrapErrKMSKeyRevoked(dbID int64, reason string) error {
+	return wrapFields(ErrKMSKeyRevoked,
+		value("dbID", dbID),
+		value("reason", reason))
+}
+
 func WrapErrCompactionReadDeltaLogErr(msg ...string) error {
 	err := error(ErrCompactionReadDeltaLogErr)
 	if len(msg) > 0 {

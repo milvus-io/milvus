@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -48,6 +49,9 @@ type SimpleLimiter struct {
 	// for alloc
 	allocWaitInterval time.Duration
 	allocRetryTimes   uint
+
+	// for KMS key revocation
+	revokedDatabases sync.Map // map[int64]string (dbID → reason)
 }
 
 // NewSimpleLimiter returns a new SimpleLimiter.
@@ -71,6 +75,12 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	}
 	if n <= 0 {
 		return nil
+	}
+
+	// Check for KMS key revocation (highest priority)
+	if dbID != util.InvalidDBID && m.isDatabaseRevoked(dbID) {
+		reason := m.getRevokedReason(dbID)
+		return merr.WrapErrKMSKeyRevoked(dbID, reason)
 	}
 
 	m.quotaStatesMu.RLock()
@@ -377,4 +387,33 @@ func IsDDLRequest(rt internalpb.RateType) bool {
 	default:
 		return false
 	}
+}
+
+// MarkDatabaseRevoked marks a database as revoked due to KMS key issues
+func (m *SimpleLimiter) MarkDatabaseRevoked(dbID int64, reason string) {
+	m.revokedDatabases.Store(dbID, reason)
+	log.Info("database marked as revoked",
+		zap.Int64("dbID", dbID),
+		zap.String("reason", reason))
+}
+
+// UnmarkDatabaseRevoked removes revocation mark from a database
+func (m *SimpleLimiter) UnmarkDatabaseRevoked(dbID int64) {
+	m.revokedDatabases.Delete(dbID)
+	log.Info("database revocation mark removed",
+		zap.Int64("dbID", dbID))
+}
+
+// isDatabaseRevoked checks if a database is currently revoked
+func (m *SimpleLimiter) isDatabaseRevoked(dbID int64) bool {
+	_, ok := m.revokedDatabases.Load(dbID)
+	return ok
+}
+
+// getRevokedReason returns the revocation reason for a database
+func (m *SimpleLimiter) getRevokedReason(dbID int64) string {
+	if reason, ok := m.revokedDatabases.Load(dbID); ok {
+		return reason.(string)
+	}
+	return "unknown reason"
 }
