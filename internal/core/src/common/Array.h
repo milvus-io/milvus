@@ -293,11 +293,11 @@ class Array {
         return offsets_ptr_;
     }
 
-    ScalarArray
-    output_data() const {
-        ScalarArray data_array;
+    void
+    output_data(ScalarArray& data_array) const {
         switch (element_type_) {
             case DataType::BOOL: {
+                data_array.mutable_bool_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<bool>(j);
                     data_array.mutable_bool_data()->add_data(element);
@@ -307,6 +307,7 @@ class Array {
             case DataType::INT8:
             case DataType::INT16:
             case DataType::INT32: {
+                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<int>(j);
                     data_array.mutable_int_data()->add_data(element);
@@ -314,6 +315,7 @@ class Array {
                 break;
             }
             case DataType::INT64: {
+                data_array.mutable_long_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<int64_t>(j);
                     data_array.mutable_long_data()->add_data(element);
@@ -322,13 +324,15 @@ class Array {
             }
             case DataType::STRING:
             case DataType::VARCHAR: {
+                data_array.mutable_string_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string>(j);
-                    data_array.mutable_string_data()->add_data(element);
+                    auto element = get_data<std::string_view>(j);
+                    data_array.mutable_string_data()->add_data(element.data(), element.size());
                 }
                 break;
             }
             case DataType::FLOAT: {
+                data_array.mutable_float_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<float>(j);
                     data_array.mutable_float_data()->add_data(element);
@@ -336,6 +340,7 @@ class Array {
                 break;
             }
             case DataType::DOUBLE: {
+                data_array.mutable_double_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<double>(j);
                     data_array.mutable_double_data()->add_data(element);
@@ -343,9 +348,10 @@ class Array {
                 break;
             }
             case DataType::GEOMETRY: {
+                data_array.mutable_geometry_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string>(j);
-                    data_array.mutable_geometry_data()->add_data(element);
+                    auto element = get_data<std::string_view>(j);
+                    data_array.mutable_geometry_data()->add_data(element.data(), element.size());
                 }
                 break;
             }
@@ -353,6 +359,12 @@ class Array {
                 // empty array
             }
         }
+    }
+
+    ScalarArray
+    output_data() const {
+        ScalarArray data_array;
+        output_data(data_array);
         return data_array;
     }
 
@@ -538,11 +550,11 @@ class ArrayView {
         return reinterpret_cast<T*>(data_)[index];
     }
 
-    ScalarArray
-    output_data() const {
-        ScalarArray data_array;
+    void
+    output_data(ScalarArray& data_array) const {
         switch (element_type_) {
             case DataType::BOOL: {
+                data_array.mutable_bool_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<bool>(j);
                     data_array.mutable_bool_data()->add_data(element);
@@ -552,6 +564,7 @@ class ArrayView {
             case DataType::INT8:
             case DataType::INT16:
             case DataType::INT32: {
+                data_array.mutable_int_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<int>(j);
                     data_array.mutable_int_data()->add_data(element);
@@ -559,6 +572,7 @@ class ArrayView {
                 break;
             }
             case DataType::INT64: {
+                data_array.mutable_long_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<int64_t>(j);
                     data_array.mutable_long_data()->add_data(element);
@@ -567,13 +581,15 @@ class ArrayView {
             }
             case DataType::STRING:
             case DataType::VARCHAR: {
+                data_array.mutable_string_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string>(j);
-                    data_array.mutable_string_data()->add_data(element);
+                    auto element = get_data<std::string_view>(j);
+                    data_array.mutable_string_data()->add_data(element.data(), element.size());
                 }
                 break;
             }
             case DataType::FLOAT: {
+                data_array.mutable_float_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<float>(j);
                     data_array.mutable_float_data()->add_data(element);
@@ -581,6 +597,7 @@ class ArrayView {
                 break;
             }
             case DataType::DOUBLE: {
+                data_array.mutable_double_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
                     auto element = get_data<double>(j);
                     data_array.mutable_double_data()->add_data(element);
@@ -588,9 +605,10 @@ class ArrayView {
                 break;
             }
             case DataType::GEOMETRY: {
+                data_array.mutable_geometry_data()->mutable_data()->Reserve(length_);
                 for (int j = 0; j < length_; ++j) {
-                    auto element = get_data<std::string>(j);
-                    data_array.mutable_geometry_data()->add_data(element);
+                    auto element = get_data<std::string_view>(j);
+                    data_array.mutable_geometry_data()->add_data(element.data(), element.size());
                 }
                 break;
             }
@@ -598,6 +616,12 @@ class ArrayView {
                 // empty array
             }
         }
+    }
+
+    ScalarArray
+    output_data() const {
+        ScalarArray data_array;
+        output_data(data_array);
         return data_array;
     }
 

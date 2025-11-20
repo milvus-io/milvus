@@ -1436,7 +1436,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     auto field = reinterpret_cast<const ChunkedArrayColumn*>(column);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
-        dst->at(i) = std::move(field->RawAt(offset));
+        field->operator[](offset).output_data(dst->at(i));
     }
 }
 
