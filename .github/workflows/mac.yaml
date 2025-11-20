@@ -56,7 +56,6 @@ jobs:
           python-version: '<3.12'
       - name: Install CMake 3.31.8
         run: |
-          ls -alh /usr/local/opt/
           cmake --version || true
           which cmake || true
           if ! brew list cmake &>/dev/null; then
