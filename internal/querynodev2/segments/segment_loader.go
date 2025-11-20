@@ -275,11 +275,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
 
-	log = log.With(
-		zap.Int64s("requestSegments", lo.Map(segments, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
-		zap.Int64s("preparedSegments", lo.Map(infos, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
-	)
-
 	// continue to wait other task done
 	log.Info("start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)))
 
@@ -608,10 +603,7 @@ func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int
 		return nil, nil
 	}
 
-	segments := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 {
-		return info.GetSegmentID()
-	})
-	log.Info("start loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int64s("segmentIDs", segments), zap.Int("segmentNum", segmentNum))
+	log.Info("start loading bm25 stats for remote...", zap.Int64("collectionID", collectionID), zap.Int("segmentNum", segmentNum))
 
 	loadedStats := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
 	loadRemoteBM25Func := func(idx int) error {
@@ -636,7 +628,7 @@ func (loader *segmentLoader) LoadBM25Stats(ctx context.Context, collectionID int
 	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteBM25Func, "loadRemoteBM25Func")
 	if err != nil {
 		// no partial success here
-		log.Warn("failed to load bm25 stats for remote segment", zap.Int64("collectionID", collectionID), zap.Int64s("segmentIDs", segments), zap.Error(err))
+		log.Warn("failed to load bm25 stats for remote segment", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
