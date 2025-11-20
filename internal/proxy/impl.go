@@ -169,6 +169,11 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			node.shardMgr.RemoveDatabase(request.GetDbName())
 			fallthrough
 		case commonpb.MsgType_AlterDatabase:
+			if db, err := globalMetaCache.GetDatabaseInfo(ctx, request.GetDbName()); err == nil && db != nil {
+				if err := hookutil.RefreshEZ(db.properties); err != nil {
+					log.Info("failed to refresh ez hook", zap.Error(err))
+				}
+			}
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
 			if request.CollectionID != UniqueID(0) {

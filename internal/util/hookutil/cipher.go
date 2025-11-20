@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -59,18 +60,35 @@ func IsClusterEncyptionEnabled() bool {
 }
 
 const (
-	// Used in db and collection properties
-	EncryptionEnabledKey = "cipher.enabled"
-	EncryptionRootKeyKey = "cipher.key"
-	EncryptionEzIDKey    = "cipher.ezID"
-
 	// Used in Plugins
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
+	CipherConfigRefreshEZ      = "cipher.ez.refresh"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
 	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
 	CipherConfigUnsafeEZK      = "cipher.ezk"
 )
+
+// KeyState represents the state of a KMS key
+type KeyState string
+
+const (
+	KeyStateEnabled         KeyState = "Enabled"
+	KeyStateDisabled        KeyState = "Disabled"
+	KeyStatePendingDeletion KeyState = "PendingDeletion"
+	KeyStateUnknown         KeyState = "Unknown"
+)
+
+// CipherWithState extends the base Cipher interface with
+// GetStates, and RegisterRotationCallback
+type CipherWithState interface {
+	hook.Cipher
+
+	// GetStates returns the state of KMS keys.
+	// Returns a map of ezID -> state.
+	GetStates() (map[int64]string, error)
+	RegisterRotationCallback(callback func(ezID int64) error)
+}
 
 type EZ struct {
 	EzID         int64
@@ -91,14 +109,18 @@ type CipherContext struct {
 
 func ContainsCipherProperties(properties []*commonpb.KeyValuePair, deletedKeys []string) bool {
 	for _, property := range properties {
-		if property.Key == EncryptionEnabledKey ||
-			property.Key == EncryptionEzIDKey ||
-			property.Key == EncryptionRootKeyKey {
+		if property.Key == common.EncryptionEnabledKey ||
+			property.Key == common.EncryptionEzIDKey ||
+			property.Key == common.EncryptionRootKeyKey {
 			return true
 		}
 	}
 	return lo.ContainsBy(deletedKeys, func(data string) bool {
-		return lo.Contains([]string{EncryptionEnabledKey, EncryptionEzIDKey, EncryptionRootKeyKey}, data)
+		return lo.Contains([]string{
+			common.EncryptionEnabledKey,
+			common.EncryptionEzIDKey,
+			common.EncryptionRootKeyKey,
+		}, data)
 	})
 }
 
@@ -107,7 +129,7 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 		return nil
 	}
 	for _, property := range collProperties {
-		if property.Key == EncryptionEzIDKey {
+		if property.Key == common.EncryptionEzIDKey {
 			ezID, _ := strconv.ParseInt(property.Value, 10, 64)
 			return &EZ{
 				EzID:         ezID,
@@ -145,15 +167,15 @@ func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID i
 func GetDBCipherProperties(ezID uint64, kmsKey string) []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
 		{
-			Key:   EncryptionEnabledKey,
+			Key:   common.EncryptionEnabledKey,
 			Value: "true",
 		},
 		{
-			Key:   EncryptionEzIDKey,
+			Key:   common.EncryptionEzIDKey,
 			Value: strconv.FormatUint(ezID, 10),
 		},
 		{
-			Key:   EncryptionRootKeyKey,
+			Key:   common.EncryptionRootKeyKey,
 			Value: kmsKey,
 		},
 	}
@@ -166,7 +188,7 @@ func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 
 	ezIdStr := ""
 	for _, property := range dbProperties {
-		if property.Key == EncryptionEzIDKey {
+		if property.Key == common.EncryptionEzIDKey {
 			ezIdStr = property.Value
 		}
 	}
@@ -214,10 +236,10 @@ func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 
 	config := make(map[string]string)
 	for _, property := range dbProperties {
-		if property.GetKey() == EncryptionEzIDKey {
+		if property.GetKey() == common.EncryptionEzIDKey {
 			config[CipherConfigCreateEZ] = property.Value
 		}
-		if property.GetKey() == EncryptionRootKeyKey {
+		if property.GetKey() == common.EncryptionRootKeyKey {
 			config[CipherConfigKeyKmsKeyArn] = property.GetValue()
 		}
 	}
@@ -240,12 +262,12 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 
 	if dbEncryptionEnabled {
 		ezIDKv := &commonpb.KeyValuePair{
-			Key:   EncryptionEzIDKey,
+			Key:   common.EncryptionEzIDKey,
 			Value: strconv.FormatInt(ezID, 10),
 		}
 		// kmsKey already in the properties
 		for _, property := range dbProperties {
-			if property.Key == EncryptionRootKeyKey {
+			if property.Key == common.EncryptionRootKeyKey {
 				dbProperties = append(dbProperties, ezIDKv)
 				return dbProperties, nil
 			}
@@ -256,7 +278,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 			dbProperties = append(dbProperties,
 				ezIDKv,
 				&commonpb.KeyValuePair{
-					Key:   EncryptionRootKeyKey,
+					Key:   common.EncryptionRootKeyKey,
 					Value: defaultRootKey,
 				},
 			)
@@ -269,9 +291,9 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 
 func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.KeyValuePair {
 	for _, property := range dbProperties {
-		if property.Key == EncryptionEzIDKey {
+		if property.Key == common.EncryptionEzIDKey {
 			return &commonpb.KeyValuePair{
-				Key:   EncryptionEzIDKey,
+				Key:   common.EncryptionEzIDKey,
 				Value: property.Value,
 			}
 		}
@@ -281,7 +303,7 @@ func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 
 func IsDBEncryptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
 	for _, property := range dbProperties {
-		if property.Key == EncryptionEnabledKey && strings.ToLower(property.Value) == "true" {
+		if property.Key == common.EncryptionEnabledKey && strings.ToLower(property.Value) == "true" {
 			return true
 		}
 	}
@@ -396,6 +418,51 @@ func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) err
 
 	log.Info("cipher plugin config reloaded successfully", zap.String("key", key))
 	return nil
+}
+
+func RefreshEZ(properties []*commonpb.KeyValuePair) error {
+	ez := GetEzPropByDBProperties(properties)
+	if ez == nil || GetCipher() == nil {
+		return nil
+	}
+
+	config := map[string]string{
+		CipherConfigRefreshEZ: ez.GetValue(),
+	}
+	return GetCipher().Init(config)
+}
+
+func GetCipherWithState() CipherWithState {
+	cipher := GetCipher()
+	if cipher == nil {
+		return nil
+	}
+
+	cipherWithState, ok := cipher.(CipherWithState)
+	if !ok {
+		return nil
+	}
+	return cipherWithState
+}
+
+// GetEzStates queries the state of KMS keys for the given EZ IDs.
+// This uses type assertion to check if the cipher plugin implements CipherWithState.
+// If not supported, returns an empty map and no error (backward compatible).
+func GetEzStates() (map[int64]KeyState, error) {
+	if GetCipherWithState() == nil {
+		return make(map[int64]KeyState), nil
+	}
+
+	states, err := GetCipherWithState().GetStates()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int64]KeyState)
+	for ezID, state := range states {
+		result[ezID] = KeyState(state)
+	}
+
+	return result, nil
 }
 
 // testCipher encryption will append magicStr to plainText, magicStr is str of ezID and collectionID

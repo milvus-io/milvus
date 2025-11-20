@@ -210,6 +210,7 @@ func (s *mixCoordImpl) initInternal() error {
 		log.Error("queryCoord start failed", zap.Error(err))
 		return err
 	}
+
 	return nil
 }
 

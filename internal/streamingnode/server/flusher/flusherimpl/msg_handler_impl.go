@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -114,4 +115,16 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), putCollectionMsg.VChannel(), putCollectionMsg.Header().FlushedSegmentIds)
+}
+
+func (impl *msgHandlerImpl) HandleAlterDatabase(ctx context.Context, alterDatabaseMsg message.ImmutableAlterDatabaseMessageV2) error {
+	// Check for key rotation property in message body
+	body := alterDatabaseMsg.MustBody()
+	properties := body.Properties
+	if err := hookutil.RefreshEZ(properties); err != nil {
+		log.Error("failed to reload cipher after key rotation", zap.Error(err))
+		return err
+	}
+
+	return nil
 }

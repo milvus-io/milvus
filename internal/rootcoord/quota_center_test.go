@@ -337,12 +337,12 @@ func TestQuotaCenter(t *testing.T) {
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
 
-		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{4}, nil)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{4}, nil, "test")
 		assert.NoError(t, err)
 
 		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{1, 2, 3}, map[int64][]int64{
 			1: {1000},
-		})
+		}, "test")
 		assert.NoError(t, err)
 
 		for collectionID := range collectionIDToPartitionIDs {
@@ -364,7 +364,7 @@ func TestQuotaCenter(t *testing.T) {
 			}
 		}
 
-		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, []int64{0}, nil, nil)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, []int64{0}, nil, nil, "test")
 		assert.NoError(t, err)
 		dbLimiters := quotaCenter.rateLimiter.GetDatabaseLimiters(0)
 		assert.NotNil(t, dbLimiters)
@@ -428,7 +428,7 @@ func TestQuotaCenter(t *testing.T) {
 		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLInsert, 10)
 		updateLimit(quotaCenter.rateLimiter.GetCollectionLimiters(0, 2), internalpb.RateType_DMLDelete, 9)
 
-		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, []int64{0}, []int64{1}, nil)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, []int64{0}, []int64{1}, nil, "test")
 		assert.NoError(t, err)
 
 		assertLimit(quotaCenter.rateLimiter.GetRootLimiters(), internalpb.RateType_DMLInsert, 0)

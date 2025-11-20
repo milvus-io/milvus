@@ -69,6 +69,53 @@ func (_c *MockMsgHandler_HandleAlterCollection_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// HandleAlterDatabase provides a mock function with given fields: ctx, alterDatabaseMsg
+func (_m *MockMsgHandler) HandleAlterDatabase(ctx context.Context, alterDatabaseMsg message.ImmutableAlterDatabaseMessageV2) error {
+	ret := _m.Called(ctx, alterDatabaseMsg)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HandleAlterDatabase")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, message.ImmutableAlterDatabaseMessageV2) error); ok {
+		r0 = rf(ctx, alterDatabaseMsg)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockMsgHandler_HandleAlterDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleAlterDatabase'
+type MockMsgHandler_HandleAlterDatabase_Call struct {
+	*mock.Call
+}
+
+// HandleAlterDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - alterDatabaseMsg message.ImmutableAlterDatabaseMessageV2
+func (_e *MockMsgHandler_Expecter) HandleAlterDatabase(ctx interface{}, alterDatabaseMsg interface{}) *MockMsgHandler_HandleAlterDatabase_Call {
+	return &MockMsgHandler_HandleAlterDatabase_Call{Call: _e.mock.On("HandleAlterDatabase", ctx, alterDatabaseMsg)}
+}
+
+func (_c *MockMsgHandler_HandleAlterDatabase_Call) Run(run func(ctx context.Context, alterDatabaseMsg message.ImmutableAlterDatabaseMessageV2)) *MockMsgHandler_HandleAlterDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(message.ImmutableAlterDatabaseMessageV2))
+	})
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleAlterDatabase_Call) Return(_a0 error) *MockMsgHandler_HandleAlterDatabase_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMsgHandler_HandleAlterDatabase_Call) RunAndReturn(run func(context.Context, message.ImmutableAlterDatabaseMessageV2) error) *MockMsgHandler_HandleAlterDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HandleCreateSegment provides a mock function with given fields: ctx, createSegmentMsg
 func (_m *MockMsgHandler) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
 	ret := _m.Called(ctx, createSegmentMsg)

@@ -91,6 +91,17 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 		}
 	}
 
+	// Pop the internal properties before persist
+	newProperties = dropInternalProperties(newProperties)
+
+	// Get all vchannels for collections in this database to broadcast the message
+	broadcastChannels, err := c.getVChannelsForDatabase(ctx, req.GetDbName())
+	if err != nil {
+		return errors.Wrap(err, "failed to get vchannels for database")
+	}
+	// Always include control channel for ordering and callback coordination
+	broadcastChannels = append(broadcastChannels, streaming.WAL().ControlChannel())
+
 	msg := message.NewAlterDatabaseMessageBuilderV2().
 		WithHeader(&message.AlterDatabaseMessageHeader{
 			DbName: req.GetDbName(),
@@ -100,10 +111,34 @@ func (c *Core) broadcastAlterDatabase(ctx context.Context, req *rootcoordpb.Alte
 			Properties:      newProperties,
 			AlterLoadConfig: alterLoadConfig,
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(broadcastChannels).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
+}
+
+func dropInternalProperties(props []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	var newProps []*commonpb.KeyValuePair
+	for _, prop := range props {
+		if !common.IsInternalPropertyKey(prop) {
+			newProps = append(newProps, prop)
+		}
+	}
+	return newProps
+}
+
+// getVChannelsForDatabase gets all virtual channels for collections in the database.
+func (c *Core) getVChannelsForDatabase(ctx context.Context, dbName string) ([]string, error) {
+	colls, err := c.meta.ListCollections(ctx, dbName, typeutil.MaxTimestamp, true)
+	if err != nil {
+		return nil, err
+	}
+
+	vchannels := make([]string, 0)
+	for _, coll := range colls {
+		vchannels = append(vchannels, coll.VirtualChannelNames...)
+	}
+	return vchannels, nil
 }
 
 // getAlterLoadConfigOfAlterDatabase gets the alter load config of alter database.
@@ -137,7 +172,7 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 
-	db := model.NewDatabase(header.DbId, header.DbName, etcdpb.DatabaseState_DatabaseCreated, result.Message.MustBody().Properties)
+	db := model.NewDatabase(header.DbId, header.DbName, etcdpb.DatabaseState_DatabaseCreated, body.Properties)
 	if err := c.meta.AlterDatabase(ctx, db, result.GetControlChannelResult().TimeTick); err != nil {
 		return errors.Wrap(err, "failed to alter database")
 	}

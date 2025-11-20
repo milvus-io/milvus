@@ -297,6 +297,19 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle put collection message success")
 			}
+		case commonpb.MsgType_AlterDatabase:
+			alterDatabaseMsg := msg.(*adaptor.AlterDatabaseMessageBody)
+			logger := log.With(
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", alterDatabaseMsg.AlterDatabaseMessage.TimeTick()),
+			)
+			logger.Info("receive alter database message")
+			if err := ddn.msgHandler.HandleAlterDatabase(ddn.ctx, alterDatabaseMsg.AlterDatabaseMessage); err != nil {
+				logger.Warn("handle alter database message failed", zap.Error(err))
+			} else {
+				logger.Info("handle alter database message success")
+			}
 		}
 	}
 
