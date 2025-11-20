@@ -170,6 +170,10 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 }
 
 func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
+	testBalanceOnSingleReplica(s)
+}
+
+func testBalanceOnSingleReplica(s *BalanceTestSuit) {
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 1, 2, 2, 2000, 500)
 
@@ -412,6 +416,16 @@ func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
 	close(stopSearchCh)
 	wg.Wait()
 	s.Equal(int64(0), failCounter.Load())
+}
+
+func (s *BalanceTestSuit) TestMultiTargetBalancePolicy() {
+	// Set balance policy to MultipleTargetBalancer
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QueryCoordCfg.Balancer.Key: "MultipleTargetBalancer",
+	})
+	defer revertGuard()
+
+	testBalanceOnSingleReplica(s)
 }
 
 func TestBalance(t *testing.T) {
