@@ -77,7 +77,7 @@ func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case teiProvider:
-		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -160,10 +160,11 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 			{Key: models.EndpointParamKey, Value: "http://mymock.com"},
 		},
 	}
-	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+	batchFactor := 5
+	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
-	s.True(provider.MaxBatch() == 32*5)
+	s.True(provider.MaxBatch() == 32*batchFactor)
 
 	// Invalid truncate
 	{
@@ -196,8 +197,8 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 	// Valid max batch
 	{
 		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "128"}
-		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
+		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{BatchFactor: batchFactor})
 		s.NoError(err)
-		s.True(pv.MaxBatch() == 128*5)
+		s.True(pv.MaxBatch() == 128*batchFactor)
 	}
 }

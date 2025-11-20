@@ -347,6 +347,9 @@ func (s *Server) initDataCoord() error {
 func (s *Server) initMessageCallback() {
 	registry.RegisterImportV1AckCallback(func(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 		body := result.Message.MustBody()
+		if body.Schema != nil {
+			body.Schema.DbName = body.DbName
+		}
 		vchannels := result.GetVChannelsWithoutControlChannel()
 		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
 			CollectionID:   body.GetCollectionID(),

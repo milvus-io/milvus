@@ -21,6 +21,7 @@ import (
 )
 
 type functionConfig struct {
+	BatchFactor            ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders ParamGroup `refreshable:"true"`
 	RerankModelProviders   ParamGroup `refreshable:"true"`
 	LocalResourcePath      ParamItem  `refreshable:"true"`
@@ -29,6 +30,13 @@ type functionConfig struct {
 }
 
 func (p *functionConfig) init(base *BaseTable) {
+	p.BatchFactor = ParamItem{
+		Key:          "function.batch_factor.",
+		Version:      "2.6.7",
+		DefaultValue: "5",
+	}
+	p.BatchFactor.Init(base.mgr)
+
 	p.TextEmbeddingProviders = ParamGroup{
 		KeyPrefix: "function.textEmbedding.providers.",
 		Version:   "2.6.0",
@@ -166,6 +174,14 @@ func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map
 		}
 	}
 	return matchedParam
+}
+
+func (p *functionConfig) GetBatchFactor() int {
+	factor := p.BatchFactor.GetAsInt()
+	if factor <= 0 {
+		factor = 1
+	}
+	return factor
 }
 
 func (p *functionConfig) GetRerankModelProviders(providerName string) map[string]string {

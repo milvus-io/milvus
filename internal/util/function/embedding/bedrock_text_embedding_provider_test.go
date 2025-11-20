@@ -74,7 +74,7 @@ func createBedrockProvider(schema *schemapb.FieldSchema, providerName string, di
 	}
 	switch providerName {
 	case bedrockProvider:
-		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}), &models.ModelExtraInfo{})
+		return NewBedrockEmbeddingProvider(schema, functionSchema, &MockBedrockClient{dim: dim}, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -185,7 +185,7 @@ func (s *BedrockTextEmbeddingProviderSuite) TestNewBedrockEmbeddingProvider() {
 			{Key: models.NormalizeParamKey, Value: "false"},
 		},
 	}
-	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}), &models.ModelExtraInfo{})
+	provider, err := NewBedrockEmbeddingProvider(fieldSchema, functionSchema, nil, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.access_key_id": "mock", "mock.secret_access_key": "mock"}), &models.ModelExtraInfo{BatchFactor: 5})
 	s.NoError(err)
 	s.True(provider.MaxBatch() > 0)
 	s.Equal(provider.FieldDim(), int64(4))

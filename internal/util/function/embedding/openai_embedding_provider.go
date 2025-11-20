@@ -144,7 +144,7 @@ func NewAzureOpenAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 }
 
 func (provider *OpenAIEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *OpenAIEmbeddingProvider) FieldDim() int64 {
