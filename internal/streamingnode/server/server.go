@@ -43,7 +43,9 @@ func (s *Server) init() {
 	s.initService()
 
 	log.Info("init query segcore...")
-	initcore.InitQueryNode(context.TODO())
+	if err := initcore.InitQueryNode(context.TODO()); err != nil {
+		panic(fmt.Sprintf("init query node segcore failed, %+v", err))
+	}
 
 	log.Info("streamingnode server initialized")
 }
