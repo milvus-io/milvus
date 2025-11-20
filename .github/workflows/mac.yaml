@@ -96,7 +96,7 @@ jobs:
           fi
           brew install libomp ninja openblas ccache pkg-config
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@17 /usr/local/opt/llvm
+            ln -s /usr/local/opt/llvm@15 /usr/local/opt/llvm
           fi
           pip3 install conan==1.64.1
           make milvus
