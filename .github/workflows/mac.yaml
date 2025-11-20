@@ -95,6 +95,8 @@ jobs:
           fi
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
+          ls -alh /usr/local/opt/
+          ln -s /usr/local/opt/llvm@18 /usr/local/opt/llvm
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@18 /usr/local/opt/llvm
           fi
