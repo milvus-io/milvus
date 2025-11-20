@@ -426,5 +426,5 @@ func (it *indexBuildTask) DropTaskOnWorker(cluster session.Cluster) {
 }
 
 func (it *indexBuildTask) RequiresExclusiveWorker() bool {
-	return it.isVectorIndex
+	return it.isVectorIndex && it.cpuSlot > 4
 }
