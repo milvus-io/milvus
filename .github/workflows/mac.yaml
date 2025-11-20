@@ -43,7 +43,7 @@ concurrency:
 jobs:
   mac:
     name: Code Checker MacOS
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 360
     steps:
       - name: Checkout
@@ -90,12 +90,12 @@ jobs:
           CCACHE_COMPRESSLEVEL: 9
           CCACHE_MAXSIZE: 1G
         run: |
+          ls -alh /usr/local/opt/
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
-          ls -alh /usr/local/opt/
+          echo "llvm@18: "
           ln -s /usr/local/opt/llvm@18 /usr/local/opt/llvm
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@18 /usr/local/opt/llvm
