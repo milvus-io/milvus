@@ -99,6 +99,7 @@ func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	h.EXPECT().HandleCreateSegment(mock.Anything, mock.Anything).Return(nil)
 	h.EXPECT().HandleFlush(mock.Anything).Return(nil)
 	h.EXPECT().HandleManualFlush(mock.Anything).Return(nil)
+	h.EXPECT().HandleAlterDatabase(mock.Anything, mock.Anything).Return(nil)
 
 	ddn := ddNode{
 		ctx:          context.Background(),
