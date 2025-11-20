@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -2901,7 +2902,7 @@ func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) er
 			localTime := t.In(location)
 
 			// 3. Format using the optimized logic (max 6 digits, no trailing zeros)
-			isoStrings[i] = funcutil.FormatTimeMicroWithoutTrailingZeros(localTime)
+			isoStrings[i] = timestamptz.FormatTimeMicroWithoutTrailingZeros(localTime)
 		}
 
 		// Replace the TimestamptzData with the new StringData in place.

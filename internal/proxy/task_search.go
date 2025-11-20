@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -292,7 +293,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
 	if exist {
-		if !funcutil.IsTimezoneValid(timezone) {
+		if !timestamptz.IsTimezoneValid(timezone) {
 			log.Info("get invalid timezone from request", zap.String("timezone", timezone))
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
 		}

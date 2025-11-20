@@ -151,9 +151,11 @@ SearchOnSealedColumn(const Schema& schema,
                              search_info.round_decimal_);
 
     auto offset = 0;
+
+    auto vector_chunks = column->GetAllChunks(op_context);
     for (int i = 0; i < num_chunk; ++i) {
-        auto pw = column->DataOfChunk(op_context, i);
-        auto vec_data = pw.get();
+        auto pw = vector_chunks[i];
+        auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};

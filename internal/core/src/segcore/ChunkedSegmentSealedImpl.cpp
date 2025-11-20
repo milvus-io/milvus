@@ -2837,7 +2837,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
     // Step 1: Separate indexed and non-indexed fields
-    std::map<FieldId, const proto::segcore::FieldIndexInfo*>
+    std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>
         field_id_to_index_info;
     std::set<FieldId> indexed_fields;
 
@@ -2847,7 +2847,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
             continue;
         }
         auto field_id = FieldId(index_info.fieldid());
-        field_id_to_index_info[field_id] = &index_info;
+        field_id_to_index_info[field_id].push_back(&index_info);
         indexed_fields.insert(field_id);
     }
 
@@ -2857,10 +2857,13 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
     for (const auto& pair : field_id_to_index_info) {
         auto field_id = pair.first;
-        auto index_info_ptr = pair.second;
-        auto future = pool.Submit(
-            [this, trace_ctx, field_id, index_info_ptr, num_rows]() mutable
-            -> void {
+        auto index_infos = pair.second;
+        for (const auto& index_info_ptr : index_infos) {
+            auto future = pool.Submit([this,
+                                       trace_ctx,
+                                       field_id,
+                                       index_info_ptr,
+                                       num_rows]() mutable -> void {
                 // Convert proto FieldIndexInfo to LoadIndexInfo
                 auto load_index_info =
                     ConvertFieldIndexInfoToLoadIndexInfo(index_info_ptr);
@@ -2877,7 +2880,8 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
                 LoadIndex(load_index_info);
             });
 
-        load_index_futures.push_back(std::move(future));
+            load_index_futures.push_back(std::move(future));
+        }
     }
 
     // Wait for all index loading to complete and collect exceptions

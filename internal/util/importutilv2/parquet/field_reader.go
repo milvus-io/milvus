@@ -33,9 +33,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -729,7 +729,7 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 		// Convert the ISO 8601 string to int64 (UTC microseconds).
 		// The pcr.timezone is used as the default timezone if the string (strValue)
 		// does not contain an explicit UTC offset (e.g., "+08:00").
-		tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, pcr.timezone)
+		tz, err := timestamptz.ValidateAndReturnUnixMicroTz(strValue, pcr.timezone)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -755,7 +755,7 @@ func ReadTimestamptzData(pcr *FieldReader, count int64) (any, error) {
 	for _, strValue := range data.([]string) {
 		// Convert the ISO 8601 string to int64 (UTC microseconds).
 		// The pcr.timezone is used as the default if the string lacks an explicit offset.
-		tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, pcr.timezone)
+		tz, err := timestamptz.ValidateAndReturnUnixMicroTz(strValue, pcr.timezone)
 		if err != nil {
 			return nil, err
 		}

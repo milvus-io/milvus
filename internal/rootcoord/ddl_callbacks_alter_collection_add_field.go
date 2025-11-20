@@ -11,9 +11,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -39,6 +42,15 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
 		return errors.Wrap(err, "failed to check field schema")
 	}
+
+	if fieldSchema.GetDataType() == schemapb.DataType_Timestamptz {
+		timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, coll.Properties)
+		if !exist {
+			timezone = common.DefaultTimezone
+		}
+		timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone)
+	}
+
 	// check if the field already exists
 	for _, field := range coll.Fields {
 		if field.Name == fieldSchema.Name {

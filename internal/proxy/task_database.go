@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 )
 
 type createDatabaseTask struct {
@@ -74,7 +75,7 @@ func (cdt *createDatabaseTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, cdt.GetProperties())
-	if exist && !funcutil.IsTimezoneValid(tz) {
+	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 	return nil
@@ -277,7 +278,7 @@ func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
 	if len(t.GetProperties()) > 0 {
 		// Check the validation of timezone
 		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
-		if exist && !funcutil.IsTimezoneValid(userDefinedTimezone) {
+		if exist && !timestamptz.IsTimezoneValid(userDefinedTimezone) {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 	}
