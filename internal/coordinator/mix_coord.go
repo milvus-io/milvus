@@ -121,6 +121,10 @@ func (s *mixCoordImpl) Register() error {
 	if s.enableActiveStandBy {
 		go func() {
 			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+				if s.ctx.Err() == context.Canceled {
+					log.Info("standby process canceled due to server shutdown")
+					return
+				}
 				log.Error("failed to activate standby server", zap.Error(err))
 				panic(err)
 			}
