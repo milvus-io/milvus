@@ -43,7 +43,7 @@ concurrency:
 jobs:
   mac:
     name: Code Checker MacOS
-    runs-on: macos-14
+    runs-on: macos-15-intel
     timeout-minutes: 360
     steps:
       - name: Checkout
@@ -96,7 +96,7 @@ jobs:
           brew install libomp ninja openblas ccache pkg-config
           BREW_PREFIX=$(brew --prefix)
           if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then
-            ln -s ${BREW_PREFIX}/opt/llvm@15 ${BREW_PREFIX}/opt/llvm
+            ln -s ${BREW_PREFIX}/opt/llvm@17 ${BREW_PREFIX}/opt/llvm
           fi
           pip3 install conan==1.64.1
           make milvus
