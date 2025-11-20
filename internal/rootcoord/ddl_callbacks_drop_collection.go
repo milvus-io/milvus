@@ -131,8 +131,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 		ce.OptLPCMDBName(body.DbName),
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
-		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)).Build(),
-		result.GetControlChannelResult().TimeTick)
+		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)).Build())
 }
 
 // newCollectionTombstone creates a new collection tombstone.

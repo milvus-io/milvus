@@ -134,15 +134,16 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if globalMetaCache != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
+			// remove collection by name first, otherwise the drop collection remove version will be failed.
+			if collectionName != "" {
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
+				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
+			}
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
 				for _, name := range aliasName {
 					node.shardMgr.DeprecateShardCache(request.GetDbName(), name)
 				}
-			}
-			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
-				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
@@ -163,7 +164,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), false)
 			}
-			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+			globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
@@ -178,7 +179,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 				}
 			}
 			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName)
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp())
 			}
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		default:
@@ -191,7 +192,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 
 			if collectionName != "" {
-				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
+				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName, request.GetBase().GetTimestamp()) // no need to return error, though collection may be not cached
 				node.shardMgr.DeprecateShardCache(request.GetDbName(), collectionName)
 			}
 		}

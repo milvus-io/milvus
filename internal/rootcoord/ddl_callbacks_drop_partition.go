@@ -114,8 +114,7 @@ func (c *DDLCallback) dropPartitionV1AckCallback(ctx context.Context, result mes
 			ce.OptLPCMCollectionID(header.CollectionId),
 			ce.OptLPCMPartitionName(body.PartitionName),
 			ce.OptLPCMMsgType(commonpb.MsgType_DropPartition),
-		),
-		result.GetControlChannelResult().TimeTick)
+		))
 }
 
 // newPartitionTombstone creates a new partition tombstone.
