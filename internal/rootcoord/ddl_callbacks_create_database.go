@@ -86,6 +86,5 @@ func (c *DDLCallback) createDatabaseV1AckCallback(ctx context.Context, result me
 		WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(header.DbName),
 			ce.OptLPCMMsgType(commonpb.MsgType_DropDatabase),
-		),
-		result.GetControlChannelResult().TimeTick)
+		))
 }

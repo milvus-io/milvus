@@ -1672,7 +1672,7 @@ func TestHasCollectionTask(t *testing.T) {
 	task.CollectionName = collectionName
 
 	// invalidate collection cache, trigger rootcoord rpc
-	globalMetaCache.RemoveCollection(ctx, dbName, collectionName)
+	globalMetaCache.RemoveCollection(ctx, dbName, collectionName, 0)
 
 	// rc return collection not found error
 	mixc.describeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {

@@ -97,7 +97,7 @@ type CacheExpirationsGetter interface {
 }
 
 // ExpireCaches handles the cache
-func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any, timetick uint64) error {
+func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any) error {
 	var cacheExpirations *message.CacheExpirations
 	if g, ok := expirations.(CacheExpirationsGetter); ok {
 		cacheExpirations = g.GetCacheExpirations()
@@ -109,18 +109,29 @@ func (c *DDLCallback) ExpireCaches(ctx context.Context, expirations any, timetic
 		panic(fmt.Sprintf("invalid getter type: %T", expirations))
 	}
 	for _, cacheExpiration := range cacheExpirations.CacheExpirations {
-		if err := c.expireCache(ctx, cacheExpiration, timetick); err != nil {
+		if err := c.expireCache(ctx, cacheExpiration); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration, timetick uint64) error {
+func (c *DDLCallback) expireCache(ctx context.Context, cacheExpiration *message.CacheExpiration) error {
+	ts, err := c.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return errors.Wrap(err, "failed to generate timestamp")
+	}
 	switch cacheExpiration.Cache.(type) {
 	case *messagespb.CacheExpiration_LegacyProxyCollectionMetaCache:
 		legacyProxyCollectionMetaCache := cacheExpiration.GetLegacyProxyCollectionMetaCache()
-		return c.Core.ExpireMetaCache(ctx, legacyProxyCollectionMetaCache.DbName, []string{legacyProxyCollectionMetaCache.CollectionName}, legacyProxyCollectionMetaCache.CollectionId, legacyProxyCollectionMetaCache.PartitionName, timetick, proxyutil.SetMsgType(legacyProxyCollectionMetaCache.MsgType))
+		return c.Core.ExpireMetaCache(
+			ctx,
+			legacyProxyCollectionMetaCache.DbName,
+			[]string{legacyProxyCollectionMetaCache.CollectionName},
+			legacyProxyCollectionMetaCache.CollectionId,
+			legacyProxyCollectionMetaCache.PartitionName,
+			ts,
+			proxyutil.SetMsgType(legacyProxyCollectionMetaCache.MsgType))
 	}
 	return nil
 }
