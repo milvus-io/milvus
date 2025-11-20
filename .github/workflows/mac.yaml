@@ -98,6 +98,8 @@ jobs:
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
+          ls -alh /usr/local/opt/
+          ls -alh /usr/local/opt/llvm
           pip3 install conan==1.64.1
           make milvus
       - name: Upload Cmake log
