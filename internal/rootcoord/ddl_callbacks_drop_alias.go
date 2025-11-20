@@ -68,7 +68,5 @@ func (c *DDLCallback) dropAliasV2AckCallback(ctx context.Context, result message
 			ce.OptLPCMDBName(result.Message.Header().DbName),
 			ce.OptLPCMCollectionName(result.Message.Header().Alias),
 			ce.OptLPCMMsgType(commonpb.MsgType_DropAlias),
-		),
-		result.GetControlChannelResult().TimeTick,
-	)
+		))
 }

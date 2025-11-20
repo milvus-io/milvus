@@ -112,6 +112,5 @@ func (c *DDLCallback) alterAliasV2AckCallback(ctx context.Context, result messag
 		ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(result.Message.Header().DbName),
 			ce.OptLPCMCollectionName(result.Message.Header().Alias),
-			ce.OptLPCMMsgType(commonpb.MsgType_AlterAlias)),
-		result.GetControlChannelResult().TimeTick)
+			ce.OptLPCMMsgType(commonpb.MsgType_AlterAlias)))
 }

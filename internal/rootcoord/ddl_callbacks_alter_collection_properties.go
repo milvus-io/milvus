@@ -296,5 +296,5 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
 		return errors.Wrap(err, "failed to broadcast altered collection")
 	}
-	return c.ExpireCaches(ctx, header, result.GetControlChannelResult().TimeTick)
+	return c.ExpireCaches(ctx, header)
 }
