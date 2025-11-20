@@ -90,6 +90,7 @@ message Limiter {
   // we can use map to store quota states and error code, because key in map fields cannot be enum types
   repeated milvus.QuotaState states = 2;
   repeated common.ErrorCode codes = 3;
+  repeated string reasons = 4;
 }
 
 message SetRatesRequest {
