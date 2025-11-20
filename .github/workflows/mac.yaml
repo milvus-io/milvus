@@ -94,8 +94,9 @@ jobs:
             mkdir -p /var/tmp/ccache
           fi
           brew install libomp ninja openblas ccache pkg-config
-          if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@15 /usr/local/opt/llvm
+          BREW_PREFIX=$(brew --prefix)
+          if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then
+            ln -s ${BREW_PREFIX}/opt/llvm@15 ${BREW_PREFIX}/opt/llvm
           fi
           pip3 install conan==1.64.1
           make milvus
