@@ -272,7 +272,7 @@ func (node *DataNode) ReadyToFlush() error {
 // Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {
-		// https://github.com/milvus-io/milvus/issues/12282
+		// set current state to abnormal, no more new tasks, and wait for all task done
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 
@@ -287,10 +287,6 @@ func (node *DataNode) Stop() error {
 			node.closer.Close()
 		}
 
-		if node.session != nil {
-			node.session.Stop()
-		}
-
 		if node.importScheduler != nil {
 			node.importScheduler.Close()
 		}
@@ -303,6 +299,10 @@ func (node *DataNode) Stop() error {
 		}
 
 		index.CloseSegcore()
+
+		if node.session != nil {
+			node.session.Stop()
+		}
 
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
