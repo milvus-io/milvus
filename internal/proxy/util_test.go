@@ -606,28 +606,64 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 }
 
 func TestFillFieldIDBySchema(t *testing.T) {
-	schema := &schemapb.CollectionSchema{}
-	columns := []*schemapb.FieldData{
-		{
-			FieldName: "TestFillFieldIDBySchema",
-		},
-	}
-
-	// length mismatch
-	assert.Error(t, fillFieldPropertiesBySchema(columns, schema))
-	schema = &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
+	t.Run("column count mismatch", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
 			{
-				Name:     "TestFillFieldIDBySchema",
-				DataType: schemapb.DataType_Int64,
-				FieldID:  1,
+				FieldName: "TestFillFieldIDBySchema",
 			},
-		},
-	}
-	assert.NoError(t, fillFieldPropertiesBySchema(columns, schema))
-	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
-	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
-	assert.Equal(t, int64(1), columns[0].FieldId)
+		}
+		// Validation should fail due to column count mismatch
+		assert.Error(t, validateFieldDataColumns(columns, schema))
+	})
+
+	t.Run("successful validation and fill", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "TestFillFieldIDBySchema",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "TestFillFieldIDBySchema",
+			},
+		}
+		// Validation should succeed
+		assert.NoError(t, validateFieldDataColumns(columns, schema))
+		// Fill properties should succeed
+		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
+		assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
+		assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
+		assert.Equal(t, int64(1), columns[0].FieldId)
+	})
+
+	t.Run("field not in schema", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "FieldA",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "FieldB",
+			},
+		}
+		// Validation should fail because FieldB is not in schema
+		err := validateFieldDataColumns(columns, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not exist in collection schema")
+	})
 }
 
 func TestValidateUsername(t *testing.T) {

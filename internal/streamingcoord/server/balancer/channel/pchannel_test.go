@@ -112,4 +112,17 @@ func TestPChannel(t *testing.T) {
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789}))
 	assert.Len(t, mutablePChannel.AssignHistories(), 1)
+
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 790}))
+	assert.Len(t, mutablePChannel.AssignHistories(), 1)
+
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 790}))
+	assert.Len(t, mutablePChannel.AssignHistories(), 2)
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 790}))
+	assert.Len(t, mutablePChannel.AssignHistories(), 2)
+	for _, h := range mutablePChannel.AssignHistories() {
+		if h.Node.ServerID == 790 {
+			assert.Equal(t, h.Channel.Term, mutablePChannel.CurrentTerm()-1)
+		}
+	}
 }

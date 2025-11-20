@@ -471,14 +471,15 @@ func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 			},
 		})
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(nil, nil).Once()
-		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_executing,
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+
+		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(nil, nil).Once()
+		task.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, scalar clustering key, compaction result ready", func() {

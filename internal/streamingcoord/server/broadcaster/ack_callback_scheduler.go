@@ -3,6 +3,7 @@ package broadcaster
 import (
 	"context"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -20,7 +21,8 @@ func newAckCallbackScheduler(logger *log.MLogger) *ackCallbackScheduler {
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
 		pending:            make(chan *broadcastTask, 16),
 		triggerChan:        make(chan struct{}, 1),
-		rkLocker:           newResourceKeyLocker(newBroadcasterMetrics()),
+		rkLockerMu:         sync.Mutex{},
+		rkLocker:           newResourceKeyLocker(),
 		tombstoneScheduler: newTombstoneScheduler(logger),
 	}
 	s.SetLogger(logger)
@@ -41,6 +43,13 @@ type ackCallbackScheduler struct {
 	// Meanwhile the timetick order of any vchannel of those two tasks are same with the order of broadcastID,
 	// so the smaller broadcastID task is always acked before the larger broadcastID task.
 	// so we can exeucte the tasks by the order of the broadcastID to promise the ack order is same with wal order.
+	rkLockerMu sync.Mutex // because batch lock operation will be executed on rkLocker,
+	// so we may encounter following cases:
+	// 1. task A, B, C are competing with rkLocker, and we want the operation is executed in order of A -> B -> C.
+	// 2. A is on running, and B, C are waiting for the lock.
+	// 3. When triggerAckCallback, B is failed to acquire the lock, C is pending to call FastLock.
+	// 4. Then A is done, the lock is released, C acquires the lock and executes the ack callback, the order is broken as A -> C -> B.
+	// To avoid the order broken, we need to use a mutex to protect the batch lock operation.
 	rkLocker *resourceKeyLocker // it is used to lock the resource-key of ack operation.
 	// it is not same instance with the resourceKeyLocker in the broadcastTaskManager.
 	// because it is just used to check if the resource-key is locked when acked.
@@ -116,6 +125,9 @@ func (s *ackCallbackScheduler) addBroadcastTask(task *broadcastTask) error {
 
 // triggerAckCallback triggers the ack callback.
 func (s *ackCallbackScheduler) triggerAckCallback() {
+	s.rkLockerMu.Lock()
+	defer s.rkLockerMu.Unlock()
+
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
 	for _, task := range s.pendingAckedTasks {
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
@@ -134,7 +146,10 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
 	logger := s.Logger().With(zap.Uint64("broadcastID", bt.Header().BroadcastID))
 	defer func() {
+		s.rkLockerMu.Lock()
 		g.Unlock()
+		s.rkLockerMu.Unlock()
+
 		s.triggerChan <- struct{}{}
 		if err == nil {
 			logger.Info("execute ack callback done")

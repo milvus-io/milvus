@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 )
 
 func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.CreateDatabaseRequest) error {
@@ -58,7 +59,7 @@ func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.Create
 		return errors.Wrap(err, "failed to tidy database cipher properties")
 	}
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, properties)
-	if exist && !funcutil.IsTimezoneValid(tz) {
+	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 	msg := message.NewCreateDatabaseMessageBuilderV2().

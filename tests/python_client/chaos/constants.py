@@ -22,6 +22,7 @@ RELEASE_NAME = 'test-allstandalone-pod-kill-19-25-26'
 WAIT_PER_OP = 10  # time to wait in seconds between operations
 CHAOS_DURATION = 120  # chaos duration time in seconds
 DEFAULT_INDEX_PARAM = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
+DEFAULT_EMB_LIST_INDEX_PARAM = {"index_type": "HNSW", "metric_type": "MAX_SIM_COSINE", "params": {"M": 16, "efConstruction": 200}}
 DEFAULT_SEARCH_PARAM = {"metric_type": "L2", "params": {"ef": 64}}
 DEFAULT_INT8_INDEX_PARAM = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
 DEFAULT_INT8_SEARCH_PARAM = {"metric_type": "L2", "params": {"ef": 64}}

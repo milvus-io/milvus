@@ -150,13 +150,10 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		PlanID: t.GetTaskProto().GetPlanID(),
 	})
 	if err != nil || result == nil {
-		log.Warn("processExecuting clustering compaction", zap.Error(err))
-		if errors.Is(err, merr.ErrNodeNotFound) {
-			log.Warn("GetCompactionPlanResult fail", zap.Error(err))
-			err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining))
-			if err != nil {
-				log.Warn("update clustering compaction task meta failed", zap.Error(err))
-			}
+		log.Warn("clusteringCompactionTask failed to get compaction result", zap.Error(err))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID))
+		if err != nil {
+			log.Warn("update clustering compaction task meta failed", zap.Error(err))
 		}
 		return
 	}
