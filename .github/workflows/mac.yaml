@@ -43,7 +43,7 @@ concurrency:
 jobs:
   mac:
     name: Code Checker MacOS
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 360
     steps:
       - name: Checkout
@@ -96,10 +96,8 @@ jobs:
           ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
+            ln -s /usr/local/opt/llvm@18 /usr/local/opt/llvm
           fi
-          ls -alh /usr/local/opt/
-          ls -alh /usr/local/opt/llvm
           pip3 install conan==1.64.1
           make milvus
       - name: Upload Cmake log
