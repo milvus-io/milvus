@@ -117,6 +117,7 @@ type Core struct {
 	mixCoord       types.MixCoord
 	streamingCoord *streamingcoord.Server
 	quotaCenter    *QuotaCenter
+	keyManager     *KeyManager
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -160,6 +161,14 @@ func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 
 func (c *Core) GetStateCode() commonpb.StateCode {
 	return commonpb.StateCode(c.stateCode.Load())
+}
+
+func (c *Core) GetMetaTable() IMetaTable {
+	return c.meta
+}
+
+func (c *Core) GetQuotaCenter() *QuotaCenter {
+	return c.quotaCenter
 }
 
 func (c *Core) sendTimeTick(t Timestamp, reason string) error {
@@ -454,6 +463,15 @@ func (c *Core) initInternal() error {
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
+
+	// Initialize KeyManager for KMS key state management
+	c.keyManager = NewKeyManager(c.ctx, c.meta, c.mixCoord)
+	if err := c.keyManager.Init(); err != nil {
+		log.Error("KeyManager init failed", zap.Error(err))
+		return err
+	}
+	c.quotaCenter.SetKeyManager(c.keyManager)
+	log.Debug("RootCoord init KeyManager done")
 
 	if err := c.initCredentials(initCtx); err != nil {
 		return err

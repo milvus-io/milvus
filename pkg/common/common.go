@@ -229,6 +229,15 @@ const (
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"
 	CollectionResourceGroups = "collection.resource_groups"
+
+	// CMEK related property keys, used in db and collection properties
+	EncryptionEnabledKey = "cipher.enabled"
+	EncryptionRootKeyKey = "cipher.key"
+	EncryptionEzIDKey    = "cipher.ezID"
+
+	// internal property (not pesistent)
+	InternalPropertyKeyPrefix   string = "_internal_"
+	InternalCipherKeyRotatedKey string = "_internal_.cipher.key.rotated"
 )
 
 // common properties
@@ -644,6 +653,10 @@ func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error 
 		return fmt.Errorf("namespace data is not set but namespace enabled")
 	}
 	return nil
+}
+
+func IsInternalPropertyKey(kv *commonpb.KeyValuePair) bool {
+	return strings.HasPrefix(kv.GetKey(), InternalPropertyKeyPrefix)
 }
 
 func ConvertWKTToWKB(wktStr string) ([]byte, error) {
