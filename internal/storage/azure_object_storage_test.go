@@ -213,6 +213,175 @@ func TestAzureObjectStorage(t *testing.T) {
 		assert.Error(t, err)
 		os.Setenv("AZURE_STORAGE_CONNECTION_STRING", connectionString)
 	})
+
+	t.Run("test CopyObject", func(t *testing.T) {
+		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
+		assert.NoError(t, err)
+		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
+
+		// Test successful copy
+		t.Run("copy object successfully", func(t *testing.T) {
+			srcKey := "copy_test/src/file1"
+			dstKey := "copy_test/dst/file1"
+			value := []byte("test data for copy")
+
+			// Put source object
+			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(value), int64(len(value)))
+			require.NoError(t, err)
+
+			// Copy object
+			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination object exists and has correct content
+			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, 1024)
+			assert.NoError(t, err)
+			dstData, err := io.ReadAll(dstReader)
+			assert.NoError(t, err)
+			assert.Equal(t, value, dstData)
+
+			// Verify source object still exists
+			srcReader, err := testCM.GetObject(ctx, config.BucketName, srcKey, 0, 1024)
+			assert.NoError(t, err)
+			srcData, err := io.ReadAll(srcReader)
+			assert.NoError(t, err)
+			assert.Equal(t, value, srcData)
+
+			// Clean up
+			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
+			assert.NoError(t, err)
+			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
+			assert.NoError(t, err)
+		})
+
+		// Test copy non-existent source
+		t.Run("copy non-existent source object", func(t *testing.T) {
+			srcKey := "copy_test/not_exist/file"
+			dstKey := "copy_test/dst/file"
+
+			err := testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			assert.Error(t, err)
+		})
+
+		// Test copy overwrite existing object
+		t.Run("copy and overwrite existing object", func(t *testing.T) {
+			srcKey := "copy_test/src3/file3"
+			dstKey := "copy_test/dst3/file3"
+			srcValue := []byte("new content")
+			oldValue := []byte("old content")
+
+			// Put destination with old content
+			err := testCM.PutObject(ctx, config.BucketName, dstKey, bytes.NewReader(oldValue), int64(len(oldValue)))
+			require.NoError(t, err)
+
+			// Put source with new content
+			err = testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(srcValue), int64(len(srcValue)))
+			require.NoError(t, err)
+
+			// Copy (should overwrite)
+			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination has new content
+			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, 1024)
+			assert.NoError(t, err)
+			dstData, err := io.ReadAll(dstReader)
+			assert.NoError(t, err)
+			assert.Equal(t, srcValue, dstData)
+
+			// Clean up
+			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
+			assert.NoError(t, err)
+			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
+			assert.NoError(t, err)
+		})
+
+		// Test copy large object
+		t.Run("copy large object", func(t *testing.T) {
+			srcKey := "copy_test/src4/large_file"
+			dstKey := "copy_test/dst4/large_file"
+
+			// Create 5MB data
+			largeData := make([]byte, 5*1024*1024)
+			for i := range largeData {
+				largeData[i] = byte(i % 256)
+			}
+
+			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(largeData), int64(len(largeData)))
+			require.NoError(t, err)
+
+			// Copy large object
+			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify content
+			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, int64(len(largeData)))
+			assert.NoError(t, err)
+			dstData, err := io.ReadAll(dstReader)
+			assert.NoError(t, err)
+			assert.Equal(t, largeData, dstData)
+
+			// Clean up
+			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
+			assert.NoError(t, err)
+			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
+			assert.NoError(t, err)
+		})
+
+		// Test copy empty object
+		t.Run("copy empty object", func(t *testing.T) {
+			srcKey := "copy_test/src5/empty_file"
+			dstKey := "copy_test/dst5/empty_file"
+			emptyData := []byte{}
+
+			// Put empty object
+			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(emptyData), 0)
+			require.NoError(t, err)
+
+			// Copy empty object
+			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination exists and has size 0
+			size, err := testCM.StatObject(ctx, config.BucketName, dstKey)
+			assert.NoError(t, err)
+			assert.Equal(t, int64(0), size)
+
+			// Clean up
+			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
+			assert.NoError(t, err)
+			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
+			assert.NoError(t, err)
+		})
+
+		// Test copy with nested path
+		t.Run("copy object with nested path", func(t *testing.T) {
+			srcKey := "copy_test/src6/file6"
+			dstKey := "copy_test/dst6/nested/deep/path/file6"
+			value := []byte("test data for nested path copy")
+
+			// Put source object
+			err := testCM.PutObject(ctx, config.BucketName, srcKey, bytes.NewReader(value), int64(len(value)))
+			require.NoError(t, err)
+
+			// Copy to nested path
+			err = testCM.CopyObject(ctx, config.BucketName, srcKey, dstKey)
+			assert.NoError(t, err)
+
+			// Verify destination exists and has correct content
+			dstReader, err := testCM.GetObject(ctx, config.BucketName, dstKey, 0, 1024)
+			assert.NoError(t, err)
+			dstData, err := io.ReadAll(dstReader)
+			assert.NoError(t, err)
+			assert.Equal(t, value, dstData)
+
+			// Clean up
+			err = testCM.RemoveObject(ctx, config.BucketName, srcKey)
+			assert.NoError(t, err)
+			err = testCM.RemoveObject(ctx, config.BucketName, dstKey)
+			assert.NoError(t, err)
+		})
+	})
 }
 
 func TestReadFile(t *testing.T) {

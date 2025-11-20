@@ -329,6 +329,316 @@ func (s *BrokerSuite) TestShowCollectionIDs() {
 	})
 }
 
+func (s *BrokerSuite) TestShowPartitions() {
+	s.Run("return_success", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+		expectedPartitionIDs := []int64{100, 101, 102}
+		expectedPartitionNames := []string{"partition_0", "partition_1", "partition_2"}
+
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			s.Equal(collID, req.GetCollectionID())
+			return &milvuspb.ShowPartitionsResponse{
+				Status:            merr.Status(nil),
+				PartitionIDs:      expectedPartitionIDs,
+				PartitionNames:    expectedPartitionNames,
+				CreatedTimestamps: []uint64{1000, 2000, 3000},
+			}, nil
+		})
+
+		resp, err := s.broker.ShowPartitions(context.Background(), collID)
+		s.NoError(err)
+		s.NotNil(resp)
+		s.ElementsMatch(expectedPartitionIDs, resp.GetPartitionIDs())
+		s.ElementsMatch(expectedPartitionNames, resp.GetPartitionNames())
+		s.Len(resp.GetCreatedTimestamps(), 3)
+
+		s.TearDownTest()
+	})
+
+	s.Run("return_status_error", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			s.Equal(collID, req.GetCollectionID())
+			return &milvuspb.ShowPartitionsResponse{
+				Status: merr.Status(merr.WrapErrCollectionNotFound(collID)),
+			}, nil
+		})
+
+		resp, err := s.broker.ShowPartitions(context.Background(), collID)
+		s.Error(err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+
+	s.Run("return_rpc_error", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+		resp, err := s.broker.ShowPartitions(context.Background(), collID)
+		s.Error(err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestDescribeCollectionInternal_StatusError() {
+	s.Run("status_error", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+
+		s.mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			s.Equal(collID, req.GetCollectionID())
+			return &milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(merr.WrapErrCollectionNotFound(collID)),
+			}, nil
+		})
+
+		resp, err := s.broker.DescribeCollectionInternal(context.Background(), collID)
+		s.Error(err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestShowCollections_StatusError() {
+	s.Run("status_error", func() {
+		s.SetupTest()
+
+		dbName := fmt.Sprintf("db_%d", rand.Intn(100))
+
+		s.mixCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+			s.Equal(dbName, req.GetDbName())
+			return &milvuspb.ShowCollectionsResponse{
+				Status: merr.Status(merr.ErrDatabaseNotFound),
+			}, nil
+		})
+
+		resp, err := s.broker.ShowCollections(context.Background(), dbName)
+		s.Error(err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestListDatabases_StatusError() {
+	s.Run("status_error", func() {
+		s.SetupTest()
+
+		s.mixCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+			return &milvuspb.ListDatabasesResponse{
+				Status: merr.Status(errors.New("internal error")),
+			}, nil
+		})
+
+		resp, err := s.broker.ListDatabases(context.Background())
+		s.Error(err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestShowCollectionIDs_MultipleDatabases() {
+	s.Run("multiple_databases", func() {
+		s.SetupTest()
+		dbNames := []string{"db_1", "db_2", "db_3"}
+
+		s.mixCoord.EXPECT().ShowCollectionIDs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+			s.ElementsMatch(dbNames, req.GetDbNames())
+			s.True(req.GetAllowUnavailable())
+			return &rootcoordpb.ShowCollectionIDsResponse{
+				Status: merr.Success(),
+				DbCollections: []*rootcoordpb.DBCollections{
+					{
+						DbName:        "db_1",
+						CollectionIDs: []int64{1, 2},
+					},
+					{
+						DbName:        "db_2",
+						CollectionIDs: []int64{3, 4, 5},
+					},
+					{
+						DbName:        "db_3",
+						CollectionIDs: []int64{6},
+					},
+				},
+			}, nil
+		})
+
+		resp, err := s.broker.ShowCollectionIDs(context.Background(), dbNames...)
+		s.NoError(err)
+		s.NotNil(resp)
+		s.Len(resp.GetDbCollections(), 3)
+
+		// Verify each database's collections
+		dbCollectionMap := make(map[string][]int64)
+		for _, dbColl := range resp.GetDbCollections() {
+			dbCollectionMap[dbColl.GetDbName()] = dbColl.GetCollectionIDs()
+		}
+
+		s.ElementsMatch([]int64{1, 2}, dbCollectionMap["db_1"])
+		s.ElementsMatch([]int64{3, 4, 5}, dbCollectionMap["db_2"])
+		s.ElementsMatch([]int64{6}, dbCollectionMap["db_3"])
+
+		s.TearDownTest()
+	})
+
+	s.Run("empty_databases", func() {
+		s.SetupTest()
+
+		s.mixCoord.EXPECT().ShowCollectionIDs(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
+			s.Empty(req.GetDbNames())
+			return &rootcoordpb.ShowCollectionIDsResponse{
+				Status:        merr.Success(),
+				DbCollections: []*rootcoordpb.DBCollections{},
+			}, nil
+		})
+
+		resp, err := s.broker.ShowCollectionIDs(context.Background())
+		s.NoError(err)
+		s.NotNil(resp)
+		s.Empty(resp.GetDbCollections())
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestHasCollection_OtherError() {
+	s.Run("other_error", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+
+		s.mixCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			s.Equal(collID, req.GetCollectionID())
+			return &milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(errors.New("internal error")),
+			}, nil
+		})
+
+		result, err := s.broker.HasCollection(context.Background(), collID)
+		s.Error(err)
+		s.False(result)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestShowPartitionsInternal_StatusError() {
+	s.Run("status_error", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			s.Equal(collID, req.GetCollectionID())
+			return &milvuspb.ShowPartitionsResponse{
+				Status: merr.Status(merr.WrapErrCollectionNotFound(collID)),
+			}, nil
+		})
+
+		resp, err := s.broker.ShowPartitionsInternal(context.Background(), collID)
+		s.Error(err)
+		s.Nil(resp)
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestNewCoordinatorBroker() {
+	s.Run("create_broker", func() {
+		mockMixCoord := mocks.NewMixCoord(s.T())
+		broker := NewCoordinatorBroker(mockMixCoord)
+		s.NotNil(broker)
+		s.Equal(mockMixCoord, broker.mixCoord)
+	})
+}
+
+func (s *BrokerSuite) TestShowCollections_EmptyResult() {
+	s.Run("empty_collections", func() {
+		s.SetupTest()
+
+		dbName := "empty_db"
+
+		s.mixCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+			s.Equal(dbName, req.GetDbName())
+			return &milvuspb.ShowCollectionsResponse{
+				Status:            merr.Status(nil),
+				CollectionIds:     []int64{},
+				CollectionNames:   []string{},
+				CreatedTimestamps: []uint64{},
+			}, nil
+		})
+
+		resp, err := s.broker.ShowCollections(context.Background(), dbName)
+		s.NoError(err)
+		s.NotNil(resp)
+		s.Empty(resp.GetCollectionIds())
+		s.Empty(resp.GetCollectionNames())
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestListDatabases_EmptyResult() {
+	s.Run("empty_databases", func() {
+		s.SetupTest()
+
+		s.mixCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+			return &milvuspb.ListDatabasesResponse{
+				Status:  merr.Status(nil),
+				DbNames: []string{},
+			}, nil
+		})
+
+		resp, err := s.broker.ListDatabases(context.Background())
+		s.NoError(err)
+		s.NotNil(resp)
+		s.Empty(resp.GetDbNames())
+
+		s.TearDownTest()
+	})
+}
+
+func (s *BrokerSuite) TestShowPartitions_EmptyResult() {
+	s.Run("empty_partitions", func() {
+		s.SetupTest()
+
+		collID := int64(1000 + rand.Intn(500))
+
+		s.mixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+			s.Equal(collID, req.GetCollectionID())
+			return &milvuspb.ShowPartitionsResponse{
+				Status:            merr.Status(nil),
+				PartitionIDs:      []int64{},
+				PartitionNames:    []string{},
+				CreatedTimestamps: []uint64{},
+			}, nil
+		})
+
+		resp, err := s.broker.ShowPartitions(context.Background(), collID)
+		s.NoError(err)
+		s.NotNil(resp)
+		s.Empty(resp.GetPartitionIDs())
+		s.Empty(resp.GetPartitionNames())
+
+		s.TearDownTest()
+	})
+}
+
 func TestBrokerSuite(t *testing.T) {
 	suite.Run(t, new(BrokerSuite))
 }
