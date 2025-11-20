@@ -95,6 +95,8 @@ jobs:
           fi
           brew install libomp ninja openblas ccache pkg-config
           BREW_PREFIX=$(brew --prefix)
+          # Install llvm@17 explicitly as a stable version
+          brew install llvm@17
           if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then
             ln -s ${BREW_PREFIX}/opt/llvm@17 ${BREW_PREFIX}/opt/llvm
           fi
