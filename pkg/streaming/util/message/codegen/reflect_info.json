@@ -434,6 +434,16 @@
                 "MessageType": "MessageTypeDropIndex",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.AlterWALMessageHeader",
+                "BodyType": "messagespb.AlterWALMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAlterWAL",
+                "Version": 2
+            }
         }
     ]
 }

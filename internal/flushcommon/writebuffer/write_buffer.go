@@ -47,6 +47,8 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// SealSegments is the method to perform `Sync` operation with provided options.
 	SealSegments(ctx context.Context, segmentIDs []int64) error
+	// SealAllSegments is the method to seal all segments in the buffer.
+	SealAllSegments(ctx context.Context) error
 	// DropPartitions mark segments as Dropped of the partition
 	DropPartitions(partitionIDs []int64)
 	// GetCheckpoint returns current channel checkpoint.
@@ -186,6 +188,12 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 	return wb.sealSegments(ctx, segmentIDs)
 }
 
+func (wb *writeBufferBase) SealAllSegments(ctx context.Context) error {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+	return wb.sealAllSegments(ctx)
+}
+
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
@@ -283,6 +291,16 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 	// mark segment flushing if segment was growing
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
+		metacache.WithSegmentState(commonpb.SegmentState_Growing))
+	return nil
+}
+
+func (wb *writeBufferBase) sealAllSegments(ctx context.Context) error {
+	allSegmentIds := wb.metaCache.GetSegmentIDsBy()
+	log.Ctx(ctx).Info("seal all segments", zap.Int64s("segmentIDs", allSegmentIds))
+	// mark segment flushing if segment was growing
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+		metacache.WithSegmentIDs(allSegmentIds...),
 		metacache.WithSegmentState(commonpb.SegmentState_Growing))
 	return nil
 }

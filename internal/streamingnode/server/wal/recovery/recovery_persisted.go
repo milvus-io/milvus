@@ -165,6 +165,8 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		zap.String("checkpoint", checkpoint.MessageId.String()),
 		zap.Uint64("timetick", checkpoint.TimeTick),
 		zap.Int64("magic", checkpoint.RecoveryMagic),
+		zap.Bool("hasAlterWal", checkpoint.HasAlterWal),
+		zap.Any("alterWALState", checkpoint.AlterWalState),
 	)
 	return checkpoint, nil
 }

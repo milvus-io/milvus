@@ -21,6 +21,11 @@ type RecoverySnapshot struct {
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	Checkpoint         *WALCheckpoint
 	TxnBuffer          *utility.TxnBuffer
+	// Used during WAL alteration process
+	FoundAlterWALMsg bool
+	TargetWALName    string
+	AlterWALConfig   map[string]string
+	AlterWALTs       uint64
 }
 
 type BuildRecoveryStreamParam struct {
@@ -83,6 +88,9 @@ type RecoveryStorage interface {
 	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
 	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
 	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
+
+	// GetFlusherCheckpointByTimeTick returns the minimum flush checkpoint among all vchannels based on time tick.
+	GetFlusherCheckpointByTimeTick(ctx context.Context) *WALCheckpoint
 
 	// Close closes the recovery storage.
 	Close()
