@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -90,5 +89,9 @@ func (s *Server) Stop() {
 	broadcast.Release()
 	s.logger.Info("release streamingcoord resource...")
 	resource.Release()
+	s.logger.Info("stop streamingcoord session...")
+	if s.session != nil {
+		s.session.Stop()
+	}
 	s.logger.Info("streamingcoord server stopped")
 }

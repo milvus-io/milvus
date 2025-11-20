@@ -49,9 +49,7 @@ func (s *ComponentStateService) OnHealthy() {
 
 func (s *ComponentStateService) OnAbnormal() {
 	s.mu.Lock()
-	if s.stateCode == commonpb.StateCode_Healthy {
-		s.stateCode = commonpb.StateCode_Abnormal
-	}
+	s.stateCode = commonpb.StateCode_Abnormal
 	s.mu.Unlock()
 }
 
