@@ -16,7 +16,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-playground/validator/v10 v10.14.0
 	github.com/gofrs/flock v0.8.1
-	github.com/golang/protobuf v1.5.4
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
@@ -265,7 +265,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.1.11 // indirect
+	github.com/zilliztech/woodpecker v0.1.13-0.20251120091013-5be1123a0c97 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
