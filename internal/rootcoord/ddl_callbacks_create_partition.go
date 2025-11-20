@@ -109,6 +109,5 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 			ce.OptLPCMCollectionID(header.CollectionId),
 			ce.OptLPCMPartitionName(body.PartitionName),
 			ce.OptLPCMMsgType(commonpb.MsgType_CreatePartition),
-		),
-		result.GetControlChannelResult().TimeTick)
+		))
 }

@@ -155,8 +155,7 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 		WithLegacyProxyCollectionMetaCache(
 			ce.OptLPCMDBName(header.DbName),
 			ce.OptLPCMMsgType(commonpb.MsgType_AlterDatabase),
-		),
-		result.GetControlChannelResult().TimeTick)
+		))
 }
 
 func MergeProperties(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
