@@ -1710,6 +1710,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
+			ManifestPath:   seg.GetManifest(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1810,7 +1811,8 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				IsSorted:     compactToSegment.GetIsSorted(),
+				ManifestPath: compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2300,6 +2302,7 @@ func (m *meta) completeSortCompactionMutation(
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
 		IsSorted:                  true,
+		ManifestPath:              resultSegment.GetManifest(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)

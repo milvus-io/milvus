@@ -112,7 +112,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 			StorageType: "local",
 			RootPath:    rootPath,
 		}, columnGroups)
-		inserts, _, _, _, _, err := bw.Write(context.Background(), pack)
+		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
 			SegmentID:      int64(i),

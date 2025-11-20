@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	sio "io"
+	"path"
 	"sort"
 
 	"github.com/samber/lo"
@@ -66,6 +67,7 @@ type rwOptions struct {
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
+	useLoonFFI          bool
 }
 
 func (o *rwOptions) validate() error {
@@ -159,6 +161,12 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithUseLoonFFI(useLoonFFI bool) RwOption {
+	return func(options *rwOptions) {
+		options.useLoonFFI = useLoonFFI
 	}
 }
 
@@ -274,11 +282,22 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
 		})
 
-		var err error
-		rr, err = NewRecordReaderFromBinlogs(binlogs, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
-		if err != nil {
-			return nil, err
+		binlogLists := lo.Map(binlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
+			return fieldBinlog.GetBinlogs()
+		})
+		bucketName := rwOptions.storageConfig.BucketName
+		paths := make([][]string, len(binlogLists[0]))
+		for _, binlogs := range binlogLists {
+			for j, binlog := range binlogs {
+				logPath := binlog.GetLogPath()
+				if rwOptions.storageConfig.StorageType != "local" {
+					logPath = path.Join(bucketName, logPath)
+				}
+				paths[j] = append(paths[j], logPath)
+			}
 		}
+		// FIXME: add needed fields support
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
@@ -286,6 +305,32 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		return nil, err
 	}
 	return rr, nil
+}
+
+func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	var pluginContext *indexcgopb.StoragePluginContext
+	if hookutil.IsClusterEncyptionEnabled() {
+		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
+
+			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			if len(unsafe) > 0 {
+				pluginContext = &indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    string(unsafe),
+				}
+			}
+		}
+	}
+	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
@@ -339,12 +384,20 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
 		)
 	case StorageV2:
-		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, maxRowNum,
-			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
-			rwOptions.storageConfig,
-			pluginContext,
-		)
+		if rwOptions.useLoonFFI {
+			return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				pluginContext)
+		} else {
+			return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				pluginContext,
+			)
+		}
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 }

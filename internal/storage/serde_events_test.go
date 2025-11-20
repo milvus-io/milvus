@@ -177,7 +177,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		err = writer.Close()
 		assert.NoError(t, err)
 
-		logs, _, _ := writer.GetLogs()
+		logs, _, _, _ := writer.GetLogs()
 		assert.Equal(t, 18, len(logs))
 		assert.Equal(t, 5, len(logs[0].Binlogs))
 	})

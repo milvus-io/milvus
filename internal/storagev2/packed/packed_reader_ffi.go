@@ -31,7 +31,9 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
@@ -185,6 +187,32 @@ func (r *FFIPackedReader) Retain() {
 // Release decreases the reference count
 func (r *FFIPackedReader) Release() {
 	r.Close()
+}
+
+func GetManifest(manifestPath string, storageConfig *indexpb.StorageConfig) (manifest string, err error) {
+	basePath, version, err := UnmarshalManfestPath(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	log.Info("GetManifest", zap.String("manifestPath", manifestPath), zap.String("basePath", basePath), zap.Int64("version", version))
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return "", err
+	}
+	cBasePath := C.CString(basePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+
+	var cManifest *C.char
+	var cVersion C.int64_t
+	result := C.get_latest_column_groups(cBasePath, cProperties, &cManifest, &cVersion)
+	err = HandleFFIResult(result)
+	if err != nil {
+		return "", err
+	}
+
+	manifest = C.GoString(cManifest)
+	return manifest, nil
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface
