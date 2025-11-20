@@ -41,6 +41,7 @@ class SingleElement : public BaseElement {
     using ValueType = std::variant<std::monostate,
                                    bool,
                                    int8_t,
+                                   uint8_t,
                                    int16_t,
                                    int32_t,
                                    int64_t,
@@ -62,6 +63,7 @@ class SingleElement : public BaseElement {
     void
     SetValue(const T& value) {
         if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, int8_t> ||
+                      std::is_same_v<T, uint8_t> ||
                       std::is_same_v<T, int16_t> ||
                       std::is_same_v<T, int32_t> ||
                       std::is_same_v<T, int64_t> || std::is_same_v<T, float> ||
@@ -95,6 +97,7 @@ class MultiElement : public BaseElement {
     using ValueType = std::variant<std::monostate,
                                    bool,
                                    int8_t,
+                                   uint8_t,
                                    int16_t,
                                    int32_t,
                                    int64_t,

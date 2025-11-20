@@ -352,7 +352,7 @@ class SegmentExpr : public Expr {
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         // For sealed segment, only single chunk
         Assert(num_data_chunk_ == 1);
         auto need_size =
@@ -411,7 +411,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         // For non_chunked sealed segment, only single chunk
         Assert(num_data_chunk_ == 1);
 
@@ -437,7 +437,7 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunksByOffsets(FUNC func,
                                 OffsetVector* input,
-                                ValTypes... values) {
+                                const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
@@ -466,7 +466,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
         auto& skip_index = segment_->GetSkipIndex();
 
@@ -516,7 +516,7 @@ class SegmentExpr : public Expr {
         OffsetVector* input,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         int64_t processed_size = 0;
 
         // index reverse lookup
@@ -665,7 +665,7 @@ class SegmentExpr : public Expr {
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         int64_t processed_size = 0;
         if constexpr (std::is_same_v<T, std::string_view> ||
                       std::is_same_v<T, Json>) {
@@ -756,7 +756,7 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         bool process_all_chunks,
-        ValTypes... values) {
+        const ValTypes&... values) {
         int64_t processed_size = 0;
 
         size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
@@ -906,7 +906,7 @@ class SegmentExpr : public Expr {
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         return ProcessMultipleChunksCommon<T, NeedSegmentOffsets>(
             func, skip_func, res, valid_res, false, values...);
     }
@@ -918,7 +918,7 @@ class SegmentExpr : public Expr {
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         return ProcessMultipleChunksCommon<T>(
             func, skip_func, res, valid_res, true, values...);
     }
@@ -933,7 +933,7 @@ class SegmentExpr : public Expr {
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         if (segment_->is_chunked()) {
             return ProcessDataChunksForMultipleChunk<T, NeedSegmentOffsets>(
                 func, skip_func, res, valid_res, values...);
@@ -950,7 +950,7 @@ class SegmentExpr : public Expr {
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         if (segment_->is_chunked()) {
             return ProcessAllChunksForMultipleChunk<T>(
                 func, skip_func, res, valid_res, values...);
@@ -1332,7 +1332,7 @@ class SegmentExpr : public Expr {
 
     template <typename T, typename FUNC, typename... ValTypes>
     void
-    ProcessIndexChunksV2(FUNC func, ValTypes... values) {
+    ProcessIndexChunksV2(FUNC func, const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
