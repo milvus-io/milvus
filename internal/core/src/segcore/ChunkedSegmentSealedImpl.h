@@ -377,6 +377,350 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     load_system_field_internal(FieldId field_id, FieldDataInfo& data);
 
+    template <typename PK>
+    void
+    search_sorted_pk_range_impl(
+        proto::plan::OpType op,
+        const PK& target,
+        const std::shared_ptr<ChunkedColumnInterface>& pk_column,
+        BitsetTypeView& bitset) const {
+        const auto num_chunk = pk_column->num_chunks();
+        if (num_chunk == 0) {
+            return;
+        }
+        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+
+        if (op == proto::plan::OpType::Equal) {
+            // find first occurrence
+            auto [chunk_id, in_chunk_offset, exact_match] =
+                this->pk_lower_bound<PK>(
+                    target, pk_column.get(), all_chunk_pins, 0);
+
+            if (exact_match) {
+                // find last occurrence
+                auto [last_chunk_id, last_in_chunk_offset] =
+                    this->find_last_pk_position<PK>(target,
+                                                    pk_column.get(),
+                                                    all_chunk_pins,
+                                                    chunk_id,
+                                                    in_chunk_offset);
+
+                auto start_idx =
+                    pk_column->GetNumRowsUntilChunk(chunk_id) + in_chunk_offset;
+                auto end_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
+                               last_in_chunk_offset;
+
+                for (int64_t idx = start_idx; idx <= end_idx; idx++) {
+                    bitset[idx] = true;
+                }
+            }
+        } else if (op == proto::plan::OpType::GreaterEqual ||
+                   op == proto::plan::OpType::GreaterThan) {
+            auto [chunk_id, in_chunk_offset, exact_match] =
+                this->pk_lower_bound<PK>(
+                    target, pk_column.get(), all_chunk_pins, 0);
+
+            if (chunk_id != -1) {
+                int64_t start_idx =
+                    pk_column->GetNumRowsUntilChunk(chunk_id) + in_chunk_offset;
+                if (exact_match && op == proto::plan::OpType::GreaterThan) {
+                    auto [last_chunk_id, last_in_chunk_offset] =
+                        this->find_last_pk_position<PK>(target,
+                                                        pk_column.get(),
+                                                        all_chunk_pins,
+                                                        chunk_id,
+                                                        in_chunk_offset);
+                    start_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
+                                last_in_chunk_offset + 1;
+                }
+                if (start_idx < bitset.size()) {
+                    bitset.set(start_idx, bitset.size() - start_idx, true);
+                }
+            }
+        } else if (op == proto::plan::OpType::LessEqual ||
+                   op == proto::plan::OpType::LessThan) {
+            auto [chunk_id, in_chunk_offset, exact_match] =
+                this->pk_lower_bound<PK>(
+                    target, pk_column.get(), all_chunk_pins, 0);
+
+            int64_t end_idx;
+            if (chunk_id == -1) {
+                end_idx = bitset.size();
+            } else if (op == proto::plan::OpType::LessEqual && exact_match) {
+                auto [last_chunk_id, last_in_chunk_offset] =
+                    this->find_last_pk_position<PK>(target,
+                                                    pk_column.get(),
+                                                    all_chunk_pins,
+                                                    chunk_id,
+                                                    in_chunk_offset);
+                end_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
+                          last_in_chunk_offset + 1;
+            } else {
+                end_idx =
+                    pk_column->GetNumRowsUntilChunk(chunk_id) + in_chunk_offset;
+            }
+
+            if (end_idx > 0) {
+                bitset.set(0, end_idx, true);
+            }
+        } else {
+            ThrowInfo(ErrorCode::Unsupported,
+                      fmt::format("unsupported op type {}", op));
+        }
+    }
+
+    template <typename PK>
+    void
+    search_pks_with_two_pointers_impl(
+        BitsetTypeView& bitset,
+        const std::vector<PkType>& pks,
+        const std::shared_ptr<ChunkedColumnInterface>& pk_column) const {
+        // TODO: we should sort pks during plan generation
+        std::vector<PK> sorted_pks;
+        sorted_pks.reserve(pks.size());
+        for (const auto& pk : pks) {
+            sorted_pks.push_back(std::get<PK>(pk));
+        }
+        std::sort(sorted_pks.begin(), sorted_pks.end());
+
+        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+
+        size_t pk_idx = 0;
+        int last_chunk_id = 0;
+
+        while (pk_idx < sorted_pks.size()) {
+            const auto& target_pk = sorted_pks[pk_idx];
+
+            // find the first occurrence of target_pk
+            auto [chunk_id, in_chunk_offset, exact_match] =
+                this->pk_lower_bound<PK>(
+                    target_pk, pk_column.get(), all_chunk_pins, last_chunk_id);
+
+            if (chunk_id == -1) {
+                // All remaining PKs are greater than all values in pk_column
+                break;
+            }
+
+            if (exact_match) {
+                // Found exact match, find the last occurrence
+                auto [last_chunk_id_found, last_in_chunk_offset] =
+                    this->find_last_pk_position<PK>(target_pk,
+                                                    pk_column.get(),
+                                                    all_chunk_pins,
+                                                    chunk_id,
+                                                    in_chunk_offset);
+
+                // Mark all occurrences from first to last position using global indices
+                auto start_idx =
+                    pk_column->GetNumRowsUntilChunk(chunk_id) + in_chunk_offset;
+                auto end_idx =
+                    pk_column->GetNumRowsUntilChunk(last_chunk_id_found) +
+                    last_in_chunk_offset;
+
+                bitset.set(start_idx, end_idx - start_idx + 1, true);
+                last_chunk_id = last_chunk_id_found;
+            }
+
+            while (pk_idx < sorted_pks.size() &&
+                   sorted_pks[pk_idx] == target_pk) {
+                pk_idx++;
+            }
+        }
+    }
+
+    // Binary search to find lower_bound of pk in pk_column starting from from_chunk_id
+    // Returns: (chunk_id, in_chunk_offset, exists)
+    //   - chunk_id: the chunk containing the first value >= pk
+    //   - in_chunk_offset: offset of the first value >= pk in that chunk
+    //   - exists: true if found an exact match (value == pk), false otherwise
+    //   - If pk doesn't exist, returns the position of first value > pk with exists=false
+    //   - If pk is greater than all values, returns {-1, -1, false}
+    template <typename PK>
+    std::tuple<int, int, bool>
+    pk_lower_bound(const PK& pk,
+                   const ChunkedColumnInterface* pk_column,
+                   const std::vector<PinWrapper<Chunk*>>& all_chunk_pins,
+                   int from_chunk_id = 0) const {
+        const auto num_chunk = pk_column->num_chunks();
+
+        if (from_chunk_id >= num_chunk) {
+            return {-1, -1, false};  // Invalid starting chunk
+        }
+
+        using PKViewType = std::conditional_t<std::is_same_v<PK, int64_t>,
+                                              int64_t,
+                                              std::string_view>;
+
+        auto get_val_view = [&](int chunk_id,
+                                int in_chunk_offset) -> PKViewType {
+            auto pw = all_chunk_pins[chunk_id];
+            if constexpr (std::is_same_v<PK, int64_t>) {
+                auto src =
+                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                return src[in_chunk_offset];
+            } else {
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                return string_chunk->operator[](in_chunk_offset);
+            }
+        };
+
+        // Binary search at chunk level to find the first chunk that might contain pk
+        int left_chunk_id = from_chunk_id;
+        int right_chunk_id = num_chunk - 1;
+        int target_chunk_id = -1;
+
+        while (left_chunk_id <= right_chunk_id) {
+            int mid_chunk_id =
+                left_chunk_id + (right_chunk_id - left_chunk_id) / 2;
+            auto chunk_row_num = pk_column->chunk_row_nums(mid_chunk_id);
+
+            PKViewType min_val = get_val_view(mid_chunk_id, 0);
+            PKViewType max_val = get_val_view(mid_chunk_id, chunk_row_num - 1);
+
+            if (pk >= min_val && pk <= max_val) {
+                // pk might be in this chunk
+                target_chunk_id = mid_chunk_id;
+                break;
+            } else if (pk < min_val) {
+                // pk is before this chunk, could be in an earlier chunk
+                target_chunk_id = mid_chunk_id;  // This chunk has values >= pk
+                right_chunk_id = mid_chunk_id - 1;
+            } else {
+                // pk is after this chunk, search in later chunks
+                left_chunk_id = mid_chunk_id + 1;
+            }
+        }
+
+        // If no suitable chunk found, check if we need the first position after all chunks
+        if (target_chunk_id == -1) {
+            if (left_chunk_id >= num_chunk) {
+                // pk is greater than all values
+                return {-1, -1, false};
+            }
+            target_chunk_id = left_chunk_id;
+        }
+
+        // Binary search within the target chunk to find lower_bound position
+        auto chunk_row_num = pk_column->chunk_row_nums(target_chunk_id);
+        int left_offset = 0;
+        int right_offset = chunk_row_num;
+
+        while (left_offset < right_offset) {
+            int mid_offset = left_offset + (right_offset - left_offset) / 2;
+            PKViewType mid_val = get_val_view(target_chunk_id, mid_offset);
+
+            if (mid_val < pk) {
+                left_offset = mid_offset + 1;
+            } else {
+                right_offset = mid_offset;
+            }
+        }
+
+        // Check if we found a valid position
+        if (left_offset < chunk_row_num) {
+            // Found position within current chunk
+            PKViewType found_val = get_val_view(target_chunk_id, left_offset);
+            bool exact_match = (found_val == pk);
+            return {target_chunk_id, left_offset, exact_match};
+        } else {
+            // Position is beyond current chunk, try next chunk
+            if (target_chunk_id + 1 < num_chunk) {
+                // Next chunk exists, return its first position
+                // Check if the first value in next chunk equals pk
+                PKViewType next_val = get_val_view(target_chunk_id + 1, 0);
+                bool exact_match = (next_val == pk);
+                return {target_chunk_id + 1, 0, exact_match};
+            } else {
+                // No more chunks, pk is greater than all values
+                return {-1, -1, false};
+            }
+        }
+    }
+
+    // Find the last occurrence position of pk starting from a known first occurrence
+    // Parameters:
+    //   - pk: the primary key to search for
+    //   - pk_column: the primary key column
+    //   - first_chunk_id: chunk id of the first occurrence (from pk_lower_bound)
+    //   - first_in_chunk_offset: offset in chunk of the first occurrence (from pk_lower_bound)
+    // Returns: (last_chunk_id, last_in_chunk_offset)
+    //   - The position of the last occurrence of pk
+    // Note: This function assumes pk exists and linearly scans forward.
+    //       It's efficient when pk has few duplicates.
+    template <typename PK>
+    std::tuple<int, int>
+    find_last_pk_position(const PK& pk,
+                          const ChunkedColumnInterface* pk_column,
+                          const std::vector<PinWrapper<Chunk*>>& all_chunk_pins,
+                          int first_chunk_id,
+                          int first_in_chunk_offset) const {
+        const auto num_chunk = pk_column->num_chunks();
+
+        using PKViewType = std::conditional_t<std::is_same_v<PK, int64_t>,
+                                              int64_t,
+                                              std::string_view>;
+
+        auto get_val_view = [&](int chunk_id,
+                                int in_chunk_offset) -> PKViewType {
+            auto pw = all_chunk_pins[chunk_id];
+            if constexpr (std::is_same_v<PK, int64_t>) {
+                auto src =
+                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                return src[in_chunk_offset];
+            } else {
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                return string_chunk->operator[](in_chunk_offset);
+            }
+        };
+
+        int last_chunk_id = first_chunk_id;
+        int last_offset = first_in_chunk_offset;
+
+        // Linear scan forward in current chunk
+        auto chunk_row_num = pk_column->chunk_row_nums(first_chunk_id);
+        for (int offset = first_in_chunk_offset + 1; offset < chunk_row_num;
+             offset++) {
+            PKViewType curr_val = get_val_view(first_chunk_id, offset);
+            if (curr_val == pk) {
+                last_offset = offset;
+            } else {
+                // Found first value != pk, done
+                return {last_chunk_id, last_offset};
+            }
+        }
+
+        // Continue scanning in subsequent chunks
+        for (int chunk_id = first_chunk_id + 1; chunk_id < num_chunk;
+             chunk_id++) {
+            auto curr_chunk_row_num = pk_column->chunk_row_nums(chunk_id);
+
+            // Check first value in this chunk
+            PKViewType first_val = get_val_view(chunk_id, 0);
+            if (first_val != pk) {
+                // This chunk doesn't contain pk anymore
+                return {last_chunk_id, last_offset};
+            }
+
+            // Update last position and scan this chunk
+            last_chunk_id = chunk_id;
+            last_offset = 0;
+
+            for (int offset = 1; offset < curr_chunk_row_num; offset++) {
+                PKViewType curr_val = get_val_view(chunk_id, offset);
+                if (curr_val == pk) {
+                    last_offset = offset;
+                } else {
+                    // Found first value != pk
+                    return {last_chunk_id, last_offset};
+                }
+            }
+            // All values in this chunk equal pk, continue to next chunk
+        }
+
+        // Scanned all chunks, return last found position
+        return {last_chunk_id, last_offset};
+    }
+
     template <typename S, typename T = S>
     static void
     bulk_subscript_impl(milvus::OpContext* op_ctx,
