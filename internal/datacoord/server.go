@@ -324,8 +324,8 @@ func (s *Server) initDataCoord() error {
 	log.Info("init statsJobManager done")
 
 	// TODO: enable external collection inspector
-	//s.initExternalCollectionInspector()
-	//log.Info("init external collection inspector done")
+	// s.initExternalCollectionInspector()
+	// log.Info("init external collection inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -761,7 +761,8 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
-	s.externalCollectionInspector.Start()
+	// TODO: enable external collection inspector
+	// s.externalCollectionInspector.Start()
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
@@ -1066,8 +1067,9 @@ func (s *Server) Stop() error {
 	s.analyzeInspector.Stop()
 	log.Info("datacoord analyze inspector stopped")
 
-	s.externalCollectionInspector.Stop()
-	log.Info("datacoord external collection inspector stopped")
+	// TODO: enable external collection inspector
+	// s.externalCollectionInspector.Stop()
+	// log.Info("datacoord external collection inspector stopped")
 
 	if s.session != nil {
 		s.session.Stop()
