@@ -319,7 +319,6 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *s
 	var pluginContext *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
 		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
-
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 			if len(unsafe) > 0 {
 				pluginContext = &indexcgopb.StoragePluginContext{
