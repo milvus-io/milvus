@@ -32,9 +32,9 @@ concurrency:
 
 jobs:
   mac:
-    name: Code Checker MacOS 13
-    runs-on: macos-13
-    timeout-minutes: 300
+    name: Code Checker MacOS
+    runs-on: macos-15-intel
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -44,18 +44,23 @@ jobs:
           python-version: '<3.12'
       - name: Install CMake 3.31.8
         run: |
-          cmake --version
-          which cmake
-          brew uninstall cmake -f
+          cmake --version || true
+          which cmake || true
+          if ! brew list cmake &>/dev/null; then
+            brew uninstall cmake -f
+          fi
           curl -LO https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz
           tar -zxf cmake-3.31.8-macos-universal.tar.gz -C /tmp/
           sudo mv /tmp/cmake-3.31.8-macos-universal/CMake.app /Applications/
+          sudo rm -f /usr/local/bin/cmake /usr/local/bin/cpack /usr/local/bin/ctest
+          sudo rm -f /opt/homebrew/bin/cmake /opt/homebrew/bin/cpack /opt/homebrew/bin/ctest
           echo -e "\n=== Creating symlinks for CMake ==="
           sudo ln -s /Applications/CMake.app/Contents/bin/cmake /usr/local/bin/cmake
           sudo ln -s /Applications/CMake.app/Contents/bin/cpack /usr/local/bin/cpack
           sudo ln -s /Applications/CMake.app/Contents/bin/ctest /usr/local/bin/ctest
           CMAKE_MODULE_DIR="/Applications/CMake.app/Contents/share/cmake-3.31"
           sudo ln -s "$CMAKE_MODULE_DIR" /usr/local/share/cmake-3.31
+          export PATH="/usr/local/bin:$PATH"          
           cmake --version
           which cmake
       - name: Setup Go environment
@@ -76,12 +81,14 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          ls -alh /var/tmp/ccache
           brew install libomp ninja openblas ccache pkg-config
-          pip3 install conan==1.64.1
-          if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
+          BREW_PREFIX=$(brew --prefix)
+          # Install llvm@17 explicitly as a stable version
+          brew install llvm@17
+          if [[ ! -d "${BREW_PREFIX}/opt/llvm" ]]; then
+            ln -s ${BREW_PREFIX}/opt/llvm@17 ${BREW_PREFIX}/opt/llvm
           fi
+          pip3 install conan==1.64.1
           make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v4

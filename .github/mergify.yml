@@ -19,6 +19,21 @@ misc:
   - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=integration-test'
       - 'status-success=Integration Test'
+      - 'status-success=ci-v2/integration-test'
+  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
+      - 'status-success=cpu-e2e'
+      - 'status-success=ci-v2/e2e-default'
+  - when_build_success: &WHEN_BUILD_SUCCESS
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - 'status-success=ci-v2/build'
+  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+      - 'status-success=ci-v2/code-check'
+  - when_code_check_macos_success: &WHEN_CODE_CHECK_MACOS_SUCCESS
+      - 'status-success=Code Checker MacOS 13'
+      - 'status-success=Code Checker MacOS'
+  
+  # Branch configurations
   - branch: &BRANCHES
       #  In this pull request, the changes are based on the master branch
       - &MASTER_BRANCH base=master
@@ -64,10 +79,9 @@ pull_request_rules:
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker Amazonlinux 2023'
-      - 'status-success=cpu-e2e'
+      - or: *WHEN_E2E_TEST_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -82,9 +96,9 @@ pull_request_rules:
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker CentOS 7'
-      - 'status-success=cpu-e2e'
+      - or: *WHEN_E2E_TEST_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -128,10 +142,10 @@ pull_request_rules:
     conditions:
       # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker Amazonlinux 2023'
+      - *only_go_unittest_files
+      - or: *WHEN_BUILD_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or:
           - -files~=^(?!pkg\/.*_test\.go).*$
@@ -175,6 +189,126 @@ pull_request_rules:
       label:
         add:
           - ci-passed
+
+  - name: Test passed for skip e2e when source code changed
+    conditions:
+      - or: *BRANCHES
+      - or: *WHEN_BUILD_SUCCESS
+      - title~=\[skip e2e\]
+      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
+      - or: *WHEN_GO_UNIT_TEST_SUCCESS
+      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      - *source_code_files
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  # ==========================================================================
+  # CI FAILURE HANDLING
+  # Remove ci-passed labels when tests fail
+  # ==========================================================================
+
+  # ==========================================================================
+  # CONSOLIDATED MIGRATION FAILURE HANDLING
+  # Handle failure scenarios during CI system migration with optimized rules
+  # ==========================================================================
+
+  - name: Remove ci-passed when any CI system fails during migration
+    conditions:
+      - or:
+        - *MASTER_BRANCH
+        - *2X_BRANCH
+      - label!=manual-pass
+      - *source_code_files
+      # Comprehensive failure logic: remove ci-passed when any required system fails
+      - or:
+        # Build systems: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Build and test AMD64 Ubuntu 22.04
+                  - status-success = ci-v2/build
+            - or:
+                - status-failure = Build and test AMD64 Ubuntu 22.04
+                - status-failure = ci-v2/build
+        # Go unit tests: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = UT for Go
+                  - status-success = ci-v2/ut-go
+            - or:
+                - status-failure = UT for Go
+                - status-failure = ci-v2/ut-go
+        # Integration tests: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Integration Test
+                  - status-success = ci-v2/integration-test
+            - or:
+                - status-failure = Integration Test
+                - status-failure = ci-v2/integration-test
+        # Cpp unit tests: remove if no success AND has failure (only when cpp files changed)
+        - and:
+          - *morethan_go_unittest_files
+          - not:
+              or:
+                - status-success = cpp-unit-test
+                - status-success = ci-v2/ut-cpp
+          - or:
+              - status-failure = cpp-unit-test
+              - status-failure = ci-v2/ut-cpp
+        # Code checker Ubuntu: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker AMD64 Ubuntu 22.04
+                  - status-success = ci-v2/code-check
+            - or:
+                - status-failure = Code Checker AMD64 Ubuntu 22.04
+                - status-failure = ci-v2/code-check
+        # Code checker MacOS: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker MacOS 13
+                  - status-success = Code Checker MacOS
+            - or:
+                - status-failure = Code Checker MacOS 13
+                - status-failure = Code Checker MacOS
+        # E2E tests: regular case - remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = cpu-e2e
+                  - status-success = ci-v2/e2e-default
+            - or:
+                - status-failure = cpu-e2e
+                - status-failure = ci-v2/e2e-default
+        # E2E tests: required case - remove if no success AND has failure (when not skipped)
+        - and:
+          - -title~=\[skip e2e\]
+          - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
+          - not:
+              or:
+                - status-success = cpu-e2e
+                - status-success = ci-v2/e2e-default
+          - or:
+              - status-failure = cpu-e2e
+              - status-failure = ci-v2/e2e-default
+    actions:
+      label:
+        remove:
+          - ci-passed
+
+  # ==========================================================================
+  # PR VALIDATION AND BLOCKING RULES
+  # Ensure PRs meet project standards before merging
+  # ==========================================================================
 
   - name: Blocking PR if missing a related issue or doesn't have kind/enhancement label
     conditions:
