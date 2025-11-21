@@ -153,9 +153,9 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	// #define LOON_TRANSACTION_UPDATE_ADDFEILD 1
 	// #define LOON_TRANSACTION_UPDATE_MAX 2
 
-	// #define LOON_TRANSACTION_RESLOVE_FAIL 0
-	// #define LOON_TRANSACTION_RESLOVE_MERGE 1
-	// #define LOON_TRANSACTION_RESLOVE_MAX 2
+	// #define LOON_TRANSACTION_RESOLVE_FAIL 0
+	// #define LOON_TRANSACTION_RESOLVE_MERGE 1
+	// #define LOON_TRANSACTION_RESOLVE_MAX 2
 
 	var commitResult C.bool
 	result = C.transaction_commit(transationHandle, C.int16_t(0), C.int16_t(0), manifest, &commitResult)
@@ -167,7 +167,7 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	var readVersion C.int64_t
 
-	// TODO: not atomic, need to get version from transation
+	// TODO: not atomic, need to get version from transaction
 	var cOutManifest *C.char
 	result = C.get_latest_column_groups(cBasePath, pw.cProperties, &cOutManifest, &readVersion)
 	if err := HandleFFIResult(result); err != nil {
