@@ -1093,7 +1093,6 @@ func (s *mixCoordImpl) WatchChannels(ctx context.Context, req *datapb.WatchChann
 	return s.datacoordServer.WatchChannels(ctx, req)
 }
 
-
 func (s *mixCoordImpl) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.datacoordServer.GetFlushState(ctx, req)
 }
