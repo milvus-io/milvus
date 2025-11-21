@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	mixcoord "github.com/milvus-io/milvus/internal/coordinator"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
@@ -727,6 +728,11 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
 	return s.mixCoord.FlushAll(ctx, req)
+}
+
+// CreateExternalCollection creates an external collection
+func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
+	return s.mixCoord.CreateExternalCollection(ctx, req)
 }
 
 // AssignSegmentID requests to allocate segment space for insert
