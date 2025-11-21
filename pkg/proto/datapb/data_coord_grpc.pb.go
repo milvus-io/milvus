@@ -10,6 +10,7 @@ import (
 	context "context"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	grpc "google.golang.org/grpc"
@@ -25,6 +26,7 @@ const _ = grpc.SupportPackageIsVersion7
 const (
 	DataCoord_Flush_FullMethodName                       = "/milvus.proto.data.DataCoord/Flush"
 	DataCoord_FlushAll_FullMethodName                    = "/milvus.proto.data.DataCoord/FlushAll"
+	DataCoord_CreateExternalCollection_FullMethodName    = "/milvus.proto.data.DataCoord/CreateExternalCollection"
 	DataCoord_AllocSegment_FullMethodName                = "/milvus.proto.data.DataCoord/AllocSegment"
 	DataCoord_AssignSegmentID_FullMethodName             = "/milvus.proto.data.DataCoord/AssignSegmentID"
 	DataCoord_GetSegmentInfo_FullMethodName              = "/milvus.proto.data.DataCoord/GetSegmentInfo"
@@ -81,6 +83,7 @@ const (
 type DataCoordClient interface {
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
 	FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error)
+	CreateExternalCollection(ctx context.Context, in *msgpb.CreateCollectionRequest, opts ...grpc.CallOption) (*CreateExternalCollectionResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(ctx context.Context, in *AllocSegmentRequest, opts ...grpc.CallOption) (*AllocSegmentResponse, error)
 	// Deprecated: Do not use.
@@ -160,6 +163,15 @@ func (c *dataCoordClient) Flush(ctx context.Context, in *FlushRequest, opts ...g
 func (c *dataCoordClient) FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error) {
 	out := new(FlushAllResponse)
 	err := c.cc.Invoke(ctx, DataCoord_FlushAll_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) CreateExternalCollection(ctx context.Context, in *msgpb.CreateCollectionRequest, opts ...grpc.CallOption) (*CreateExternalCollectionResponse, error) {
+	out := new(CreateExternalCollectionResponse)
+	err := c.cc.Invoke(ctx, DataCoord_CreateExternalCollection_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -606,6 +618,7 @@ func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 type DataCoordServer interface {
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
 	FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error)
+	CreateExternalCollection(context.Context, *msgpb.CreateCollectionRequest) (*CreateExternalCollectionResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error)
 	// Deprecated: Do not use.
@@ -674,6 +687,9 @@ func (UnimplementedDataCoordServer) Flush(context.Context, *FlushRequest) (*Flus
 }
 func (UnimplementedDataCoordServer) FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FlushAll not implemented")
+}
+func (UnimplementedDataCoordServer) CreateExternalCollection(context.Context, *msgpb.CreateCollectionRequest) (*CreateExternalCollectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateExternalCollection not implemented")
 }
 func (UnimplementedDataCoordServer) AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AllocSegment not implemented")
@@ -863,6 +879,24 @@ func _DataCoord_FlushAll_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataCoordServer).FlushAll(ctx, req.(*FlushAllRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_CreateExternalCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(msgpb.CreateCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).CreateExternalCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_CreateExternalCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).CreateExternalCollection(ctx, req.(*msgpb.CreateCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1745,6 +1779,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FlushAll",
 			Handler:    _DataCoord_FlushAll_Handler,
+		},
+		{
+			MethodName: "CreateExternalCollection",
+			Handler:    _DataCoord_CreateExternalCollection_Handler,
 		},
 		{
 			MethodName: "AllocSegment",

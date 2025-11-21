@@ -352,3 +352,7 @@ func buildAnalyzeTaskKey(taskID int64) string {
 func buildStatsTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", StatsTaskPrefix, taskID)
 }
+
+func buildUpdateExternalCollectionTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", UpdateExternalCollectionTaskPrefix, taskID)
+}
