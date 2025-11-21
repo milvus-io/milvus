@@ -46,6 +46,9 @@ misc:
   - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=ci-v2/code-check'
+  - when_code_check_macos_success: &WHEN_CODE_CHECK_MACOS_SUCCESS
+      - 'status-success=Code Checker MacOS 13'
+      - 'status-success=Code Checker MacOS'
   
   # Branch configurations
   - branch: &BRANCHES
@@ -103,7 +106,7 @@ pull_request_rules:
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_E2E_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -121,7 +124,7 @@ pull_request_rules:
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_E2E_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -165,7 +168,7 @@ pull_request_rules:
       - *only_go_unittest_files
       - or: *WHEN_BUILD_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
     actions:
       label:
@@ -202,7 +205,7 @@ pull_request_rules:
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
+      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
       - *source_code_files
     actions:
       label:
@@ -289,8 +292,15 @@ pull_request_rules:
             - or:
                 - status-failure = Code Checker AMD64 Ubuntu 22.04
                 - status-failure = ci-v2/code-check
-        - or:
-          - status-success != Code Checker MacOS 13
+        # Code checker MacOS: remove if no success AND has failure
+        - and:
+            - not:
+                or:
+                  - status-success = Code Checker MacOS 13
+                  - status-success = Code Checker MacOS
+            - or:
+                - status-failure = Code Checker MacOS 13
+                - status-failure = Code Checker MacOS
         # E2E tests: regular case - remove if no success AND has failure
         - and:
             - not:
