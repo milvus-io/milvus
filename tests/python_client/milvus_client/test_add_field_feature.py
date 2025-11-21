@@ -78,45 +78,66 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = 128
+        dim, default_value = 128, 1
         # 1. create collection
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        index_params.add_index(default_vector_field_name+"new", metric_type="L2")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [
             {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
              default_string_field_name: str(i)} for i in range(10*default_nb)]
         self.insert(client, collection_name, rows)
+        # 3. add collection field
         self.add_collection_field(client, collection_name, field_name=default_new_field_name, data_type=DataType.INT64,
-                                  nullable=True, is_clustering_key=True)
-        # 3. insert new field after add field
-        rows_new = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),default_string_field_name: str(i),
-             default_new_field_name: random.randint(1, 1000)} for i in range(10*default_nb, 11*default_nb)]
-        self.insert(client, collection_name, rows_new)
-        self.flush(client, collection_name)
-        # 4. compact
-        compact_id = self.compact(client, collection_name, is_clustering=True)[0]
+                                  nullable=True, is_clustering_key=True, default_value=default_value)
         cost = 180
+        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        vectors_to_search = [vectors[0]]
+        # 4. insert new field after add field
+        rows_new = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                     default_string_field_name: str(i), default_new_field_name: random.randint(1, 1000)}
+                     for i in range(10*default_nb, 11*default_nb)]
+        self.insert(client, collection_name, rows_new)
+        # 5. compact
+        compact_id = self.compact(client, collection_name)[0]
         start = time.time()
         while True:
             time.sleep(1)
-            res = self.get_compaction_state(client, compact_id, is_clustering=True)[0]
+            res = self.get_compaction_state(client, compact_id)[0]
             if res == "Completed":
                 break
             if time.time() - start > cost:
                 raise Exception(1, f"Compact after index cost more than {cost}s")
-
+        self.wait_for_index_ready(client, collection_name, default_vector_field_name)
+        self.release_collection(client, collection_name)
+        time.sleep(10)
+        self.load_collection(client, collection_name)
+        insert_ids = [i for i in range(10*default_nb)]
+        # 6. search with default value
+        self.search(client, collection_name, vectors_to_search, filter=f'{default_new_field_name} == {default_value}',
+                    output_fields=[default_new_field_name],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        insert_ids = [i for i in range(10*default_nb, 11*default_nb)]
+        # 7. search with new data(no default value)
+        self.search(client, collection_name, vectors_to_search,
+                    filter=f'{default_new_field_name} != {default_value}',
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -360,7 +381,8 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
             "stop_words": ["for", "the", "is", "a"]
         }
         self.add_collection_field(client, collection_name, field_name="text_content", data_type=DataType.VARCHAR,
-                                  nullable=True, max_length=1000, enable_analyzer=True, analyzer_params=analyzer_params)
+                                  nullable=True, max_length=1000, enable_analyzer=True, analyzer_params=analyzer_params,
+                                  enable_match=True)
 
         # 4. insert data with the new analyzer field
         text_data = [
