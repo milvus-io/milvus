@@ -19,6 +19,8 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
+	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+
 	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 
 	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -1782,6 +1784,80 @@ func (_c *MockMixCoordClient_CreateDatabase_Call) Return(_a0 *commonpb.Status, _
 }
 
 func (_c *MockMixCoordClient_CreateDatabase_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateDatabaseRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CreateDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateExternalCollection provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CreateExternalCollection(ctx context.Context, in *msgpb.CreateCollectionRequest, opts ...grpc.CallOption) (*datapb.CreateExternalCollectionResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateExternalCollection")
+	}
+
+	var r0 *datapb.CreateExternalCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *msgpb.CreateCollectionRequest, ...grpc.CallOption) (*datapb.CreateExternalCollectionResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *msgpb.CreateCollectionRequest, ...grpc.CallOption) *datapb.CreateExternalCollectionResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.CreateExternalCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *msgpb.CreateCollectionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CreateExternalCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateExternalCollection'
+type MockMixCoordClient_CreateExternalCollection_Call struct {
+	*mock.Call
+}
+
+// CreateExternalCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *msgpb.CreateCollectionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CreateExternalCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CreateExternalCollection_Call {
+	return &MockMixCoordClient_CreateExternalCollection_Call{Call: _e.mock.On("CreateExternalCollection",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CreateExternalCollection_Call) Run(run func(ctx context.Context, in *msgpb.CreateCollectionRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CreateExternalCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*msgpb.CreateCollectionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CreateExternalCollection_Call) Return(_a0 *datapb.CreateExternalCollectionResponse, _a1 error) *MockMixCoordClient_CreateExternalCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CreateExternalCollection_Call) RunAndReturn(run func(context.Context, *msgpb.CreateCollectionRequest, ...grpc.CallOption) (*datapb.CreateExternalCollectionResponse, error)) *MockMixCoordClient_CreateExternalCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
