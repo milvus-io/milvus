@@ -2473,7 +2473,10 @@ def gen_timestamptz_str():
             return base.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
         # otherwise use explicit offset
         offset_hours = random.randint(-12, 14)
-        offset_minutes = random.choice([0, 30])
+        if offset_hours == -12 or offset_hours == 14:
+            offset_minutes = 0
+        else:
+            offset_minutes = random.choice([0, 30])
         tz = timezone(timedelta(hours=offset_hours, minutes=offset_minutes))
         local_dt = base.astimezone(tz)
         tz_str = local_dt.strftime("%z")  # "+0800"
@@ -4192,6 +4195,12 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
 
     Returns:
         list of rows data with timestamptz string converted to desired timezone string
+
+    Note:
+        Naive timestamps (e.g. ``YYYY-MM-DD HH:MM:SS`` with no offset information)
+        are treated as already expressed in the desired timezone. In those cases we
+        simply append the correct offset for the provided timezone instead of
+        converting from UTC first.
     """
     iso_offset_re = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
@@ -4308,37 +4317,40 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
                 dt_target = dt.astimezone(ZoneInfo(timezone))
                 return _format_with_offset_str(dt_target)
             else:
-                # naive; interpret as time in target timezone and output there
                 y, mo, d, hh, mi, ss, _, _ = _parse_basic(raw)
-                if y == 0:
-                    # Cannot use datetime; treat as local-like in target zone with fixed offset fallback
-                    # Asia/Shanghai common case: +08:00
-                    fixed_minutes = 480 if timezone == 'Asia/Shanghai' else 0
-                    return _format_fixed(y, mo, d, hh, mi, ss, fixed_minutes)
-                local = datetime(y, mo, d, hh, mi, ss, tzinfo=ZoneInfo(timezone))
-                return _format_with_offset_str(local)
+                if not (1 <= y <= 9999):
+                    raise ValueError("year out of range for datetime")
+                tzinfo = ZoneInfo(timezone)
+                dt_local = datetime(y, mo, d, hh, mi, ss, tzinfo=tzinfo)
+                return _format_with_offset_str(dt_local)
         except Exception:
             # manual fallback (handles year 0 and overflow beyond 9999)
             y, mo, d, hh, mi, ss, offset, has_z = _parse_basic(raw)
+            if offset is None and not has_z:
+                # naive input outside datetime supported range; attach offset only
+                target_minutes = 0
+                try:
+                    tzinfo = ZoneInfo(timezone)
+                    ref_year = 2004  # leap year to keep Feb 29 valid
+                    ref_dt = datetime(ref_year, mo, d, hh, mi, ss, tzinfo=tzinfo)
+                    off_td = ref_dt.utcoffset()
+                    if off_td is not None:
+                        target_minutes = int(off_td.total_seconds() // 60)
+                except Exception:
+                    if timezone == 'Asia/Shanghai':
+                        target_minutes = 480
+                return _format_fixed(y, mo, d, hh, mi, ss, target_minutes)
             # compute UTC components first
             if offset is None and has_z:
                 uy, um, ud, uh, umi, uss = y, mo, d, hh, mi, ss
             elif offset is None:
-                # treat naive as in target timezone; need target offset if possible
-                try:
-                    if 1 <= y <= 9999:
-                        local = datetime(y, mo, d, hh, mi, ss, tzinfo=ZoneInfo(timezone))
-                        off_td = local.utcoffset() or tzmod.utc.utcoffset(local)
-                        total = int(off_td.total_seconds() // 60)
-                        # convert to UTC
-                        sign = '+' if total >= 0 else '-'
-                        total = abs(total)
-                        offset = (sign, total // 60, total % 60)
-                    else:
-                        offset = ('+', 8, 0) if timezone == 'Asia/Shanghai' else ('+', 0, 0)
-                except Exception:
-                    offset = ('+', 8, 0) if timezone == 'Asia/Shanghai' else ('+', 0, 0)
-                uy, um, ud, uh, umi, uss = _apply_offset_to_utc(y, mo, d, hh, mi, ss, offset)
+                # already handled above, but keep safety fallback to just append offset
+                if 1 <= y <= 9999:
+                    tzinfo = ZoneInfo(timezone)
+                    dt_local = datetime(y, mo, d, hh, mi, ss, tzinfo=tzinfo)
+                    return _format_with_offset_str(dt_local)
+                target_minutes = 480 if timezone == 'Asia/Shanghai' else 0
+                return _format_fixed(y, mo, d, hh, mi, ss, target_minutes)
             else:
                 uy, um, ud, uh, umi, uss = _apply_offset_to_utc(y, mo, d, hh, mi, ss, offset)
 
@@ -4350,9 +4362,23 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
                     return _format_with_offset_str(dt_target)
             except Exception:
                 pass
-            # fallback to fixed offset formatting (Asia/Shanghai -> +08:00 else Z)
+            # fallback: manually apply timezone offset when datetime conversion fails
+            # Get target timezone offset
             target_minutes = 480 if timezone == 'Asia/Shanghai' else 0
-            return _format_fixed(uy, um, ud, uh, umi, uss, target_minutes)
+            try:
+                # Try to get actual offset from timezone if possible
+                if 1 <= uy <= 9999:
+                    test_dt = datetime(uy, um, ud, uh, umi, uss, tzinfo=tzmod.utc)
+                    test_target = test_dt.astimezone(ZoneInfo(timezone))
+                    off_td = test_target.utcoffset() or tzmod.utc.utcoffset(test_target)
+                    target_minutes = int(off_td.total_seconds() // 60)
+            except Exception:
+                pass
+            # Convert UTC to local time: UTC + offset = local
+            # Reverse the offset sign to convert UTC->local (opposite of local->UTC)
+            reverse_sign = '-' if target_minutes >= 0 else '+'
+            ty, tm, td, th, tmi, ts = _apply_offset_to_utc(uy, um, ud, uh, umi, uss, (reverse_sign, abs(target_minutes) // 60, abs(target_minutes) % 60))
+            return _format_fixed(ty, tm, td, th, tmi, ts, target_minutes)
 
     new_rows = []
     for row in rows:
