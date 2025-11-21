@@ -339,20 +339,23 @@ def output_field_value_check(search_res, original, pk_name):
     :return: True or False
     """
     pk_name = ct.default_primary_field_name if pk_name is None else pk_name
+    nq = len(search_res)
     limit = len(search_res[0])
-    for i in range(limit):
-        entity = search_res[0][i].fields
-        _id = search_res[0][i].id
-        for field in entity.keys():
-            if isinstance(entity[field], list):
-                for order in range(0, len(entity[field]), 4):
-                    assert abs(original[field][_id][order] - entity[field][order]) < ct.epsilon
-            elif isinstance(entity[field], dict) and field != ct.default_json_field_name:
-                # sparse checking, sparse vector must be the last, this is a bit hacky,
-                # but sparse only supports list data type insertion for now
-                assert entity[field].keys() == original[-1][_id].keys()
-            else:
-                num = original[original[pk_name] == _id].index.to_list()[0]
-                assert original[field][num] == entity[field]
+    check_nqs = min(2, nq)       # the output field values are wrong only at nq>=2  #45338
+    for n in range(check_nqs):
+        for i in range(limit):
+            entity = search_res[n][i].fields
+            _id = search_res[n][i].id
+            for field in entity.keys():
+                if isinstance(entity[field], list):
+                    for order in range(0, len(entity[field]), 4):
+                        assert abs(original[field][_id][order] - entity[field][order]) < ct.epsilon
+                elif isinstance(entity[field], dict) and field != ct.default_json_field_name:
+                    # sparse checking, sparse vector must be the last, this is a bit hacky,
+                    # but sparse only supports list data type insertion for now
+                    assert entity[field].keys() == original[-1][_id].keys()
+                else:
+                    num = original[original[pk_name] == _id].index.to_list()[0]
+                    assert original[field][num] == entity[field], f"the output field values are wrong at nq={n}"
 
     return True
