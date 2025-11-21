@@ -615,7 +615,6 @@ func (s *taskScheduler) processInProgress(task Task) bool {
 	if exist {
 		task.QueryResult(s.ctx, client)
 		if task.GetState() == indexpb.JobState_JobStateFinished || task.GetState() == indexpb.JobState_JobStateFailed {
-			task.ResetTask(s.meta)
 			return s.processFinished(task)
 		}
 		return false
