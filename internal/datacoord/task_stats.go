@@ -40,7 +40,8 @@ type statsTask struct {
 	nodeID          int64
 	taskInfo        *workerpb.StatsResult
 
-	taskSlot int64
+	cpuSlot    float64
+	memorySlot float64
 
 	queueTime time.Time
 	startTime time.Time
@@ -53,7 +54,7 @@ type statsTask struct {
 
 var _ Task = (*statsTask)(nil)
 
-func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, taskSlot int64) *statsTask {
+func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType indexpb.StatsSubJob, cpuSlot, memorySlot float64) *statsTask {
 	return &statsTask{
 		taskID:          taskID,
 		segmentID:       segmentID,
@@ -63,7 +64,8 @@ func newStatsTask(taskID int64, segmentID, targetSegmentID int64, subJobType ind
 			State:  indexpb.JobState_JobStateInit,
 		},
 		subJobType: subJobType,
-		taskSlot:   taskSlot,
+		cpuSlot:    cpuSlot,
+		memorySlot: memorySlot,
 	}
 }
 
@@ -133,8 +135,8 @@ func (st *statsTask) GetFailReason() string {
 	return st.taskInfo.GetFailReason()
 }
 
-func (st *statsTask) GetTaskSlot() int64 {
-	return st.taskSlot
+func (st *statsTask) GetTaskSlot() (float64, float64) {
+	return st.cpuSlot, st.memorySlot
 }
 
 func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
@@ -258,7 +260,8 @@ func (st *statsTask) PreCheck(ctx context.Context, dependency *taskScheduler) bo
 		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
 		JsonKeyStatsDataFormat:    1,
 		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
-		TaskSlot:                  st.taskSlot,
+		CpuSlot:                   st.cpuSlot,
+		MemorySlot:                st.memorySlot,
 	}
 
 	log.Info("stats task pre check successfully", zap.String("subJobType", st.subJobType.String()),

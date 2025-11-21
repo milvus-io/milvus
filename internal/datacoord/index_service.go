@@ -66,7 +66,8 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 	if err != nil {
 		return err
 	}
-	taskSlot := calculateIndexTaskSlot(segment.getSegmentSize())
+
+	cpuSlot, memorySlot := calculateIndexTaskSlot(segment.getSegmentSize(), IsVectorIndex(s.meta, segment.GetCollectionID(), indexID))
 	segIndex := &model.SegmentIndex{
 		SegmentID:      segment.ID,
 		CollectionID:   segment.CollectionID,
@@ -80,7 +81,7 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 	if err = s.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err
 	}
-	s.taskScheduler.enqueue(newIndexBuildTask(buildID, taskSlot))
+	s.taskScheduler.enqueue(newIndexBuildTask(buildID, cpuSlot, memorySlot))
 	return nil
 }
 

@@ -92,6 +92,10 @@ func (t *fakeTask) GetSlot() int64 {
 	return 1
 }
 
+func (t *fakeTask) GetSlotV2() (float64, float64) {
+	return 1, 1
+}
+
 func (t *fakeTask) OnEnqueue(ctx context.Context) error {
 	_taskwg.Add(1)
 	t.state = fakeTaskEnqueued

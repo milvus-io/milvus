@@ -207,18 +207,29 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStatsRe
 	unissued, active := i.sched.TaskQueue.GetTaskNum()
 
 	slots := i.totalSlot - i.sched.TaskQueue.GetUsingSlot()
+	usingCPUSlot, usingMemorySlot := i.sched.TaskQueue.GetUsingSlotV2()
+	availableCPUSlot := i.cpuSlot - usingCPUSlot
+	availableMemorySlot := i.memorySlot - usingMemorySlot
 	log.Ctx(ctx).Info("Get Index Job Stats",
 		zap.Int("unissued", unissued),
 		zap.Int("active", active),
 		zap.Int64("slots", slots),
+		zap.Float64("availableCPUSlot", availableCPUSlot),
+		zap.Float64("availableMemorySlot", availableMemorySlot),
+		zap.Float64("totalCPUSlot", i.cpuSlot),
+		zap.Float64("totalMemorySlot", i.memorySlot),
 	)
 	return &workerpb.GetJobStatsResponse{
-		Status:           merr.Success(),
-		TotalJobNum:      int64(active) + int64(unissued),
-		InProgressJobNum: int64(active),
-		EnqueueJobNum:    int64(unissued),
-		TotalSlots:       i.totalSlot,
-		AvailableSlots:   slots,
+		Status:               merr.Success(),
+		TotalJobNum:          int64(active) + int64(unissued),
+		InProgressJobNum:     int64(active),
+		EnqueueJobNum:        int64(unissued),
+		TotalSlots:           i.totalSlot,
+		AvailableSlots:       slots,
+		AvailableCpuSlots:    availableCPUSlot,
+		AvailableMemorySlots: availableMemorySlot,
+		TotalCpuSlots:        i.cpuSlot,
+		TotalMemorySlots:     i.memorySlot,
 	}, nil
 }
 
