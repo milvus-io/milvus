@@ -141,11 +141,10 @@ type Server struct {
 	notifyIndexChan chan UniqueID
 	factory         dependency.Factory
 
-	session   sessionutil.SessionInterface
-	icSession sessionutil.SessionInterface
-	dnEventCh <-chan *sessionutil.SessionEvent
-	// qcEventCh <-chan *sessionutil.SessionEvent
-	qnEventCh <-chan *sessionutil.SessionEvent
+	session          sessionutil.SessionInterface
+	icSession        sessionutil.SessionInterface
+	dnSessionWatcher sessionutil.SessionWatcher
+	qnSessionWatcher sessionutil.SessionWatcher
 
 	enableActiveStandBy bool
 	activateFunc        func() error
@@ -532,7 +531,7 @@ func (s *Server) initServiceDiscovery() error {
 		}
 		log.Info("DataCoord Cluster Manager start up successfully")
 
-		s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, s.rewatchDataNodes)
+		s.dnSessionWatcher = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, s.rewatchDataNodes)
 	}
 
 	s.indexEngineVersionManager = newIndexEngineVersionManager()
@@ -542,7 +541,7 @@ func (s *Server) initServiceDiscovery() error {
 		return err
 	}
 	s.rewatchQueryNodes(qnSessions)
-	s.qnEventCh = s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, r, qnRevision+1, s.rewatchQueryNodes)
+	s.qnSessionWatcher = s.session.WatchServicesWithVersionRange(typeutil.QueryNodeRole, r, qnRevision+1, s.rewatchQueryNodes)
 
 	return nil
 }
@@ -799,7 +798,7 @@ func (s *Server) watchService(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("watch service shutdown")
 			return
-		case event, ok := <-s.dnEventCh:
+		case event, ok := <-s.dnSessionWatcher.EventChannel():
 			if !ok {
 				s.stopServiceWatch()
 				return
@@ -812,7 +811,7 @@ func (s *Server) watchService(ctx context.Context) {
 				}()
 				return
 			}
-		case event, ok := <-s.qnEventCh:
+		case event, ok := <-s.qnSessionWatcher.EventChannel():
 			if !ok {
 				s.stopServiceWatch()
 				return
@@ -1053,6 +1052,14 @@ func (s *Server) Stop() error {
 
 	s.analyzeInspector.Stop()
 	log.Info("datacoord analyze inspector stopped")
+
+	if s.dnSessionWatcher != nil {
+		s.dnSessionWatcher.Stop()
+	}
+
+	if s.qnSessionWatcher != nil {
+		s.qnSessionWatcher.Stop()
+	}
 
 	if s.session != nil {
 		s.session.Stop()

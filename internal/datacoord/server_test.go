@@ -735,7 +735,12 @@ func TestService_WatchServices(t *testing.T) {
 	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
-	svr.dnEventCh = ech
+	mockDnWatcher := sessionutil.NewMockSessionWatcher(t)
+	mockDnWatcher.EXPECT().EventChannel().Return(ech)
+	svr.dnSessionWatcher = mockDnWatcher
+	mockQnWatcher := sessionutil.NewMockSessionWatcher(t)
+	mockQnWatcher.EXPECT().EventChannel().Return(nil)
+	svr.qnSessionWatcher = mockQnWatcher
 
 	flag := false
 	closed := false
@@ -762,7 +767,9 @@ func TestService_WatchServices(t *testing.T) {
 	ech = make(chan *sessionutil.SessionEvent)
 
 	flag = false
-	svr.dnEventCh = ech
+	mockDnWatcher = sessionutil.NewMockSessionWatcher(t)
+	mockDnWatcher.EXPECT().EventChannel().Return(ech)
+	svr.dnSessionWatcher = mockDnWatcher
 	ctx, cancel := context.WithCancel(context.Background())
 	svr.serverLoopWg.Add(1)
 
