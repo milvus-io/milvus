@@ -509,7 +509,7 @@ func (c *importChecker) checkFailedJob(job ImportJob) {
 
 func (c *importChecker) tryFailingTasks(job ImportJob) {
 	tasks := c.importMeta.GetTaskBy(c.ctx, WithJob(job.GetJobID()), WithStates(datapb.ImportTaskStateV2_Pending,
-		datapb.ImportTaskStateV2_InProgress, datapb.ImportTaskStateV2_Completed))
+		datapb.ImportTaskStateV2_InProgress, datapb.ImportTaskStateV2_Completed, datapb.ImportTaskStateV2_Retry))
 	if len(tasks) == 0 {
 		return
 	}
@@ -526,6 +526,10 @@ func (c *importChecker) tryFailingTasks(job ImportJob) {
 }
 
 func (c *importChecker) tryTimeoutJob(job ImportJob) {
+	if job.GetState() == internalpb.ImportJobState_Failed ||
+		job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 	if time.Now().After(timeoutTime) {
 		log.Warn("Import timeout, expired the specified time limit",
@@ -552,7 +556,7 @@ func (c *importChecker) checkCollection(collectionID int64, jobs []ImportJob) {
 	}
 	if !has {
 		jobs = lo.Filter(jobs, func(job ImportJob, _ int) bool {
-			return job.GetState() != internalpb.ImportJobState_Failed
+			return job.GetState() != internalpb.ImportJobState_Failed && job.GetState() != internalpb.ImportJobState_Completed
 		})
 		for _, job := range jobs {
 			err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
