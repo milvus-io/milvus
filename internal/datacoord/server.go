@@ -1055,7 +1055,7 @@ func (s *Server) Stop() error {
 	}
 
 	if s.qnSessionWatcher != nil {
-		s.dnSessionWatcher.Stop()
+		s.qnSessionWatcher.Stop()
 	}
 
 	if s.session != nil {
