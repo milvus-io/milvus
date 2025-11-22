@@ -23,9 +23,11 @@ TimestampIndex::build_with(const Timestamp* timestamps, int64_t size) {
     auto num_slice = lengths_.size();
     Assert(num_slice > 0);
     std::vector<int64_t> prefix_sums;
+    prefix_sums.reserve(num_slice + 1);
     int offset = 0;
     prefix_sums.push_back(offset);
     std::vector<Timestamp> timestamp_barriers;
+    timestamp_barriers.reserve(num_slice + 1);
     Timestamp last_max_v = 0;
     for (int slice_id = 0; slice_id < num_slice; ++slice_id) {
         auto length = lengths_[slice_id];
