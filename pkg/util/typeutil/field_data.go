@@ -19,7 +19,7 @@ func NewFieldDataBuilder(dt schemapb.DataType, fillZero bool, capacity int) (*Fi
 	switch dt {
 	case schemapb.DataType_Bool,
 		schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
-		schemapb.DataType_VarChar:
+		schemapb.DataType_Timestamptz, schemapb.DataType_VarChar:
 		return &FieldDataBuilder{
 			dt:       dt,
 			data:     make([]any, 0, capacity),
@@ -106,6 +106,26 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
+						Data: val,
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Timestamptz:
+		val := make([]int64, 0, len(b.valid))
+		validIdx := 0
+		for _, v := range b.valid {
+			if v {
+				val = append(val, b.data[validIdx].(int64))
+				validIdx++
+			} else if b.fillZero {
+				val = append(val, 0)
+			}
+		}
+		field.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{
 						Data: val,
 					},
 				},
