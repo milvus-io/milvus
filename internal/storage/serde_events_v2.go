@@ -266,20 +266,6 @@ func NewPackedRecordWriter(
 	}, nil
 }
 
-// Deprecated, todo remove
-func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
-	multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int,
-) (*SerializeWriterImpl[*Value], error) {
-	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil, nil)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
-	}
-	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema)
-	}, batchSize), nil
-}
-
 var _ BinlogRecordWriter = (*PackedBinlogRecordWriter)(nil)
 
 type PackedBinlogRecordWriter struct {
