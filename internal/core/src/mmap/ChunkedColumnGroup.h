@@ -626,7 +626,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     void
     BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(ScalarFieldProto&&, size_t)> fn,
+                std::function<void(const ArrayView&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
@@ -639,10 +639,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
-            auto array = static_cast<ArrayChunk*>(chunk.get())
-                             ->View(offsets_in_chunk[i])
-                             .output_data();
-            fn(std::move(array), i);
+            auto view = static_cast<ArrayChunk*>(chunk.get())
+                            ->View(offsets_in_chunk[i]);
+            fn(view, i);
         }
     }
 

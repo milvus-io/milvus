@@ -187,7 +187,7 @@ class ChunkedColumnInterface {
 
     virtual void
     BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(ScalarFieldProto&&, size_t)> fn,
+                std::function<void(const ArrayView&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const {
         ThrowInfo(ErrorCode::Unsupported,
