@@ -29,7 +29,7 @@ type Task interface {
 	GetTaskID() int64
 	GetTaskType() taskcommon.Type
 	GetTaskState() taskcommon.State
-	GetTaskSlot() int64
+	GetTaskSlot() (float64, float64)
 	SetTaskTime(timeType taskcommon.TimeType, time time.Time)
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64
@@ -37,6 +37,8 @@ type Task interface {
 	CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	QueryTaskOnWorker(cluster session.Cluster)
 	DropTaskOnWorker(cluster session.Cluster)
+
+	RequiresExclusiveWorker() bool
 }
 
 func WrapTaskLog(task Task, fields ...zap.Field) []zap.Field {
