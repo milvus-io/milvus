@@ -104,7 +104,8 @@ BsonInvertedIndex::BuildIndex() {
 
 void
 BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
-                             milvus::proto::common::LoadPriority priority) {
+                             milvus::proto::common::LoadPriority priority,
+                             bool load_in_mmap) {
     if (is_load_) {
         // convert shared_key_index/... to remote_prefix/shared_key_index/...
         std::vector<std::string> remote_files;
@@ -122,10 +123,17 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
                    "index dir not exist: {}",
                    path_);
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            path_.c_str(), false, milvus::index::SetBitsetUnused);
-        LOG_INFO("load json shared key index done for field id:{} with dir:{}",
-                 field_id_,
-                 path_);
+            path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
+
+        if (!load_in_mmap) {
+            disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
+        }
+        LOG_INFO(
+            "load json shared key index done for field id:{} with "
+            "dir:{},load_in_mmap:{}",
+            field_id_,
+            path_,
+            load_in_mmap);
     }
 }
 

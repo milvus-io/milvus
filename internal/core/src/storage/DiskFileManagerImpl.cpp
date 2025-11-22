@@ -722,6 +722,13 @@ DiskFileManagerImpl::RemoveTextLogFiles() {
 }
 
 void
+DiskFileManagerImpl::RemoveJsonStatsSharedIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalJsonStatsSharedIndexPrefix());
+}
+
+void
 DiskFileManagerImpl::RemoveJsonStatsFiles() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
