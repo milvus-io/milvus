@@ -78,7 +78,7 @@ func (idx gpuIVFPQIndex) Params() map[string]string {
 	return map[string]string{
 		// build meta
 		MetricTypeKey: string(idx.metricType),
-		IndexTypeKey:  string(GPUIvfFlat),
+		IndexTypeKey:  string(GPUIvfPQ),
 		// build params
 		ivfNlistKey: strconv.Itoa(idx.nlist),
 		ivfPQMKey:   strconv.Itoa(idx.m),
