@@ -493,6 +493,13 @@ func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.
 	if len(channelPlans) == 0 {
 		segmentPlans = b.balanceSegments(ctx, replica, stoppingBalance)
 	}
+
+	for i := range segmentPlans {
+		segmentPlans[i].Replica = replica
+	}
+	for i := range channelPlans {
+		channelPlans[i].Replica = replica
+	}
 	return
 }
 
