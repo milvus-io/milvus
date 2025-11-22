@@ -110,7 +110,33 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	}
 
 	status := C.UpdateSchema(c.ptr, unsafe.Pointer(&schemaBlob[0]), (C.int64_t)(len(schemaBlob)), (C.uint64_t)(version))
-	return ConsumeCStatusIntoError(&status)
+	if err = ConsumeCStatusIntoError(&status); err != nil {
+		return err
+	}
+
+	c.schema = sch
+	return err
+}
+
+func (c *CCollection) UpdateIndexMeta(indexMeta *segcorepb.CollectionIndexMeta) error {
+	if indexMeta == nil {
+		return nil
+	}
+
+	indexMetaBlob, err := proto.Marshal(indexMeta)
+	if err != nil {
+		return errors.New("marshal index meta failed")
+	}
+
+	if indexMetaBlob != nil && c.ptr != nil {
+		status := C.SetIndexMeta(c.ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			return err
+		}
+	}
+
+	c.indexMeta = indexMeta
+	return nil
 }
 
 // Release releases the underlying collection
