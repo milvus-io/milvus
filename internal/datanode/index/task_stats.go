@@ -130,6 +130,10 @@ func (st *statsTask) GetSlot() int64 {
 	return st.req.GetTaskSlot()
 }
 
+func (st *statsTask) GetSlotV2() (float64, float64) {
+	return st.req.GetCpuSlot(), st.req.GetMemorySlot()
+}
+
 func (st *statsTask) PreExecute(ctx context.Context) error {
 	ctx, span := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, fmt.Sprintf("Stats-PreExecute-%s-%d", st.req.GetClusterID(), st.req.GetTaskID()))
 	defer span.End()

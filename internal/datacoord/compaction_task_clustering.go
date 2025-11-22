@@ -76,8 +76,8 @@ func (t *clusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
 }
 
-func (t *clusteringCompactionTask) GetTaskSlot() int64 {
-	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
+func (t *clusteringCompactionTask) GetTaskSlot() (float64, float64) {
+	return paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsFloat(), paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsFloat()
 }
 
 func (t *clusteringCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -355,10 +355,10 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		BeginLogID:             logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs: taskProto.GetPreAllocatedSegmentIDs(),
 		PreAllocatedLogIDs:     logIDRange,
-		SlotUsage:              t.GetSlotUsage(),
 		MaxSize:                taskProto.GetMaxSize(),
 		JsonParams:             compactionParams,
 	}
+	plan.CpuSlot, plan.MemorySlot = t.GetTaskSlot()
 	log := log.With(zap.Int64("taskID", taskProto.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 
 	for _, segID := range taskProto.GetInputSegments() {
@@ -844,8 +844,4 @@ func (t *clusteringCompactionTask) GetLabel() string {
 
 func (t *clusteringCompactionTask) NeedReAssignNodeID() bool {
 	return t.GetTaskProto().GetState() == datapb.CompactionTaskState_pipelining && (t.GetTaskProto().GetNodeID() == 0 || t.GetTaskProto().GetNodeID() == NullNodeID)
-}
-
-func (t *clusteringCompactionTask) GetSlotUsage() int64 {
-	return t.GetTaskSlot()
 }

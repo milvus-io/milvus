@@ -46,4 +46,5 @@ type Task interface {
 	PostExecute(context.Context) error
 	Reset()
 	GetSlot() int64
+	GetSlotV2() (float64, float64)
 }
