@@ -19,6 +19,9 @@ package http
 // HealthzRouterPath is default path for check health state.
 const HealthzRouterPath = "/healthz"
 
+// LivezRouterPath is the lightweight path dedicated to checking process liveness.
+const LivezRouterPath = "/livez"
+
 // LogLevelRouterPath is path for Get and Update log level at runtime.
 const LogLevelRouterPath = "/log/level"
 

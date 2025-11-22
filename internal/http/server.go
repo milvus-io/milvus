@@ -77,6 +77,10 @@ func registerDefaults() {
 		Handler: healthz.Handler(),
 	})
 	Register(&Handler{
+		Path:    LivezRouterPath,
+		Handler: healthz.LivenessHandler(),
+	})
+	Register(&Handler{
 		Path:    EventLogRouterPath,
 		Handler: eventlog.Handler(),
 	})
