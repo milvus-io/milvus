@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -106,7 +108,19 @@ func (s *ManagerSuite) TestFlushSegments() {
 
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	manager := s.manager
-	err := manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	msg := message.NewCreateSegmentMessageBuilderV2().
+		WithVChannel(s.channelName).
+		WithHeader(&message.CreateSegmentMessageHeader{
+			CollectionId: s.collID,
+			PartitionId:  1,
+			SegmentId:    1,
+		}).
+		WithBody(&message.CreateSegmentMessageBody{}).
+		MustBuildMutable()
+	immutableMsg := msg.WithTimeTick(1).IntoImmutableMessage(rmq.NewRmqID(1))
+	createSegmentMsg := message.MustAsImmutableCreateSegmentMessageV2(immutableMsg)
+
+	err := manager.CreateNewGrowingSegment(context.Background(), createSegmentMsg)
 	s.Error(err)
 
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
@@ -118,7 +132,7 @@ func (s *ManagerSuite) TestCreateNewGrowingSegment() {
 	s.NoError(err)
 
 	s.manager.buffers.Insert(s.channelName, wb)
-	err = manager.CreateNewGrowingSegment(context.Background(), s.channelName, 1, 1)
+	err = manager.CreateNewGrowingSegment(context.Background(), createSegmentMsg)
 	s.NoError(err)
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -97,8 +98,10 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
 	collID := ut.upsertMsg.DeleteMsg.CollectionID
-	ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
 	// hash primary keys to channels
@@ -127,8 +130,15 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		for _, deleteMsg := range deleteMsgs {
 			msg, err := message.NewDeleteMessageBuilderV1().
 				WithHeader(&message.DeleteMessageHeader{
-					CollectionId: ut.upsertMsg.DeleteMsg.CollectionID,
+					CollectionId: deleteMsg.CollectionID,
 					Rows:         uint64(deleteMsg.NumRows),
+					Partitions: []*messagespb.PartitionSegmentAssignment{
+						{
+							PartitionId: deleteMsg.PartitionID,
+							Rows:        uint64(deleteMsg.NumRows),
+							BinarySize:  0, // TODO: current not used, message estimate size is used.
+						},
+					},
 				}).
 				WithBody(deleteMsg.DeleteRequest).
 				WithVChannel(vchannel).
