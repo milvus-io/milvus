@@ -77,6 +77,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	}
 
 	mockNodeManager.EXPECT().Startup(mock.Anything, mock.Anything).Return(nil)
+	mockNodeManager.EXPECT().GetClientIDs().Return([]int64{1})
 	mockNodeManager.EXPECT().GetClient(mock.Anything).RunAndReturn(func(nodeID int64) (types.DataNodeClient, error) {
 		switch nodeID {
 		case 100:

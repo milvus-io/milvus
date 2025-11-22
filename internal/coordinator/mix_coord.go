@@ -210,6 +210,8 @@ func (s *mixCoordImpl) initInternal() error {
 		log.Error("queryCoord start failed", zap.Error(err))
 		return err
 	}
+
+	s.datacoordServer.SyncFileResources(s.ctx)
 	return nil
 }
 
@@ -880,6 +882,10 @@ func (s *mixCoordImpl) GetDcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 
 func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.queryCoordServer.GetMetrics(ctx, in)
+}
+
+func (s *mixCoordImpl) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	return s.queryCoordServer.SyncFileResource(ctx, resources, version)
 }
 
 // QueryCoordServer

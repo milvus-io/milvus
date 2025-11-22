@@ -10198,7 +10198,7 @@ var file_query_coord_proto_rawDesc = []byte{
 	0x75, 0x65, 0x72, 0x79, 0x2e, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61,
 	0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d,
 	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d,
-	0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x32, 0x85, 0x17, 0x0a, 0x09,
+	0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x32, 0xe8, 0x17, 0x0a, 0x09,
 	0x51, 0x75, 0x65, 0x72, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74,
 	0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x73, 0x12,
 	0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
@@ -10383,10 +10383,17 @@ var file_query_coord_proto_rawDesc = []byte{
 	0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71,
 	0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
 	0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75,
-	0x73, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f,
-	0x71, 0x75, 0x65, 0x72, 0x79, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x73, 0x22, 0x00, 0x12, 0x61, 0x0a, 0x10, 0x53, 0x79, 0x6e, 0x63, 0x46, 0x69, 0x6c, 0x65, 0x52,
+	0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e,
+	0x53, 0x79, 0x6e, 0x63, 0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74,
+	0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
+	0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2f, 0x71, 0x75, 0x65, 0x72, 0x79, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x33,
 }
 
 var (
@@ -10564,17 +10571,18 @@ var file_query_coord_proto_goTypes = []interface{}{
 	(*milvuspb.GetComponentStatesRequest)(nil),     // 157: milvus.proto.milvus.GetComponentStatesRequest
 	(*internalpb.GetTimeTickChannelRequest)(nil),   // 158: milvus.proto.internal.GetTimeTickChannelRequest
 	(*internalpb.GetStatisticsChannelRequest)(nil), // 159: milvus.proto.internal.GetStatisticsChannelRequest
-	(*internalpb.ShowConfigurationsResponse)(nil),  // 160: milvus.proto.internal.ShowConfigurationsResponse
-	(*milvuspb.GetMetricsResponse)(nil),            // 161: milvus.proto.milvus.GetMetricsResponse
-	(*milvuspb.GetReplicasResponse)(nil),           // 162: milvus.proto.milvus.GetReplicasResponse
-	(*milvuspb.CheckHealthResponse)(nil),           // 163: milvus.proto.milvus.CheckHealthResponse
-	(*milvuspb.ListResourceGroupsResponse)(nil),    // 164: milvus.proto.milvus.ListResourceGroupsResponse
-	(*milvuspb.RunAnalyzerResponse)(nil),           // 165: milvus.proto.milvus.RunAnalyzerResponse
-	(*milvuspb.ComponentStates)(nil),               // 166: milvus.proto.milvus.ComponentStates
-	(*milvuspb.StringResponse)(nil),                // 167: milvus.proto.milvus.StringResponse
-	(*internalpb.GetStatisticsResponse)(nil),       // 168: milvus.proto.internal.GetStatisticsResponse
-	(*internalpb.SearchResults)(nil),               // 169: milvus.proto.internal.SearchResults
-	(*internalpb.RetrieveResults)(nil),             // 170: milvus.proto.internal.RetrieveResults
+	(*internalpb.SyncFileResourceRequest)(nil),     // 160: milvus.proto.internal.SyncFileResourceRequest
+	(*internalpb.ShowConfigurationsResponse)(nil),  // 161: milvus.proto.internal.ShowConfigurationsResponse
+	(*milvuspb.GetMetricsResponse)(nil),            // 162: milvus.proto.milvus.GetMetricsResponse
+	(*milvuspb.GetReplicasResponse)(nil),           // 163: milvus.proto.milvus.GetReplicasResponse
+	(*milvuspb.CheckHealthResponse)(nil),           // 164: milvus.proto.milvus.CheckHealthResponse
+	(*milvuspb.ListResourceGroupsResponse)(nil),    // 165: milvus.proto.milvus.ListResourceGroupsResponse
+	(*milvuspb.RunAnalyzerResponse)(nil),           // 166: milvus.proto.milvus.RunAnalyzerResponse
+	(*milvuspb.ComponentStates)(nil),               // 167: milvus.proto.milvus.ComponentStates
+	(*milvuspb.StringResponse)(nil),                // 168: milvus.proto.milvus.StringResponse
+	(*internalpb.GetStatisticsResponse)(nil),       // 169: milvus.proto.internal.GetStatisticsResponse
+	(*internalpb.SearchResults)(nil),               // 170: milvus.proto.internal.SearchResults
+	(*internalpb.RetrieveResults)(nil),             // 171: milvus.proto.internal.RetrieveResults
 }
 var file_query_coord_proto_depIdxs = []int32{
 	128, // 0: milvus.proto.query.ShowCollectionsRequest.base:type_name -> milvus.proto.common.MsgBase
@@ -10833,77 +10841,79 @@ var file_query_coord_proto_depIdxs = []int32{
 	100, // 253: milvus.proto.query.QueryNode.GetHighlight:input_type -> milvus.proto.query.GetHighlightRequest
 	106, // 254: milvus.proto.query.QueryNode.DropIndex:input_type -> milvus.proto.query.DropIndexRequest
 	98,  // 255: milvus.proto.query.QueryNode.ValidateAnalyzer:input_type -> milvus.proto.query.ValidateAnalyzerRequest
-	8,   // 256: milvus.proto.query.QueryCoord.ShowLoadCollections:output_type -> milvus.proto.query.ShowCollectionsResponse
-	10,  // 257: milvus.proto.query.QueryCoord.ShowLoadPartitions:output_type -> milvus.proto.query.ShowPartitionsResponse
-	129, // 258: milvus.proto.query.QueryCoord.LoadPartitions:output_type -> milvus.proto.common.Status
-	129, // 259: milvus.proto.query.QueryCoord.ReleasePartitions:output_type -> milvus.proto.common.Status
-	129, // 260: milvus.proto.query.QueryCoord.LoadCollection:output_type -> milvus.proto.common.Status
-	129, // 261: milvus.proto.query.QueryCoord.ReleaseCollection:output_type -> milvus.proto.common.Status
-	129, // 262: milvus.proto.query.QueryCoord.SyncNewCreatedPartition:output_type -> milvus.proto.common.Status
-	17,  // 263: milvus.proto.query.QueryCoord.GetPartitionStates:output_type -> milvus.proto.query.GetPartitionStatesResponse
-	19,  // 264: milvus.proto.query.QueryCoord.GetLoadSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
-	129, // 265: milvus.proto.query.QueryCoord.LoadBalance:output_type -> milvus.proto.common.Status
-	160, // 266: milvus.proto.query.QueryCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	161, // 267: milvus.proto.query.QueryCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	162, // 268: milvus.proto.query.QueryCoord.GetReplicas:output_type -> milvus.proto.milvus.GetReplicasResponse
-	21,  // 269: milvus.proto.query.QueryCoord.GetShardLeaders:output_type -> milvus.proto.query.GetShardLeadersResponse
-	163, // 270: milvus.proto.query.QueryCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
-	129, // 271: milvus.proto.query.QueryCoord.CreateResourceGroup:output_type -> milvus.proto.common.Status
-	129, // 272: milvus.proto.query.QueryCoord.UpdateResourceGroups:output_type -> milvus.proto.common.Status
-	129, // 273: milvus.proto.query.QueryCoord.DropResourceGroup:output_type -> milvus.proto.common.Status
-	129, // 274: milvus.proto.query.QueryCoord.TransferNode:output_type -> milvus.proto.common.Status
-	129, // 275: milvus.proto.query.QueryCoord.TransferReplica:output_type -> milvus.proto.common.Status
-	164, // 276: milvus.proto.query.QueryCoord.ListResourceGroups:output_type -> milvus.proto.milvus.ListResourceGroupsResponse
-	66,  // 277: milvus.proto.query.QueryCoord.DescribeResourceGroup:output_type -> milvus.proto.query.DescribeResourceGroupResponse
-	105, // 278: milvus.proto.query.QueryCoord.ListLoadedSegments:output_type -> milvus.proto.query.ListLoadedSegmentsResponse
-	74,  // 279: milvus.proto.query.QueryCoord.ListCheckers:output_type -> milvus.proto.query.ListCheckersResponse
-	129, // 280: milvus.proto.query.QueryCoord.ActivateChecker:output_type -> milvus.proto.common.Status
-	129, // 281: milvus.proto.query.QueryCoord.DeactivateChecker:output_type -> milvus.proto.common.Status
-	82,  // 282: milvus.proto.query.QueryCoord.ListQueryNode:output_type -> milvus.proto.query.ListQueryNodeResponse
-	84,  // 283: milvus.proto.query.QueryCoord.GetQueryNodeDistribution:output_type -> milvus.proto.query.GetQueryNodeDistributionResponse
-	129, // 284: milvus.proto.query.QueryCoord.SuspendBalance:output_type -> milvus.proto.common.Status
-	129, // 285: milvus.proto.query.QueryCoord.ResumeBalance:output_type -> milvus.proto.common.Status
-	88,  // 286: milvus.proto.query.QueryCoord.CheckBalanceStatus:output_type -> milvus.proto.query.CheckBalanceStatusResponse
-	129, // 287: milvus.proto.query.QueryCoord.SuspendNode:output_type -> milvus.proto.common.Status
-	129, // 288: milvus.proto.query.QueryCoord.ResumeNode:output_type -> milvus.proto.common.Status
-	129, // 289: milvus.proto.query.QueryCoord.TransferSegment:output_type -> milvus.proto.common.Status
-	129, // 290: milvus.proto.query.QueryCoord.TransferChannel:output_type -> milvus.proto.common.Status
-	129, // 291: milvus.proto.query.QueryCoord.CheckQueryNodeDistribution:output_type -> milvus.proto.common.Status
-	129, // 292: milvus.proto.query.QueryCoord.UpdateLoadConfig:output_type -> milvus.proto.common.Status
-	165, // 293: milvus.proto.query.QueryCoord.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
-	129, // 294: milvus.proto.query.QueryCoord.ValidateAnalyzer:output_type -> milvus.proto.common.Status
-	166, // 295: milvus.proto.query.QueryNode.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	167, // 296: milvus.proto.query.QueryNode.GetTimeTickChannel:output_type -> milvus.proto.milvus.StringResponse
-	167, // 297: milvus.proto.query.QueryNode.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
-	129, // 298: milvus.proto.query.QueryNode.WatchDmChannels:output_type -> milvus.proto.common.Status
-	129, // 299: milvus.proto.query.QueryNode.UnsubDmChannel:output_type -> milvus.proto.common.Status
-	129, // 300: milvus.proto.query.QueryNode.LoadSegments:output_type -> milvus.proto.common.Status
-	129, // 301: milvus.proto.query.QueryNode.ReleaseCollection:output_type -> milvus.proto.common.Status
-	129, // 302: milvus.proto.query.QueryNode.LoadPartitions:output_type -> milvus.proto.common.Status
-	129, // 303: milvus.proto.query.QueryNode.ReleasePartitions:output_type -> milvus.proto.common.Status
-	129, // 304: milvus.proto.query.QueryNode.ReleaseSegments:output_type -> milvus.proto.common.Status
-	19,  // 305: milvus.proto.query.QueryNode.GetSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
-	129, // 306: milvus.proto.query.QueryNode.SyncReplicaSegments:output_type -> milvus.proto.common.Status
-	168, // 307: milvus.proto.query.QueryNode.GetStatistics:output_type -> milvus.proto.internal.GetStatisticsResponse
-	169, // 308: milvus.proto.query.QueryNode.Search:output_type -> milvus.proto.internal.SearchResults
-	169, // 309: milvus.proto.query.QueryNode.SearchSegments:output_type -> milvus.proto.internal.SearchResults
-	170, // 310: milvus.proto.query.QueryNode.Query:output_type -> milvus.proto.internal.RetrieveResults
-	170, // 311: milvus.proto.query.QueryNode.QueryStream:output_type -> milvus.proto.internal.RetrieveResults
-	170, // 312: milvus.proto.query.QueryNode.QuerySegments:output_type -> milvus.proto.internal.RetrieveResults
-	170, // 313: milvus.proto.query.QueryNode.QueryStreamSegments:output_type -> milvus.proto.internal.RetrieveResults
-	160, // 314: milvus.proto.query.QueryNode.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	161, // 315: milvus.proto.query.QueryNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	51,  // 316: milvus.proto.query.QueryNode.GetDataDistribution:output_type -> milvus.proto.query.GetDataDistributionResponse
-	129, // 317: milvus.proto.query.QueryNode.SyncDistribution:output_type -> milvus.proto.common.Status
-	129, // 318: milvus.proto.query.QueryNode.Delete:output_type -> milvus.proto.common.Status
-	70,  // 319: milvus.proto.query.QueryNode.DeleteBatch:output_type -> milvus.proto.query.DeleteBatchResponse
-	129, // 320: milvus.proto.query.QueryNode.UpdateSchema:output_type -> milvus.proto.common.Status
-	165, // 321: milvus.proto.query.QueryNode.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
-	103, // 322: milvus.proto.query.QueryNode.GetHighlight:output_type -> milvus.proto.query.GetHighlightResponse
-	129, // 323: milvus.proto.query.QueryNode.DropIndex:output_type -> milvus.proto.common.Status
-	129, // 324: milvus.proto.query.QueryNode.ValidateAnalyzer:output_type -> milvus.proto.common.Status
-	256, // [256:325] is the sub-list for method output_type
-	187, // [187:256] is the sub-list for method input_type
+	160, // 256: milvus.proto.query.QueryNode.SyncFileResource:input_type -> milvus.proto.internal.SyncFileResourceRequest
+	8,   // 257: milvus.proto.query.QueryCoord.ShowLoadCollections:output_type -> milvus.proto.query.ShowCollectionsResponse
+	10,  // 258: milvus.proto.query.QueryCoord.ShowLoadPartitions:output_type -> milvus.proto.query.ShowPartitionsResponse
+	129, // 259: milvus.proto.query.QueryCoord.LoadPartitions:output_type -> milvus.proto.common.Status
+	129, // 260: milvus.proto.query.QueryCoord.ReleasePartitions:output_type -> milvus.proto.common.Status
+	129, // 261: milvus.proto.query.QueryCoord.LoadCollection:output_type -> milvus.proto.common.Status
+	129, // 262: milvus.proto.query.QueryCoord.ReleaseCollection:output_type -> milvus.proto.common.Status
+	129, // 263: milvus.proto.query.QueryCoord.SyncNewCreatedPartition:output_type -> milvus.proto.common.Status
+	17,  // 264: milvus.proto.query.QueryCoord.GetPartitionStates:output_type -> milvus.proto.query.GetPartitionStatesResponse
+	19,  // 265: milvus.proto.query.QueryCoord.GetLoadSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
+	129, // 266: milvus.proto.query.QueryCoord.LoadBalance:output_type -> milvus.proto.common.Status
+	161, // 267: milvus.proto.query.QueryCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	162, // 268: milvus.proto.query.QueryCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	163, // 269: milvus.proto.query.QueryCoord.GetReplicas:output_type -> milvus.proto.milvus.GetReplicasResponse
+	21,  // 270: milvus.proto.query.QueryCoord.GetShardLeaders:output_type -> milvus.proto.query.GetShardLeadersResponse
+	164, // 271: milvus.proto.query.QueryCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
+	129, // 272: milvus.proto.query.QueryCoord.CreateResourceGroup:output_type -> milvus.proto.common.Status
+	129, // 273: milvus.proto.query.QueryCoord.UpdateResourceGroups:output_type -> milvus.proto.common.Status
+	129, // 274: milvus.proto.query.QueryCoord.DropResourceGroup:output_type -> milvus.proto.common.Status
+	129, // 275: milvus.proto.query.QueryCoord.TransferNode:output_type -> milvus.proto.common.Status
+	129, // 276: milvus.proto.query.QueryCoord.TransferReplica:output_type -> milvus.proto.common.Status
+	165, // 277: milvus.proto.query.QueryCoord.ListResourceGroups:output_type -> milvus.proto.milvus.ListResourceGroupsResponse
+	66,  // 278: milvus.proto.query.QueryCoord.DescribeResourceGroup:output_type -> milvus.proto.query.DescribeResourceGroupResponse
+	105, // 279: milvus.proto.query.QueryCoord.ListLoadedSegments:output_type -> milvus.proto.query.ListLoadedSegmentsResponse
+	74,  // 280: milvus.proto.query.QueryCoord.ListCheckers:output_type -> milvus.proto.query.ListCheckersResponse
+	129, // 281: milvus.proto.query.QueryCoord.ActivateChecker:output_type -> milvus.proto.common.Status
+	129, // 282: milvus.proto.query.QueryCoord.DeactivateChecker:output_type -> milvus.proto.common.Status
+	82,  // 283: milvus.proto.query.QueryCoord.ListQueryNode:output_type -> milvus.proto.query.ListQueryNodeResponse
+	84,  // 284: milvus.proto.query.QueryCoord.GetQueryNodeDistribution:output_type -> milvus.proto.query.GetQueryNodeDistributionResponse
+	129, // 285: milvus.proto.query.QueryCoord.SuspendBalance:output_type -> milvus.proto.common.Status
+	129, // 286: milvus.proto.query.QueryCoord.ResumeBalance:output_type -> milvus.proto.common.Status
+	88,  // 287: milvus.proto.query.QueryCoord.CheckBalanceStatus:output_type -> milvus.proto.query.CheckBalanceStatusResponse
+	129, // 288: milvus.proto.query.QueryCoord.SuspendNode:output_type -> milvus.proto.common.Status
+	129, // 289: milvus.proto.query.QueryCoord.ResumeNode:output_type -> milvus.proto.common.Status
+	129, // 290: milvus.proto.query.QueryCoord.TransferSegment:output_type -> milvus.proto.common.Status
+	129, // 291: milvus.proto.query.QueryCoord.TransferChannel:output_type -> milvus.proto.common.Status
+	129, // 292: milvus.proto.query.QueryCoord.CheckQueryNodeDistribution:output_type -> milvus.proto.common.Status
+	129, // 293: milvus.proto.query.QueryCoord.UpdateLoadConfig:output_type -> milvus.proto.common.Status
+	166, // 294: milvus.proto.query.QueryCoord.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
+	129, // 295: milvus.proto.query.QueryCoord.ValidateAnalyzer:output_type -> milvus.proto.common.Status
+	167, // 296: milvus.proto.query.QueryNode.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	168, // 297: milvus.proto.query.QueryNode.GetTimeTickChannel:output_type -> milvus.proto.milvus.StringResponse
+	168, // 298: milvus.proto.query.QueryNode.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
+	129, // 299: milvus.proto.query.QueryNode.WatchDmChannels:output_type -> milvus.proto.common.Status
+	129, // 300: milvus.proto.query.QueryNode.UnsubDmChannel:output_type -> milvus.proto.common.Status
+	129, // 301: milvus.proto.query.QueryNode.LoadSegments:output_type -> milvus.proto.common.Status
+	129, // 302: milvus.proto.query.QueryNode.ReleaseCollection:output_type -> milvus.proto.common.Status
+	129, // 303: milvus.proto.query.QueryNode.LoadPartitions:output_type -> milvus.proto.common.Status
+	129, // 304: milvus.proto.query.QueryNode.ReleasePartitions:output_type -> milvus.proto.common.Status
+	129, // 305: milvus.proto.query.QueryNode.ReleaseSegments:output_type -> milvus.proto.common.Status
+	19,  // 306: milvus.proto.query.QueryNode.GetSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
+	129, // 307: milvus.proto.query.QueryNode.SyncReplicaSegments:output_type -> milvus.proto.common.Status
+	169, // 308: milvus.proto.query.QueryNode.GetStatistics:output_type -> milvus.proto.internal.GetStatisticsResponse
+	170, // 309: milvus.proto.query.QueryNode.Search:output_type -> milvus.proto.internal.SearchResults
+	170, // 310: milvus.proto.query.QueryNode.SearchSegments:output_type -> milvus.proto.internal.SearchResults
+	171, // 311: milvus.proto.query.QueryNode.Query:output_type -> milvus.proto.internal.RetrieveResults
+	171, // 312: milvus.proto.query.QueryNode.QueryStream:output_type -> milvus.proto.internal.RetrieveResults
+	171, // 313: milvus.proto.query.QueryNode.QuerySegments:output_type -> milvus.proto.internal.RetrieveResults
+	171, // 314: milvus.proto.query.QueryNode.QueryStreamSegments:output_type -> milvus.proto.internal.RetrieveResults
+	161, // 315: milvus.proto.query.QueryNode.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	162, // 316: milvus.proto.query.QueryNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	51,  // 317: milvus.proto.query.QueryNode.GetDataDistribution:output_type -> milvus.proto.query.GetDataDistributionResponse
+	129, // 318: milvus.proto.query.QueryNode.SyncDistribution:output_type -> milvus.proto.common.Status
+	129, // 319: milvus.proto.query.QueryNode.Delete:output_type -> milvus.proto.common.Status
+	70,  // 320: milvus.proto.query.QueryNode.DeleteBatch:output_type -> milvus.proto.query.DeleteBatchResponse
+	129, // 321: milvus.proto.query.QueryNode.UpdateSchema:output_type -> milvus.proto.common.Status
+	166, // 322: milvus.proto.query.QueryNode.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
+	103, // 323: milvus.proto.query.QueryNode.GetHighlight:output_type -> milvus.proto.query.GetHighlightResponse
+	129, // 324: milvus.proto.query.QueryNode.DropIndex:output_type -> milvus.proto.common.Status
+	129, // 325: milvus.proto.query.QueryNode.ValidateAnalyzer:output_type -> milvus.proto.common.Status
+	129, // 326: milvus.proto.query.QueryNode.SyncFileResource:output_type -> milvus.proto.common.Status
+	257, // [257:327] is the sub-list for method output_type
+	187, // [187:257] is the sub-list for method input_type
 	187, // [187:187] is the sub-list for extension type_name
 	187, // [187:187] is the sub-list for extension extendee
 	0,   // [0:187] is the sub-list for field type_name
