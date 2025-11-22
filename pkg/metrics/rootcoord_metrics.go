@@ -107,8 +107,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "partition_num",
-			Help:      "number of partitions",
-		}, []string{})
+			Help:      "number of partitions per collection",
+		}, []string{databaseLabelName, collectionName})
 
 	// RootCoordNumOfDMLChannel counts the number of DML channels.
 	RootCoordNumOfDMLChannel = prometheus.NewGauge(
