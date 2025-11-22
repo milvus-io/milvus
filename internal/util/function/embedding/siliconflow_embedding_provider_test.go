@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func createSiliconflowProvider(url string, schema *schemapb.FieldSchema, provide
 	}
 	switch providerName {
 	case siliconflowProvider:
-		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		return NewSiliconflowEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -91,7 +92,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			r, err2 := provder.CallEmbedding(data, models.InsertMode)
+			r, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
@@ -99,7 +100,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestEmbedding() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			_, err := provder.CallEmbedding(data, models.SearchMode)
+			_, err := provder.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.NoError(err)
 		}
 	}
@@ -134,7 +135,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provder.CallEmbedding(data, models.InsertMode)
+		_, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -163,7 +164,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provder.CallEmbedding(data, models.InsertMode)
+		_, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -181,7 +182,7 @@ func (s *SiliconflowTextEmbeddingProviderSuite) TestNewSiliconflowEmbeddingProvi
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
 	}
-	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewSiliconflowEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{models.URLParamKey: "mock"}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() > 0)

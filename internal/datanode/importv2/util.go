@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -426,11 +427,15 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 		return err
 	}
 	if embedding.HasNonBM25Functions(schema.Functions, []int64{}) {
-		exec, err := embedding.NewFunctionExecutor(schema, needProcessFunctions)
+		extraInfo := &models.ModelExtraInfo{
+			ClusterID: task.req.ClusterID,
+			DBName:    task.req.Schema.DbName,
+		}
+		exec, err := embedding.NewFunctionExecutor(schema, needProcessFunctions, extraInfo)
 		if err != nil {
 			return err
 		}
-		if err := exec.ProcessBulkInsert(data); err != nil {
+		if err := exec.ProcessBulkInsert(context.Background(), data); err != nil {
 			return err
 		}
 	}

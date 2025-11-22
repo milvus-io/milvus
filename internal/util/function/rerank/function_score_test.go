@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
 func TestFunctionScore(t *testing.T) {
@@ -82,7 +83,7 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 		Functions: []*schemapb.FunctionSchema{functionSchema},
 	}
 
-	f, err := NewFunctionScore(schema, funcScores)
+	f, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 	s.Equal([]string{"ts"}, f.GetAllInputFieldNames())
 	s.Equal([]int64{102}, f.GetAllInputFieldIDs())
@@ -92,42 +93,42 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 	// two ranker but one was boost scorer
 	{
 		funcScores.Functions = append(funcScores.Functions, segmentScorer)
-		_, err := NewFunctionScore(schema, funcScores)
+		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		funcScores.Functions = funcScores.Functions[:1]
 	}
 
 	{
 		schema.Fields[3].Nullable = true
-		_, err := NewFunctionScore(schema, funcScores)
+		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Function input field cannot be nullable")
 		schema.Fields[3].Nullable = false
 	}
 
 	{
 		funcScores.Functions[0].Params[0].Value = "NotExist"
-		_, err := NewFunctionScore(schema, funcScores)
+		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Unsupported rerank function")
 		funcScores.Functions[0].Params[0].Value = DecayFunctionName
 	}
 
 	{
 		funcScores.Functions = append(funcScores.Functions, functionSchema)
-		_, err := NewFunctionScore(schema, funcScores)
+		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Currently only supports one rerank")
 		funcScores.Functions = funcScores.Functions[:1]
 	}
 
 	{
 		funcScores.Functions[0].Type = schemapb.FunctionType_BM25
-		_, err := NewFunctionScore(schema, funcScores)
+		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "is not rerank function")
 		funcScores.Functions[0].Type = schemapb.FunctionType_Rerank
 	}
 
 	{
 		funcScores.Functions[0].OutputFieldNames = []string{"text"}
-		_, err := NewFunctionScore(schema, funcScores)
+		_, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank function should not have output field")
 		funcScores.Functions[0].OutputFieldNames = []string{""}
 	}
@@ -165,7 +166,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		Functions: []*schemapb.FunctionSchema{functionSchema},
 	}
 
-	f, err := NewFunctionScore(schema, funcScores)
+	f, err := NewFunctionScore(schema, funcScores, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	// empty inputs

@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -43,14 +44,15 @@ type VoyageAIEmbeddingProvider struct {
 
 	maxBatch   int
 	timeoutSec int64
+	extraInfo  *models.ModelExtraInfo
 }
 
-func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*VoyageAIEmbeddingProvider, error) {
+func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*VoyageAIEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.VoyageAIAKEnvStr)
+	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.VoyageAIAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +110,7 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 		outputType:    outputType,
 		maxBatch:      128,
 		timeoutSec:    30,
+		extraInfo:     extraInfo,
 	}
 	return &provider, nil
 }
@@ -120,7 +123,7 @@ func (provider *VoyageAIEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *VoyageAIEmbeddingProvider) CallEmbedding(texts []string, mode models.TextEmbeddingMode) (any, error) {
+func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	var textType string
 	if mode == models.InsertMode {

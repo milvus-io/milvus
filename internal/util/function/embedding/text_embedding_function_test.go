@@ -137,7 +137,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 				{Key: models.DimParamKey, Value: "4"},
 				{Key: models.CredentialParamKey, Value: "mock"},
 			},
-		})
+		}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 
 		{
@@ -174,7 +174,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsert() {
 				{Key: models.DimParamKey, Value: "4"},
 				{Key: models.CredentialParamKey, Value: "mock"},
 			},
-		})
+		}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 
 		{
@@ -216,7 +216,7 @@ func (s *TextEmbeddingFunctionSuite) TestAliEmbedding() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	{
@@ -361,7 +361,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: models.DimParamKey, Value: "4"},
 				{Key: models.CredentialParamKey, Value: "mock"},
 			},
-		})
+		}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -399,7 +399,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: models.DimParamKey, Value: "4"},
 				{Key: models.CredentialParamKey, Value: "mock"},
 			},
-		})
+		}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -418,7 +418,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: models.DimParamKey, Value: "4"},
 				{Key: models.CredentialParamKey, Value: "mock"},
 			},
-		})
+		}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -435,7 +435,7 @@ func (s *TextEmbeddingFunctionSuite) TestRunnerParamsErr() {
 				{Key: Provider, Value: openAIProvider},
 				{Key: models.ModelNameParamKey, Value: "text-embedding-ada-003"},
 			},
-		})
+		}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 }
@@ -457,10 +457,10 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
-		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -479,10 +479,10 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
-		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -501,10 +501,10 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
-		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -523,10 +523,10 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
-		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -545,10 +545,10 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
-		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -565,10 +565,10 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 				{Key: "endpoint", Value: "http://mock.com"},
 			},
 		}
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		fSchema.Params = []*commonpb.KeyValuePair{}
-		_, err = NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -584,7 +584,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			Params:           []*commonpb.KeyValuePair{},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -601,7 +601,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 			},
 		}
 
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 
@@ -618,7 +618,7 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 				{Key: Provider, Value: "tei"},
 			},
 		}
-		_, err := NewTextEmbeddingFunction(s.schema, fSchema)
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 }
@@ -645,7 +645,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchFloat32() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	// Large inputs
@@ -735,7 +735,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessInsertInt8() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	{
@@ -782,7 +782,7 @@ func (s *TextEmbeddingFunctionSuite) TestUnsupportedVec() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 			// {Key: embeddingURLParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.Error(err)
 }
 
@@ -822,7 +822,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessSearchInt8() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	// Normal inputs
@@ -898,28 +898,28 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	data, err := testutil.CreateInsertData(s.schema, 100)
 	s.NoError(err)
 	{
 		input := []storage.FieldData{data.Data[101]}
-		_, err := runner.ProcessBulkInsert(input)
+		_, err := runner.ProcessBulkInsert(context.Background(), input)
 		s.NoError(err)
 	}
 
 	// Multi-input
 	{
 		input := []storage.FieldData{data.Data[101], data.Data[101]}
-		_, err := runner.ProcessBulkInsert(input)
+		_, err := runner.ProcessBulkInsert(context.Background(), input)
 		s.Error(err)
 	}
 
 	// Error input type
 	{
 		input := []storage.FieldData{data.Data[102]}
-		_, err := runner.ProcessBulkInsert(input)
+		_, err := runner.ProcessBulkInsert(context.Background(), input)
 		s.Error(err)
 	}
 
@@ -928,7 +928,7 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 		input := []storage.FieldData{data.Data[101]}
 		err := input[0].AppendRow("")
 		s.NoError(err)
-		_, err = runner.ProcessBulkInsert(input)
+		_, err = runner.ProcessBulkInsert(context.Background(), input)
 		s.Error(err)
 	}
 }
@@ -936,19 +936,19 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertFloat32() {
 func (s *TextEmbeddingFunctionSuite) TestParseCredentail() {
 	{
 		cred := credentials.NewCredentials(map[string]string{})
-		ak, url, err := models.ParseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{}, "")
+		ak, url, err := models.ParseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{}, "", &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Equal(ak, "")
 		s.Equal(url, "")
 		s.NoError(err)
 	}
 	{
 		cred := credentials.NewCredentials(map[string]string{})
-		_, _, err := models.ParseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "NotExist"}, "")
+		_, _, err := models.ParseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "NotExist"}, "", &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "is not a apikey crediential, can not find key")
 	}
 	{
 		cred := credentials.NewCredentials(map[string]string{"mock.apikey": "mock"})
-		_, _, err := models.ParseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"}, "")
+		_, _, err := models.ParseAKAndURL(cred, []*commonpb.KeyValuePair{}, map[string]string{"credential": "mock"}, "", &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 }
@@ -988,14 +988,14 @@ func (s *TextEmbeddingFunctionSuite) TestProcessBulkInsertInt8() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.NoError(err)
 
 	data, err := testutil.CreateInsertData(s.schema, 100)
 	s.NoError(err)
 	{
 		input := []storage.FieldData{data.Data[101]}
-		_, err := runner.ProcessBulkInsert(input)
+		_, err := runner.ProcessBulkInsert(context.Background(), input)
 		s.NoError(err)
 	}
 }
@@ -1020,6 +1020,6 @@ func (s *TextEmbeddingFunctionSuite) TestDisable() {
 			{Key: models.DimParamKey, Value: "4"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		},
-	})
+	}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	s.ErrorContains(err, "Text embedding model provider [openai] is disabled")
 }
