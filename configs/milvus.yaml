@@ -1022,6 +1022,7 @@ common:
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
   localRPCEnabled: false # enable local rpc for internal communication when mix or standalone mode.
+  preferIPv6: false # prefer IPv6 (ULA/global) addresses over IPv4 when auto-detecting local IP.
   sync:
     taskPoolReleaseTimeoutSeconds: 60 # The maximum time to wait for the task to finish and release resources in the pool
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
