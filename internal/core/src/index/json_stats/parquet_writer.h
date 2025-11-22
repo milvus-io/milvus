@@ -105,7 +105,9 @@ class DefaultColumnGroupingStrategy : public ColumnGroupingStrategy {
     CreateGroups(const TableStatsInfo& table_info) const override {
         // put all columns into one group
         std::vector<std::vector<int>> column_groups;
+        column_groups.reserve(1);
         std::vector<int> group;
+        group.reserve(table_info.schema->num_fields());
         for (size_t i = 0; i < table_info.schema->num_fields(); ++i) {
             group.push_back(i);
         }

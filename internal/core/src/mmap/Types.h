@@ -40,10 +40,24 @@ struct FieldDataInfo {
         arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
     }
 
+    FieldDataInfo(int64_t field_id,
+                  int64_t main_field_id,
+                  size_t row_count,
+                  std::string mmap_dir_path = "",
+                  bool in_load_list = false)
+        : field_id(field_id),
+          row_count(row_count),
+          main_field_id(main_field_id),
+          mmap_dir_path(std::move(mmap_dir_path)),
+          in_load_list(in_load_list) {
+        arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
+    }
+
     int64_t field_id;
+    int64_t main_field_id{INVALID_FIELD_ID};  // used for json stats only
     size_t row_count;
-    std::string mmap_dir_path;
+    std::string mmap_dir_path{};
     std::shared_ptr<ArrowReaderChannel> arrow_reader_channel;
-    bool in_load_list = false;
+    bool in_load_list{false};
 };
 }  // namespace milvus
