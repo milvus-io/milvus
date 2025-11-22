@@ -23,18 +23,18 @@ runs:
     uses: actions/cache/save@v4
     with:
       path: /var/tmp/ccache
-      key: macos-ccache-${{ env.corehash }}
-      restore-keys: macos-ccache-
+      key: macos15-ccache-${{ env.corehash }}
+      restore-keys: macos15-ccache-
   - name: Mac Cache Go Mod Volumes
     uses: actions/cache/save@v4
     with:
       path: ~/go/pkg/mod
-      key: macos-go-mod-${{ hashFiles('**/go.sum') }}
-      restore-keys: macos-go-mod-
+      key: macos15-go-mod-${{ hashFiles('**/go.sum') }}
+      restore-keys: macos15-go-mod-
   - name: Mac Cache Conan Packages
     uses: actions/cache/save@v4
     with:
       path: ~/.conan
-      key: macos-conan-${{ hashFiles('internal/core/conanfile.*') }}
-      restore-keys: macos-conan-
+      key: macos15-conan-${{ hashFiles('internal/core/conanfile.*') }}
+      restore-keys: macos15-conan-
 
