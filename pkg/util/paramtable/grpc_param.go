@@ -87,7 +87,8 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.IPItem.Init(base.mgr)
-	p.IP = funcutil.GetIP(p.IPItem.GetValue())
+
+	p.IP = funcutil.GetIP(p.IPItem.GetValue(), Get().CommonCfg.PreferIPv6Address.GetAsBool())
 
 	p.Port = ParamItem{
 		Key:          p.Domain + ".port",
