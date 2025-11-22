@@ -291,6 +291,15 @@ class HuaweiCloudChunkManager : public MinioChunkManager {
     }
 };
 
+class VolcengineChunkManager : public MinioChunkManager {
+ public:
+    explicit VolcengineChunkManager(const StorageConfig& storage_config);
+    virtual std::string
+    GetName() const {
+        return "VolcengineChunkManager";
+    }
+};
+
 using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;
 
 static const char* GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG =
