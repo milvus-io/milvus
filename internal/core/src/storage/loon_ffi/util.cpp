@@ -17,10 +17,13 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <nlohmann/json.hpp>
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "milvus-storage/properties.h"
 #include "storage/loon_ffi/util.h"
+
+using json = nlohmann::json;
 
 std::shared_ptr<Properties>
 MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
@@ -117,4 +120,66 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
 
     FreeFFIResult(&result);
     return properties;
+}
+
+CStorageConfig
+ToCStorageConfig(const milvus::storage::StorageConfig& config) {
+    return CStorageConfig{config.address.c_str(),
+                          config.bucket_name.c_str(),
+                          config.access_key_id.c_str(),
+                          config.access_key_value.c_str(),
+                          config.root_path.c_str(),
+                          config.storage_type.c_str(),
+                          config.cloud_provider.c_str(),
+                          config.iam_endpoint.c_str(),
+                          config.log_level.c_str(),
+                          config.region.c_str(),
+                          config.useSSL,
+                          config.sslCACert.c_str(),
+                          config.useIAM,
+                          config.useVirtualHost,
+                          config.requestTimeoutMs,
+                          config.gcp_credential_json.c_str(),
+                          false,  // this field does not exist in StorageConfig
+                          config.max_connections};
+}
+
+std::string
+GetManifest(const std::string& path,
+            const std::shared_ptr<Properties>& properties) {
+    try {
+        // Parse the JSON string
+        json j = json::parse(path);
+
+        // Extract base_path and ver fields
+        std::string base_path = j.at("base_path").get<std::string>();
+        int64_t ver = j.at("ver").get<int64_t>();
+
+        // return std::make_pair(base_path, ver);
+        char* out_column_groups = nullptr;
+        int64_t out_read_version = 0;
+        FFIResult result = get_latest_column_groups(base_path.c_str(),
+                                                    properties.get(),
+                                                    &out_column_groups,
+                                                    &out_read_version);
+        if (!IsSuccess(&result)) {
+            auto message = GetErrorMessage(&result);
+            // Copy the error message before freeing the FFIResult
+            std::string error_msg = message ? message : "Unknown error";
+            FreeFFIResult(&result);
+            throw std::runtime_error(error_msg);
+        }
+
+        FreeFFIResult(&result);
+        return {out_column_groups};
+    } catch (const json::parse_error& e) {
+        throw std::runtime_error(
+            std::string("Failed to parse manifest JSON: ") + e.what());
+    } catch (const json::out_of_range& e) {
+        throw std::runtime_error(
+            std::string("Missing required field in manifest: ") + e.what());
+    } catch (const json::type_error& e) {
+        throw std::runtime_error(
+            std::string("Invalid field type in manifest: ") + e.what());
+    }
 }

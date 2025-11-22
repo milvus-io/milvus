@@ -16,15 +16,21 @@
 
 #include "storage/MemFileManagerImpl.h"
 #include <memory>
+#include <string>
 #include <unordered_map>
 
+#include <arrow/c/bridge.h>
 #include "common/Common.h"
+#include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/Types.h"
 #include "log/Log.h"
 #include "storage/Util.h"
 #include "storage/FileManager.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
 #include "index/Utils.h"
+#include "milvus-storage/ffi_c.h"
+#include "util.h"
 
 namespace milvus::storage {
 
@@ -34,6 +40,7 @@ MemFileManagerImpl::MemFileManagerImpl(
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
+    loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
     plugin_context_ = fileManagerContext.plugin_context;
 }
 
@@ -213,9 +220,25 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);
-    AssertInfo(segment_insert_files.has_value(),
-               "[StorageV2] insert file paths for storage v2 is empty when "
-               "build index");
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    AssertInfo(segment_insert_files.has_value() || manifest.has_value(),
+               "[StorageV2] insert file paths and manifest for storage v2 is "
+               "empty when build index");
+    // use manifest file for storage v2
+    auto manifest_path_str = manifest.value_or("");
+    if (manifest_path_str != "") {
+        AssertInfo(loon_ffi_properties_ != nullptr,
+                   "[StorageV2] loon ffi properties is null when build index "
+                   "with manifest");
+        return GetFieldDatasFromManifest(manifest_path_str,
+                                         loon_ffi_properties_,
+                                         field_meta_,
+                                         data_type,
+                                         dim,
+                                         element_type);
+    }
+
     auto remote_files = segment_insert_files.value();
     for (auto& files : remote_files) {
         SortByPath(files);
