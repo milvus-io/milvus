@@ -2,10 +2,12 @@ use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
 use serde_json as json;
-use std::borrow::Cow;
+use std::fs;
 use std::io::BufReader;
+use std::{borrow::Cow, path::PathBuf};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
+use crate::analyzer::options;
 use crate::error::{Result, TantivyBindingError};
 
 lazy_static! {
@@ -54,16 +56,19 @@ impl TokenStream for JiebaTokenStream {
 
 fn get_jieba_dict(
     params: &json::Map<String, json::Value>,
-) -> Result<(Vec<String>, Option<String>)> {
+) -> Result<(Vec<String>, Option<String>, Option<PathBuf>)> {
+    let mut words = Vec::<String>::new();
+    let mut user_dict = None;
+    // use default dict as default system dict
+    let mut system_dict = Some("_default_".to_string());
     match params.get("dict") {
         Some(value) => {
+            system_dict = None;
             if !value.is_array() {
                 return Err(TantivyBindingError::InvalidArgument(format!(
                     "jieba tokenizer dict must be array"
                 )));
             }
-            let mut dict = Vec::<String>::new();
-            let mut system_dict = None;
 
             for word in value.as_array().unwrap() {
                 if !word.is_string() {
@@ -82,18 +87,27 @@ fn get_jieba_dict(
                 if text == "_default_" || text == "_extend_default_" {
                     if system_dict.is_some() {
                         return Err(TantivyBindingError::InvalidArgument(format!(
-                            "jieba tokenizer dict can only set one default dict"
+                            "jieba tokenizer dict can only set one system dict"
                         )));
                     }
                     system_dict = Some(text)
                 } else {
-                    dict.push(text);
+                    words.push(text);
                 }
             }
-            Ok((dict, system_dict))
         }
-        _ => Ok((vec![], Some("_default_".to_string()))),
-    }
+        _ => {}
+    };
+
+    match params.get("extra_dict_file") {
+        Some(v) => {
+            let path = options::get_resource_path(v, "jieba extra dict file")?;
+            user_dict = Some(path)
+        }
+        _ => {}
+    };
+
+    Ok((words, system_dict, user_dict))
 }
 
 fn get_jieba_mode(params: &json::Map<String, json::Value>) -> Result<JiebaMode> {
@@ -143,7 +157,7 @@ impl<'a> JiebaTokenizer<'a> {
     }
 
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<JiebaTokenizer<'a>> {
-        let (dict, system_dict) = get_jieba_dict(params)?;
+        let (words, system_dict, user_dict) = get_jieba_dict(params)?;
 
         let mut tokenizer =
             system_dict.map_or(Ok(jieba_rs::Jieba::empty()), |name| match name.as_str() {
@@ -163,8 +177,19 @@ impl<'a> JiebaTokenizer<'a> {
                 ))),
             })?;
 
-        for word in dict {
+        for word in words {
             tokenizer.add_word(word.as_str(), None, None);
+        }
+
+        if user_dict.is_some() {
+            let file = fs::File::open(user_dict.unwrap())?;
+            let mut reader = BufReader::new(file);
+            tokenizer.load_dict(&mut reader).map_err(|e| {
+                TantivyBindingError::InvalidArgument(format!(
+                    "jieba tokenizer load dict file failed with error: {:?}",
+                    e
+                ))
+            })?;
         }
 
         let mode = get_jieba_mode(params)?;
