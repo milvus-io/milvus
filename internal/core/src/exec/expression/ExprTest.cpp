@@ -17395,6 +17395,85 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
                        });
 }
 
+TEST_P(ExprTest, TestSTIsValidFunction) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto int_fid = schema->AddDebugField("int", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(int_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 100;
+    int num_iters = 1;
+
+    std::vector<const char*> wkts = {
+        "POINT (0 0)",                          // valid
+        "LINESTRING (0 0, 1 1, 2 2)",           // valid
+        "POLYGON ((0 0, 2 2, 2 0, 0 2, 0 0))",  // invalid
+        "LINESTRING (0 0, 0 0)"                 // invalid
+    };
+    std::vector<bool> expected_flags = {true, true, false, false};
+
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+
+        milvus::proto::schema::FieldData* geometry_field_data = nullptr;
+        for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+            if (fd.field_id() == geom_fid.get()) {
+                geometry_field_data = &fd;
+                break;
+            }
+        }
+        ASSERT_NE(geometry_field_data, nullptr);
+
+        geometry_field_data->mutable_scalars()
+            ->mutable_geometry_data()
+            ->clear_data();
+
+        auto ctx = GEOS_init_r();
+        for (int i = 0; i < N; ++i) {
+            const char* wkt = wkts[i % wkts.size()];
+            Geometry geom(ctx, wkt);
+            geometry_field_data->mutable_scalars()
+                ->mutable_geometry_data()
+                ->add_data(geom.to_wkb_string());
+        }
+        GEOS_finish_r(ctx);
+
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentInternalInterface*>(seg.get());
+
+    auto is_valid_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+        milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
+        proto::plan::GISFunctionFilterExpr_GISOp_IsValidOp,
+        "");
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       is_valid_expr);
+
+    BitsetType final =
+        ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+    ASSERT_EQ(final.size(), N * num_iters);
+
+    for (int i = 0; i < final.size(); ++i) {
+        bool expected = expected_flags[i % expected_flags.size()];
+        EXPECT_EQ(final[i], expected)
+            << "Unexpected validity result at index " << i;
+    }
+}
+
 TEST_P(ExprTest, TestSTDWithinFunction) {
     using namespace milvus;
     using namespace milvus::query;
