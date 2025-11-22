@@ -121,6 +121,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.CompactionMaxParallelReads.GetAsInt(), 8)
 		assert.Equal(t, wpCfg.ReaderMaxBatchSize.GetAsSize(), int64(16*1024*1024))
 		assert.Equal(t, wpCfg.ReaderMaxFetchThreads.GetAsInt(), 32)
+		assert.Equal(t, wpCfg.FencePolicyConditionWrite.GetValue(), "auto")
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "default")

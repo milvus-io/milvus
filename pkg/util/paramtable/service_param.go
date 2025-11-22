@@ -736,6 +736,7 @@ type WoodpeckerConfig struct {
 	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
 	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
 	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
+	FencePolicyConditionWrite      ParamItem `refreshable:"true"`
 
 	// storage
 	StorageType ParamItem `refreshable:"false"`
@@ -931,6 +932,16 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ReaderMaxFetchThreads.Init(base.mgr)
+
+	p.FencePolicyConditionWrite = ParamItem{
+		Key:          "woodpecker.logstore.fencePolicy.conditionWrite",
+		Version:      "2.6.0",
+		DefaultValue: "auto",
+		Doc: `Enable conditional write for embedded mode, default is auto, which will automatically detect whether the storage supports conditional write.
+Valid values: [auto, enable, disable]`,
+		Export: true,
+	}
+	p.FencePolicyConditionWrite.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "woodpecker.storage.type",
