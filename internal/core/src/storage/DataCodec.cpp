@@ -24,23 +24,24 @@
 #include "storage/BinlogReader.h"
 #include "storage/PluginLoader.h"
 #include "common/EasyAssert.h"
-#include "common/Consts.h"
 
 namespace milvus::storage {
 
 std::unique_ptr<DataCodec>
 DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                     int64_t length,
-                    bool is_field_data) {
+                    bool is_field_data,
+                    storage::FieldDataMeta field_meta,
+                    storage::IndexMeta index_meta) {
     auto buff_to_keep = input_data;  // ref += 1
     auto reader =
         std::make_shared<BinlogReader>(buff_to_keep, length);  //ref += 1
     ReadMediumType(reader);
 
     DescriptorEvent descriptor_event(reader);
+    auto& extras = descriptor_event.event_data.extras;
     auto data_type =
         static_cast<DataType>(descriptor_event.event_data.fix_part.data_type);
-    auto& extras = descriptor_event.event_data.extras;
     bool nullable = (extras.find(NULLABLE) != extras.end())
                         ? std::any_cast<bool>(extras[NULLABLE])
                         : false;
@@ -58,15 +59,15 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
 
         int64_t ez_id = descriptor_event.GetEZFromExtra();
         AssertInfo(ez_id != -1, "ez_id meta not exist for a encrypted file");
-        auto decryptor = cipherPlugin->GetDecryptor(
-            ez_id, descriptor_fix_part.collection_id, edek);
+        auto decryptor =
+            cipherPlugin->GetDecryptor(ez_id, field_meta.collection_id, edek);
 
         auto left_size = length - descriptor_event.event_header.next_position_;
         LOG_INFO(
             "start decrypting data, ez_id: {}, collection_id: {}, total "
             "length: {}, descriptor_length: {}, cipher text length: {}",
             ez_id,
-            descriptor_fix_part.collection_id,
+            field_meta.collection_id,
             length,
             descriptor_event.event_header.next_position_,
             left_size);
@@ -106,7 +107,7 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             std::unique_ptr<InsertData> insert_data;
             insert_data =
                 std::make_unique<InsertData>(insert_event_data.payload_reader);
-            insert_data->SetFieldDataMeta(data_meta);
+            insert_data->SetFieldDataMeta(field_meta);
             insert_data->SetTimestamps(insert_event_data.start_timestamp,
                                        insert_event_data.end_timestamp);
             // DataCodec must keep the input_data alive for zero-copy usage,
@@ -140,15 +141,7 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             }
             auto index_data =
                 std::make_unique<IndexData>(index_event_data.payload_reader);
-            index_data->SetFieldDataMeta(data_meta);
-            IndexMeta index_meta;
-            index_meta.segment_id = data_meta.segment_id;
-            index_meta.field_id = data_meta.field_id;
-            auto& extras = descriptor_event.event_data.extras;
-            AssertInfo(extras.find(INDEX_BUILD_ID_KEY) != extras.end(),
-                       "index build id not exist");
-            index_meta.build_id = std::stol(
-                std::any_cast<std::string>(extras[INDEX_BUILD_ID_KEY]));
+            index_data->SetFieldDataMeta(field_meta);
             index_data->set_index_meta(index_meta);
             index_data->SetTimestamps(index_event_data.start_timestamp,
                                       index_event_data.end_timestamp);
