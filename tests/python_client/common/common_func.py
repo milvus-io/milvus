@@ -687,6 +687,9 @@ def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.defau
 def gen_geometry_field(name="geo", description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
 
+def gen_timestamptz_field(name=ct.default_timestamptz_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.TIMESTAMPTZ, name=name, description=description, is_primary=is_primary, **kwargs)
+
 
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
@@ -859,6 +862,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
                     analyzer_params=analyzer_params)
     schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=nullable)
     schema.add_field(ct.default_geometry_field_name, DataType.GEOMETRY, nullable=nullable)
+    schema.add_field(ct.default_timestamptz_field_name, DataType.TIMESTAMPTZ, nullable=nullable)
     schema.add_field("array_int", DataType.ARRAY, element_type=DataType.INT64, max_capacity=ct.default_max_capacity)
     schema.add_field("array_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
     schema.add_field("array_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=200, max_capacity=ct.default_max_capacity)
@@ -867,7 +871,6 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
     schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim)
     schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR)
     # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
-    # schema.add_field("timestamptz", DataType.TIMESTAMPTZ, nullable=nullable)
 
     # Add struct array field
     if enable_struct_array_field:

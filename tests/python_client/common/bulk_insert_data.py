@@ -12,6 +12,7 @@ import uuid
 from faker import Faker
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
+from common.common_func import gen_timestamptz_str
 from common.minio_comm import copy_files_to_minio
 from utils.util_log import test_log as log
 import pyarrow as pa
@@ -46,6 +47,7 @@ class DataField:
     array_string_field = "array_string"
     new_field = "new_field"
     geo_field = "geo"
+    timestamp_field = "timestamptz"
 
 
 class DataErrorType:
@@ -700,6 +702,11 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
                 data = gen_wkt_geometry(rows)
             else:
                 data = [None for _ in range(start, rows + start)]
+        elif data_field == DataField.timestamp_field:
+            if not nullable:
+                data = [gen_timestamptz_str() for _ in range(start, rows + start)]
+            else:
+                data = [None for _ in range(start, rows + start)]
         else:
             raise Exception("unsupported field name")
 
@@ -865,6 +872,11 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                 if not nullable:
                     # Generate a single WKT geometry string
                     d[data_field] = gen_wkt_geometry(1)[0]
+                else:
+                    d[data_field] = None
+            elif data_field == DataField.timestamp_field:
+                if not nullable:
+                    d[data_field] = gen_timestamptz_str()
                 else:
                     d[data_field] = None
             else:

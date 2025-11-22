@@ -141,7 +141,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         
         vector_field_type = [DataType.FLOAT16_VECTOR,
                             DataType.BFLOAT16_VECTOR, 
-                            DataType.INT8_VECTOR]
+                            DataType.INT8_VECTOR,
+                            DataType.FLOAT_VECTOR]
         # fields to be updated
         update_fields_name = []
         scalar_update_name = []
@@ -163,6 +164,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         expected = [{field: new_rows[i][field] for field in scalar_update_name}
                     for i in range(default_nb)]
 
+        expected = cf.convert_timestamptz(expected, ct.default_timestamptz_field_name, "UTC")
         result = self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
                 check_task=CheckTasks.check_query_results,
                 output_fields=scalar_update_name,
