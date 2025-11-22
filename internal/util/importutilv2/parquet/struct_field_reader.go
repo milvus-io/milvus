@@ -103,10 +103,7 @@ func (r *StructFieldReader) Next(count int64) (any, any, error) {
 }
 
 func (r *StructFieldReader) toScalarField(data []interface{}) (*schemapb.ScalarField, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-
+	// struct list can be empty, len(data) can be zero, build an empty ScalarField if len(data) is zero
 	switch r.field.GetElementType() {
 	case schemapb.DataType_Bool:
 		boolData := make([]bool, len(data))
@@ -320,7 +317,9 @@ func (r *StructFieldReader) readArrayOfVectorField(chunked *arrow.Chunked) (any,
 						}
 					}
 				}
-				if len(allVectors) > 0 {
+				// struct list could be empty, len(allVectors) can be zero
+				// build an empty VectorField if len(allVectors) is zero
+				if len(allVectors) >= 0 {
 					vectorField := &schemapb.VectorField{
 						Dim: int64(r.dim),
 						Data: &schemapb.VectorField_FloatVector{
