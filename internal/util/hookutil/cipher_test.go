@@ -18,6 +18,7 @@ package hookutil
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"sync"
 	"testing"
@@ -243,7 +244,7 @@ func (s *CipherSuite) TestGetStoragePluginContext() {
 	s.Equal(CipherConfigCreateEZ, result[0].Key)
 	s.Equal("1", result[0].Value)
 	s.Equal(CipherConfigUnsafeEZK, result[1].Key)
-	s.Equal("unsafe key", result[1].Value)
+	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), result[1].Value)
 
 	result = GetStoragePluginContext([]*commonpb.KeyValuePair{}, 2)
 	s.Nil(result)
