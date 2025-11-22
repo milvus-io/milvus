@@ -391,6 +391,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         // warmup will be disabled only when all columns are not in load list
         bool merged_in_load_list = false;
         std::vector<FieldId> milvus_field_ids;
+        milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
             merged_in_load_list = merged_in_load_list ||
@@ -2672,6 +2673,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     // Step 2: Load indexes in parallel using thread pool
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<void>> load_index_futures;
+    load_index_futures.reserve(field_id_to_index_info.size());
 
     for (const auto& pair : field_id_to_index_info) {
         auto field_id = pair.first;
@@ -2704,6 +2706,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
     // Wait for all index loading to complete and collect exceptions
     std::vector<std::exception_ptr> index_exceptions;
+    index_exceptions.reserve(load_index_futures.size());
     for (auto& future : load_index_futures) {
         try {
             future.get();
@@ -2754,6 +2757,10 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
         // Calculate total row count and collect binlog paths
         int64_t total_entries = 0;
+        auto binlog_count = field_binlog.binlogs().size();
+        field_binlog_info.insert_files.reserve(binlog_count);
+        field_binlog_info.entries_nums.reserve(binlog_count);
+        field_binlog_info.memory_sizes.reserve(binlog_count);
         for (const auto& binlog : field_binlog.binlogs()) {
             field_binlog_info.insert_files.push_back(binlog.log_path());
             field_binlog_info.entries_nums.push_back(binlog.entries_num());
@@ -2774,6 +2781,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
                  field_data_to_load.size(),
                  id_);
         std::vector<std::future<void>> load_field_futures;
+        load_field_futures.reserve(field_data_to_load.size());
 
         for (const auto& [field_id, load_field_data_info] :
              field_data_to_load) {
@@ -2787,6 +2795,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
         // Wait for all field data loading to complete and collect exceptions
         std::vector<std::exception_ptr> field_exceptions;
+        field_exceptions.reserve(load_field_futures.size());
         for (auto& future : load_field_futures) {
             try {
                 future.get();

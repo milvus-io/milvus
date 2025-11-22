@@ -1344,6 +1344,10 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
         // Process each binlog
         int64_t total_row_count = 0;
+        auto binlog_count = field_binlog.binlogs().size();
+        binlog_info.entries_nums.reserve(binlog_count);
+        binlog_info.insert_files.reserve(binlog_count);
+        binlog_info.memory_sizes.reserve(binlog_count);
         for (const auto& binlog : field_binlog.binlogs()) {
             binlog_info.entries_nums.push_back(binlog.entries_num());
             binlog_info.insert_files.push_back(binlog.log_path());
@@ -1353,6 +1357,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
         binlog_info.row_count = total_row_count;
 
         // Set child field ids
+        binlog_info.child_field_ids.reserve(field_binlog.child_fields().size());
         for (const auto& child_field : field_binlog.child_fields()) {
             binlog_info.child_field_ids.push_back(child_field);
         }
