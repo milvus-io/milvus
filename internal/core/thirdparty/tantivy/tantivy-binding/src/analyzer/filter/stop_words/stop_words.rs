@@ -33,6 +33,25 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+use once_cell::sync::Lazy;
+fn fetch_words_from_file(data: &[u8]) -> &'static [&'static str] {
+    let s = std::str::from_utf8(data).expect("UTF-8");
+    let vec: Box<Vec<String>> = Box::new(
+        s.lines()
+            .map(|line| line.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+    );
+    let vec: &'static Vec<String> = Box::leak(vec);
+
+    let slice: Box<[&str]> = vec
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<&str>>()
+        .into_boxed_slice();
+    Box::leak(slice)
+}
+
 pub fn fetch_language_stop_words(lang: &str) -> Option<&[&str]> {
     match lang {
         "_english_" => Some(ENGLISH),
@@ -48,6 +67,7 @@ pub fn fetch_language_stop_words(lang: &str) -> Option<&[&str]> {
         "_russian_" => Some(RUSSIAN),
         "_spanish_" => Some(SPANISH),
         "_swedish_" => Some(SWEDISH),
+        "_chinese_" => Some(&*CHINESE),
         _ => None,
     }
 }
@@ -1919,3 +1939,24 @@ pub const SWEDISH: &[&str] = &[
     "varför", "varje", "vilka", "ditt", "vem", "vilket", "sitt", "sådana", "vart", "dina", "vars",
     "vårt", "våra", "ert", "era", "vilkas",
 ];
+
+pub static CHINESE_DATA: &[u8] = include_bytes!("chinese.txt");
+
+pub static CHINESE: Lazy<&[&str]> = Lazy::new(|| fetch_words_from_file(CHINESE_DATA));
+
+#[cfg(test)]
+mod tests {
+    use super::fetch_language_stop_words;
+
+    #[test]
+    fn test_chinese_stop_words() {
+        let words = fetch_language_stop_words("_chinese_").unwrap();
+        assert!(
+            words.len() == 840,
+            "number of system Chinese stop words does not match the expected value"
+        );
+        for s in words {
+            print!("{}\n", s);
+        }
+    }
+}
