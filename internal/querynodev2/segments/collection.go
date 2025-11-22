@@ -17,6 +17,7 @@
 package segments
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sync"
 
@@ -398,7 +399,7 @@ func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID
 		ez := hookutil.GetEzByCollProperties(properties, collectionID)
 		if ez != nil {
 			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			err := segcore.PutOrRefPluginContext(ez, string(key))
+			err := segcore.PutOrRefPluginContext(ez, base64.StdEncoding.EncodeToString(key))
 			if err != nil {
 				log.Error("failed to put or update plugin context", zap.Int64("collectionID", collectionID), zap.Error(err))
 			}
