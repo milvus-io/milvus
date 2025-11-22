@@ -3633,7 +3633,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                                  "limit": limit})
 
 
-@pytest.mark.skip(reason="issue #45511")
 class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
     """ Test case of search interface """
 
