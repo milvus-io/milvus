@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -550,7 +551,11 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		}
 		results = append(results, &partialResultData)
 	}
-	tr.CtxElapse(ctx, "decodeSearchResults done")
+	decodeDuration := tr.CtxElapse(ctx, "decodeSearchResults done")
+	metrics.ProxyDecodeResultLatency.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		metrics.SearchLabel,
+	).Observe(float64(decodeDuration.Milliseconds()))
 	return results, nil
 }
 
