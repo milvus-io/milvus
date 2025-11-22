@@ -55,8 +55,7 @@ class Metrics {
     explicit Metrics()
         : time_point_(std::chrono::steady_clock::now()),
           queue_duration_(0),
-          execute_duration_(0),
-          cancelled_before_execute_(false) {
+          execute_duration_(0) {
         milvus::monitor::internal_cgo_inflight_task_total_all.Increment();
     }
 
@@ -75,13 +74,17 @@ class Metrics {
             milvus::monitor::internal_cgo_cancel_before_execute_total_all
                 .Increment();
         } else {
+            if (cancelled_during_execute_) {
+                milvus::monitor::internal_cgo_cancel_during_execute_total_all
+                    .Increment();
+            }
             milvus::monitor::internal_cgo_execute_duration_seconds_all.Observe(
                 std::chrono::duration<double>(execute_duration_).count());
         }
     }
 
     void
-    withCancel() {
+    withEarlyCancel() {
         queue_duration_ = std::chrono::duration_cast<Duration>(
             std::chrono::steady_clock::now() - time_point_);
         cancelled_before_execute_ = true;
@@ -97,6 +100,11 @@ class Metrics {
     }
 
     void
+    withDuringCancel() {
+        cancelled_during_execute_ = true;
+    }
+
+    void
     executeDone() {
         auto now = std::chrono::steady_clock::now();
         execute_duration_ =
@@ -108,7 +116,8 @@ class Metrics {
     std::chrono::steady_clock::time_point time_point_;
     Duration queue_duration_;
     Duration execute_duration_;
-    bool cancelled_before_execute_;
+    bool cancelled_before_execute_{false};
+    bool cancelled_during_execute_{false};
 };
 
 // FutureResult is a struct that represents the result of the future.
@@ -156,21 +165,13 @@ class IFuture {
     virtual ~IFuture() = default;
 };
 
-/// @brief a class that represents a cancellation token
-class CancellationToken : public folly::CancellationToken {
- public:
-    CancellationToken(folly::CancellationToken&& token) noexcept
-        : folly::CancellationToken(std::move(token)) {
+/// @brief a helper function to throw a FutureCancellation exception if the token is cancelled.
+static inline void
+throwIfCancelled(const folly::CancellationToken& token) {
+    if (token.isCancellationRequested()) {
+        throw folly::FutureCancellation();
     }
-
-    /// @brief check if the token is cancelled, throw a FutureCancellation exception if it is.
-    void
-    throwIfCancelled() const {
-        if (isCancellationRequested()) {
-            throw folly::FutureCancellation();
-        }
-    }
-};
+}
 
 /// @brief Future is a class that bound a future with a result for
 /// using by cgo.
@@ -183,7 +184,7 @@ class Future : public IFuture {
     /// returned result or exception will be handled by consumer side.
     template <typename Fn,
               typename = std::enable_if<
-                  std::is_invocable_r_v<R*, Fn, CancellationToken>>>
+                  std::is_invocable_r_v<R*, Fn, folly::CancellationToken>>>
     static std::unique_ptr<Future<R>>
     async(folly::Executor::KeepAlive<> executor,
           int priority,
@@ -267,23 +268,32 @@ class Future : public IFuture {
     template <typename Fn,
               typename... Args,
               typename = std::enable_if<
-                  std::is_invocable_r_v<R*, Fn, CancellationToken>>>
+                  std::is_invocable_r_v<R*, Fn, folly::CancellationToken>>>
     void
     asyncProduce(folly::Executor::KeepAlive<> executor, int priority, Fn&& fn) {
         // start produce process async.
-        auto cancellation_token =
-            CancellationToken(cancellation_source_.getToken());
+        auto cancellation_token = cancellation_source_.getToken();
         auto runner = [fn = std::forward<Fn>(fn),
                        cancellation_token = std::move(cancellation_token),
                        this]() {
+            // pre check the cancellation token
             if (cancellation_token.isCancellationRequested()) {
-                metrics_.withCancel();
+                metrics_.withEarlyCancel();
                 throw folly::FutureCancellation();
             }
 
-            auto executionGuard =
-                Metrics<std::chrono::microseconds>::ExecutionGuard(metrics_);
-            return fn(cancellation_token);
+            // start the execution guard.
+            Metrics<std::chrono::microseconds>::ExecutionGuard executionGuard(
+                metrics_);
+
+            try {
+                return fn(cancellation_token);
+            } catch (const folly::FutureCancellation& e) {
+                metrics_.withDuringCancel();
+                throw e;
+            } catch (...) {
+                throw;  // rethrow the exception to the consumer side.
+            }
         };
 
         // the runner is executed may be executed in different thread.
