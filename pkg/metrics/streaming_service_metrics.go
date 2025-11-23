@@ -461,11 +461,6 @@ var (
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
-
-	WALTruncateTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "truncate_time_tick",
-		Help: "the final timetick tick of truncator seen",
-	}, WALChannelLabelName, WALChannelTermLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
@@ -566,7 +561,6 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
-	registry.MustRegister(WALTruncateTimeTick)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {
