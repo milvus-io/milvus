@@ -15,7 +15,7 @@ expr:
 	| EmptyArray                                                                 # EmptyArray
 	| EXISTS expr                                                                # Exists
 	| expr LIKE StringLiteral                                                    # Like
-	| TEXTMATCH'('Identifier',' StringLiteral')'                                 # TextMatch
+	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'         # TextMatch
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
 	| expr POW expr											                     # Power
@@ -36,6 +36,7 @@ expr:
 	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
 	| STWithin'('Identifier','StringLiteral')'									 # STWithin
 	| STDWithin'('Identifier','StringLiteral',' expr')'                          # STDWithin
+	| STIsValid'('Identifier')'                                  			 	 # STIsValid
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
@@ -49,6 +50,9 @@ expr:
 	| expr OR expr											                     # LogicalOr
 	| (Identifier | JSONIdentifier) ISNULL                                                          # IsNull
 	| (Identifier | JSONIdentifier) ISNOTNULL                                                       # IsNotNull;
+
+textMatchOption:
+	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
@@ -76,6 +80,8 @@ PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
+MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
+ASSIGN: '=';
 
 ADD: '+';
 SUB: '-';
@@ -118,6 +124,7 @@ STContains: 'st_contains' | 'ST_CONTAINS';
 STIntersects : 'st_intersects' | 'ST_INTERSECTS';
 STWithin :'st_within' | 'ST_WITHIN';
 STDWithin: 'st_dwithin' | 'ST_DWITHIN';
+STIsValid: 'st_isvalid' | 'ST_ISVALID';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 

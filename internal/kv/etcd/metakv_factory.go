@@ -63,7 +63,8 @@ func NewWatchKVFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.Watc
 		etcdCfg.EtcdTLSCert.GetValue(),
 		etcdCfg.EtcdTLSKey.GetValue(),
 		etcdCfg.EtcdTLSCACert.GetValue(),
-		etcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdCfg.EtcdTLSMinVersion.GetValue(),
+		etcdCfg.ClientOptions()...)
 	if err != nil {
 		return nil, err
 	}

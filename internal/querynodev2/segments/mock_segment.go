@@ -1151,6 +1151,52 @@ func (_c *MockSegment_Level_Call) RunAndReturn(run func() datapb.SegmentLevel) *
 	return _c
 }
 
+// Load provides a mock function with given fields: ctx
+func (_m *MockSegment) Load(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Load")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_Load_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Load'
+type MockSegment_Load_Call struct {
+	*mock.Call
+}
+
+// Load is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockSegment_Expecter) Load(ctx interface{}) *MockSegment_Load_Call {
+	return &MockSegment_Load_Call{Call: _e.mock.On("Load", ctx)}
+}
+
+func (_c *MockSegment_Load_Call) Run(run func(ctx context.Context)) *MockSegment_Load_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Load_Call) Return(_a0 error) *MockSegment_Load_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Load_Call) RunAndReturn(run func(context.Context) error) *MockSegment_Load_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadDeltaData provides a mock function with given fields: ctx, deltaData
 func (_m *MockSegment) LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error {
 	ret := _m.Called(ctx, deltaData)

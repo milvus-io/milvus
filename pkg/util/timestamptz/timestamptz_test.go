@@ -1,4 +1,4 @@
-package funcutil
+package timestamptz
 
 import (
 	"testing"

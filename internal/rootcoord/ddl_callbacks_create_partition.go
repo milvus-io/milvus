@@ -34,7 +34,7 @@ import (
 )
 
 func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) error {
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -109,6 +109,5 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 			ce.OptLPCMCollectionID(header.CollectionId),
 			ce.OptLPCMPartitionName(body.PartitionName),
 			ce.OptLPCMMsgType(commonpb.MsgType_CreatePartition),
-		),
-		result.GetControlChannelResult().TimeTick)
+		))
 }

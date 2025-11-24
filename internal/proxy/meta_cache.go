@@ -70,7 +70,7 @@ type Cache interface {
 	// DeprecateShardCache(database, collectionName string)
 	// InvalidateShardLeaderCache(collections []int64)
 	// ListShardLocation() map[int64]nodeInfo
-	RemoveCollection(ctx context.Context, database, collectionName string)
+	RemoveCollection(ctx context.Context, database, collectionName string, version uint64)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string
 
 	// GetCredentialInfo operate credential cache
@@ -800,23 +800,33 @@ func parsePartitionsInfo(infos []*partitionInfo, hasPartitionKey bool) *partitio
 	return result
 }
 
-func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string) {
+func (m *MetaCache) RemoveCollection(ctx context.Context, database, collectionName string, version uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	_, dbOk := m.collInfo[database]
-	if dbOk {
-		delete(m.collInfo[database], collectionName)
+
+	if db, dbOk := m.collInfo[database]; dbOk {
+		if coll, ok := db[collectionName]; ok {
+			m.removeCollectionByID(ctx, coll.collID, version, false)
+		}
 	}
 	if database == "" {
-		delete(m.collInfo[defaultDB], collectionName)
+		if db, dbOk := m.collInfo[defaultDB]; dbOk {
+			if coll, ok := db[collectionName]; ok {
+				m.removeCollectionByID(ctx, coll.collID, version, false)
+			}
+		}
 	}
-	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName), zap.Bool("dbok", dbOk))
+	log.Ctx(ctx).Debug("remove collection", zap.String("db", database), zap.String("collection", collectionName))
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.removeCollectionByID(ctx, collectionID, version, removeVersion)
+}
+
+func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
 	curVersion := m.collectionCacheVersion[collectionID]
 	var collNames []string
 	for database, db := range m.collInfo {

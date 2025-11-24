@@ -187,7 +187,7 @@ func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, sear
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if _, ok := decayScores[id]; !ok {
-				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx + int(col.nqOffset)}
 				decayScores[id] = float32(decay.reScorer(decay.origin, decay.scale, decay.decay, decay.offset, float64(nums[idx])))
 			}
 		}

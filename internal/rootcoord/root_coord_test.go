@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -82,6 +84,8 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	require.NoError(t, err)
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
+	tso := mocktso.NewAllocator(t)
+	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
 			catalog:     rootcoord.NewCatalog(catalogKV, ss),
@@ -93,6 +97,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 		withValidMixCoord(),
 		withValidProxyManager(),
 		withValidIDAllocator(),
+		withTsoAllocator(tso),
 		withBroker(newValidMockBroker()),
 	)
 	registry.ResetRegistration()
@@ -1263,6 +1268,102 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AddCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAddFunction).Return(fmt.Errorf("")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AddCollectionFunction(ctx, &milvuspb.AddCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_DropCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForDropFunction).Return(fmt.Errorf("")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.DropCollectionFunction(ctx, &milvuspb.DropCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_AlterCollectionFunction(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAlterFunction).Return(nil).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("run failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := initStreamingSystemAndCore(t)
+		defer c.Stop()
+		mocker := mockey.Mock((*Core).broadcastAlterCollectionForAlterFunction).Return(fmt.Errorf("")).Build()
+		defer mocker.UnPatch()
+		resp, err := c.AlterCollectionFunction(ctx, &milvuspb.AlterCollectionFunctionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 	})
 }
 

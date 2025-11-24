@@ -655,53 +655,6 @@ func (_c *RootCoordCatalog_CreateCollection_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// CreateCredential provides a mock function with given fields: ctx, credential
-func (_m *RootCoordCatalog) CreateCredential(ctx context.Context, credential *model.Credential) error {
-	ret := _m.Called(ctx, credential)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CreateCredential")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *model.Credential) error); ok {
-		r0 = rf(ctx, credential)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// RootCoordCatalog_CreateCredential_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateCredential'
-type RootCoordCatalog_CreateCredential_Call struct {
-	*mock.Call
-}
-
-// CreateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - credential *model.Credential
-func (_e *RootCoordCatalog_Expecter) CreateCredential(ctx interface{}, credential interface{}) *RootCoordCatalog_CreateCredential_Call {
-	return &RootCoordCatalog_CreateCredential_Call{Call: _e.mock.On("CreateCredential", ctx, credential)}
-}
-
-func (_c *RootCoordCatalog_CreateCredential_Call) Run(run func(ctx context.Context, credential *model.Credential)) *RootCoordCatalog_CreateCredential_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*model.Credential))
-	})
-	return _c
-}
-
-func (_c *RootCoordCatalog_CreateCredential_Call) Return(_a0 error) *RootCoordCatalog_CreateCredential_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *RootCoordCatalog_CreateCredential_Call) RunAndReturn(run func(context.Context, *model.Credential) error) *RootCoordCatalog_CreateCredential_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CreateDatabase provides a mock function with given fields: ctx, db, ts
 func (_m *RootCoordCatalog) CreateDatabase(ctx context.Context, db *model.Database, ts uint64) error {
 	ret := _m.Called(ctx, db, ts)

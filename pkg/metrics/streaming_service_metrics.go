@@ -22,7 +22,7 @@ const (
 	WALStatusError                          = "error"
 
 	BroadcasterTaskStateLabelName     = "state"
-	ResourceKeyDomainLabelName        = "domain"
+	ResourceKeyLockLabelName          = "rk_lock"
 	WALAccessModelLabelName           = "access_model"
 	WALScannerModelLabelName          = "scanner_model"
 	TimeTickSyncTypeLabelName         = "type"
@@ -126,24 +126,31 @@ var (
 	StreamingCoordBroadcasterTaskTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "broadcaster_task_total",
 		Help: "Total of broadcaster task",
-	}, BroadcasterTaskStateLabelName)
+	}, WALMessageTypeLabelName, BroadcasterTaskStateLabelName)
 
-	StreamingCoordBroadcastDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
-		Name:    "broadcaster_broadcast_duration_seconds",
-		Help:    "Duration of broadcast",
+	StreamingCoordBroadcasterTaskExecutionDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_task_execution_duration_seconds",
+		Help:    "Duration of broadcast execution, including broadcast message into wal and ack callback, without lock acquisition duration",
 		Buckets: secondsBuckets,
-	})
+	}, WALMessageTypeLabelName)
 
-	StreamingCoordBroadcasterAckAllDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
-		Name:    "broadcaster_ack_all_duration_seconds",
-		Help:    "Duration of acknowledge all message",
+	StreamingCoordBroadcasterTaskBroadcastDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_task_broadcast_duration_seconds",
+		Help:    "Duration of broadcast message into wal",
 		Buckets: secondsBuckets,
-	})
+	}, WALMessageTypeLabelName)
 
-	StreamingCoordResourceKeyTotal = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
-		Name: "resource_key_total",
-		Help: "Total of resource key hold at streaming coord",
-	}, ResourceKeyDomainLabelName)
+	StreamingCoordBroadcasterTaskAcquireLockDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_task_acquire_lock_duration_seconds",
+		Help:    "Duration of acquire lock of resource key",
+		Buckets: secondsBuckets,
+	}, ResourceKeyLockLabelName)
+
+	StreamingCoordBroadcasterTaskAckCallbackDurationSeconds = newStreamingCoordHistogramVec(prometheus.HistogramOpts{
+		Name:    "broadcaster_task_ack_callback_duration_seconds",
+		Help:    "Duration of ack callback handler execution duration",
+		Buckets: secondsBuckets,
+	}, WALMessageTypeLabelName)
 
 	// StreamingNode Producer Server Metrics.
 	StreamingNodeProducerTotal = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
@@ -454,11 +461,6 @@ var (
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
-
-	WALTruncateTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "truncate_time_tick",
-		Help: "the final timetick tick of truncator seen",
-	}, WALChannelLabelName, WALChannelTermLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
@@ -483,9 +485,10 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordAssignmentVersion)
 	registry.MustRegister(StreamingCoordAssignmentListenerTotal)
 	registry.MustRegister(StreamingCoordBroadcasterTaskTotal)
-	registry.MustRegister(StreamingCoordBroadcastDurationSeconds)
-	registry.MustRegister(StreamingCoordBroadcasterAckAllDurationSeconds)
-	registry.MustRegister(StreamingCoordResourceKeyTotal)
+	registry.MustRegister(StreamingCoordBroadcasterTaskExecutionDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterTaskBroadcastDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterTaskAcquireLockDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterTaskAckCallbackDurationSeconds)
 }
 
 // RegisterStreamingNode registers streaming node metrics
@@ -558,7 +561,6 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
-	registry.MustRegister(WALTruncateTimeTick)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {

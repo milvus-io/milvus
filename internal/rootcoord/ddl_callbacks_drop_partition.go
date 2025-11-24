@@ -37,7 +37,7 @@ func (c *Core) broadcastDropPartition(ctx context.Context, in *milvuspb.DropPart
 		return errors.New("default partition cannot be deleted")
 	}
 
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, in.GetDbName(), in.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -114,8 +114,7 @@ func (c *DDLCallback) dropPartitionV1AckCallback(ctx context.Context, result mes
 			ce.OptLPCMCollectionID(header.CollectionId),
 			ce.OptLPCMPartitionName(body.PartitionName),
 			ce.OptLPCMMsgType(commonpb.MsgType_DropPartition),
-		),
-		result.GetControlChannelResult().TimeTick)
+		))
 }
 
 // newPartitionTombstone creates a new partition tombstone.
@@ -144,5 +143,5 @@ func (t *partitionTombstone) ConfirmCanBeRemoved(ctx context.Context) (bool, err
 }
 
 func (t *partitionTombstone) Remove(ctx context.Context) error {
-	return t.meta.RemoveCollection(ctx, t.collectionID, 0)
+	return t.meta.RemovePartition(ctx, t.collectionID, t.partitionID, 0)
 }

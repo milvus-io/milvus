@@ -312,12 +312,10 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.Require().True(t.GetTaskProto().GetNodeID() > 0)
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).Return(nil, errors.New("mock error")).Times(12)
-		for i := 0; i < 12; i++ {
-			t.QueryTaskOnWorker(cluster)
-			s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
-			s.EqualValues(100, t.GetTaskProto().GetNodeID())
-		}
+		cluster.EXPECT().QueryCompaction(t.GetTaskProto().NodeID, mock.Anything).Return(nil, errors.New("mock error"))
+		t.QueryTaskOnWorker(cluster)
+		s.Equal(datapb.CompactionTaskState_pipelining, t.GetTaskProto().GetState())
+		s.EqualValues(-1, t.GetTaskProto().GetNodeID())
 	})
 
 	s.Run("test executing with result executing", func() {

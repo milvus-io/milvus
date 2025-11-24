@@ -72,6 +72,10 @@ class ChunkedColumnInterface {
     virtual PinWrapper<SpanBase>
     Span(milvus::OpContext* op_ctx, int64_t chunk_id) const = 0;
 
+    virtual void
+    PrefetchChunks(milvus::OpContext* op_ctx,
+                   const std::vector<int64_t>& chunk_ids) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(milvus::OpContext* op_ctx,
@@ -183,7 +187,7 @@ class ChunkedColumnInterface {
 
     virtual void
     BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(ScalarFieldProto&&, size_t)> fn,
+                std::function<void(const ArrayView&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const {
         ThrowInfo(ErrorCode::Unsupported,

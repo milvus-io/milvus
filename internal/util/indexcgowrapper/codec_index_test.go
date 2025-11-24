@@ -274,14 +274,7 @@ func genScalarIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				common.IndexTypeKey: "sort",
-			},
-		},
-		{
-			dtype:      dtype,
-			typeParams: nil,
-			indexParams: map[string]string{
-				common.IndexTypeKey: "flat",
+				common.IndexTypeKey: "STL_SORT",
 			},
 		},
 	}
@@ -293,14 +286,14 @@ func genStringIndexCases(dtype schemapb.DataType) []indexTestCase {
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				common.IndexTypeKey: "sort",
+				common.IndexTypeKey: "STL_SORT",
 			},
 		},
 		{
 			dtype:      dtype,
 			typeParams: nil,
 			indexParams: map[string]string{
-				common.IndexTypeKey: "marisa-trie",
+				common.IndexTypeKey: "Trie",
 			},
 		},
 	}

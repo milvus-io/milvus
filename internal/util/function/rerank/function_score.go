@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -127,7 +128,7 @@ type FunctionScore struct {
 	reranker Reranker
 }
 
-func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
+func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Reranker, error) {
 	if funcSchema.GetType() != schemapb.FunctionType_Rerank {
 		return nil, fmt.Errorf("%s is not rerank function.", funcSchema.GetType().String())
 	}
@@ -142,7 +143,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	case DecayFunctionName:
 		rerankFunc, newRerankErr = newDecayFunction(collSchema, funcSchema)
 	case ModelFunctionName:
-		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema)
+		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema, extraInfo)
 	case RRFName:
 		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
 	case WeightedName:
@@ -159,11 +160,11 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	return rerankFunc, nil
 }
 
-func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore) (*FunctionScore, error) {
+func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore, extraInfo *models.ModelExtraInfo) (*FunctionScore, error) {
 	funcScore := &FunctionScore{}
 
 	for _, function := range funcScoreSchema.Functions {
-		reranker, err := createFunction(collSchema, function)
+		reranker, err := createFunction(collSchema, function, extraInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +241,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 		return nil, fmt.Errorf("unsupported rank type %s", rankTypeStr)
 	}
 	funcScore := &FunctionScore{}
-	if funcScore.reranker, err = createFunction(collSchema, &fSchema); err != nil {
+	if funcScore.reranker, err = createFunction(collSchema, &fSchema, &models.ModelExtraInfo{}); err != nil {
 		return nil, err
 	}
 	return funcScore, nil

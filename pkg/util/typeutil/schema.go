@@ -1120,6 +1120,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetIntData().Data = dstScalar.GetIntData().Data[:len(dstScalar.GetIntData().Data)-1]
 			case *schemapb.ScalarField_LongData:
 				dstScalar.GetLongData().Data = dstScalar.GetLongData().Data[:len(dstScalar.GetLongData().Data)-1]
+			case *schemapb.ScalarField_TimestamptzData:
+				dstScalar.GetTimestamptzData().Data = dstScalar.GetTimestamptzData().Data[:len(dstScalar.GetTimestamptzData().Data)-1]
 			case *schemapb.ScalarField_FloatData:
 				dstScalar.GetFloatData().Data = dstScalar.GetFloatData().Data[:len(dstScalar.GetFloatData().Data)-1]
 			case *schemapb.ScalarField_DoubleData:
@@ -1438,6 +1440,16 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					}
 				} else {
 					dstScalar.GetLongData().Data = append(dstScalar.GetLongData().Data, srcScalar.LongData.Data...)
+				}
+			case *schemapb.ScalarField_TimestamptzData:
+				if dstScalar.GetTimestamptzData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: srcScalar.TimestamptzData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data...)
 				}
 			case *schemapb.ScalarField_FloatData:
 				if dstScalar.GetFloatData() == nil {

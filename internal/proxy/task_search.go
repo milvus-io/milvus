@@ -17,12 +17,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -79,8 +82,8 @@ type searchTask struct {
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
-
-	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
+	highlightTasks         []*highlightTask
+	resultBuf              *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
@@ -290,7 +293,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.request.SearchParams)
 	if exist {
-		if !funcutil.IsTimezoneValid(timezone) {
+		if !timestamptz.IsTimezoneValid(timezone) {
 			log.Info("get invalid timezone from request", zap.String("timezone", timezone))
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", timezone)
 		}
@@ -398,7 +401,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	var err error
 	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
+		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
 			log.Warn("Failed to create function score", zap.Error(err))
 			return err
 		}
@@ -469,12 +472,16 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		// set analyzer name for sub search
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", subReq.GetSearchParams())
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, subReq.GetSearchParams())
 		if err == nil {
 			internalSubReq.AnalyzerName = analyzer
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
+		if err := t.addHighlightTask(t.request.GetHighlighter(), internalSubReq.GetMetricType(), internalSubReq.FieldId, subReq.GetPlaceholderGroup(), internalSubReq.GetAnalyzerName()); err != nil {
+			return err
+		}
+
 		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
@@ -527,7 +534,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
 		if err != nil {
 			return err
 		}
@@ -561,6 +568,119 @@ func (t *searchTask) fillResult() {
 	t.result.CollectionName = t.collectionName
 }
 
+func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
+	pb := &commonpb.PlaceholderGroup{}
+	proto.Unmarshal(placeholder, pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
+	}
+
+	holder := pb.Placeholders[0]
+	if holder.Type != commonpb.PlaceholderType_VarChar {
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+	}
+
+	texts := funcutil.GetVarCharFromPlaceholder(holder)
+	return texts, nil
+}
+
+func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	task := &highlightTask{
+		HighlightTask: &querypb.HighlightTask{},
+	}
+
+	params := funcutil.KeyValuePair2Map(highlighter.GetParams())
+
+	if metricType != metric.BM25 {
+		return merr.WrapErrParameterInvalidMsg(`Search highlight only support with metric type "BM25" but was: %s`, t.SearchRequest.GetMetricType())
+	}
+	function, ok := getBM25FunctionOfAnnsField(annsField, t.schema.GetFunctions())
+	if !ok {
+		return merr.WrapErrServiceInternal(`Search with highlight failed, input field of BM25 annsField not found`)
+	}
+	task.FieldId = function.InputFieldIds[0]
+	task.FieldName = function.InputFieldNames[0]
+
+	if value, ok := params[HighlightSearchTextKey]; ok {
+		enable, err := strconv.ParseBool(value)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("unmarshal highlight_search_data as bool failed: %v", err)
+		}
+
+		// now only support highlight with search
+		// so skip if highlight search not enable.
+		if !enable {
+			return nil
+		}
+	}
+
+	// set pre_tags and post_tags
+	if value, ok := params[PreTagsKey]; ok {
+		tags := []string{}
+		if err := json.Unmarshal([]byte(value), &tags); err != nil {
+			return merr.WrapErrParameterInvalidMsg("unmarshal pre_tags as string list failed: %v", err)
+		}
+		if len(tags) == 0 {
+			return merr.WrapErrParameterInvalidMsg("pre_tags cannot be empty list")
+		}
+
+		task.preTags = make([][]byte, len(tags))
+		for i, tag := range tags {
+			task.preTags[i] = []byte(tag)
+		}
+	} else {
+		task.preTags = [][]byte{[]byte(DefaultPreTag)}
+	}
+
+	if value, ok := params[PostTagsKey]; ok {
+		tags := []string{}
+		if err := json.Unmarshal([]byte(value), &tags); err != nil {
+			return merr.WrapErrParameterInvalidMsg("unmarshal post_tags as string list failed: %v", err)
+		}
+		if len(tags) == 0 {
+			return merr.WrapErrParameterInvalidMsg("post_tags cannot be empty list")
+		}
+		task.postTags = make([][]byte, len(tags))
+		for i, tag := range tags {
+			task.postTags[i] = []byte(tag)
+		}
+	} else {
+		task.postTags = [][]byte{[]byte(DefaultPostTag)}
+	}
+
+	// set bm25 search text as query texts
+	texts, err := t.getBM25SearchTexts(placeholder)
+	if err != nil {
+		return err
+	}
+
+	task.Texts = texts
+	task.SearchTextNum = int64(len(texts))
+	if analyzerName != "" {
+		task.AnalyzerNames = []string{}
+		for i := 0; i < len(texts); i++ {
+			task.AnalyzerNames = append(task.AnalyzerNames, analyzerName)
+		}
+	}
+
+	t.highlightTasks = append(t.highlightTasks, task)
+	return nil
+}
+
+func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	if highlighter == nil {
+		return nil
+	}
+
+	switch highlighter.GetType() {
+	case commonpb.HighlightType_Lexical:
+		return t.createLexicalHighlighter(highlighter, metricType, annsField, placeholder, analyzerName)
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
+	}
+}
+
 func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
@@ -573,7 +693,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	}
 
 	if t.request.FunctionScore != nil {
-		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore); err != nil {
+		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
 			log.Warn("Failed to create function score", zap.Error(err))
 			return err
 		}
@@ -638,16 +758,19 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
 
 	if t.SearchRequest.MetricType == metric.BM25 {
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", t.request.GetSearchParams())
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
 		if err == nil {
 			t.SearchRequest.AnalyzerName = analyzer
 		}
+	}
+	if err := t.addHighlightTask(t.request.GetHighlighter(), t.SearchRequest.MetricType, t.SearchRequest.FieldId, t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
+		return err
 	}
 
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil)
+		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
 		if err != nil {
 			return err
 		}
@@ -818,7 +941,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.isRecallEvaluation = isRecallEvaluation
 
 	// call pipeline
-	pipeline, err := newBuiltInPipeline(t)
+	pipeline, err := newSearchPipeline(t)
 	if err != nil {
 		log.Warn("Faild to create post process pipeline")
 		return err

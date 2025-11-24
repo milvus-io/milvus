@@ -34,6 +34,7 @@
 #include "cachinglayer/Manager.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "segcore/Utils.h"
 #include "monitor/scope_metric.h"
 
 bool
@@ -239,122 +240,14 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
     try {
         auto load_index_info =
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
-        auto& index_params = load_index_info->index_params;
-        auto field_type = load_index_info->field_type;
-        auto engine_version = load_index_info->index_engine_version;
-
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = load_index_info->field_type;
-        index_info.index_engine_version = engine_version;
-
-        auto config = milvus::index::ParseConfigFromIndexParams(
-            load_index_info->index_params);
-        auto load_priority_str =
-            config[milvus::LOAD_PRIORITY].get<std::string>();
-        auto priority_for_load = milvus::PriorityForLoad(load_priority_str);
-        config[milvus::LOAD_PRIORITY] = priority_for_load;
-
-        // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
-        // Use value_or(1) for unit test without setting this value
-        index_info.scalar_index_engine_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-                .value_or(1);
-
-        index_info.tantivy_index_version =
-            milvus::index::GetValueFromConfig<int32_t>(
-                config, milvus::index::TANTIVY_INDEX_VERSION)
-                .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
 
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
         auto span = milvus::tracer::StartSpan("SegCoreLoadIndex", &ctx);
         milvus::tracer::SetRootSpan(span);
 
-        LOG_INFO(
-            "[collection={}][segment={}][field={}][enable_mmap={}][load_"
-            "priority={}] load index {}, "
-            "mmap_dir_path={}",
-            load_index_info->collection_id,
-            load_index_info->segment_id,
-            load_index_info->field_id,
-            load_index_info->enable_mmap,
-            load_priority_str,
-            load_index_info->index_id,
-            load_index_info->mmap_dir_path);
+        LoadIndexData(ctx, load_index_info);
 
-        // get index type
-        AssertInfo(index_params.find("index_type") != index_params.end(),
-                   "index type is empty");
-        index_info.index_type = index_params.at("index_type");
-
-        // get metric type
-        if (milvus::IsVectorDataType(field_type)) {
-            AssertInfo(index_params.find("metric_type") != index_params.end(),
-                       "metric type is empty for vector index");
-            index_info.metric_type = index_params.at("metric_type");
-        }
-
-        if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
-            AssertInfo(index_params.find(milvus::index::MIN_GRAM) !=
-                           index_params.end(),
-                       "min_gram is empty for ngram index");
-            AssertInfo(index_params.find(milvus::index::MAX_GRAM) !=
-                           index_params.end(),
-                       "max_gram is empty for ngram index");
-
-            // get min_gram and max_gram and convert to uintptr_t
-            milvus::index::NgramParams ngram_params{};
-            ngram_params.loading_index = true;
-            ngram_params.min_gram =
-                std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                               config, milvus::index::MIN_GRAM)
-                               .value());
-            ngram_params.max_gram =
-                std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                               config, milvus::index::MAX_GRAM)
-                               .value());
-            index_info.ngram_params = std::make_optional(ngram_params);
-        }
-
-        // init file manager
-        milvus::storage::FieldDataMeta field_meta{
-            load_index_info->collection_id,
-            load_index_info->partition_id,
-            load_index_info->segment_id,
-            load_index_info->field_id,
-            load_index_info->schema};
-        milvus::storage::IndexMeta index_meta{load_index_info->segment_id,
-                                              load_index_info->field_id,
-                                              load_index_info->index_build_id,
-                                              load_index_info->index_version};
-        config[milvus::index::INDEX_FILES] = load_index_info->index_files;
-
-        if (load_index_info->field_type == milvus::DataType::JSON) {
-            index_info.json_cast_type = milvus::JsonCastType::FromString(
-                config.at(JSON_CAST_TYPE).get<std::string>());
-            index_info.json_path = config.at(JSON_PATH).get<std::string>();
-        }
-        auto remote_chunk_manager =
-            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                .GetRemoteChunkManager();
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
-        AssertInfo(fs != nullptr, "arrow file system is nullptr");
-        milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, remote_chunk_manager, fs);
-        fileManagerContext.set_for_loading_index(true);
-
-        // use cache layer to load vector/scalar index
-        std::unique_ptr<
-            milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-            translator = std::make_unique<
-                milvus::segcore::storagev1translator::SealedIndexTranslator>(
-                index_info, load_index_info, ctx, fileManagerContext, config);
-
-        load_index_info->cache_index =
-            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                std::move(translator));
         span->End();
         milvus::tracer::CloseRootSpan();
 

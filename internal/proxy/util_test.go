@@ -606,28 +606,64 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 }
 
 func TestFillFieldIDBySchema(t *testing.T) {
-	schema := &schemapb.CollectionSchema{}
-	columns := []*schemapb.FieldData{
-		{
-			FieldName: "TestFillFieldIDBySchema",
-		},
-	}
-
-	// length mismatch
-	assert.Error(t, fillFieldPropertiesBySchema(columns, schema))
-	schema = &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
+	t.Run("column count mismatch", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
 			{
-				Name:     "TestFillFieldIDBySchema",
-				DataType: schemapb.DataType_Int64,
-				FieldID:  1,
+				FieldName: "TestFillFieldIDBySchema",
 			},
-		},
-	}
-	assert.NoError(t, fillFieldPropertiesBySchema(columns, schema))
-	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
-	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
-	assert.Equal(t, int64(1), columns[0].FieldId)
+		}
+		// Validation should fail due to column count mismatch
+		assert.Error(t, validateFieldDataColumns(columns, schema))
+	})
+
+	t.Run("successful validation and fill", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "TestFillFieldIDBySchema",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "TestFillFieldIDBySchema",
+			},
+		}
+		// Validation should succeed
+		assert.NoError(t, validateFieldDataColumns(columns, schema))
+		// Fill properties should succeed
+		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
+		assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
+		assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
+		assert.Equal(t, int64(1), columns[0].FieldId)
+	})
+
+	t.Run("field not in schema", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "FieldA",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "FieldB",
+			},
+		}
+		// Validation should fail because FieldB is not in schema
+		err := validateFieldDataColumns(columns, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not exist in collection schema")
+	})
 }
 
 func TestValidateUsername(t *testing.T) {
@@ -2546,7 +2582,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
 	})
 
@@ -2571,7 +2607,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicate function name")
 	})
@@ -2590,7 +2626,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "input field not found")
 	})
@@ -2609,7 +2645,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "output field not found")
 	})
@@ -2629,7 +2665,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
 	})
 
@@ -2648,7 +2684,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be primary key")
 	})
@@ -2668,7 +2704,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2688,7 +2724,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be partition key or clustering key")
 	})
@@ -2708,7 +2744,7 @@ func TestValidateFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "function output field cannot be nullable")
 	})
@@ -2761,7 +2797,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
 	})
 
@@ -2794,7 +2830,7 @@ func TestValidateModelFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateFunction(schema)
+		err := validateFunction(schema, false)
 		assert.Error(t, err)
 	})
 }

@@ -143,21 +143,7 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zap
 
 	// sample the checkpoint for truncator to make wal truncation.
 	rs.metrics.ObServePersistedMetrics(snapshot.Checkpoint.TimeTick)
-	rs.sampleTruncateCheckpoint(snapshot.Checkpoint)
 	return
-}
-
-func (rs *recoveryStorageImpl) sampleTruncateCheckpoint(checkpoint *WALCheckpoint) {
-	flusherCP := rs.getFlusherCheckpoint()
-	if flusherCP == nil {
-		return
-	}
-	// use the smaller one to truncate the wal.
-	if flusherCP.MessageID.LTE(checkpoint.MessageID) {
-		rs.truncator.SampleCheckpoint(flusherCP)
-	} else {
-		rs.truncator.SampleCheckpoint(checkpoint)
-	}
 }
 
 // dropAllVirtualChannel drops all virtual channels that are in the dropped state.

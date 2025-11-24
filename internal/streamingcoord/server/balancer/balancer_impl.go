@@ -26,7 +26,7 @@ import (
 
 const (
 	versionChecker260 = "<2.6.0-dev"
-	versionChecker265 = "<2.6.5-dev"
+	versionChecker265 = "<2.6.6-dev"
 )
 
 // RecoverBalancer recover the balancer working.

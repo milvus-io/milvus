@@ -148,7 +148,7 @@ func (m mockMetaTable) ChangePartitionState(ctx context.Context, collectionID Un
 	return m.ChangePartitionStateFunc(ctx, collectionID, partitionID, state, ts)
 }
 
-func (m mockMetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+func (m mockMetaTable) RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
 	return m.RemovePartitionFunc(ctx, collectionID, partitionID, ts)
 }
 

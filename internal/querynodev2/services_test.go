@@ -1579,6 +1579,8 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 
 	// data
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, nil)
+	defer suite.node.manager.Collection.Unref(suite.collectionID, 1)
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
@@ -2466,6 +2468,49 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
 		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func (suite *ServiceSuite) TestGetHighlight() {
+	ctx := context.Background()
+
+	suite.Run("node not healthy", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		resp, err := suite.node.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Channel: suite.vchannel,
+			Topks:   []int64{10},
+		})
+
+		suite.NoError(err)
+		suite.Error(merr.Error(resp.GetStatus()))
+	})
+
+	suite.Run("normal case", func() {
+		delegator := &delegator.MockShardDelegator{}
+		suite.node.delegators.Insert(suite.vchannel, delegator)
+		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+		delegator.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(
+			[]*querypb.HighlightResult{}, nil)
+		resp, err := suite.node.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Channel: suite.vchannel,
+			Topks:   []int64{1, 1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldName:     "text_field",
+					FieldId:       100,
+					Texts:         []string{"target text", "target text2", "text", "text2"},
+					AnalyzerNames: []string{"standard", "standard", "standard", "standard"},
+					SearchTextNum: 2,
+					CorpusTextNum: 2,
+				},
+			},
+		})
+
+		suite.NoError(err)
+		suite.NoError(merr.Error(resp.GetStatus()))
+		suite.NotNil(resp.Results)
 	})
 }
 

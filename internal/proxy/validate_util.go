@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -590,7 +591,7 @@ func FillWithDefaultValue(field *schemapb.FieldData, fieldSchema *schemapb.Field
 					// as UTC/the collection's primary timezone, the 'common.DefaultTimezone' passed here
 					// as the fallback timezone is generally inconsequential (negligible)
 					// for the final conversion result in this specific context.
-					defaultValue, _ = funcutil.ValidateAndReturnUnixMicroTz(strDefaultValue, common.DefaultTimezone)
+					defaultValue, _ = timestamptz.ValidateAndReturnUnixMicroTz(strDefaultValue, common.DefaultTimezone)
 				}
 			}
 			sd.TimestamptzData.Data, err = fillWithDefaultValueImpl(sd.TimestamptzData.Data, defaultValue, field.GetValidData())
@@ -1165,8 +1166,8 @@ func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, time
 
 	// 2. Validation and Conversion Loop
 	for i, isoStr := range stringData {
-		// Use the centralized parser (funcutil.ParseTimeTz) for validation and parsing.
-		t, err := funcutil.ParseTimeTz(isoStr, timezone)
+		// Use the centralized parser (timestamptz.ParseTimeTz) for validation and parsing.
+		t, err := timestamptz.ParseTimeTz(isoStr, timezone)
 		if err != nil {
 			log.Warn("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.Error(err))
 			// Use the recommended refined error message structure

@@ -12,6 +12,7 @@ default_dim = 128
 default_nb = 2000
 default_nb_medium = 5000
 default_max_capacity = 100
+default_max_length = 500
 default_top_k = 10
 default_nq = 2
 default_limit = 10

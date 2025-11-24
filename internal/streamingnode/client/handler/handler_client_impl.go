@@ -298,7 +298,7 @@ func shouldUseRemoteWAL(err error) bool {
 	if errors.Is(err, registry.ErrNoStreamingNodeDeployed) {
 		return true
 	}
-	// 2. If the wal is not exist at current streaming node.
+	// 2. If the wal is not exist at current streaming node or the local wal is shutdown.
 	streamingServiceErr := status.AsStreamingError(err)
-	return streamingServiceErr.IsWrongStreamingNode()
+	return streamingServiceErr.IsWrongStreamingNode() || streamingServiceErr.IsOnShutdown()
 }

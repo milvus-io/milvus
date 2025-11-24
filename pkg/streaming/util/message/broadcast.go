@@ -33,6 +33,17 @@ type BroadcastResult[H proto.Message, B proto.Message] struct {
 	Results map[string]*AppendResult
 }
 
+// GetMaxTimeTick returns the max time tick of the broadcast result.
+func (br *BroadcastResult[H, B]) GetMaxTimeTick() uint64 {
+	maxTimeTick := uint64(0)
+	for _, result := range br.Results {
+		if result.TimeTick > maxTimeTick {
+			maxTimeTick = result.TimeTick
+		}
+	}
+	return maxTimeTick
+}
+
 // GetControlChannelResult returns the append result of the control channel.
 // Return nil if the control channel is not found.
 func (br *BroadcastResult[H, B]) GetControlChannelResult() *AppendResult {

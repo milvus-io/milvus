@@ -448,7 +448,8 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		replica := ob.meta.ReplicaManager.GetByCollectionAndNode(ctx, collectionID, d.Node)
 		if replica == nil {
 			log.Warn("replica not found", zap.Int64("nodeID", d.Node), zap.Int64("collectionID", collectionID))
-			continue
+			// should not happen, don't update current target if replica not found
+			return false
 		}
 		// init all the meta information
 		if partitions == nil {

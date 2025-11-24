@@ -36,18 +36,20 @@ NewSegment(CCollection collection,
            CSegmentInterface* newSegment,
            bool is_sorted_by_pk);
 
-// Create a new segment with pre-loaded segment information.
-// This function creates a segment and initializes it with serialized load info,
-// which can include precomputed metadata, statistics, or configuration data.
-//
-// @param collection: The collection that this segment belongs to
-// @param seg_type: Type of the segment (growing, sealed, etc.)
-// @param segment_id: Unique identifier for this segment
-// @param newSegment: Output parameter for the created segment interface
-// @param is_sorted_by_pk: Whether the segment data is sorted by primary key
-// @param load_info_blob: Serialized load information blob
-// @param load_info_length: Length of the load_info_blob in bytes
-// @return CStatus indicating success or failure
+/**
+ * @brief Create a new segment with pre-loaded segment information
+ * This function creates a segment and initializes it with serialized load info,
+ * which can include precomputed metadata, statistics, or configuration data
+ *
+ * @param collection: The collection that this segment belongs to
+ * @param seg_type: Type of the segment (growing, sealed, etc.)
+ * @param segment_id: Unique identifier for this segment
+ * @param newSegment: Output parameter for the created segment interface
+ * @param is_sorted_by_pk: Whether the segment data is sorted by primary key
+ * @param load_info_blob: Serialized load information blob
+ * @param load_info_length: Length of the load_info_blob in bytes
+ * @return CStatus indicating success or failure
+ */
 CStatus
 NewSegmentWithLoadInfo(CCollection collection,
                        SegmentType seg_type,
@@ -56,6 +58,16 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length);
+/**
+ * @brief Dispatch a segment manage load task.
+ * This function make segment itself load index & field data according to load info previously set.
+ *
+ * @param c_trace: tracing context param
+ * @param c_segment: segment handle indicate which segment to load
+ * @return CStatus indicating success or failure
+ */
+CStatus
+SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
 
 void
 DeleteSegment(CSegmentInterface c_segment);

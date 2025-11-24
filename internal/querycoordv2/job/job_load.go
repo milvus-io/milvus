@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -50,6 +51,7 @@ type LoadCollectionJob struct {
 	targetMgr          meta.TargetManagerInterface
 	targetObserver     *observers.TargetObserver
 	collectionObserver *observers.CollectionObserver
+	checkerController  *checkers.CheckerController
 	nodeMgr            *session.NodeManager
 }
 
@@ -62,6 +64,7 @@ func NewLoadCollectionJob(
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
+	checkerController *checkers.CheckerController,
 	nodeMgr *session.NodeManager,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
@@ -74,6 +77,7 @@ func NewLoadCollectionJob(
 		targetMgr:          targetMgr,
 		targetObserver:     targetObserver,
 		collectionObserver: collectionObserver,
+		checkerController:  checkerController,
 		nodeMgr:            nodeMgr,
 	}
 }
@@ -161,6 +165,12 @@ func (job *LoadCollectionJob) Execute() error {
 	eventlog.Record(eventlog.NewRawEvt(eventlog.Level_Info, fmt.Sprintf("Start load collection %d", collection.CollectionID)))
 	metrics.QueryCoordNumPartitions.WithLabelValues().Add(float64(len(partitions)))
 
+	log.Info("put collection and partitions done",
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64s("partitions", req.GetPartitionIds()),
+		zap.Int64s("toReleasePartitions", toReleasePartitions),
+	)
+
 	// 5. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
 	if _, err = job.targetObserver.UpdateNextTarget(req.GetCollectionId()); err != nil {
 		return err
@@ -168,5 +178,20 @@ func (job *LoadCollectionJob) Execute() error {
 
 	// 6. register load task into collection observer
 	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), incomingPartitions.Collect())
+
+	// 7. wait for partition released if any partition is released
+	if len(toReleasePartitions) > 0 {
+		if err = WaitCurrentTargetUpdated(ctx, job.targetObserver, req.GetCollectionId()); err != nil {
+			log.Warn("failed to wait current target updated", zap.Error(err))
+			// return nil to avoid infinite retry on DDL callback
+			return nil
+		}
+		if err = WaitCollectionReleased(ctx, job.dist, job.checkerController, req.GetCollectionId(), toReleasePartitions...); err != nil {
+			log.Warn("failed to wait partition released", zap.Error(err))
+			// return nil to avoid infinite retry on DDL callback
+			return nil
+		}
+		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
+	}
 	return nil
 }

@@ -105,5 +105,12 @@ func (job *ReleaseCollectionJob) Execute() error {
 	job.proxyManager.InvalidateShardLeaderCache(job.ctx, &proxypb.InvalidateShardLeaderCacheRequest{
 		CollectionIDs: []int64{collectionID},
 	})
+
+	if err = WaitCollectionReleased(job.ctx, job.dist, job.checkerController, collectionID); err != nil {
+		log.Warn("failed to wait collection released", zap.Error(err))
+		// return nil to avoid infinite retry on DDL callback
+		return nil
+	}
+	log.Info("release collection job done", zap.Int64("collectionID", collectionID))
 	return nil
 }

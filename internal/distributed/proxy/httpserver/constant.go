@@ -69,6 +69,9 @@ const (
 	RevokePrivilegeActionV2         = "revoke_privilege_v2"
 	AlterAction                     = "alter"
 	AlterPropertiesAction           = "alter_properties"
+	AddFunctionAction               = "add_function"
+	AlterFunctionAction             = "alter_function"
+	DropFunctionAction              = "drop_function"
 	AddAction                       = `add`
 	DropPropertiesAction            = "drop_properties"
 	CompactAction                   = "compact"

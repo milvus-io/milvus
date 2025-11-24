@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -449,6 +450,70 @@ func TestIsSubsetOfProperties(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := IsSubsetOfProperties(tt.args.src, tt.args.target)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func Test_nextFieldID(t *testing.T) {
+	type args struct {
+		coll *model.Collection
+	}
+	tests := []struct {
+		name string
+		args args
+		want int64
+	}{
+		{
+			name: "collection with max field ID in struct array sub-field",
+			args: args{
+				coll: &model.Collection{
+					Fields: []*model.Field{
+						{FieldID: common.StartOfUserFieldID},
+					},
+					StructArrayFields: []*model.StructArrayField{
+						{
+							FieldID: common.StartOfUserFieldID + 1,
+							Fields: []*model.Field{
+								{FieldID: common.StartOfUserFieldID + 2},
+								{FieldID: common.StartOfUserFieldID + 10},
+							},
+						},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 11,
+		},
+		{
+			name: "collection with multiple struct array fields",
+			args: args{
+				coll: &model.Collection{
+					Fields: []*model.Field{
+						{FieldID: common.StartOfUserFieldID},
+					},
+					StructArrayFields: []*model.StructArrayField{
+						{
+							FieldID: common.StartOfUserFieldID + 1,
+							Fields: []*model.Field{
+								{FieldID: common.StartOfUserFieldID + 2},
+							},
+						},
+						{
+							FieldID: common.StartOfUserFieldID + 5,
+							Fields: []*model.Field{
+								{FieldID: common.StartOfUserFieldID + 6},
+								{FieldID: common.StartOfUserFieldID + 7},
+							},
+						},
+					},
+				},
+			},
+			want: common.StartOfUserFieldID + 8,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nextFieldID(tt.args.coll)
 			assert.Equal(t, tt.want, got)
 		})
 	}
