@@ -244,11 +244,69 @@ func (mr ManifestReader) Close() error {
 // ChunkedBlobsReader returns a chunk composed of blobs, or io.EOF if no more data
 type ChunkedBlobsReader func() ([]*Blob, error)
 
+type BinlogRecordReader struct {
+	fields []FieldID
+
+	br *BinlogReader
+	er *EventReader
+	rr array.RecordReader
+}
+
+var _ RecordReader = (*BinlogRecordReader)(nil)
+
+func (brr *BinlogRecordReader) Next() (Record, error) {
+	if ok := brr.rr.Next(); !ok {
+		return nil, io.EOF
+	}
+	rec := brr.rr.Record()
+	field2Col := make(map[FieldID]int)
+	for i, field := range brr.fields {
+		field2Col[field] = i
+	}
+	return NewSimpleArrowRecord(rec, field2Col), nil
+}
+
+func (brr *BinlogRecordReader) Close() error {
+	if brr.br != nil {
+		brr.br.Close()
+	}
+	if brr.er != nil {
+		brr.er.Close()
+	}
+	if brr.rr != nil {
+		brr.rr.Release()
+	}
+	return nil
+}
+
+func newBinlogRecordReader(blob *Blob, fields ...FieldID) (*BinlogRecordReader, error) {
+	reader, err := NewBinlogReader(blob.Value)
+	if err != nil {
+		return nil, err
+	}
+	er, err := reader.NextEventReader()
+	if err != nil {
+		return nil, err
+	}
+	if len(fields) == 0 {
+		fields = []FieldID{reader.FieldID}
+	}
+	rr, err := er.GetArrowRecordReader()
+	if err != nil {
+		return nil, err
+	}
+	return &BinlogRecordReader{
+		fields: fields,
+		br:     reader,
+		er:     er,
+		rr:     rr,
+	}, nil
+}
+
 type CompositeBinlogRecordReader struct {
 	fields map[FieldID]*schemapb.FieldSchema
 	index  map[FieldID]int16
-	brs    []*BinlogReader
-	rrs    []array.RecordReader
+	rrs    []*BinlogRecordReader
 }
 
 var _ RecordReader = (*CompositeBinlogRecordReader)(nil)
@@ -260,15 +318,15 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	for _, f := range crr.fields {
 		idx := crr.index[f.FieldID]
 		if crr.rrs[idx] != nil {
-			if ok := crr.rrs[idx].Next(); !ok {
-				return nil, io.EOF
+			rec, err := crr.rrs[idx].Next()
+			if err != nil {
+				return nil, err
 			}
-			r := crr.rrs[idx].Record()
-			recs[idx] = r.Column(0)
+			recs[idx] = rec.Column(f.FieldID)
 			if nRows == 0 {
-				nRows = int(r.NumRows())
+				nRows = rec.Len()
 			}
-			if nRows != int(r.NumRows()) {
+			if nRows != rec.Len() {
 				return nil, merr.WrapErrServiceInternal(fmt.Sprintf("number of rows mismatch for field %d", f.FieldID))
 			}
 		} else {
@@ -290,17 +348,10 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 }
 
 func (crr *CompositeBinlogRecordReader) Close() error {
-	if crr.brs != nil {
-		for _, er := range crr.brs {
-			if er != nil {
-				er.Close()
-			}
-		}
-	}
 	if crr.rrs != nil {
 		for _, rr := range crr.rrs {
 			if rr != nil {
-				rr.Release()
+				rr.Close()
 			}
 		}
 	}
@@ -371,32 +422,20 @@ func newCompositeBinlogRecordReader(
 		idx++
 	}
 
-	rrs := make([]array.RecordReader, len(allFields))
-	brs := make([]*BinlogReader, len(allFields))
+	rrs := make([]*BinlogRecordReader, len(allFields))
 	for _, b := range blobs {
-		reader, err := NewBinlogReader(b.Value, opts...)
+		reader, err := newBinlogRecordReader(b)
 		if err != nil {
 			return nil, err
 		}
-
-		er, err := reader.NextEventReader()
-		if err != nil {
-			return nil, err
-		}
-		i := index[reader.FieldID]
-		rr, err := er.GetArrowRecordReader()
-		if err != nil {
-			return nil, err
-		}
-		rrs[i] = rr
-		brs[i] = reader
+		i := index[reader.fields[0]]
+		rrs[i] = reader
 	}
 
 	return &CompositeBinlogRecordReader{
 		fields: fields,
 		index:  index,
 		rrs:    rrs,
-		brs:    brs,
 	}, nil
 }
 

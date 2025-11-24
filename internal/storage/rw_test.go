@@ -634,7 +634,7 @@ func TestRwOptionValidate(t *testing.T) {
 		{
 			tag: "writer_missing_uploader",
 			input: &rwOptions{
-				version:       StorageV2,
+				version:       StorageV1,
 				storageConfig: &indexpb.StorageConfig{},
 				op:            OpWrite,
 			},
@@ -652,4 +652,158 @@ func TestRwOptionValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeltalogReaderWriter(t *testing.T) {
+	var (
+		numRows       = 100
+		storageConfig = &indexpb.StorageConfig{
+			StorageType: "local",
+			RootPath:    "/tmp",
+			BucketName:  "test-bucket",
+		}
+	)
+
+	tests := []struct {
+		name    string
+		version int64
+		pkType  schemapb.DataType
+		format  string
+	}{
+		{
+			name:    "StorageV1 Int64 PARQUET",
+			version: StorageV1,
+			pkType:  schemapb.DataType_Int64,
+			format:  "parquet",
+		},
+		{
+			name:    "StorageV1 VarChar PARQUET",
+			version: StorageV1,
+			pkType:  schemapb.DataType_VarChar,
+			format:  "parquet",
+		},
+		{
+			name:    "StorageV1 Int64 JSON",
+			version: StorageV1,
+			pkType:  schemapb.DataType_Int64,
+			format:  "json",
+		},
+		{
+			name:    "StorageV1 VarChar JSON",
+			version: StorageV1,
+			pkType:  schemapb.DataType_VarChar,
+			format:  "json",
+		},
+		{
+			name:    "StorageV2 Int64",
+			version: StorageV2,
+			pkType:  schemapb.DataType_Int64,
+		},
+		{
+			name:    "StorageV2 VarChar",
+			version: StorageV2,
+			pkType:  schemapb.DataType_VarChar,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.format != "" {
+				paramtable.Get().Save(paramtable.Get().DataNodeCfg.DeltalogFormat.Key, tt.format)
+				defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.DeltalogFormat.Key)
+			}
+
+			blob := &Blob{}
+			path := "/tmp/test_deltalog.bin"
+			ctx := context.Background()
+
+			// Write phase
+			opts := []RwOption{WithVersion(tt.version)}
+			if tt.version == StorageV1 {
+				opts = append(opts,
+					WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+						blob.Value = kvs[path]
+						blob.Key = path
+						return nil
+					}),
+				)
+			} else {
+				opts = append(opts,
+					WithStorageConfig(storageConfig),
+					WithCollectionID(1),
+				)
+			}
+
+			writer, err := NewDeltalogWriter(ctx, 1, 2, 3, 0, tt.pkType, path, opts...)
+			assert.NoError(t, err)
+			assert.NotNil(t, writer)
+
+			origData := createTestRecord(tt.pkType, numRows)
+			defer origData.Release()
+
+			err = writer.Write(origData)
+			assert.NoError(t, err)
+
+			err = writer.Close()
+			assert.NoError(t, err)
+
+			// Read phase
+			if tt.version == StorageV1 {
+				opts = append(opts, WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+					return [][]byte{blob.Value}, nil
+				}))
+			}
+			reader, err := NewDeltalogReader(tt.pkType, []string{path}, opts...)
+			assert.NoError(t, err)
+			assert.NotNil(t, reader)
+
+			readData, err := reader.Next()
+			assert.NoError(t, err)
+			assert.NotNil(t, readData)
+			assert.Equal(t, numRows, readData.Len())
+
+			// Verify pk data matches
+			origPkCol := origData.Column(0)
+			readPkCol := readData.Column(0)
+			assert.NotNil(t, readPkCol)
+			assert.Equal(t, origPkCol.Len(), readPkCol.Len())
+
+			// Verify ts data matches
+			origTsCol := origData.Column(1)
+			readTsCol := readData.Column(common.TimeStampField)
+			assert.NotNil(t, readTsCol)
+			assert.Equal(t, origTsCol.Len(), readTsCol.Len())
+
+			err = reader.Close()
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestDeltalogErrorHandling(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("WriterUnsupportedVersion", func(t *testing.T) {
+		_, err := NewDeltalogWriter(
+			ctx, 1, 2, 3, 0, schemapb.DataType_Int64, "test.bin",
+			WithVersion(999), // Invalid version
+			WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+				return nil
+			}),
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported storage version")
+	})
+
+	t.Run("ReaderUnsupportedVersion", func(t *testing.T) {
+		_, err := NewDeltalogReader(
+			schemapb.DataType_Int64, []string{"test.bin"},
+			WithVersion(999), // Invalid version
+			WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return nil, nil
+			}),
+		)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported storage version")
+	})
 }
