@@ -310,6 +310,24 @@ func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocV
 	return vchannels, nil
 }
 
+// AllocVirtualChannelsWithPChannels allocates virtual channels on specified pchannels.
+// Used by snapshot restore to preserve pchannel mapping from the source collection.
+func (cm *ChannelManager) AllocVirtualChannelsWithPChannels(ctx context.Context, collectionID int64, pchannels []string) ([]string, error) {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	vchannels := make([]string, 0, len(pchannels))
+	for idx, pchannel := range pchannels {
+		// Validate pchannel exists
+		if _, ok := cm.channels[ChannelID{Name: pchannel}]; !ok {
+			return nil, errors.Errorf("pchannel %s not found", pchannel)
+		}
+		vchannel := funcutil.GetVirtualChannel(pchannel, collectionID, idx)
+		vchannels = append(vchannels, vchannel)
+	}
+	return vchannels, nil
+}
+
 // withVChannelCount is a helper struct to sort the channels by the vchannel count.
 type withVChannelCount struct {
 	id            ChannelID

@@ -331,6 +331,11 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.ListRestoreSnapshotJobsRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	default:
 	}
 	return ctx, req

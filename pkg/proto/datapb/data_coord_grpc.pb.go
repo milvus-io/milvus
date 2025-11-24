@@ -79,7 +79,7 @@ const (
 	DataCoord_DropSnapshot_FullMethodName                = "/milvus.proto.data.DataCoord/DropSnapshot"
 	DataCoord_ListSnapshots_FullMethodName               = "/milvus.proto.data.DataCoord/ListSnapshots"
 	DataCoord_DescribeSnapshot_FullMethodName            = "/milvus.proto.data.DataCoord/DescribeSnapshot"
-	DataCoord_RestoreSnapshot_FullMethodName             = "/milvus.proto.data.DataCoord/RestoreSnapshot"
+	DataCoord_RestoreSnapshotData_FullMethodName         = "/milvus.proto.data.DataCoord/RestoreSnapshotData"
 	DataCoord_GetRestoreSnapshotState_FullMethodName     = "/milvus.proto.data.DataCoord/GetRestoreSnapshotState"
 	DataCoord_ListRestoreSnapshotJobs_FullMethodName     = "/milvus.proto.data.DataCoord/ListRestoreSnapshotJobs"
 )
@@ -154,7 +154,7 @@ type DataCoordClient interface {
 	DropSnapshot(ctx context.Context, in *DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListSnapshots(ctx context.Context, in *ListSnapshotsRequest, opts ...grpc.CallOption) (*ListSnapshotsResponse, error)
 	DescribeSnapshot(ctx context.Context, in *DescribeSnapshotRequest, opts ...grpc.CallOption) (*DescribeSnapshotResponse, error)
-	RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error)
+	RestoreSnapshotData(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error)
 	GetRestoreSnapshotState(ctx context.Context, in *GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*GetRestoreSnapshotStateResponse, error)
 	ListRestoreSnapshotJobs(ctx context.Context, in *ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*ListRestoreSnapshotJobsResponse, error)
 }
@@ -664,9 +664,9 @@ func (c *dataCoordClient) DescribeSnapshot(ctx context.Context, in *DescribeSnap
 	return out, nil
 }
 
-func (c *dataCoordClient) RestoreSnapshot(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error) {
+func (c *dataCoordClient) RestoreSnapshotData(ctx context.Context, in *RestoreSnapshotRequest, opts ...grpc.CallOption) (*RestoreSnapshotResponse, error) {
 	out := new(RestoreSnapshotResponse)
-	err := c.cc.Invoke(ctx, DataCoord_RestoreSnapshot_FullMethodName, in, out, opts...)
+	err := c.cc.Invoke(ctx, DataCoord_RestoreSnapshotData_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -761,7 +761,7 @@ type DataCoordServer interface {
 	DropSnapshot(context.Context, *DropSnapshotRequest) (*commonpb.Status, error)
 	ListSnapshots(context.Context, *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
 	DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error)
-	RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error)
+	RestoreSnapshotData(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error)
 	GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error)
 	ListRestoreSnapshotJobs(context.Context, *ListRestoreSnapshotJobsRequest) (*ListRestoreSnapshotJobsResponse, error)
 }
@@ -935,8 +935,8 @@ func (UnimplementedDataCoordServer) ListSnapshots(context.Context, *ListSnapshot
 func (UnimplementedDataCoordServer) DescribeSnapshot(context.Context, *DescribeSnapshotRequest) (*DescribeSnapshotResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeSnapshot not implemented")
 }
-func (UnimplementedDataCoordServer) RestoreSnapshot(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RestoreSnapshot not implemented")
+func (UnimplementedDataCoordServer) RestoreSnapshotData(context.Context, *RestoreSnapshotRequest) (*RestoreSnapshotResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestoreSnapshotData not implemented")
 }
 func (UnimplementedDataCoordServer) GetRestoreSnapshotState(context.Context, *GetRestoreSnapshotStateRequest) (*GetRestoreSnapshotStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRestoreSnapshotState not implemented")
@@ -1946,20 +1946,20 @@ func _DataCoord_DescribeSnapshot_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataCoord_RestoreSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_RestoreSnapshotData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RestoreSnapshotRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataCoordServer).RestoreSnapshot(ctx, in)
+		return srv.(DataCoordServer).RestoreSnapshotData(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DataCoord_RestoreSnapshot_FullMethodName,
+		FullMethod: DataCoord_RestoreSnapshotData_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).RestoreSnapshot(ctx, req.(*RestoreSnapshotRequest))
+		return srv.(DataCoordServer).RestoreSnapshotData(ctx, req.(*RestoreSnapshotRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2228,8 +2228,8 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DataCoord_DescribeSnapshot_Handler,
 		},
 		{
-			MethodName: "RestoreSnapshot",
-			Handler:    _DataCoord_RestoreSnapshot_Handler,
+			MethodName: "RestoreSnapshotData",
+			Handler:    _DataCoord_RestoreSnapshotData_Handler,
 		},
 		{
 			MethodName: "GetRestoreSnapshotState",

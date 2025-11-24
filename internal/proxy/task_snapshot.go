@@ -18,17 +18,15 @@ package proxy
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -273,7 +271,8 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeSnapshot),
 		),
-		Name: dst.req.GetName(),
+		Name:                  dst.req.GetName(),
+		IncludeCollectionInfo: false,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		dst.result = &milvuspb.DescribeSnapshotResponse{
@@ -307,6 +306,7 @@ func (dst *describeSnapshotTask) Execute(ctx context.Context) error {
 		CreateTs:       snapshotInfo.GetCreateTs(),
 		CollectionName: collectionName,
 		PartitionNames: partitionNames,
+		S3Location:     snapshotInfo.GetS3Location(),
 	}
 
 	return nil
@@ -471,203 +471,20 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 		zap.String("dbName", rst.req.GetDbName()),
 	)
 
-	// First, get snapshot detail info
-	resp, err := rst.mixCoord.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeSnapshot),
-		),
-		Name: rst.req.GetName(),
-	})
-	if err = merr.CheckRPCCall(resp, err); err != nil {
+	// Delegate to RootCoord which orchestrates the entire restore process:
+	// 1. Get snapshot info from DataCoord
+	// 2. Create collection with preserved field IDs
+	// 3. Create user partitions
+	// 4. Restore data and indexes via DataCoord
+	resp, err := rst.mixCoord.RestoreSnapshot(ctx, rst.req)
+	if err != nil {
+		log.Ctx(ctx).Warn("RestoreSnapshot failed",
+			zap.Error(err))
 		rst.result = &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}
 		return err
 	}
-
-	var collectionCreated bool
-	var status *commonpb.Status
-	defer func() {
-		if !merr.Ok(status) && collectionCreated {
-			result, err := rst.mixCoord.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-				CollectionName: rst.req.GetCollectionName(),
-			})
-			if merr.CheckRPCCall(result, err) != nil {
-				log.Ctx(ctx).Warn("failed to drop collection after RestoreSnapshot fail",
-					zap.Error(err))
-			}
-		}
-	}()
-
-	var createdPartitionNames []string
-	defer func() {
-		if !merr.Ok(status) && len(createdPartitionNames) > 0 {
-			for _, partitionName := range createdPartitionNames {
-				result, err := rst.mixCoord.DropPartition(ctx, &milvuspb.DropPartitionRequest{
-					CollectionName: rst.req.GetCollectionName(),
-					PartitionName:  partitionName,
-				})
-				if merr.CheckRPCCall(result, err) != nil {
-					log.Ctx(ctx).Warn("failed to drop partition after RestoreSnapshot fail",
-						zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	// Create collection and partition
-	collInfo := resp.GetCollectionInfo()
-	collInfo.Schema.Name = rst.req.GetCollectionName()
-	schema, err := proto.Marshal(collInfo.GetSchema())
-	if err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot fail to marshal schema",
-			zap.String("collectionName", rst.req.GetCollectionName()),
-			zap.Error(err))
-		status = merr.Status(err)
-		rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-		return err
-	}
-
-	createCollReq := &milvuspb.CreateCollectionRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
-		),
-		CollectionName:   rst.req.GetCollectionName(),
-		DbName:           rst.req.GetDbName(),
-		Schema:           schema,
-		ShardsNum:        int32(collInfo.GetNumShards()),
-		NumPartitions:    collInfo.GetNumPartitions(),
-		ConsistencyLevel: collInfo.GetConsistencyLevel(),
-		Properties:       collInfo.Schema.GetProperties(),
-		PreserveFieldId:  true, // Preserve field IDs from snapshot
-	}
-	result, err := rst.mixCoord.CreateCollection(ctx, createCollReq)
-	if err = merr.CheckRPCCall(result, err); err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot fail to create collection",
-			zap.Error(err))
-		status = merr.Status(err)
-		rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-		return err
-	}
-	collectionCreated = true
-	log.Info("restore collection", zap.Any("request", createCollReq))
-
-	// deal with user created partitions
-	for _, partitionName := range collInfo.GetUserCreatedPartitions() {
-		result, err := rst.mixCoord.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition),
-			),
-			CollectionName: rst.req.GetCollectionName(),
-			PartitionName:  partitionName,
-		})
-		if err = merr.CheckRPCCall(result, err); err != nil {
-			log.Ctx(ctx).Warn("RestoreSnapshot fail to create partition",
-				zap.String("partitionName", partitionName),
-				zap.Error(err))
-			status = merr.Status(err)
-			rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-			return err
-		}
-		createdPartitionNames = append(createdPartitionNames, partitionName)
-		log.Info("restore partition", zap.String("partition", partitionName))
-	}
-
-	restoredCollectionID, err := globalMetaCache.GetCollectionID(ctx, rst.req.GetDbName(), rst.req.GetCollectionName())
-	if err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot fail to get restored collection ID",
-			zap.String("collectionName", rst.req.GetCollectionName()),
-			zap.Error(err))
-		status = merr.Status(err)
-		rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-		return err
-	}
-	getIndexParam := func(indexParams []*commonpb.KeyValuePair, key string) (string, bool) {
-		for _, p := range indexParams {
-			if p.Key == key {
-				return p.Value, true
-			}
-		}
-		return "", false
-	}
-
-	setIndexParam := func(indexParams []*commonpb.KeyValuePair, key, value string) {
-		for _, p := range indexParams {
-			if p.Key == key {
-				p.Value = value
-			}
-		}
-	}
-
-	// Create indexes
-	for _, indexInfo := range resp.GetIndexInfos() {
-		if indexInfo.IndexParams != nil && len(indexInfo.IndexParams) > 0 {
-			// reset json path from user passed json path
-			jsonPath, exist := getIndexParam(indexInfo.UserIndexParams, common.JSONPathKey)
-			if exist {
-				setIndexParam(indexInfo.IndexParams, common.JSONPathKey, jsonPath)
-			}
-		}
-		indexReq := &indexpb.CreateIndexRequest{
-			CollectionID:    restoredCollectionID,
-			FieldID:         indexInfo.GetFieldID(),
-			IndexName:       indexInfo.GetIndexName(),
-			TypeParams:      indexInfo.GetTypeParams(),
-			IndexParams:     indexInfo.GetIndexParams(),
-			Timestamp:       rst.BeginTs(),
-			IsAutoIndex:     indexInfo.GetIsAutoIndex(),
-			UserIndexParams: indexInfo.GetUserIndexParams(),
-			PreserveIndexId: true,                   // Preserve index ID from snapshot
-			IndexId:         indexInfo.GetIndexID(), // Use index ID from snapshot
-		}
-		result, err := rst.mixCoord.CreateIndex(ctx, indexReq)
-		if err = merr.CheckRPCCall(result, err); err != nil {
-			log.Ctx(ctx).Warn("RestoreSnapshot fail to create index",
-				zap.String("indexName", indexInfo.GetIndexName()),
-				zap.Int64("fieldID", indexInfo.GetFieldID()),
-				zap.Error(err))
-			status = merr.Status(err)
-			rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-			return err
-		}
-		log.Info("restore index", zap.Any("request", indexReq))
-	}
-
-	// Restore data
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, "", rst.req.GetCollectionName())
-	if err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot fail to get collection ID for restore data",
-			zap.String("collectionName", rst.req.GetCollectionName()),
-			zap.Error(err))
-		status = merr.Status(err)
-		rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-		return err
-	}
-
-	restoreResp, err := rst.mixCoord.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_RestoreSnapshot),
-		),
-		Name:         rst.req.GetName(),
-		CollectionId: collectionID,
-	})
-	if err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot fail to restore data",
-			zap.Error(err))
-		status = merr.Status(err)
-		rst.result = &milvuspb.RestoreSnapshotResponse{Status: status}
-		return err
-	}
-	rst.result = &milvuspb.RestoreSnapshotResponse{
-		Status: restoreResp.GetStatus(),
-		JobId:  restoreResp.GetJobId(),
-	}
-	if err = merr.CheckRPCCall(rst.result.Status, err); err != nil {
-		log.Ctx(ctx).Warn("RestoreSnapshot fail to restore data",
-			zap.Error(err))
-		status = rst.result.Status
-		return err
-	}
-
-	return nil
+	rst.result = resp
+	return merr.CheckRPCCall(resp.GetStatus(), nil)
 }
 
 func (rst *restoreSnapshotTask) PostExecute(ctx context.Context) error {
@@ -794,6 +611,8 @@ type listRestoreSnapshotJobsTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *milvuspb.ListRestoreSnapshotJobsResponse
+
+	collectionID UniqueID
 }
 
 func (lrst *listRestoreSnapshotJobsTask) TraceCtx() context.Context {
@@ -838,20 +657,27 @@ func (lrst *listRestoreSnapshotJobsTask) OnEnqueue() error {
 }
 
 func (lrst *listRestoreSnapshotJobsTask) PreExecute(ctx context.Context) error {
-	// No additional validation needed for list restore snapshot jobs
+	if lrst.req.GetCollectionName() != "" {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, lrst.req.GetDbName(), lrst.req.GetCollectionName())
+		if err != nil {
+			return err
+		}
+		lrst.collectionID = collectionID
+	}
 	return nil
 }
 
 func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	log.Ctx(ctx).Info("proxy list restore snapshot jobs",
 		zap.String("collectionName", lrst.req.GetCollectionName()),
+		zap.Int64("collectionID", lrst.collectionID),
 	)
 
 	result, err := lrst.mixCoord.ListRestoreSnapshotJobs(ctx, &datapb.ListRestoreSnapshotJobsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Undefined),
 		),
-		CollectionName: lrst.req.GetCollectionName(),
+		CollectionId: lrst.collectionID,
 	})
 	if err = merr.CheckRPCCall(result, err); err != nil {
 		lrst.result = &milvuspb.ListRestoreSnapshotJobsResponse{
@@ -865,7 +691,6 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 	milvusJobs := make([]*milvuspb.RestoreSnapshotInfo, 0, len(jobs))
 	for _, job := range jobs {
 		collectionName := ""
-		dbName := ""
 		if job.GetCollectionId() != 0 {
 			var err error
 			collectionName, err = globalMetaCache.GetCollectionName(ctx, "", job.GetCollectionId())
@@ -878,12 +703,12 @@ func (lrst *listRestoreSnapshotJobsTask) Execute(ctx context.Context) error {
 		milvusJobs = append(milvusJobs, &milvuspb.RestoreSnapshotInfo{
 			JobId:          job.GetJobId(),
 			SnapshotName:   job.GetSnapshotName(),
-			DbName:         dbName,
+			DbName:         lrst.req.GetDbName(),
 			CollectionName: collectionName,
 			State:          milvuspb.RestoreSnapshotState(job.GetState()),
 			Progress:       job.GetProgress(),
 			Reason:         job.GetReason(),
-			StartTime:      0, // datapb doesn't have start_time
+			StartTime:      uint64(time.Now().UnixNano() - int64(job.GetTimeCost())),
 			TimeCost:       job.GetTimeCost(),
 		})
 	}

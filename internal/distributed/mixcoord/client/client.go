@@ -2039,14 +2039,27 @@ func (c *Client) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 	})
 }
 
-func (c *Client) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+// RestoreSnapshot is the RootCoord API for restoring a snapshot (orchestrates the entire restore process)
+func (c *Client) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*milvuspb.RestoreSnapshotResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.RestoreSnapshotResponse, error) {
+		return client.RestoreSnapshot(ctx, req)
+	})
+}
+
+// RestoreSnapshotData is the DataCoord API for restoring snapshot data
+func (c *Client) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.RestoreSnapshotResponse, error) {
-		return client.RestoreSnapshot(ctx, req)
+		return client.RestoreSnapshotData(ctx, req)
 	})
 }
 

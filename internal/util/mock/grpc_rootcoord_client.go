@@ -329,3 +329,7 @@ func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvus
 func (m *GrpcRootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
 	return &internalpb.BackupEzkResponse{}, m.Err
 }
+
+func (m *GrpcRootCoordClient) RestoreSnapshot(ctx context.Context, in *milvuspb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*milvuspb.RestoreSnapshotResponse, error) {
+	return &milvuspb.RestoreSnapshotResponse{}, m.Err
+}

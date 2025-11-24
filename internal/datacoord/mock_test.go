@@ -990,7 +990,7 @@ func (s *mockMixCoord) DescribeSnapshot(ctx context.Context, req *datapb.Describ
 	panic("implement me")
 }
 
-func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+func (s *mockMixCoord) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	panic("implement me")
 }
 
@@ -999,6 +999,11 @@ func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.
 }
 
 func (s *mockMixCoord) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	panic("implement me")
+}
+
+// RestoreSnapshot is the RootCoord API for restoring a snapshot (creates collection, partitions, and calls DataCoord)
+func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
 	panic("implement me")
 }
 

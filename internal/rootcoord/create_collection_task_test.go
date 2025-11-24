@@ -1061,15 +1061,15 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
-				Base:            &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName:  collectionName,
-				Schema:          marshaledSchema,
-				PreserveFieldId: true,
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
 			},
 			body: &message.CreateCollectionRequest{
 				CollectionName:   collectionName,
 				CollectionSchema: schema,
 			},
+			preserveFieldID: true,
 		}
 
 		err = task.prepareSchema(context.TODO())
@@ -1146,15 +1146,15 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
-				Base:            &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName:  collectionName,
-				Schema:          marshaledSchema,
-				PreserveFieldId: true,
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
 			},
 			body: &message.CreateCollectionRequest{
 				CollectionName:   collectionName,
 				CollectionSchema: schema,
 			},
+			preserveFieldID: true,
 		}
 
 		err = task.prepareSchema(context.TODO())
@@ -1174,6 +1174,189 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				assert.Equal(t, int64(20), field.FieldID, "User field ID should be preserved")
 			}
 		}
+	})
+
+	t.Run("preserve field IDs - user fields integrity", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+
+		// Prepare input schema with multiple user fields
+		userFields := []*schemapb.FieldSchema{
+			{
+				Name:         "pk_field",
+				FieldID:      100,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:     "varchar_field",
+				FieldID:  105,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "256"},
+				},
+			},
+			{
+				Name:     "vector_field",
+				FieldID:  200,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			{
+				Name:     "json_field",
+				FieldID:  300,
+				DataType: schemapb.DataType_JSON,
+			},
+		}
+
+		// Add system fields to simulate snapshot restore scenario
+		allFields := append([]*schemapb.FieldSchema{}, userFields...)
+		allFields = append(allFields,
+			&schemapb.FieldSchema{
+				Name:     MetaFieldName,
+				FieldID:  50,
+				DataType: schemapb.DataType_JSON,
+			},
+			&schemapb.FieldSchema{
+				Name:     RowIDFieldName,
+				FieldID:  RowIDField,
+				DataType: schemapb.DataType_Int64,
+			},
+			&schemapb.FieldSchema{
+				Name:     TimeStampFieldName,
+				FieldID:  TimeStampField,
+				DataType: schemapb.DataType_Int64,
+			},
+		)
+
+		schema := &schemapb.CollectionSchema{
+			Name:               collectionName,
+			EnableDynamicField: true,
+			Fields:             allFields,
+		}
+
+		// Save expected user field information
+		expectedUserFields := make(map[string]int64) // fieldName -> fieldID
+		for _, field := range userFields {
+			expectedUserFields[field.Name] = field.FieldID
+		}
+		expectedUserFieldsInOrder := []string{"pk_field", "varchar_field", "vector_field", "json_field"}
+
+		// Create task and execute prepareSchema
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: true,
+		}
+
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Extract user fields after prepareSchema (excluding system fields)
+		systemFieldNames := map[string]bool{
+			RowIDFieldName:     true,
+			TimeStampFieldName: true,
+			MetaFieldName:      true,
+			NamespaceFieldName: true,
+		}
+
+		actualUserFields := make(map[string]int64)
+		actualUserFieldsInOrder := make([]string, 0)
+		for _, field := range task.body.CollectionSchema.Fields {
+			if !systemFieldNames[field.Name] {
+				actualUserFields[field.Name] = field.FieldID
+				actualUserFieldsInOrder = append(actualUserFieldsInOrder, field.Name)
+			}
+		}
+
+		// Verify user field count remains the same
+		assert.Equal(t, len(expectedUserFields), len(actualUserFields),
+			"User field count mismatch after prepareSchema")
+
+		// Verify each user field's FieldID is preserved
+		for fieldName, expectedID := range expectedUserFields {
+			actualID, exists := actualUserFields[fieldName]
+			assert.True(t, exists, "User field '%s' is missing after prepareSchema", fieldName)
+			assert.Equal(t, expectedID, actualID,
+				"FieldID mismatch for field '%s': expected %d, got %d",
+				fieldName, expectedID, actualID)
+		}
+
+		// Verify user field order remains the same
+		assert.Equal(t, expectedUserFieldsInOrder, actualUserFieldsInOrder,
+			"User field order changed after prepareSchema")
+	})
+
+	t.Run("preserve field IDs - non-contiguous field IDs", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+
+		// Use non-contiguous field IDs to ensure they are truly preserved
+		userFields := []*schemapb.FieldSchema{
+			{
+				Name:         "field_100",
+				FieldID:      100,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				Name:     "field_150",
+				FieldID:  150,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+				},
+			},
+			{
+				Name:     "field_500",
+				FieldID:  500,
+				DataType: schemapb.DataType_Float,
+			},
+			{
+				Name:     "field_1000",
+				FieldID:  1000,
+				DataType: schemapb.DataType_Int32,
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Name:   collectionName,
+			Fields: userFields,
+		}
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: true,
+		}
+
+		err := task.prepareSchema(context.TODO())
+		assert.NoError(t, err)
+
+		// Verify non-contiguous IDs are preserved exactly
+		fieldIDMap := make(map[string]int64)
+		for _, field := range task.body.CollectionSchema.Fields {
+			if field.Name != RowIDFieldName && field.Name != TimeStampFieldName {
+				fieldIDMap[field.Name] = field.FieldID
+			}
+		}
+
+		assert.Equal(t, int64(100), fieldIDMap["field_100"], "Non-contiguous ID 100 should be preserved")
+		assert.Equal(t, int64(150), fieldIDMap["field_150"], "Non-contiguous ID 150 should be preserved")
+		assert.Equal(t, int64(500), fieldIDMap["field_500"], "Non-contiguous ID 500 should be preserved")
+		assert.Equal(t, int64(1000), fieldIDMap["field_1000"], "Non-contiguous ID 1000 should be preserved")
 	})
 
 	t.Run("normal case without preserve field IDs", func(t *testing.T) {
@@ -1197,15 +1380,15 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
-				Base:            &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName:  collectionName,
-				Schema:          marshaledSchema,
-				PreserveFieldId: false,
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+				Schema:         marshaledSchema,
 			},
 			body: &message.CreateCollectionRequest{
 				CollectionName:   collectionName,
 				CollectionSchema: schema,
 			},
+			preserveFieldID: false,
 		}
 
 		err = task.prepareSchema(context.TODO())

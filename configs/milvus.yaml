@@ -717,6 +717,8 @@ dataCoord:
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
+  snapshot:
+    pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance

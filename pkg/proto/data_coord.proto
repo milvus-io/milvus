@@ -118,7 +118,7 @@ service DataCoord {
   rpc DropSnapshot(DropSnapshotRequest) returns(common.Status){}
   rpc ListSnapshots(ListSnapshotsRequest) returns(ListSnapshotsResponse){}
   rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
-  rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
+  rpc RestoreSnapshotData(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
 }
@@ -1145,6 +1145,13 @@ enum CopySegmentTaskState {
   CopySegmentTaskFailed = 4;       // Task failed, requires manual handling
 }
 
+// SnapshotState defines the state for snapshot 2PC commit
+enum SnapshotState {
+  SnapshotStateUnknown = 0;    // Default/unknown state
+  SnapshotStatePending = 1;    // S3 files are being written
+  SnapshotStateCommitted = 2;  // S3 write completed, snapshot is ready
+}
+
 // RestoreSnapshotState defines the state machine for restore snapshot jobs
 enum RestoreSnapshotState {
   RestoreSnapshotNone = 0;
@@ -1423,6 +1430,7 @@ message SegmentDescription {
   msg.MsgPosition dml_position = 14; // dml position
   int64 storage_version = 15; // storage version
   bool is_sorted = 16; // whether the segment is sorted by primary key
+  string manifest_path = 17; // StorageV2 manifest file path
 }
 
 message CollectionDescription {
@@ -1432,6 +1440,7 @@ message CollectionDescription {
   common.ConsistencyLevel consistency_level = 4; // consistency level
   repeated common.KeyValuePair properties = 5; // properties
   map<int64, string> user_created_partitions = 6; // user created partitions through create partition api
+  repeated string virtual_channel_names = 7; // virtual channel names for restore to preserve pchannel mapping
 }
 
 message SnapshotInfo {
@@ -1442,6 +1451,8 @@ message SnapshotInfo {
   repeated int64 partition_ids = 5; // partition ids
   int64 create_ts = 6; // create timestamp, all stream data before this timestamp will be flushed to segment list.
   string s3_location = 7; // s3 location of the snapshot meta file if snapshot is exported to s3.
+  SnapshotState state = 8; // snapshot state for 2PC commit (Pending/Committed)
+  int64 pending_start_time = 9; // timestamp when pending started, for GC timeout
 }
 
 message RestoreSnapshotInfo {
@@ -1475,6 +1486,8 @@ message RestoreSnapshotRequest {
   common.MsgBase base = 1;
   string name = 2; // snapshot name
   int64 collection_id = 3; // target collection id
+  reserved 4; // previously: create_indexes (now handled by RootCoord DDL callback)
+  int64 job_id = 5; // pre-allocated job ID from RootCoord, if 0 DataCoord will allocate
 }
 
 message RestoreSnapshotResponse {
@@ -1494,7 +1507,8 @@ message GetRestoreSnapshotStateResponse {
 
 message ListRestoreSnapshotJobsRequest {
   common.MsgBase base = 1;
-  string collection_name = 2; // filter by collection, empty for all
+  int64 collection_id = 2; // filter by collection id, empty for all
+
 }
 
 message ListRestoreSnapshotJobsResponse {

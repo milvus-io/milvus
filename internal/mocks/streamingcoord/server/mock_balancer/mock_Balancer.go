@@ -92,6 +92,66 @@ func (_c *MockBalancer_AllocVirtualChannels_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// AllocVirtualChannelsWithPChannels provides a mock function with given fields: ctx, collectionID, pchannels
+func (_m *MockBalancer) AllocVirtualChannelsWithPChannels(ctx context.Context, collectionID int64, pchannels []string) ([]string, error) {
+	ret := _m.Called(ctx, collectionID, pchannels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AllocVirtualChannelsWithPChannels")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []string) ([]string, error)); ok {
+		return rf(ctx, collectionID, pchannels)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []string) []string); ok {
+		r0 = rf(ctx, collectionID, pchannels)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, []string) error); ok {
+		r1 = rf(ctx, collectionID, pchannels)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBalancer_AllocVirtualChannelsWithPChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocVirtualChannelsWithPChannels'
+type MockBalancer_AllocVirtualChannelsWithPChannels_Call struct {
+	*mock.Call
+}
+
+// AllocVirtualChannelsWithPChannels is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - pchannels []string
+func (_e *MockBalancer_Expecter) AllocVirtualChannelsWithPChannels(ctx interface{}, collectionID interface{}, pchannels interface{}) *MockBalancer_AllocVirtualChannelsWithPChannels_Call {
+	return &MockBalancer_AllocVirtualChannelsWithPChannels_Call{Call: _e.mock.On("AllocVirtualChannelsWithPChannels", ctx, collectionID, pchannels)}
+}
+
+func (_c *MockBalancer_AllocVirtualChannelsWithPChannels_Call) Run(run func(ctx context.Context, collectionID int64, pchannels []string)) *MockBalancer_AllocVirtualChannelsWithPChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].([]string))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_AllocVirtualChannelsWithPChannels_Call) Return(_a0 []string, _a1 error) *MockBalancer_AllocVirtualChannelsWithPChannels_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBalancer_AllocVirtualChannelsWithPChannels_Call) RunAndReturn(run func(context.Context, int64, []string) ([]string, error)) *MockBalancer_AllocVirtualChannelsWithPChannels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockBalancer) Close() {
 	_m.Called()

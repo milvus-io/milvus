@@ -135,6 +135,8 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
+	snapshotManager SnapshotManager
+
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
@@ -365,6 +367,18 @@ func (s *Server) initDataCoord() error {
 		s.copySegmentMeta,
 	)
 	log.Info("init copy segment inspector and checker done")
+
+	// Initialize snapshot manager
+	s.snapshotManager = NewSnapshotManager(
+		s.meta,
+		s.meta.snapshotMeta,
+		s.copySegmentMeta,
+		s.allocator,
+		s.handler,
+		s.broker,
+		s.getChannelsByCollectionID,
+	)
+	log.Info("init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 

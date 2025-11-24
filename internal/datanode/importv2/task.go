@@ -194,6 +194,8 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 	res := []zap.Field{
 		zap.Int64("taskID", task.GetTaskID()),
 		zap.Int64("jobID", task.GetJobID()),
+		zap.Int64("collectionID", task.GetCollectionID()),
+		zap.String("type", task.GetType().String()),
 	}
 	res = append(res, fields...)
 	return res

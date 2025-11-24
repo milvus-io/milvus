@@ -88,6 +88,16 @@ func (s *StreamingNodeManager) AllocVirtualChannels(ctx context.Context, param b
 	return balancer.AllocVirtualChannels(ctx, param)
 }
 
+// AllocVirtualChannelsWithPChannels allocates virtual channels on specified pchannels.
+// Used by snapshot restore to preserve pchannel mapping from the source collection.
+func (s *StreamingNodeManager) AllocVirtualChannelsWithPChannels(ctx context.Context, collectionID int64, pchannels []string) ([]string, error) {
+	balancer, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return balancer.AllocVirtualChannelsWithPChannels(ctx, collectionID, pchannels)
+}
+
 // GetLatestWALLocated returns the server id of the node that the wal of the vChannel is located.
 // Return -1 and error if the vchannel is not found or context is canceled.
 func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel string) (int64, error) {

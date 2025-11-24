@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -793,7 +795,16 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			IndexFiles:        indexesFiles,
 			JsonKeyIndexFiles: uncompressedJsonStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
+			ManifestPath:      segInfo.GetManifestPath(),
 		}
+	})
+
+	// Clone schema and add consistency level to properties
+	// This is needed because mustConsumeConsistencyLevel in restore expects consistency level in schema.Properties
+	schema := proto.Clone(resp.GetSchema()).(*schemapb.CollectionSchema)
+	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
+		Key:   common.ConsistencyLevel,
+		Value: strconv.Itoa(int(resp.GetConsistencyLevel())),
 	})
 
 	return &SnapshotData{
@@ -803,12 +814,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			CreateTs:     int64(snapshotTs),
 		},
 		Collection: &datapb.CollectionDescription{
-			Schema:                resp.GetSchema(),
+			Schema:                schema,
 			NumShards:             int64(resp.GetShardsNum()),
 			NumPartitions:         int64(resp.GetNumPartitions()),
-			ConsistencyLevel:      resp.GetConsistencyLevel(),
-			Properties:            resp.GetProperties(),
 			UserCreatedPartitions: userCreatedPartitions,
+			VirtualChannelNames:   resp.GetVirtualChannelNames(),
 		},
 		Indexes:  indexInfos,
 		Segments: segDescList,

@@ -1651,9 +1651,19 @@ func (coord *MixCoordMock) DescribeSnapshot(ctx context.Context, req *datapb.Des
 	}, nil
 }
 
-func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+// RestoreSnapshot is the RootCoord API for restoring a snapshot (orchestrates the entire restore process)
+func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*milvuspb.RestoreSnapshotResponse, error) {
+	return &milvuspb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+// RestoreSnapshotData is the DataCoord API for restoring snapshot data
+func (coord *MixCoordMock) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
 	return &datapb.RestoreSnapshotResponse{
 		Status: merr.Success(),
+		JobId:  1,
 	}, nil
 }
 

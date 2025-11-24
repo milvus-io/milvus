@@ -23,14 +23,10 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -517,51 +513,8 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 		mixCoord: mockMixCoord,
 	}
 
-	// Mock DescribeSnapshot response
-	mockSchema := &schemapb.CollectionSchema{
-		Name: "restored_collection",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "id", DataType: schemapb.DataType_Int64},
-		},
-	}
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Name:         "test_snapshot",
-			CollectionId: 100,
-		},
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema:           mockSchema,
-			NumShards:        2,
-			NumPartitions:    1,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-
-	// Mock proto.Marshal
-	mockMarshal := mockey.Mock(proto.Marshal).Return([]byte("mock_schema"), nil).Build()
-	defer mockMarshal.UnPatch()
-
-	// Mock collection creation
-	mockCreateCollection := mockey.Mock((*MixCoordMock).CreateCollection).Return(merr.Success(), nil).Build()
-	defer mockCreateCollection.UnPatch()
-
-	// Mock partition creation
-	mockCreatePartition := mockey.Mock((*MixCoordMock).CreatePartition).Return(merr.Success(), nil).Build()
-	defer mockCreatePartition.UnPatch()
-
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
-	// Mock globalMetaCache for getting collection ID after creation
-	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(200), nil).Build()
-	defer mockGetCollectionID.UnPatch()
-	mockGetPartitions := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]int64{"partition1": 100}, nil).Build()
-	defer mockGetPartitions.UnPatch()
-
-	// Mock restore snapshot
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
+	// Mock RestoreSnapshot - now proxy simply delegates to RootCoord
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&milvuspb.RestoreSnapshotResponse{
 		Status: merr.Success(),
 		JobId:  1,
 	}, nil).Build()
@@ -572,9 +525,10 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, task.result)
 	assert.True(t, merr.Ok(task.result.GetStatus()))
+	assert.Equal(t, int64(1), task.result.GetJobId())
 }
 
-func TestRestoreSnapshotTask_Execute_DescribeSnapshotError(t *testing.T) {
+func TestRestoreSnapshotTask_Execute_RootCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	task := &restoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
@@ -584,19 +538,20 @@ func TestRestoreSnapshotTask_Execute_DescribeSnapshotError(t *testing.T) {
 		mixCoord: mockMixCoord,
 	}
 
-	expectedError := errors.New("describe snapshot failed")
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(nil, expectedError).Build()
-	defer mockDescribeSnapshot.UnPatch()
+	// Mock RestoreSnapshot to return RPC error
+	expectedError := errors.New("rootcoord restore snapshot failed")
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(nil, expectedError).Build()
+	defer mockRestoreSnapshot.UnPatch()
 
 	err := task.Execute(context.Background())
 
 	assert.Error(t, err)
 	assert.NotNil(t, task.result)
 	assert.False(t, merr.Ok(task.result.GetStatus()))
-	assert.Contains(t, err.Error(), "describe snapshot failed")
+	assert.Contains(t, err.Error(), "rootcoord restore snapshot failed")
 }
 
-func TestRestoreSnapshotTask_Execute_SchemaMarshalError(t *testing.T) {
+func TestRestoreSnapshotTask_Execute_StatusError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	task := &restoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
@@ -606,64 +561,17 @@ func TestRestoreSnapshotTask_Execute_SchemaMarshalError(t *testing.T) {
 		mixCoord: mockMixCoord,
 	}
 
-	// Mock successful DescribeSnapshot
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema: &schemapb.CollectionSchema{Name: "test"},
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-
-	// Mock proto.Marshal failure
-	expectedError := errors.New("marshal failed")
-	mockMarshal := mockey.Mock(proto.Marshal).Return(nil, expectedError).Build()
-	defer mockMarshal.UnPatch()
+	// Mock RestoreSnapshot to return error status
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&milvuspb.RestoreSnapshotResponse{
+		Status: merr.Status(merr.WrapErrCollectionNotFound("test_collection")),
+	}, nil).Build()
+	defer mockRestoreSnapshot.UnPatch()
 
 	err := task.Execute(context.Background())
 
 	assert.Error(t, err)
 	assert.NotNil(t, task.result)
 	assert.False(t, merr.Ok(task.result.GetStatus()))
-	assert.Contains(t, err.Error(), "marshal failed")
-}
-
-func TestRestoreSnapshotTask_Execute_CreateCollectionError(t *testing.T) {
-	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
-		req: &milvuspb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			CollectionName: "restored_collection",
-		},
-		mixCoord: mockMixCoord,
-	}
-
-	// Mock successful DescribeSnapshot
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema: &schemapb.CollectionSchema{Name: "test"},
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-
-	// Mock successful marshal
-	mockMarshal := mockey.Mock(proto.Marshal).Return([]byte("mock_schema"), nil).Build()
-	defer mockMarshal.UnPatch()
-
-	// Mock CreateCollection failure
-	expectedError := errors.New("create collection failed")
-	mockCreateCollection := mockey.Mock((*MixCoordMock).CreateCollection).Return(nil, expectedError).Build()
-	defer mockCreateCollection.UnPatch()
-
-	err := task.Execute(context.Background())
-
-	assert.Error(t, err)
-	assert.NotNil(t, task.result)
-	assert.False(t, merr.Ok(task.result.GetStatus()))
-	assert.Contains(t, err.Error(), "create collection failed")
 }
 
 // =========================== Task Lifecycle Integration Tests ===========================
@@ -732,281 +640,3 @@ func TestCreateSnapshotTask_EmptyPartitionNames(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), task.collectionID)
 }
-
-func TestRestoreSnapshotTask_CollectionCreationFailureWithCleanup(t *testing.T) {
-	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
-		req: &milvuspb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			CollectionName: "restored_collection",
-		},
-		mixCoord: mockMixCoord,
-	}
-
-	// Mock successful DescribeSnapshot
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema:                &schemapb.CollectionSchema{Name: "test"},
-			UserCreatedPartitions: map[int64]string{100: "partition1"}, // Needed to trigger CreatePartition call
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-	mockMarshal := mockey.Mock(proto.Marshal).Return([]byte("mock_schema"), nil).Build()
-	defer mockMarshal.UnPatch()
-
-	// Mock successful collection creation
-	mockCreateCollection := mockey.Mock((*MixCoordMock).CreateCollection).Return(merr.Success(), nil).Build()
-	defer mockCreateCollection.UnPatch()
-
-	// Mock partition creation failure
-	expectedError := errors.New("create partition failed")
-	mockCreatePartition := mockey.Mock((*MixCoordMock).CreatePartition).Return(nil, expectedError).Build()
-	defer mockCreatePartition.UnPatch()
-
-	// Mock cleanup (DropCollection should be called)
-	mockDropCollection := mockey.Mock((*MixCoordMock).DropCollection).Return(merr.Success(), nil).Build()
-	defer mockDropCollection.UnPatch()
-
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
-	// Mock globalMetaCache for getting collection ID after creation
-	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(200), nil).Build()
-	defer mockGetCollectionID.UnPatch()
-	mockGetPartitions := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]int64{"partition1": 100}, nil).Build()
-	defer mockGetPartitions.UnPatch()
-
-	err := task.Execute(context.Background())
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "create partition failed")
-}
-
-// =========================== RestoreSnapshot PreserveFieldId Tests ===========================
-
-func TestRestoreSnapshotTask_PreserveFieldId(t *testing.T) {
-	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
-		req: &milvuspb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			CollectionName: "restored_collection",
-			DbName:         "default",
-		},
-		mixCoord: mockMixCoord,
-	}
-
-	// Mock DescribeSnapshot response with system fields
-	mockSchema := &schemapb.CollectionSchema{
-		Name: "restored_collection",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64},
-			{Name: "vector", FieldID: 101, DataType: schemapb.DataType_FloatVector},
-		},
-	}
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Name:         "test_snapshot",
-			CollectionId: 100,
-		},
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema:                mockSchema,
-			NumShards:             2,
-			NumPartitions:         1,
-			ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
-			UserCreatedPartitions: map[int64]string{},
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-
-	// Mock proto.Marshal
-	mockMarshal := mockey.Mock(proto.Marshal).Return([]byte("mock_schema"), nil).Build()
-	defer mockMarshal.UnPatch()
-
-	var capturedCreateCollReq *milvuspb.CreateCollectionRequest
-	mockCreateCollection := mockey.Mock((*MixCoordMock).CreateCollection).To(
-		func(mock *MixCoordMock, ctx context.Context, req *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-			capturedCreateCollReq = req
-			return merr.Success(), nil
-		}).Build()
-	defer mockCreateCollection.UnPatch()
-
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
-	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(200), nil).Build()
-	defer mockGetCollectionID.UnPatch()
-
-	// Mock restore snapshot
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
-		Status: merr.Success(),
-		JobId:  1,
-	}, nil).Build()
-	defer mockRestoreSnapshot.UnPatch()
-
-	err := task.Execute(context.Background())
-
-	assert.NoError(t, err)
-	assert.NotNil(t, capturedCreateCollReq)
-	assert.True(t, capturedCreateCollReq.PreserveFieldId, "PreserveFieldId should be true")
-	assert.Equal(t, int64(1), capturedCreateCollReq.NumPartitions)
-}
-
-func TestRestoreSnapshotTask_PreserveIndexId(t *testing.T) {
-	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
-		req: &milvuspb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			CollectionName: "restored_collection",
-			DbName:         "default",
-		},
-		mixCoord: mockMixCoord,
-	}
-
-	// Mock DescribeSnapshot response with index info
-	mockSchema := &schemapb.CollectionSchema{
-		Name: "restored_collection",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64},
-			{Name: "vector", FieldID: 101, DataType: schemapb.DataType_FloatVector},
-		},
-	}
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Name:         "test_snapshot",
-			CollectionId: 100,
-		},
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema:                mockSchema,
-			NumShards:             2,
-			NumPartitions:         1,
-			ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
-			UserCreatedPartitions: map[int64]string{},
-		},
-		IndexInfos: []*indexpb.IndexInfo{
-			{
-				IndexID:         1000,
-				FieldID:         101,
-				IndexName:       "vector_index",
-				TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
-				IndexParams:     []*commonpb.KeyValuePair{{Key: "index_type", Value: "IVF_FLAT"}},
-				IsAutoIndex:     false,
-				UserIndexParams: []*commonpb.KeyValuePair{{Key: "nlist", Value: "1024"}},
-			},
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-
-	// Mock proto.Marshal
-	mockMarshal := mockey.Mock(proto.Marshal).Return([]byte("mock_schema"), nil).Build()
-	defer mockMarshal.UnPatch()
-
-	// Mock collection creation
-	mockCreateCollection := mockey.Mock((*MixCoordMock).CreateCollection).Return(merr.Success(), nil).Build()
-	defer mockCreateCollection.UnPatch()
-
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
-	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(200), nil).Build()
-	defer mockGetCollectionID.UnPatch()
-
-	var capturedCreateIndexReq *indexpb.CreateIndexRequest
-	mockCreateIndex := mockey.Mock((*MixCoordMock).CreateIndex).To(
-		func(mock *MixCoordMock, ctx context.Context, req *indexpb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-			capturedCreateIndexReq = req
-			return merr.Success(), nil
-		}).Build()
-	defer mockCreateIndex.UnPatch()
-
-	// Mock restore snapshot
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
-		Status: merr.Success(),
-		JobId:  1,
-	}, nil).Build()
-	defer mockRestoreSnapshot.UnPatch()
-
-	err := task.Execute(context.Background())
-
-	assert.NoError(t, err)
-	assert.NotNil(t, capturedCreateIndexReq)
-	assert.True(t, capturedCreateIndexReq.PreserveIndexId, "PreserveIndexId should be true")
-	assert.Equal(t, int64(1000), capturedCreateIndexReq.IndexId, "IndexId should match snapshot")
-	assert.Equal(t, int64(200), capturedCreateIndexReq.CollectionID, "Should use restored collection ID")
-}
-
-func TestRestoreSnapshotTask_UserCreatedPartitions(t *testing.T) {
-	mockMixCoord := NewMixCoordMock()
-	task := &restoreSnapshotTask{
-		req: &milvuspb.RestoreSnapshotRequest{
-			Name:           "test_snapshot",
-			CollectionName: "restored_collection",
-			DbName:         "default",
-		},
-		mixCoord: mockMixCoord,
-	}
-
-	// Mock DescribeSnapshot response with user created partitions
-	mockSchema := &schemapb.CollectionSchema{
-		Name: "restored_collection",
-		Fields: []*schemapb.FieldSchema{
-			{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64},
-		},
-	}
-	mockDescribeResponse := &datapb.DescribeSnapshotResponse{
-		Status: merr.Success(),
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Name:         "test_snapshot",
-			CollectionId: 100,
-		},
-		CollectionInfo: &datapb.CollectionDescription{
-			Schema:                mockSchema,
-			NumShards:             2,
-			NumPartitions:         3,
-			ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
-			UserCreatedPartitions: map[int64]string{1: "partition_a", 2: "partition_b"},
-		},
-	}
-	mockDescribeSnapshot := mockey.Mock((*MixCoordMock).DescribeSnapshot).Return(mockDescribeResponse, nil).Build()
-	defer mockDescribeSnapshot.UnPatch()
-
-	// Mock proto.Marshal
-	mockMarshal := mockey.Mock(proto.Marshal).Return([]byte("mock_schema"), nil).Build()
-	defer mockMarshal.UnPatch()
-
-	// Mock collection creation
-	mockCreateCollection := mockey.Mock((*MixCoordMock).CreateCollection).Return(merr.Success(), nil).Build()
-	defer mockCreateCollection.UnPatch()
-
-	// Initialize globalMetaCache
-	globalMetaCache = &MetaCache{}
-	mockGetCollectionID := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(200), nil).Build()
-	defer mockGetCollectionID.UnPatch()
-
-	var createdPartitions []string
-	mockCreatePartition := mockey.Mock((*MixCoordMock).CreatePartition).To(
-		func(mock *MixCoordMock, ctx context.Context, req *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-			createdPartitions = append(createdPartitions, req.PartitionName)
-			return merr.Success(), nil
-		}).Build()
-	defer mockCreatePartition.UnPatch()
-
-	// Mock restore snapshot
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
-		Status: merr.Success(),
-		JobId:  1,
-	}, nil).Build()
-	defer mockRestoreSnapshot.UnPatch()
-
-	err := task.Execute(context.Background())
-
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(createdPartitions), "Should create 2 user partitions")
-	assert.Contains(t, createdPartitions, "partition_a")
-	assert.Contains(t, createdPartitions, "partition_b")
-}
-
-// Note: Tests for GetRestoreSnapshotStateTask and ListRestoreSnapshotJobsTask are pending
-// until the corresponding protobuf definitions are added to milvuspb package

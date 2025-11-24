@@ -4645,6 +4645,7 @@ type dataCoordConfig struct {
 	GCRemoveConcurrent          ParamItem `refreshable:"false"`
 	GCScanIntervalInHour        ParamItem `refreshable:"false"`
 	GCSlowDownCPUUsageThreshold ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout      ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
@@ -5431,6 +5432,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export: false,
 	}
 	p.GCRemoveConcurrent.Init(base.mgr)
+
+	p.SnapshotPendingTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.pendingTimeout",
+		Version:      "2.6.7",
+		DefaultValue: "60",
+		Doc:          "Timeout in minutes for pending snapshots before GC cleanup",
+		Export:       true,
+	}
+	p.SnapshotPendingTimeout.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

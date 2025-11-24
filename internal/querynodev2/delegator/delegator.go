@@ -1002,6 +1002,11 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 	log := sd.getLogger(context.Background()).WithRateGroup(fmt.Sprintf("UpdateTSafe-%s", sd.vchannelName), 1, 60)
 	sd.tsCond.L.Lock()
+	log.RatedInfo(10, "update tsafe",
+		zap.Int64("collectionID", sd.collectionID),
+		zap.String("vchannel", sd.vchannelName),
+		zap.Time("tsafe", tsoutil.PhysicalTime(tsafe)),
+		zap.Time("latestTSafe", tsoutil.PhysicalTime(sd.latestTsafe.Load())))
 	if tsafe > sd.latestTsafe.Load() {
 		sd.latestTsafe.Store(tsafe)
 		sd.tsCond.Broadcast()

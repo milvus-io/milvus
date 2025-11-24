@@ -1935,7 +1935,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	defer mock9.UnPatch()
 
 	// Execute
-	gc.recycleDroppedSegments(ctx)
+	gc.recycleDroppedSegments(ctx, nil)
 
 	// Verify
 	// Segment 1001 should still exist (not GC'd due to snapshot reference)
@@ -2061,7 +2061,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	defer mock8.UnPatch()
 
 	// Execute
-	gc.recycleUnusedSegIndexes(ctx)
+	gc.recycleUnusedSegIndexes(ctx, nil)
 
 	// Verify
 	// Only segIdx2 should have its files removed (segIdx1 is protected by snapshot)

@@ -57,7 +57,7 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	s.catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	s.broker = broker.NewMockBroker(s.T())
@@ -89,7 +89,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())
@@ -149,7 +149,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())
@@ -198,7 +198,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
 	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())

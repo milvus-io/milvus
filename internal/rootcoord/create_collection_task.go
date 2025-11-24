@@ -44,9 +44,13 @@ import (
 
 type createCollectionTask struct {
 	*Core
-	Req    *milvuspb.CreateCollectionRequest
-	header *message.CreateCollectionMessageHeader
-	body   *message.CreateCollectionRequest
+	Req             *milvuspb.CreateCollectionRequest
+	header          *message.CreateCollectionMessageHeader
+	body            *message.CreateCollectionRequest
+	preserveFieldID bool
+	// If set, use these pchannels instead of load-balanced allocation.
+	// Used by snapshot restore to preserve pchannel mapping from the source collection.
+	preferredPChannels []string
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -379,7 +383,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	// if schema comes from restore snapshot
 	preservedDynamicFieldID := int64(-1)
 	preservedNamespaceFieldID := int64(-1)
-	if t.Req.GetPreserveFieldId() {
+	if t.preserveFieldID {
 		log.Ctx(ctx).Info("preserve field IDs from schema during create collection", zap.String("collection", t.Req.CollectionName))
 		fields := make([]*schemapb.FieldSchema, 0)
 		// filter out system fields
@@ -415,7 +419,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 
-	if t.Req.GetPreserveFieldId() {
+	if t.preserveFieldID {
 		// cause dynamic field is system field without internal id allocation
 		// we need to restore its field id here
 		for _, field := range t.body.CollectionSchema.Fields {
@@ -502,10 +506,20 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) assignChannels(ctx context.Context) error {
-	vchannels, err := snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
-		CollectionID: t.header.GetCollectionId(),
-		Num:          int(t.Req.GetShardsNum()),
-	})
+	var vchannels []string
+	var err error
+
+	if len(t.preferredPChannels) > 0 {
+		// Use specified pchannels for snapshot restore
+		vchannels, err = snmanager.StaticStreamingNodeManager.AllocVirtualChannelsWithPChannels(
+			ctx, t.header.GetCollectionId(), t.preferredPChannels)
+	} else {
+		// Normal allocation with load balancing
+		vchannels, err = snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
+			CollectionID: t.header.GetCollectionId(),
+			Num:          int(t.Req.GetShardsNum()),
+		})
+	}
 	if err != nil {
 		return err
 	}

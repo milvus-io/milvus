@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -144,78 +147,102 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 		return err
 	}
 
-	// Step 2: For each snapshot, read from S3 and build in-memory cache
+	// Step 2: Filter out PENDING snapshots - they will be cleaned up by GC
+	committedSnapshots := make([]*datapb.SnapshotInfo, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		log.Info("reload snapshot from catalog",
-			zap.String("name", snapshot.GetName()),
-			zap.Int64("id", snapshot.GetId()),
-			zap.String("s3_location", snapshot.GetS3Location()))
-
-		// Read complete snapshot data from S3 to get segment/index lists
-		snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId(), true)
-		if err != nil {
-			log.Error("failed to read snapshot from s3", zap.Error(err))
-			return err
+		if snapshot.GetState() == datapb.SnapshotState_SnapshotStatePending {
+			log.Warn("skipping pending snapshot during reload, will be cleaned by GC",
+				zap.String("name", snapshot.GetName()),
+				zap.Int64("id", snapshot.GetId()))
+			continue
 		}
+		committedSnapshots = append(committedSnapshots, snapshot)
+	}
 
-		// Extract segment IDs and index IDs for reference tracking
-		segmentIDs := make([]int64, 0)
-		indexIDs := make([]int64, 0)
-		for _, segment := range snapshotData.Segments {
-			segmentIDs = append(segmentIDs, segment.GetSegmentId())
-		}
-		for _, index := range snapshotData.Indexes {
-			indexIDs = append(indexIDs, index.GetIndexID())
-		}
+	// Step 3: For each committed snapshot, read from S3 and build in-memory cache concurrently
+	if len(committedSnapshots) == 0 {
+		return nil
+	}
 
-		// Insert into in-memory cache with precomputed ID sets
-		sm.snapshotID2DataInfo.Insert(snapshot.GetId(), &SnapshotDataInfo{
-			snapshotInfo: snapshot,
-			SegmentIDs:   typeutil.NewUniqueSet(segmentIDs...),
-			IndexIDs:     typeutil.NewUniqueSet(indexIDs...),
+	// Create concurrent pool for loading snapshots to improve recovery performance
+	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	defer pool.Release()
+
+	futures := make([]*conc.Future[any], 0, len(committedSnapshots))
+	for _, snapshot := range committedSnapshots {
+		future := pool.Submit(func() (any, error) {
+			log.Info("reload snapshot from catalog",
+				zap.String("name", snapshot.GetName()),
+				zap.Int64("id", snapshot.GetId()),
+				zap.String("s3_location", snapshot.GetS3Location()))
+
+			// Fast path: Read metadata.json directly from S3 using stored location
+			// (includeSegments=false avoids parsing heavy Avro manifest files)
+			// Note: During reload, memory cache is empty, so we read directly from S3
+			snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshot.GetS3Location(), false)
+			if err != nil {
+				log.Error("failed to read snapshot metadata from s3", zap.Error(err))
+				return nil, err
+			}
+
+			// Merge S3 location from catalog into snapshot data
+			snapshotData.SnapshotInfo.S3Location = snapshot.GetS3Location()
+
+			// Insert into in-memory cache with precomputed ID sets
+			// snapshotID2DataInfo is a thread-safe ConcurrentMap
+			sm.snapshotID2DataInfo.Insert(snapshot.GetId(), &SnapshotDataInfo{
+				snapshotInfo: snapshotData.SnapshotInfo,
+				SegmentIDs:   typeutil.NewUniqueSet(snapshotData.SegmentIDs...),
+				IndexIDs:     typeutil.NewUniqueSet(snapshotData.IndexIDs...),
+			})
+
+			return nil, nil
 		})
+		futures = append(futures, future)
+	}
+
+	// Wait for all loading tasks to complete
+	err = conc.AwaitAll(futures...)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-// SaveSnapshot persists a new snapshot to both S3 and catalog.
+// SaveSnapshot persists a new snapshot to both S3 and catalog using 2PC (Two-Phase Commit).
 //
-// This is the main entry point for creating a new snapshot. It follows a two-phase
-// approach: first save the complete data to S3, then save the metadata to catalog.
-// This ordering ensures that catalog never references non-existent S3 data.
+// This is the main entry point for creating a new snapshot. It uses a two-phase commit
+// approach to ensure atomic creation and enable GC cleanup of orphan files.
 //
-// Process flow:
-//  1. Save complete snapshot data (segments, indexes, schema) to S3
-//  2. Record S3 location in snapshot metadata
-//  3. Extract segment IDs and index IDs for reference tracking
-//  4. Insert into in-memory cache with ID sets
-//  5. Save snapshot metadata to catalog (persistent storage)
+// Process flow (2PC):
+//  1. Phase 1 (Prepare): Save PENDING state to catalog (snapshot ID is used for file paths)
+//  2. Write complete snapshot data to S3 (each segment to separate manifest file)
+//  3. Phase 2 (Commit): Update catalog to COMMITTED state
+//  4. Insert into in-memory cache
 //
-// Transaction semantics:
-//   - S3 write is durable before catalog write
-//   - Catalog write is atomic (etcd transaction)
-//   - If catalog write fails, S3 data becomes orphaned but doesn't affect correctness
-//   - Recovery: orphaned S3 data will be cleaned by GC
+// Failure handling:
+//   - If Phase 1 fails: No changes made, return error
+//   - If S3 write fails: PENDING record remains in catalog, GC will cleanup S3 files
+//   - If Phase 2 fails: PENDING record remains in catalog, GC will cleanup S3 files
+//   - GC uses snapshot ID to compute and delete orphan S3 files without S3 list operations
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
 //   - snapshot: Complete snapshot data including segments, indexes, and schema
 //
 // Returns:
-//   - error: Error if S3 write or catalog write fails
+//   - error: Error if any phase fails
 func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData) error {
-	// Step 1: Save complete snapshot data to S3 first (durable storage)
-	metadataFilePath, err := sm.writer.Save(ctx, snapshot)
-	if err != nil {
-		log.Error("failed to save snapshot to s3", zap.Error(err))
-		return err
-	}
-	snapshot.SnapshotInfo.S3Location = metadataFilePath
+	log := log.Ctx(ctx).With(
+		zap.String("snapshotName", snapshot.SnapshotInfo.GetName()),
+		zap.Int64("snapshotID", snapshot.SnapshotInfo.GetId()),
+		zap.Int64("collectionID", snapshot.SnapshotInfo.GetCollectionId()),
+	)
 
-	// Step 2: Extract segment IDs and index IDs for reference tracking
-	segmentIDs := make([]int64, 0)
-	indexIDs := make([]int64, 0)
+	// Step 1: Extract segment IDs and index IDs for reference tracking
+	segmentIDs := make([]int64, 0, len(snapshot.Segments))
+	indexIDs := make([]int64, 0, len(snapshot.Indexes))
 	for _, segment := range snapshot.Segments {
 		segmentIDs = append(segmentIDs, segment.GetSegmentId())
 	}
@@ -223,15 +250,55 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 		indexIDs = append(indexIDs, index.GetIndexID())
 	}
 
-	// Step 3: Insert into in-memory cache with precomputed ID sets
+	// Step 2: Phase 1 (Prepare) - Save PENDING state to catalog
+	// This enables GC to cleanup orphan S3 files if subsequent steps fail
+	// Snapshot ID is used for computing S3 file paths
+	snapshot.SnapshotInfo.State = datapb.SnapshotState_SnapshotStatePending
+	snapshot.SnapshotInfo.PendingStartTime = time.Now().UnixMilli()
+
+	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
+		log.Error("failed to save pending snapshot to catalog", zap.Error(err))
+		return fmt.Errorf("failed to save pending snapshot to catalog: %w", err)
+	}
+	log.Info("saved pending snapshot to catalog")
+
+	// Step 3: Write S3 files using snapshot ID for path computation
+	metadataFilePath, err := sm.writer.Save(ctx, snapshot)
+	if err != nil {
+		// S3 write failed, leave PENDING record for GC to clean up
+		log.Error("failed to save snapshot to S3, pending record left for GC cleanup",
+			zap.Error(err))
+		return fmt.Errorf("failed to save snapshot to S3: %w", err)
+	}
+	snapshot.SnapshotInfo.S3Location = metadataFilePath
+	log.Info("saved snapshot data to S3", zap.String("s3Location", metadataFilePath))
+
+	// Step 4: Phase 2 (Commit) - Update catalog to COMMITTED state
+	snapshot.SnapshotInfo.State = datapb.SnapshotState_SnapshotStateCommitted
+
+	// Insert into in-memory cache with precomputed ID sets
 	sm.snapshotID2DataInfo.Insert(snapshot.SnapshotInfo.GetId(), &SnapshotDataInfo{
 		snapshotInfo: snapshot.SnapshotInfo,
 		SegmentIDs:   typeutil.NewUniqueSet(segmentIDs...),
 		IndexIDs:     typeutil.NewUniqueSet(indexIDs...),
 	})
 
-	// Step 4: Save metadata to catalog (atomic, persistent)
-	return sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo)
+	// Update catalog with COMMITTED state
+	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
+		// Phase 2 failed, but S3 data is written. GC will eventually cleanup.
+		// Remove from memory cache since commit failed
+		sm.snapshotID2DataInfo.Remove(snapshot.SnapshotInfo.GetId())
+		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
+			zap.Error(err))
+		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
+	}
+
+	log.Info("snapshot saved successfully with 2PC",
+		zap.String("s3Location", metadataFilePath),
+		zap.Int("numSegments", len(snapshot.Segments)),
+		zap.Int("numIndexes", len(snapshot.Indexes)))
+
+	return nil
 }
 
 // DropSnapshot removes a snapshot from memory, catalog, and S3.
@@ -276,8 +343,8 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 		return err
 	}
 
-	// Step 4: Delete complete snapshot data from S3
-	err = sm.writer.Drop(ctx, snapshot.GetCollectionId(), snapshot.GetId())
+	// Step 4: Delete complete snapshot data from S3 using stored metadata path
+	err = sm.writer.Drop(ctx, snapshot.GetS3Location())
 	if err != nil {
 		log.Error("failed to drop snapshot from s3", zap.Error(err))
 		return err
@@ -370,11 +437,13 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, snapshotName string) (*
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
 //   - snapshotName: Unique name of the snapshot to read
+//   - includeSegments: If true, reads segment manifest files from S3; if false, only reads metadata.json
 //
 // Returns:
-//   - *SnapshotData: Complete snapshot data with segments, indexes, and schema
+//   - *SnapshotData: Snapshot data (segments only populated when includeSegments=true;
+//     SegmentIDs/IndexIDs always populated for new format snapshots)
 //   - error: Error if snapshot not found or S3 read fails
-func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName string) (*SnapshotData, error) {
+func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName string, includeSegments bool) (*SnapshotData, error) {
 	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName))
 
 	// Step 1: Get snapshot metadata from memory to find S3 location
@@ -389,8 +458,8 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName strin
 		zap.Int64("id", snapshotInfo.GetId()),
 		zap.String("s3_location_from_memory", snapshotInfo.GetS3Location()))
 
-	// Step 2: Read complete snapshot data from S3
-	snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshotInfo.GetCollectionId(), snapshotInfo.GetId(), true)
+	// Step 2: Read snapshot data from S3 using the known metadata path directly
+	snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshotInfo.GetS3Location(), includeSegments)
 	if err != nil {
 		log.Error("failed to read snapshot data from S3", zap.Error(err))
 		return nil, err
@@ -488,4 +557,55 @@ func (sm *snapshotMeta) GetSnapshotByIndex(ctx context.Context, collectionID, in
 	})
 
 	return snapshotIDs
+}
+
+// GetPendingSnapshots returns all snapshots that are in PENDING state.
+// This is used by GC to find orphaned snapshots that need cleanup.
+// Only returns snapshots that have exceeded the pending timeout.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control
+//   - pendingTimeout: Duration after which a pending snapshot is considered orphaned
+//
+// Returns:
+//   - []*datapb.SnapshotInfo: List of pending snapshots that have exceeded timeout
+//   - error: Error if catalog list fails
+func (sm *snapshotMeta) GetPendingSnapshots(ctx context.Context, pendingTimeout time.Duration) ([]*datapb.SnapshotInfo, error) {
+	// Get all snapshots from catalog (etcd)
+	snapshots, err := sm.catalog.ListSnapshots(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list snapshots from catalog: %w", err)
+	}
+
+	now := time.Now().UnixMilli()
+	pendingSnapshots := make([]*datapb.SnapshotInfo, 0)
+
+	for _, snapshot := range snapshots {
+		// Only process PENDING snapshots
+		if snapshot.GetState() != datapb.SnapshotState_SnapshotStatePending {
+			continue
+		}
+
+		// Check if pending timeout exceeded
+		if now-snapshot.GetPendingStartTime() < pendingTimeout.Milliseconds() {
+			continue // Still within timeout, might be in progress
+		}
+
+		pendingSnapshots = append(pendingSnapshots, snapshot)
+	}
+
+	return pendingSnapshots, nil
+}
+
+// CleanupPendingSnapshot removes a pending snapshot from catalog.
+// This is called by GC after S3 files have been cleaned up.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control
+//   - snapshot: The pending snapshot to remove from catalog
+//
+// Returns:
+//   - error: Error if catalog delete fails
+func (sm *snapshotMeta) CleanupPendingSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+	return sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId())
 }

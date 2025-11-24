@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -730,7 +729,7 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 	// No need to check collection name
 	// Validation shall be preformed in `CreateCollection`
 	// also permit drop collection one with bad collection name
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, t.DropCollectionRequest.GetDbName(), t.GetCollectionName())
+	_, err := globalMetaCache.GetCollectionID(ctx, t.DropCollectionRequest.GetDbName(), t.GetCollectionName())
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
 			// make dropping collection idempotent.
@@ -740,16 +739,6 @@ func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	result, err := t.mixCoord.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
-		CollectionId: collectionID,
-	})
-	if merr.CheckRPCCall(result, err) != nil {
-		log.Info("failed to check snapshots", zap.Error(err))
-		return err
-	}
-	if len(result.GetSnapshots()) > 0 {
-		return merr.WrapErrParameterInvalidMsg("drop collection failed, please clean its snapshots first")
-	}
 	return nil
 }
 
@@ -1920,18 +1909,6 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 		if loaded {
 			return errors.New("partition cannot be dropped, partition is loaded, please release it first")
 		}
-	}
-
-	result, err := t.mixCoord.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
-		CollectionId: collID,
-		PartitionId:  partID,
-	})
-	if merr.CheckRPCCall(result, err) != nil {
-		log.Info("failed to check snapshots", zap.Error(err))
-		return err
-	}
-	if len(result.GetSnapshots()) > 0 {
-		return merr.WrapErrParameterInvalidMsg("drop partition failed, please clean its snapshots first")
 	}
 
 	return nil

@@ -71,6 +71,10 @@ var (
 	// Resource Group
 	RegisterAlterResourceGroupV2AckCallback = registerMessageAckCallback[*message.AlterResourceGroupMessageHeader, *message.AlterResourceGroupMessageBody]
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
+
+	// Snapshot
+	RegisterCreateSnapshotV2AckCallback = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
+	RegisterDropSnapshotV2AckCallback   = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -124,5 +128,9 @@ func resetMessageAckCallbacks() {
 		// Resource Group
 		message.MessageTypeAlterResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
+
+		// Snapshot
+		message.MessageTypeCreateSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotV2:   syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

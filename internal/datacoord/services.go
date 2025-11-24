@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"time"
 
@@ -2157,25 +2156,46 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	log.Info("receive CreateSnapshot request", zap.String("name", req.GetName()),
 		zap.String("description", req.GetDescription()))
 
-	snapshotID, err := s.idAllocator.AllocOne()
+	// Check if snapshot name already exists
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
+		log.Warn("CreateSnapshot failed: snapshot name already exists")
+		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", req.GetName())), nil
+	}
+
+	// Start broadcast with collection lock (also validates collection existence)
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
 	if err != nil {
+		return nil, err
+	}
+	dbName := coll.GetDbName()
+	collectionName := coll.GetCollectionName()
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+		message.NewExclusiveSnapshotNameResourceKey(req.GetName()),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer broadcaster.Close()
+
+	// Broadcast CreateSnapshot message via DDL framework
+	// Snapshot ID is allocated in the callback
+	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{
+			CollectionId: req.GetCollectionId(),
+			Name:         req.GetName(),
+			Description:  req.GetDescription(),
+		}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast(),
+	); err != nil {
+		log.Error("CreateSnapshot broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	snapshotData, err := s.handler.GenSnapshot(ctx, req.GetCollectionId())
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	snapshotData.SnapshotInfo.Id = snapshotID
-	snapshotData.SnapshotInfo.Name = req.GetName()
-	snapshotData.SnapshotInfo.Description = req.GetDescription()
-
-	err = s.meta.GetSnapshotMeta().SaveSnapshot(ctx, snapshotData)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	log.Info("generated snapshot data", zap.Any("snapshotData", snapshotData))
-
+	log.Info("CreateSnapshot completed successfully")
 	return merr.Success(), nil
 }
 
@@ -2186,12 +2206,38 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	}
 	log.Info("receive DropSnapshot request")
 
-	err := s.meta.GetSnapshotMeta().DropSnapshot(ctx, req.GetName())
+	// Check if snapshot exists - if not, return success (idempotent)
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
+		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)")
+		return merr.Success(), nil
+	}
+
+	// Start broadcast with exclusive snapshot lock to prevent concurrent drop/restore
+	// No collection lock needed - dropping snapshot only affects snapshot metadata
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedClusterResourceKey(),
+		message.NewExclusiveSnapshotNameResourceKey(req.GetName()),
+	)
 	if err != nil {
-		log.Error("failed to drop snapshot", zap.Error(err))
+		log.Error("DropSnapshot failed to start broadcast", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	defer broadcaster.Close()
+
+	// Broadcast DropSnapshot message via DDL framework
+	if _, err := broadcaster.Broadcast(ctx, message.NewDropSnapshotMessageBuilderV2().
+		WithHeader(&message.DropSnapshotMessageHeader{
+			Name: req.GetName(),
+		}).
+		WithBody(&message.DropSnapshotMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast(),
+	); err != nil {
+		log.Error("DropSnapshot broadcast failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
+	log.Info("DropSnapshot completed successfully")
 	return merr.Success(), nil
 }
 
@@ -2202,113 +2248,68 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 			Status: merr.Status(err),
 		}, nil
 	}
-
 	log.Info("receive DescribeSnapshot request")
-	snapshotData, err := s.meta.GetSnapshotMeta().ReadSnapshotData(ctx, req.GetName())
+
+	// Delegate to SnapshotManager
+	snapshotData, err := s.snapshotManager.DescribeSnapshot(ctx, req.GetName())
 	if err != nil {
-		log.Error("failed to get snapshot info", zap.Error(err))
+		log.Error("failed to describe snapshot", zap.Error(err))
 		return &datapb.DescribeSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	return &datapb.DescribeSnapshotResponse{
-		Status:         merr.Success(),
-		SnapshotInfo:   snapshotData.SnapshotInfo,
-		CollectionInfo: snapshotData.Collection,
-		IndexInfos:     snapshotData.Indexes,
-	}, nil
+	resp := &datapb.DescribeSnapshotResponse{
+		Status:       merr.Success(),
+		SnapshotInfo: snapshotData.SnapshotInfo,
+	}
+	if req.GetIncludeCollectionInfo() {
+		resp.CollectionInfo = snapshotData.Collection
+		resp.IndexInfos = snapshotData.Indexes
+	}
+	return resp, nil
 }
 
-func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+// RestoreSnapshotData restores snapshot data to the target collection.
+// Index restoration is handled by RootCoord DDL callback.
+func (s *Server) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("snapshot", req.GetName()),
-		zap.Int64("collectionID", req.GetCollectionId()))
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("jobID", req.GetJobId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("receive RestoreSnapshot request")
+	log.Info("receive RestoreSnapshotData request")
 
-	// Read complete snapshot data from S3
-	snapshotData, err := s.meta.GetSnapshotMeta().ReadSnapshotData(ctx, req.GetName())
-	if err != nil {
-		log.Error("failed to read snapshot data", zap.Error(err))
+	// Validate that jobID is provided (must be pre-allocated by RootCoord)
+	if req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("jobID must be provided and greater than 0")
+		log.Warn("invalid jobID in request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	channelMapping := make(map[string]string)
-	partitionMapping := make(map[int64]int64)
-	if len(snapshotData.Segments) > 0 {
-		// generate channel mappings
-		channelSet := make(map[string]struct{})
-		for _, ch := range snapshotData.Segments {
-			channelSet[ch.GetChannelName()] = struct{}{}
-		}
-		channelsInSnapshot := lo.Keys(channelSet)
-		newChannels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionId())
-		if err != nil {
-			log.Error("failed to get channels by collection ID", zap.Error(err))
-			return &datapb.RestoreSnapshotResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-		if len(newChannels) != len(channelsInSnapshot) {
-			return &datapb.RestoreSnapshotResponse{
-				Status: merr.Status(merr.WrapErrServiceInternal(
-					fmt.Sprintf("channel count mismatch between snapshot and new collection, snapshot: %d, new collection: %d", len(channelsInSnapshot), len(newChannels)))),
-			}, nil
-		}
-		sort.Slice(newChannels, func(i, j int) bool {
-			return newChannels[i].GetName() < newChannels[j].GetName()
-		})
-		sort.Slice(channelsInSnapshot, func(i, j int) bool {
-			return channelsInSnapshot[i] < channelsInSnapshot[j]
-		})
-		for i, channel := range newChannels {
-			channelMapping[channelsInSnapshot[i]] = channel.GetName()
-		}
-
-		// generate partition mapping
-		partitionsInSnapshot := snapshotData.SnapshotInfo.GetPartitionIds()
-		newPartitions, err := s.broker.ShowPartitionsInternal(ctx, req.GetCollectionId())
-		if err != nil {
-			return nil, err
-		}
-		if len(newPartitions) != len(partitionsInSnapshot) {
-			return &datapb.RestoreSnapshotResponse{
-				Status: merr.Status(merr.WrapErrServiceInternal(
-					fmt.Sprintf("partition count mismatch between snapshot and new collection, snapshot: %d, new collection: %d", len(partitionsInSnapshot), len(newPartitions)))),
-			}, nil
-		}
-		sort.Slice(newPartitions, func(i, j int) bool {
-			return newPartitions[i] < newPartitions[j]
-		})
-		sort.Slice(partitionsInSnapshot, func(i, j int) bool {
-			return partitionsInSnapshot[i] < partitionsInSnapshot[j]
-		})
-		for i, partition := range newPartitions {
-			partitionMapping[partitionsInSnapshot[i]] = partition
-		}
-
-	}
-
-	// Create copy segment job directly
-	jobID, err := s.restoreSnapshotByCopy(ctx, req.GetCollectionId(), channelMapping, partitionMapping, snapshotData)
-	if err != nil {
-		log.Error("failed to create copy segment job", zap.Error(err))
+	// Delegate data restore to SnapshotManager
+	if err := s.snapshotManager.RestoreSnapshot(
+		ctx,
+		req.GetName(),
+		req.GetCollectionId(),
+		req.GetJobId(),
+	); err != nil {
+		log.Error("failed to restore snapshot", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("RestoreSnapshot job created", zap.Int64("jobID", jobID))
+	log.Info("restore job created successfully")
 	return &datapb.RestoreSnapshotResponse{
 		Status: merr.Success(),
-		JobId:  jobID,
+		JobId:  req.GetJobId(),
 	}, nil
 }
 
@@ -2320,58 +2321,23 @@ func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRes
 		}, nil
 	}
 
-	resp := &datapb.GetRestoreSnapshotStateResponse{
+	// Delegate to SnapshotManager
+	restoreInfo, err := s.snapshotManager.GetRestoreState(ctx, req.GetJobId())
+	if err != nil {
+		log.Warn("failed to get restore state", zap.Error(err))
+		return &datapb.GetRestoreSnapshotStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("get restore state completed",
+		zap.String("state", restoreInfo.GetState().String()),
+		zap.Int32("progress", restoreInfo.GetProgress()))
+
+	return &datapb.GetRestoreSnapshotStateResponse{
 		Status: merr.Success(),
-	}
-
-	job := s.copySegmentMeta.GetJob(ctx, req.GetJobId())
-	if job == nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("copy job does not exist, jobID=%d", req.GetJobId())))
-		return resp, nil
-	}
-
-	// Calculate progress: (copied_segments / total_segments) * 100
-	var progress int32
-	if job.GetTotalSegments() > 0 {
-		progress = int32((job.GetCopiedSegments() * 100) / job.GetTotalSegments())
-	}
-
-	// Convert CopySegmentJobState to RestoreSnapshotState
-	var state datapb.RestoreSnapshotState
-	switch job.GetState() {
-	case datapb.CopySegmentJobState_CopySegmentJobPending:
-		state = datapb.RestoreSnapshotState_RestoreSnapshotPending
-	case datapb.CopySegmentJobState_CopySegmentJobExecuting:
-		state = datapb.RestoreSnapshotState_RestoreSnapshotExecuting
-	case datapb.CopySegmentJobState_CopySegmentJobCompleted:
-		state = datapb.RestoreSnapshotState_RestoreSnapshotCompleted
-	case datapb.CopySegmentJobState_CopySegmentJobFailed:
-		state = datapb.RestoreSnapshotState_RestoreSnapshotFailed
-	default:
-		state = datapb.RestoreSnapshotState_RestoreSnapshotNone
-	}
-
-	// Calculate time cost in milliseconds
-	var timeCost uint64
-	if job.GetStartTs() > 0 && job.GetCompleteTs() > 0 {
-		timeCost = uint64((job.GetCompleteTs() - job.GetStartTs()) / 1e6) // Convert nanoseconds to milliseconds
-	}
-
-	resp.Info = &datapb.RestoreSnapshotInfo{
-		JobId:        req.GetJobId(),
-		SnapshotName: job.GetSnapshotName(),
-		CollectionId: job.GetCollectionId(),
-		State:        state,
-		Progress:     progress,
-		Reason:       job.GetReason(),
-		TimeCost:     timeCost,
-	}
-
-	log.Info("GetRestoreSnapshotState",
-		zap.String("state", state.String()),
-		zap.Int32("progress", progress))
-
-	return resp, nil
+		Info:   restoreInfo,
+	}, nil
 }
 
 func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
@@ -2381,312 +2347,27 @@ func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRe
 		}, nil
 	}
 
-	resp := &datapb.ListRestoreSnapshotJobsResponse{
+	// Delegate to SnapshotManager
+	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Ctx(ctx).Error("failed to list restore jobs", zap.Error(err))
+		return &datapb.ListRestoreSnapshotJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Ctx(ctx).Info("list restore jobs completed",
+		zap.Int("totalJobs", len(restoreInfos)),
+		zap.Int64("filterCollectionId", req.GetCollectionId()))
+
+	return &datapb.ListRestoreSnapshotJobsResponse{
 		Status: merr.Success(),
-		Jobs:   make([]*datapb.RestoreSnapshotInfo, 0),
-	}
-
-	jobs := s.copySegmentMeta.GetJobBy(ctx)
-
-	// Get collection ID from collection name if provided
-	var filterCollectionID int64
-	if req.GetCollectionName() != "" {
-		collections := s.meta.GetCollections()
-		for _, coll := range collections {
-			if coll.Schema != nil && coll.Schema.GetName() == req.GetCollectionName() {
-				filterCollectionID = coll.ID
-				break
-			}
-		}
-		if filterCollectionID == 0 {
-			log.Ctx(ctx).Warn("collection not found", zap.String("collectionName", req.GetCollectionName()))
-		}
-	}
-
-	// Filter by collection and only include restore jobs (with snapshotName)
-	for _, job := range jobs {
-		if filterCollectionID != 0 && job.GetCollectionId() != filterCollectionID {
-			continue
-		}
-
-		// Calculate progress
-		var progress int32
-		if job.GetTotalSegments() > 0 {
-			progress = int32((job.GetCopiedSegments() * 100) / job.GetTotalSegments())
-		}
-
-		// Convert CopySegmentJobState to RestoreSnapshotState
-		var state datapb.RestoreSnapshotState
-		switch job.GetState() {
-		case datapb.CopySegmentJobState_CopySegmentJobPending:
-			state = datapb.RestoreSnapshotState_RestoreSnapshotPending
-		case datapb.CopySegmentJobState_CopySegmentJobExecuting:
-			state = datapb.RestoreSnapshotState_RestoreSnapshotExecuting
-		case datapb.CopySegmentJobState_CopySegmentJobCompleted:
-			state = datapb.RestoreSnapshotState_RestoreSnapshotCompleted
-		case datapb.CopySegmentJobState_CopySegmentJobFailed:
-			state = datapb.RestoreSnapshotState_RestoreSnapshotFailed
-		default:
-			state = datapb.RestoreSnapshotState_RestoreSnapshotNone
-		}
-
-		// Calculate time cost in milliseconds
-		var timeCost uint64
-		if job.GetStartTs() > 0 && job.GetCompleteTs() > 0 {
-			timeCost = uint64((job.GetCompleteTs() - job.GetStartTs()) / 1e6) // Convert nanoseconds to milliseconds
-		}
-
-		resp.Jobs = append(resp.Jobs, &datapb.RestoreSnapshotInfo{
-			JobId:        job.GetJobId(),
-			SnapshotName: job.GetSnapshotName(),
-			CollectionId: job.GetCollectionId(),
-			State:        state,
-			Progress:     progress,
-			Reason:       job.GetReason(),
-			TimeCost:     timeCost,
-		})
-	}
-
-	log.Ctx(ctx).Info("ListRestoreSnapshotJobs",
-		zap.Int("totalJobs", len(resp.Jobs)),
-		zap.String("filterCollectionName", req.GetCollectionName()))
-
-	return resp, nil
-}
-
-// restoreSnapshotByCopy initiates a copy-based snapshot restore operation.
-//
-// This function creates a copy segment job that restores snapshot data to a target collection
-// by copying segment files (binlogs, indexes) from snapshot to new segment IDs. It uses the
-// copy segment infrastructure to perform efficient parallel file copying across DataNodes.
-//
-// Process flow:
-//  1. Allocate unique job ID for the restore operation
-//  2. Validate which source segments exist in metadata (skip missing segments)
-//  3. Allocate new segment IDs for all valid target segments
-//  4. Create ID mappings between source and target segments
-//  5. Apply channel and partition mappings to target segments
-//  6. Pre-register target segments in metadata with Importing state
-//  7. Create copy segment job with lightweight ID mappings
-//  8. Save job to metadata for tracking and execution
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeout
-//   - targetCollection: ID of collection to restore data into
-//   - channelMapping: Map of source channel names to target channel names
-//   - partitionMapping: Map of source partition IDs to target partition IDs
-//   - snapshotInfo: Complete snapshot data with segment descriptions
-//
-// Returns:
-//   - jobID: Unique identifier for the copy segment job (0 on failure)
-//   - error: If allocation fails, segment validation fails, or job creation fails
-//
-// Target segment pre-registration:
-// - Creates placeholder segments with Importing state
-// - Ensures segments exist before copy tasks execute
-// - Contains metadata: collection, partition, channel, rowcount, positions
-// - Binlogs and indexes populated during task execution
-//
-// ID mapping structure:
-// - SourceSegmentId: Segment ID in snapshot (source data)
-// - TargetSegmentId: Newly allocated segment ID (destination)
-// - PartitionId: Target partition ID (after applying partitionMapping)
-//
-// Lightweight design:
-// - Job stores only ID mappings, not full segment descriptions
-// - Reduces metadata storage size
-// - Full binlog paths retrieved dynamically from snapshot during task execution
-//
-// L0 segment handling:
-// - L0 segments (delete-only segments) may not have partition mappings
-// - Uses partitionID = -1 for L0 segments without mapping
-// - Preserves L0 segment level in target segments
-//
-// Channel and partition remapping:
-// - Enables restoring to different channels (for scaling or rebalancing)
-// - Enables restoring to different partitions (for data reorganization)
-// - Critical for cross-database/cross-cluster restore scenarios
-//
-// Job configuration:
-// - Default timeout: 5 minutes (can be extended for large restores)
-// - Options: copy_index=true (copies all index types)
-// - Snapshot name recorded for task request assembly
-//
-// Error handling:
-// - Returns error if no valid segments found
-// - Skips segments not found in metadata (with warning)
-// - Returns error if partition mapping missing for non-L0 segments
-// - Rolls back on failure (segments remain in Importing state, can be cleaned up)
-//
-// Task execution flow (after this function):
-// 1. CopySegmentChecker detects Pending job
-// 2. Checker creates CopySegmentTasks by splitting ID mappings
-// 3. CopySegmentInspector schedules tasks to DataNodes
-// 4. DataNodes copy files and report results
-// 5. DataCoord updates segment binlogs and indexes
-// 6. Segments transition from Importing → Flushed (queryable)
-func (s *Server) restoreSnapshotByCopy(
-	ctx context.Context,
-	targetCollection int64,
-	channelMapping map[string]string,
-	partitionMapping map[int64]int64,
-	snapshotInfo *SnapshotData,
-) (int64, error) {
-	log := log.Ctx(ctx).With(
-		zap.String("snapshotName", snapshotInfo.SnapshotInfo.GetName()),
-		zap.Int64("targetCollectionID", targetCollection),
-		zap.Any("channelMapping", channelMapping),
-		zap.Any("partitionMapping", partitionMapping),
-	)
-
-	// Allocate job ID
-	jobID, err := s.idAllocator.AllocOne()
-	if err != nil {
-		log.Error("failed to alloc job id", zap.Error(err))
-		return 0, err
-	}
-
-	// First validate which segments exist in meta
-	validSegments := make([]*datapb.SegmentDescription, 0, len(snapshotInfo.Segments))
-	for _, segDesc := range snapshotInfo.Segments {
-		sourceSegmentID := segDesc.GetSegmentId()
-		segInfo := s.meta.GetSegment(ctx, sourceSegmentID)
-		if segInfo == nil {
-			log.Warn("segment not found in meta, skip",
-				zap.Int64("segmentID", sourceSegmentID))
-			continue
-		}
-		validSegments = append(validSegments, segDesc)
-	}
-
-	// Allocate segment IDs only for valid segments
-	startID, _, err := s.allocator.AllocN(int64(len(validSegments)))
-	if err != nil {
-		log.Error("failed to allocate segment IDs", zap.Error(err))
-		return 0, err
-	}
-
-	// Create lightweight ID mappings
-	idMappings := make([]*datapb.CopySegmentIDMapping, 0, len(validSegments))
-	totalRows := int64(0)
-	targetSegments := make(map[int64]*SegmentInfo, len(validSegments))
-	for i, segDesc := range validSegments {
-		totalRows += segDesc.GetNumOfRows()
-
-		targetChannel := channelMapping[segDesc.GetChannelName()]
-		targetPartition, ok := partitionMapping[segDesc.GetPartitionId()]
-		if !ok {
-			if segDesc.GetSegmentLevel() != datapb.SegmentLevel_L0 {
-				log.Error("partition mapping not found for segment",
-					zap.Int64("sourcePartitionID", segDesc.GetPartitionId()),
-					zap.Int64("sourceSegmentID", segDesc.GetSegmentId()))
-				return 0, merr.WrapErrImportFailed(fmt.Sprintf("partition mapping not found for segment, segmentID=%d", segDesc.GetSegmentId()))
-			}
-			targetPartition = -1
-		}
-		targetSegmentID := startID + int64(i)
-		targetSegmentLevel := segDesc.GetSegmentLevel()
-
-		// Create lightweight ID mapping (binlogs will be retrieved dynamically later)
-		idMapping := &datapb.CopySegmentIDMapping{
-			SourceSegmentId: segDesc.GetSegmentId(),
-			TargetSegmentId: targetSegmentID,
-			PartitionId:     targetPartition,
-		}
-
-		log.Info("prepared segment ID mapping for copy",
-			zap.Int64("sourceSegmentID", idMapping.GetSourceSegmentId()),
-			zap.Int64("targetSegmentID", idMapping.GetTargetSegmentId()),
-			zap.Int64("sourcePartitionID", segDesc.GetPartitionId()),
-			zap.Int64("targetPartitionID", targetPartition),
-			zap.String("sourceChannel", segDesc.GetChannelName()),
-			zap.String("targetChannel", targetChannel),
-			zap.Int64("numRows", segDesc.GetNumOfRows()),
-		)
-		idMappings = append(idMappings, idMapping)
-
-		startPos := segDesc.GetStartPosition()
-		dmlPos := segDesc.GetDmlPosition()
-		if startPos == nil {
-			startPos.ChannelName = targetChannel
-		}
-		if dmlPos == nil {
-			dmlPos.ChannelName = targetChannel
-		}
-
-		// assign target segment
-		newSegment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:                  targetSegmentID,
-				CollectionID:        targetCollection,
-				PartitionID:         targetPartition,
-				InsertChannel:       targetChannel,
-				NumOfRows:           segDesc.GetNumOfRows(), // Will be updated after copy
-				State:               commonpb.SegmentState_Importing,
-				MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-				Level:               datapb.SegmentLevel(targetSegmentLevel),
-				CreatedByCompaction: false,
-				LastExpireTime:      math.MaxUint64,
-				StartPosition:       startPos,
-				DmlPosition:         dmlPos,
-				StorageVersion:      segDesc.GetStorageVersion(),
-				IsSorted:            segDesc.GetIsSorted(),
-			},
-		}
-		targetSegments[targetSegmentID] = newSegment
-	}
-
-	// Pre-register target segments in meta to ensure they exist when copy tasks run
-	// This creates placeholder segments that will be populated during copy task execution
-	for _, targetSegment := range targetSegments {
-		if err := s.meta.AddSegment(ctx, targetSegment); err != nil {
-			log.Error("failed to pre-register target segment in meta",
-				zap.Error(err))
-			return 0, err
-		}
-	}
-
-	// Create CopySegmentJob (schema removed to reduce storage)
-	copyJob := &copySegmentJob{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:        jobID,
-			CollectionId: targetCollection,
-			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
-			IdMappings:   idMappings,                                         // Lightweight ID mappings
-			TimeoutTs:    uint64(time.Now().Add(5 * time.Minute).UnixNano()), // Default timeout
-			StartTs:      uint64(time.Now().UnixNano()),
-			Options: []*commonpb.KeyValuePair{
-				{Key: "copy_index", Value: "true"}, // Copy indexes from snapshot
-				{Key: "source_type", Value: "snapshot"},
-			},
-			TotalSegments: int64(len(idMappings)),
-			TotalRows:     totalRows,
-			SnapshotName:  snapshotInfo.SnapshotInfo.GetName(), // Set snapshot name
-		},
-		tr: timerecord.NewTimeRecorder("copy segment job"),
-	}
-
-	// Save job to meta
-	if err := s.copySegmentMeta.AddJob(ctx, copyJob); err != nil {
-		log.Error("failed to save copy segment job",
-			zap.Int64("jobID", jobID),
-			zap.Error(err))
-		return 0, err
-	}
-
-	log.Info("created copy segment job for snapshot restore",
-		zap.Int64("jobID", jobID),
-		zap.String("snapshotName", snapshotInfo.SnapshotInfo.GetName()),
-		zap.Int("segmentCount", len(idMappings)),
-		zap.Int64("totalRows", totalRows))
-
-	return jobID, nil
+		Jobs:   restoreInfos,
+	}, nil
 }
 
 func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.GetCollectionId()))
-
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.ListSnapshotsResponse{
 			Status: merr.Status(err),
@@ -2694,7 +2375,8 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 	}
 	log.Info("receive ListSnapshots request")
 
-	snapshots, err := s.meta.GetSnapshotMeta().ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId())
+	// Delegate to SnapshotManager
+	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId())
 	if err != nil {
 		log.Error("failed to list snapshots", zap.Error(err))
 		return &datapb.ListSnapshotsResponse{

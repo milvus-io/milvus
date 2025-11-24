@@ -3137,7 +3137,6 @@ func Test_dropCollectionTask_PreExecute(t *testing.T) {
 	defer mockGetCollectionID.UnPatch()
 
 	mockRC := mocks.NewMockMixCoordClient(t)
-	mockRC.EXPECT().ListSnapshots(mock.Anything, mock.Anything).Return(nil, nil)
 	dct.mixCoord = mockRC
 	ctx := context.Background()
 	err := dct.PreExecute(ctx)

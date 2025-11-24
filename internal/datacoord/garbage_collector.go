@@ -331,6 +331,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedTextIndexFiles(ctx, signal)
 			gc.recycleUnusedJSONIndexFiles(ctx, signal)
 			gc.recycleUnusedJSONStatsFiles(ctx, signal)
+			gc.recyclePendingSnapshots(ctx, signal) // Cleanup orphaned snapshot files from failed 2PC
 		})
 	}()
 	go func() {
@@ -1422,6 +1423,100 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 		}
 	}
 	log.Info("json index files recycle done", zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
+
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+}
+
+// recyclePendingSnapshots cleans up orphaned snapshot files from failed 2PC commits.
+// This method scans etcd for PENDING snapshots that have exceeded the timeout,
+// computes their S3 directory/file paths from snapshot ID, and cleans up using RemoveWithPrefix.
+//
+// Key design decisions:
+//   - NO S3 list operations: Uses RemoveWithPrefix for directory cleanup
+//   - File paths computed from collection_id + snapshot_id stored in etcd
+//   - Timeout mechanism prevents cleanup of snapshots still being created
+//
+// Process flow:
+//  1. Get all PENDING snapshots from catalog that have exceeded timeout
+//  2. For each pending snapshot:
+//     a. Compute manifest directory and metadata file path from snapshot ID
+//     b. Delete manifest directory using RemoveWithPrefix
+//     c. Delete metadata file
+//     d. Delete etcd record
+func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal <-chan gcCmd) {
+	start := time.Now()
+	log := log.Ctx(ctx).With(zap.String("gcName", "recyclePendingSnapshots"), zap.Time("startAt", start))
+	log.Info("start recyclePendingSnapshots...")
+	defer func() { log.Info("recyclePendingSnapshots done", zap.Duration("timeCost", time.Since(start))) }()
+
+	snapshotMeta := gc.meta.GetSnapshotMeta()
+	if snapshotMeta == nil {
+		log.Warn("snapshotMeta is nil, skip recyclePendingSnapshots")
+		return
+	}
+
+	// Get pending timeout from config
+	pendingTimeout := paramtable.Get().DataCoordCfg.SnapshotPendingTimeout.GetAsDuration(time.Minute)
+
+	// Get all pending snapshots that have exceeded timeout
+	pendingSnapshots, err := snapshotMeta.GetPendingSnapshots(ctx, pendingTimeout)
+	if err != nil {
+		log.Warn("failed to get pending snapshots", zap.Error(err))
+		return
+	}
+
+	if len(pendingSnapshots) == 0 {
+		return
+	}
+
+	log.Info("found pending snapshots to cleanup", zap.Int("count", len(pendingSnapshots)))
+	cleanedCount := 0
+
+	for _, snapshot := range pendingSnapshots {
+		snapshotLog := log.With(
+			zap.String("snapshotName", snapshot.GetName()),
+			zap.Int64("snapshotID", snapshot.GetId()),
+			zap.Int64("collectionID", snapshot.GetCollectionId()),
+		)
+
+		gc.ackSignal(signal)
+		// Compute paths from collection_id + snapshot_id
+		manifestDir, metadataPath := GetSnapshotPaths(
+			gc.option.cli.RootPath(),
+			snapshot.GetCollectionId(),
+			snapshot.GetId(),
+		)
+
+		snapshotLog.Info("cleaning up pending snapshot",
+			zap.String("manifestDir", manifestDir),
+			zap.String("metadataPath", metadataPath))
+
+		// Delete manifest directory using RemoveWithPrefix (no list needed)
+		// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
+		if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
+			snapshotLog.Warn("failed to remove pending snapshot manifest directory", zap.Error(err))
+			// Continue with metadata and etcd cleanup even if S3 cleanup fails
+		}
+
+		// Delete metadata file
+		if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
+			snapshotLog.Warn("failed to remove pending snapshot metadata file", zap.Error(err))
+			// Continue with etcd cleanup even if S3 cleanup fails
+		}
+
+		// Delete etcd record
+		if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
+			snapshotLog.Warn("failed to drop pending snapshot from catalog", zap.Error(err))
+			continue
+		}
+
+		snapshotLog.Info("successfully cleaned up pending snapshot")
+		cleanedCount++
+	}
+
+	log.Info("pending snapshots cleanup completed",
+		zap.Int("totalPending", len(pendingSnapshots)),
+		zap.Int("cleanedCount", cleanedCount))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }
