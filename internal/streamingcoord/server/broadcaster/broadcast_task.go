@@ -20,6 +20,9 @@ import (
 func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadcasterMetrics, ackCallbackScheduler *ackCallbackScheduler) *broadcastTask {
 	msg := message.NewBroadcastMutableMessageBeforeAppend(proto.Message.Payload, proto.Message.Properties)
 	m := metrics.NewBroadcastTask(msg.MessageType(), proto.GetState(), msg.BroadcastHeader().ResourceKeys.Collect())
+
+	fixAckInfoFromProto(proto, len(msg.BroadcastHeader().VChannels))
+
 	bt := &broadcastTask{
 		mu:                   sync.Mutex{},
 		taskMetricsGuard:     m,
@@ -38,6 +41,24 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		close(bt.done)
 	}
 	return bt
+}
+
+// fixAckInfoFromProto fixes the recovery info of the broadcast task.
+// because the zero value of the repeated field and bytes field in proto is ignored or treated as empty value but not nil pointer,
+// so we need to fix the recovery info of the broadcast task from proto to keep the consistency of memory state.
+func fixAckInfoFromProto(proto *streamingpb.BroadcastTask, vchannelCount int) {
+	bitmap := make([]byte, vchannelCount)
+	copy(bitmap, proto.AckedVchannelBitmap)
+
+	checkpoints := make([]*streamingpb.AckedCheckpoint, vchannelCount)
+	for i, cp := range proto.AckedCheckpoints {
+		if cp != nil && cp.TimeTick == 0 {
+			cp = nil
+		}
+		checkpoints[i] = cp
+	}
+	proto.AckedVchannelBitmap = bitmap
+	proto.AckedCheckpoints = checkpoints
 }
 
 // newBroadcastTaskFromBroadcastMessage creates a new broadcast task from the broadcast message.
