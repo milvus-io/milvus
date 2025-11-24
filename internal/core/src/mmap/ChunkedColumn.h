@@ -629,16 +629,15 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
 
     void
     BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(ScalarFieldProto&&, size_t)> fn,
+                std::function<void(const ArrayView&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
         for (int64_t i = 0; i < count; i++) {
-            auto array = static_cast<ArrayChunk*>(ca->get_cell_of(cids[i]))
-                             ->View(offsets_in_chunk[i])
-                             .output_data();
-            fn(std::move(array), i);
+            auto view = static_cast<ArrayChunk*>(ca->get_cell_of(cids[i]))
+                            ->View(offsets_in_chunk[i]);
+            fn(view, i);
         }
     }
 
