@@ -603,6 +603,50 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
     
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_timestamptz_search_group_by(self):
+        """
+        target: test search with group by and timestamptz
+        method:
+            1. Create a collection
+            2. Generate rows with timestamptz and insert the rows
+            3. Search with group by timestamptz
+        expected: Step 3 should result success
+        """
+        # step 1: create collection
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_timestamp_field_name, DataType.TIMESTAMPTZ, nullable=True)
+        index_params = self.prepare_index_params(client)[0] 
+        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_timestamp_field_name, index_type="AUTOINDEX")
+        self.create_collection(client, collection_name, default_dim, schema=schema, 
+                               consistency_level="Strong", index_params=index_params)
+    
+        # step 2: generate rows with timestamptz and insert the rows
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
+        self.insert(client, collection_name, rows)
+        
+        # step 3: search with group by timestamptz
+        vectors_to_search = cf.gen_vectors(1, default_dim, vector_data_type=DataType.FLOAT_VECTOR)
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search, 
+                    timezone="Asia/Shanghai",
+                    time_fields="year, month, day, hour, minute, second, microsecond",
+                    group_by_field=default_timestamp_field_name,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                            "nq": len(vectors_to_search),
+                            "ids": insert_ids,
+                            "pk_name": default_primary_key_field_name,
+                            "limit": default_limit})
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_timestamptz_query(self):
         """
         target:  Milvus can query with timestamptz expr
@@ -763,7 +807,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
             2. insert rows
             3. add field with timestamptz
             4. compact
-        expected: Step 4 should success
+            5. query the rows
+        expected: Step 4 and Step 5 should success
         """
         # step 1: create collection
         client = self._client()
@@ -802,6 +847,24 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
             if time.time() - start > cost:
                 raise Exception(1, f"Compact after index cost more than {cost}s")
         
+        # step 5: query the rows
+        # first release the collection
+        self.release_collection(client, collection_name)
+        # then load the collection
+        self.load_collection(client, collection_name)
+        # then query the rows
+        for row in rows:
+            row[default_timestamp_field_name] = None
+        self.query(client, collection_name, filter=f"0 <= {default_primary_key_field_name} < {default_nb}",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: rows,
+                                    "pk_name": default_primary_key_field_name})
+
+        new_rows = cf.convert_timestamptz(new_rows, default_timestamp_field_name, "UTC")
+        self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= {default_nb}",
+                    check_task=CheckTasks.check_query_results,
+                    check_items={exp_res: new_rows,
+                                    "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1092,7 +1155,7 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         
         # step 3: query the rows from different client in different timezone
-        client2 = self._client()
+        client2 = self._client(alias="client2_alias")
         UTC_time_row = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
         shanghai_rows = cf.convert_timestamptz(UTC_time_row, default_timestamp_field_name, "Asia/Shanghai")
         LA_rows = cf.convert_timestamptz(UTC_time_row, default_timestamp_field_name, "America/Los_Angeles")
@@ -1109,7 +1172,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         
         assert len(result_1) == len(result_2) == default_nb
         self.drop_collection(client, collection_name)
-
 
 
 class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
