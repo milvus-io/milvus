@@ -23,11 +23,9 @@ import (
 	"reflect"
 
 	"github.com/x448/float16"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 // Generic Clone for proto message
@@ -102,7 +100,6 @@ func Uint64ToBytes(v uint64) []byte {
 // SliceRemoveDuplicate is used to dedup a Slice
 func SliceRemoveDuplicate(a interface{}) (ret []interface{}) {
 	if reflect.TypeOf(a).Kind() != reflect.Slice {
-		log.Error("input is not slice", zap.String("inputType", fmt.Sprintf("%T", a)))
 		return ret
 	}
 

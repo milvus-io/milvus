@@ -500,6 +500,7 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumeBytes)
 
 	registerWAL(registry)
+	RegisterLoggingMetrics(registry)
 
 	// TODO: after remove the implementation of old data node
 	// Such as flowgraph and writebuffer, we can remove these metrics from streaming node.

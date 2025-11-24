@@ -43,9 +43,11 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/milvus-io/milvus/pkg/v2/log/writesyncer"
 )
 
-var _globalL, _globalP, _globalS, _globalR atomic.Value
+var _globalL, _globalP, _globalS, _globalR, _globalCleanup atomic.Value
 
 var (
 	_globalLevelLogger sync.Map
@@ -85,6 +87,11 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 	}
 	debugCfg := *cfg
 	debugCfg.Level = "debug"
+	if cfg.AsyncWriteEnable {
+		var cleanup func()
+		outputs, cleanup = withAsyncBufferedWriteSyncer(outputs, cfg)
+		registerCleanup(cleanup)
+	}
 	outputsWriter := zap.CombineWriteSyncers(outputs...)
 	debugL, r, err := InitLoggerWithWriteSyncer(&debugCfg, outputsWriter, opts...)
 	if err != nil {
@@ -212,12 +219,28 @@ func fatalL() *zap.Logger {
 	return v.(*zap.Logger)
 }
 
+// Cleanup cleans up the global logger and sugared logger.
+func Cleanup() {
+	cleanup := _globalCleanup.Load()
+	if cleanup != nil {
+		cleanup.(func())()
+	}
+}
+
 // ReplaceGlobals replaces the global Logger and SugaredLogger.
 // It's safe for concurrent use.
 func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
 	_globalL.Store(logger)
 	_globalS.Store(logger.Sugar())
 	_globalP.Store(props)
+}
+
+// registerCleanup registers a cleanup function to be called when the global logger is cleaned up.
+func registerCleanup(cleanup func()) {
+	oldCleanup := _globalCleanup.Swap(cleanup)
+	if oldCleanup != nil {
+		oldCleanup.(func())()
+	}
 }
 
 func replaceLeveledLoggers(debugLogger *zap.Logger) {
@@ -253,4 +276,26 @@ func Sync() error {
 
 func Level() zap.AtomicLevel {
 	return _globalP.Load().(*ZapProperties).Level
+}
+
+func withAsyncBufferedWriteSyncer(outputs []zapcore.WriteSyncer, cfg *Config) ([]zapcore.WriteSyncer, func()) {
+	syncers := make([]*writesyncer.AsyncBufferedWriteSyncer, len(outputs))
+	newOutputs := make([]zapcore.WriteSyncer, len(outputs))
+	for i, output := range outputs {
+		asyncSyncer := writesyncer.NewAsyncBufferedWriteSyncer(writesyncer.AsyncBufferedWriteSyncerConfig{
+			WS:                  output,
+			FlushInterval:       cfg.AsyncWriteFlushInterval,
+			WriteDroppedTimeout: cfg.AsyncWriteDroppedTimeout,
+			StopTimeout:         cfg.AsyncWriteStopTimeout,
+			PendingItemSize:     cfg.AsyncWritePendingLength,
+			WriteBufferSize:     cfg.AsyncWriteBufferSize,
+		})
+		syncers[i] = asyncSyncer
+		newOutputs[i] = asyncSyncer
+	}
+	return newOutputs, func() {
+		for _, syncer := range syncers {
+			syncer.Stop()
+		}
+	}
 }
