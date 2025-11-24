@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"encoding/base64"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -167,7 +168,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 				pluginContext := indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
-					EncryptionKey:    string(unsafe),
+					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 				}
 				pluginContextPtr = &pluginContext
 			}
