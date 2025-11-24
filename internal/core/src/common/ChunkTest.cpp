@@ -962,3 +962,501 @@ TEST(chunk, test_binary_search_methods_comparison) {
         }
     }
 }
+
+TEST(chunk, test_create_group_chunk_basic) {
+    // Prepare data for multiple fields
+    size_t row_count = 5;
+
+    // Field 1: INT64
+    FixedVector<int64_t> int_data = {1, 2, 3, 4, 5};
+    auto int_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::INT64, DataType::NONE);
+    int_field_data->FillFieldData(int_data.data(), int_data.size());
+
+    // Field 2: VARCHAR
+    FixedVector<std::string> str_data = {
+        "test1", "test2", "test3", "test4", "test5"};
+    auto str_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VARCHAR, DataType::NONE);
+    str_field_data->FillFieldData(str_data.data(), str_data.size());
+
+    // Field 3: DOUBLE
+    FixedVector<double> double_data = {1.1, 2.2, 3.3, 4.4, 5.5};
+    auto double_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::DOUBLE, DataType::NONE);
+    double_field_data->FillFieldData(double_data.data(), double_data.size());
+
+    // Create arrow arrays for each field
+    std::vector<arrow::ArrayVector> array_vecs;
+
+    // Process INT64 field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(int_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Process VARCHAR field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(str_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Process DOUBLE field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(double_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Create field metadata
+    std::vector<FieldId> field_ids = {FieldId(1), FieldId(2), FieldId(3)};
+    std::vector<FieldMeta> field_metas = {FieldMeta(FieldName("int_field"),
+                                                    FieldId(1),
+                                                    DataType::INT64,
+                                                    false,
+                                                    std::nullopt),
+                                          FieldMeta(FieldName("str_field"),
+                                                    FieldId(2),
+                                                    DataType::STRING,
+                                                    false,
+                                                    std::nullopt),
+                                          FieldMeta(FieldName("double_field"),
+                                                    FieldId(3),
+                                                    DataType::DOUBLE,
+                                                    false,
+                                                    std::nullopt)};
+
+    // Create group chunk without mmap
+    auto chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+
+    // Verify all chunks were created
+    EXPECT_EQ(chunks.size(), 3);
+    EXPECT_NE(chunks.find(FieldId(1)), chunks.end());
+    EXPECT_NE(chunks.find(FieldId(2)), chunks.end());
+    EXPECT_NE(chunks.find(FieldId(3)), chunks.end());
+
+    // Verify INT64 chunk
+    auto int_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(1)].get());
+    auto int_span = int_chunk->Span();
+    EXPECT_EQ(int_span.row_count(), row_count);
+    for (size_t i = 0; i < row_count; ++i) {
+        auto value =
+            *(int64_t*)((char*)int_span.data() + i * int_span.element_sizeof());
+        EXPECT_EQ(value, int_data[i]);
+    }
+
+    // Verify STRING chunk
+    auto str_chunk = static_cast<StringChunk*>(chunks[FieldId(2)].get());
+    auto [str_views, str_valid] = str_chunk->StringViews(std::nullopt);
+    EXPECT_EQ(str_views.size(), row_count);
+    for (size_t i = 0; i < row_count; ++i) {
+        EXPECT_EQ(str_views[i], str_data[i]);
+    }
+
+    // Verify DOUBLE chunk
+    auto double_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(3)].get());
+    auto double_span = double_chunk->Span();
+    EXPECT_EQ(double_span.row_count(), row_count);
+    for (size_t i = 0; i < row_count; ++i) {
+        auto value = *(double*)((char*)double_span.data() +
+                                i * double_span.element_sizeof());
+        EXPECT_DOUBLE_EQ(value, double_data[i]);
+    }
+}
+
+TEST(chunk, test_create_group_chunk_with_mmap) {
+    // Prepare data for multiple fields
+    size_t row_count = 5;
+
+    // Field 1: INT32
+    FixedVector<int32_t> int32_data = {10, 20, 30, 40, 50};
+    auto int32_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::INT32, DataType::NONE);
+    int32_field_data->FillFieldData(int32_data.data(), int32_data.size());
+
+    // Field 2: FLOAT
+    FixedVector<float> float_data = {1.5f, 2.5f, 3.5f, 4.5f, 5.5f};
+    auto float_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::FLOAT, DataType::NONE);
+    float_field_data->FillFieldData(float_data.data(), float_data.size());
+
+    // Create arrow arrays for each field
+    std::vector<arrow::ArrayVector> array_vecs;
+
+    // Process INT32 field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(int32_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Process FLOAT field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(float_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Create field metadata
+    std::vector<FieldId> field_ids = {FieldId(10), FieldId(11)};
+    std::vector<FieldMeta> field_metas = {FieldMeta(FieldName("int32_field"),
+                                                    FieldId(10),
+                                                    DataType::INT32,
+                                                    false,
+                                                    std::nullopt),
+                                          FieldMeta(FieldName("float_field"),
+                                                    FieldId(11),
+                                                    DataType::FLOAT,
+                                                    false,
+                                                    std::nullopt)};
+
+    // Create group chunk with mmap
+    std::string mmap_file = "/tmp/test_group_chunk_mmap.bin";
+    auto chunks =
+        create_group_chunk(field_ids, field_metas, array_vecs, mmap_file);
+
+    // Verify all chunks were created
+    EXPECT_EQ(chunks.size(), 2);
+    EXPECT_NE(chunks.find(FieldId(10)), chunks.end());
+    EXPECT_NE(chunks.find(FieldId(11)), chunks.end());
+
+    // Verify INT32 chunk
+    auto int32_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(10)].get());
+    auto int32_span = int32_chunk->Span();
+    EXPECT_EQ(int32_span.row_count(), row_count);
+    for (size_t i = 0; i < row_count; ++i) {
+        auto value = *(int32_t*)((char*)int32_span.data() +
+                                 i * int32_span.element_sizeof());
+        EXPECT_EQ(value, int32_data[i]);
+    }
+
+    // Verify FLOAT chunk
+    auto float_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(11)].get());
+    auto float_span = float_chunk->Span();
+    EXPECT_EQ(float_span.row_count(), row_count);
+    for (size_t i = 0; i < row_count; ++i) {
+        auto value = *(float*)((char*)float_span.data() +
+                               i * float_span.element_sizeof());
+        EXPECT_FLOAT_EQ(value, float_data[i]);
+    }
+
+    // Clean up mmap file
+    chunks.clear();
+    boost::filesystem::remove(mmap_file);
+}
+
+TEST(chunk, test_create_group_chunk_shared_memory) {
+    // Test that chunks in a group share the same underlying memory
+    size_t row_count = 3;
+
+    // Create two simple INT64 fields
+    FixedVector<int64_t> data1 = {100, 200, 300};
+    auto field_data1 = milvus::storage::CreateFieldData(
+        storage::DataType::INT64, DataType::NONE);
+    field_data1->FillFieldData(data1.data(), data1.size());
+
+    FixedVector<int64_t> data2 = {111, 222, 333};
+    auto field_data2 = milvus::storage::CreateFieldData(
+        storage::DataType::INT64, DataType::NONE);
+    field_data2->FillFieldData(data2.data(), data2.size());
+
+    // Create arrow arrays
+    std::vector<arrow::ArrayVector> array_vecs;
+
+    // Process first field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(field_data1);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Process second field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(field_data2);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    std::vector<FieldId> field_ids = {FieldId(20), FieldId(21)};
+    std::vector<FieldMeta> field_metas = {FieldMeta(FieldName("field1"),
+                                                    FieldId(20),
+                                                    DataType::INT64,
+                                                    false,
+                                                    std::nullopt),
+                                          FieldMeta(FieldName("field2"),
+                                                    FieldId(21),
+                                                    DataType::INT64,
+                                                    false,
+                                                    std::nullopt)};
+
+    auto chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+
+    // Both chunks should exist
+    EXPECT_EQ(chunks.size(), 2);
+
+    // Get the chunks
+    auto chunk1 = static_cast<FixedWidthChunk*>(chunks[FieldId(20)].get());
+    auto chunk2 = static_cast<FixedWidthChunk*>(chunks[FieldId(21)].get());
+
+    // Verify data in both chunks
+    auto span1 = chunk1->Span();
+    auto span2 = chunk2->Span();
+
+    EXPECT_EQ(span1.row_count(), row_count);
+    EXPECT_EQ(span2.row_count(), row_count);
+
+    for (size_t i = 0; i < row_count; ++i) {
+        auto value1 =
+            *(int64_t*)((char*)span1.data() + i * span1.element_sizeof());
+        EXPECT_EQ(value1, data1[i]);
+
+        auto value2 =
+            *(int64_t*)((char*)span2.data() + i * span2.element_sizeof());
+        EXPECT_EQ(value2, data2[i]);
+    }
+}
+
+TEST(chunk, test_create_group_chunk_nullable_fields) {
+    // Test group chunk with nullable fields
+    size_t row_count = 5;
+
+    // Field 1: Nullable INT64
+    FixedVector<int64_t> int_data = {1, 2, 3, 4, 5};
+    auto int_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::INT64, DataType::NONE, true);
+    uint8_t* int_valid_data = new uint8_t[1]{0x15};  // 10101 in binary
+    int_field_data->FillFieldData(
+        int_data.data(), int_valid_data, int_data.size(), 0);
+    delete[] int_valid_data;
+
+    // Field 2: Nullable VARCHAR
+    FixedVector<std::string> str_data = {
+        "test1", "test2", "test3", "test4", "test5"};
+    auto str_field_data = milvus::storage::CreateFieldData(
+        storage::DataType::VARCHAR, DataType::NONE, true);
+    uint8_t* str_valid_data = new uint8_t[1]{0x1A};  // 11010 in binary
+    str_field_data->FillFieldData(
+        str_data.data(), str_valid_data, str_data.size(), 0);
+    delete[] str_valid_data;
+
+    // Create arrow arrays
+    std::vector<arrow::ArrayVector> array_vecs;
+
+    // Process INT64 field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(int_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    // Process VARCHAR field
+    {
+        storage::InsertEventData event_data;
+        auto payload_reader =
+            std::make_shared<milvus::storage::PayloadReader>(str_field_data);
+        event_data.payload_reader = payload_reader;
+        auto ser_data = event_data.Serialize();
+        auto buffer = std::make_shared<arrow::io::BufferReader>(
+            ser_data.data() + 2 * sizeof(milvus::Timestamp),
+            ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+        parquet::arrow::FileReaderBuilder reader_builder;
+        auto s = reader_builder.Open(buffer);
+        EXPECT_TRUE(s.ok());
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+        s = reader_builder.Build(&arrow_reader);
+        EXPECT_TRUE(s.ok());
+
+        std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+        s = arrow_reader->GetRecordBatchReader(&rb_reader);
+        EXPECT_TRUE(s.ok());
+
+        array_vecs.push_back(read_single_column_batches(rb_reader));
+    }
+
+    std::vector<FieldId> field_ids = {FieldId(30), FieldId(31)};
+    std::vector<FieldMeta> field_metas = {FieldMeta(FieldName("nullable_int"),
+                                                    FieldId(30),
+                                                    DataType::INT64,
+                                                    true,
+                                                    std::nullopt),
+                                          FieldMeta(FieldName("nullable_str"),
+                                                    FieldId(31),
+                                                    DataType::STRING,
+                                                    true,
+                                                    std::nullopt)};
+
+    auto chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+
+    EXPECT_EQ(chunks.size(), 2);
+
+    // Verify nullable INT64 chunk (validity: 10101)
+    auto int_chunk = static_cast<FixedWidthChunk*>(chunks[FieldId(30)].get());
+    EXPECT_TRUE(int_chunk->isValid(0));
+    EXPECT_FALSE(int_chunk->isValid(1));
+    EXPECT_TRUE(int_chunk->isValid(2));
+    EXPECT_FALSE(int_chunk->isValid(3));
+    EXPECT_TRUE(int_chunk->isValid(4));
+
+    // Verify nullable VARCHAR chunk (validity: 11010)
+    auto str_chunk = static_cast<StringChunk*>(chunks[FieldId(31)].get());
+    auto [str_views, str_valid] = str_chunk->StringViews(std::nullopt);
+    EXPECT_FALSE(str_valid[0]);
+    EXPECT_TRUE(str_valid[1]);
+    EXPECT_FALSE(str_valid[2]);
+    EXPECT_TRUE(str_valid[3]);
+    EXPECT_TRUE(str_valid[4]);
+
+    // Verify data for valid entries
+    for (size_t i = 0; i < row_count; ++i) {
+        if (str_valid[i]) {
+            EXPECT_EQ(str_views[i], str_data[i]);
+        }
+    }
+}
