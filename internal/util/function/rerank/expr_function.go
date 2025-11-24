@@ -184,8 +184,6 @@ func tokenMatchCount(fieldText string, queryText string, analyzerParams string) 
 	if err != nil {
 		log.Warn("token_match_count: failed to create analyzer",
 			zap.String("analyzer_params", analyzerParams),
-			zap.String("field_text", fieldText),
-			zap.String("query_text", queryText),
 			zap.Error(err))
 		return math.NaN()
 	}
@@ -193,7 +191,6 @@ func tokenMatchCount(fieldText string, queryText string, analyzerParams string) 
 
 	// token stream of the queryText - collect unique tokens
 	queryTokens := make(map[string]bool)
-	queryTokensList := make([]string, 0)
 	tok1 := an.NewTokenStream(queryText)
 	if tok1 == nil {
 		log.Warn("token_match_count: failed to create query token stream",
@@ -201,17 +198,14 @@ func tokenMatchCount(fieldText string, queryText string, analyzerParams string) 
 		return math.NaN()
 	}
 	defer tok1.Destroy()
-	
+
 	for tok1.Advance() {
 		token := tok1.Token()
 		queryTokens[token] = true
-		queryTokensList = append(queryTokensList, token)
 	}
 
 	// token stream of the fieldText - count matches
 	matchCount := 0
-	fieldTokensList := make([]string, 0)
-	matchedTokens := make([]string, 0)
 	tok2 := an.NewTokenStream(fieldText)
 	if tok2 == nil {
 		log.Warn("token_match_count: failed to create field token stream",
@@ -219,23 +213,13 @@ func tokenMatchCount(fieldText string, queryText string, analyzerParams string) 
 		return math.NaN()
 	}
 	defer tok2.Destroy()
-	
+
 	for tok2.Advance() {
 		token := tok2.Token()
-		fieldTokensList = append(fieldTokensList, token)
 		if queryTokens[token] {
 			matchCount++
-			matchedTokens = append(matchedTokens, token)
 		}
 	}
-	
-	log.Info("token_match_count: result",
-		zap.String("field_text", fieldText),
-		zap.String("query_text", queryText),
-		zap.Strings("query_tokens", queryTokensList),
-		zap.Strings("field_tokens", fieldTokensList),
-		zap.Strings("matched_tokens", matchedTokens),
-		zap.Int("match_count", matchCount))
 
 	return float64(matchCount)
 }
