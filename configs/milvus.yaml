@@ -1009,6 +1009,7 @@ common:
       splitByAvgSize:
         enabled: false # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
+    useLoonFFI: false
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data

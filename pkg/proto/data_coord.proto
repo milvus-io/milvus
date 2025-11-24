@@ -680,6 +680,7 @@ message CompactionSegmentBinlogs {
   int64 partitionID = 8;
   bool is_sorted = 9;
   int64 storage_version = 10;
+  string manifest = 11;
 }
 
 message CompactionPlan {
@@ -723,6 +724,7 @@ message CompactionSegment {
   repeated FieldBinlog bm25logs = 9;
   int64 storage_version = 10;
   map<int64, data.TextIndexStats> text_stats_logs = 11;
+  string manifest = 12;
 }
 
 message CompactionPlanResult {

@@ -302,6 +302,7 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 			CollectionID:        info.GetCollectionID(),
 			PartitionID:         info.GetPartitionID(),
 			IsSorted:            info.GetIsSorted(),
+			Manifest:            info.GetManifestPath(),
 		})
 	}
 
@@ -341,6 +342,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			InsertChannel: segInfo.GetInsertChannel(),
 			Deltalogs:     segInfo.GetDeltalogs(),
 			IsSorted:      segInfo.GetIsSorted(),
+			Manifest:      segInfo.GetManifestPath(),
 		})
 		segments = append(segments, segInfo)
 	}

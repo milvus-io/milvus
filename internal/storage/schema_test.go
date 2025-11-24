@@ -56,7 +56,7 @@ func TestConvertArrowSchema(t *testing.T) {
 		Fields:            fieldSchemas,
 		StructArrayFields: StructArrayFieldSchemas,
 	}
-	arrowSchema, err := ConvertToArrowSchema(schema)
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	assert.NoError(t, err)
 	assert.Equal(t, len(fieldSchemas)+len(StructArrayFieldSchemas[0].Fields), len(arrowSchema.Fields()))
 }
@@ -84,6 +84,6 @@ func TestConvertArrowSchemaWithoutDim(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: fieldSchemas,
 	}
-	_, err := ConvertToArrowSchema(schema)
+	_, err := ConvertToArrowSchema(schema, false)
 	assert.Error(t, err)
 }

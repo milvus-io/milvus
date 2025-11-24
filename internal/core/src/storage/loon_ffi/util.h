@@ -15,6 +15,7 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
+#include "storage/Types.h"
 
 /**
  * @brief Creates a shared pointer to Properties from CStorageConfig
@@ -36,3 +37,10 @@
  */
 std::shared_ptr<Properties>
 MakePropertiesFromStorageConfig(CStorageConfig c_storage_config);
+
+CStorageConfig
+ToCStorageConfig(const milvus::storage::StorageConfig& config);
+
+std::string
+GetManifest(const std::string& path,
+            const std::shared_ptr<Properties>& properties);
