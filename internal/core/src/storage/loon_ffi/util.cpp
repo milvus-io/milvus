@@ -21,6 +21,8 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "milvus-storage/properties.h"
+#include "milvus-storage/transaction/manifest.h"
+#include "milvus-storage/transaction/transaction.h"
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
@@ -122,6 +124,110 @@ MakePropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     return properties;
 }
 
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
+    auto properties_map = std::make_shared<milvus_storage::api::Properties>();
+
+    // Add non-null string fields
+    if (c_storage_config.address != nullptr) {
+        milvus_storage::api::SetValue(
+            *properties_map, PROPERTY_FS_ADDRESS, c_storage_config.address);
+    }
+    if (c_storage_config.bucket_name != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_BUCKET_NAME,
+                                      c_storage_config.bucket_name);
+    }
+    if (c_storage_config.access_key_id != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_ACCESS_KEY_ID,
+                                      c_storage_config.access_key_id);
+    }
+    if (c_storage_config.access_key_value != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_ACCESS_KEY_VALUE,
+                                      c_storage_config.access_key_value);
+    }
+    if (c_storage_config.root_path != nullptr) {
+        milvus_storage::api::SetValue(
+            *properties_map, PROPERTY_FS_ROOT_PATH, c_storage_config.root_path);
+    }
+    if (c_storage_config.storage_type != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_STORAGE_TYPE,
+                                      c_storage_config.storage_type);
+    }
+    if (c_storage_config.cloud_provider != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_CLOUD_PROVIDER,
+                                      c_storage_config.cloud_provider);
+    }
+    if (c_storage_config.iam_endpoint != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_IAM_ENDPOINT,
+                                      c_storage_config.iam_endpoint);
+    }
+    if (c_storage_config.log_level != nullptr) {
+        milvus_storage::api::SetValue(
+            *properties_map, PROPERTY_FS_LOG_LEVEL, "Warn");
+    }
+    if (c_storage_config.region != nullptr) {
+        milvus_storage::api::SetValue(
+            *properties_map, PROPERTY_FS_REGION, c_storage_config.region);
+    }
+    if (c_storage_config.sslCACert != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_SSL_CA_CERT,
+                                      c_storage_config.sslCACert);
+    }
+    if (c_storage_config.gcp_credential_json != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_GCP_CREDENTIAL_JSON,
+                                      c_storage_config.gcp_credential_json);
+    }
+
+    // Add boolean fields
+    milvus_storage::api::SetValue(*properties_map,
+                                  PROPERTY_FS_USE_SSL,
+                                  c_storage_config.useSSL ? "true" : "false");
+    milvus_storage::api::SetValue(*properties_map,
+                                  PROPERTY_FS_USE_IAM,
+                                  c_storage_config.useIAM ? "true" : "false");
+    milvus_storage::api::SetValue(
+        *properties_map,
+        PROPERTY_FS_USE_VIRTUAL_HOST,
+        c_storage_config.useVirtualHost ? "true" : "false");
+    milvus_storage::api::SetValue(
+        *properties_map,
+        PROPERTY_FS_USE_CUSTOM_PART_UPLOAD,
+        c_storage_config.use_custom_part_upload ? "true" : "false");
+
+    // Add integer fields
+    milvus_storage::api::SetValue(
+        *properties_map,
+        PROPERTY_FS_REQUEST_TIMEOUT_MS,
+        std::to_string(c_storage_config.requestTimeoutMs).c_str());
+    milvus_storage::api::SetValue(
+        *properties_map,
+        PROPERTY_FS_MAX_CONNECTIONS,
+        std::to_string(c_storage_config.max_connections).c_str());
+
+    return properties_map;
+}
+
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalLocalProperies(const char* c_path) {
+    auto properties_map = std::make_shared<milvus_storage::api::Properties>();
+
+    milvus_storage::api::SetValue(
+        *properties_map, PROPERTY_FS_STORAGE_TYPE, "local");
+
+    milvus_storage::api::SetValue(
+        *properties_map, PROPERTY_FS_ROOT_PATH, c_path);
+
+    return properties_map;
+}
+
 CStorageConfig
 ToCStorageConfig(const milvus::storage::StorageConfig& config) {
     return CStorageConfig{config.address.c_str(),
@@ -172,6 +278,41 @@ GetManifest(const std::string& path,
 
         FreeFFIResult(&result);
         return {out_column_groups};
+    } catch (const json::parse_error& e) {
+        throw std::runtime_error(
+            std::string("Failed to parse manifest JSON: ") + e.what());
+    } catch (const json::out_of_range& e) {
+        throw std::runtime_error(
+            std::string("Missing required field in manifest: ") + e.what());
+    } catch (const json::type_error& e) {
+        throw std::runtime_error(
+            std::string("Invalid field type in manifest: ") + e.what());
+    }
+}
+
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+GetColumnGroups(
+    const std::string& path,
+    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
+    try {
+        // Parse the JSON string
+        json j = json::parse(path);
+
+        // Extract base_path and ver fields
+        std::string base_path = j.at("base_path").get<std::string>();
+        int64_t ver = j.at("ver").get<int64_t>();
+
+        // TODO fetch manifest based on version after api supported
+        auto transaction =
+            std::make_unique<milvus_storage::api::transaction::TransactionImpl<
+                milvus_storage::api::ColumnGroups>>(*properties, base_path);
+        auto latest_manifest_result = transaction->get_latest_manifest();
+        if (!latest_manifest_result.ok()) {
+            throw(
+                std::runtime_error(latest_manifest_result.status().ToString()));
+        }
+        auto latest_manifest = latest_manifest_result.ValueOrDie();
+        return latest_manifest;
     } catch (const json::parse_error& e) {
         throw std::runtime_error(
             std::string("Failed to parse manifest JSON: ") + e.what());
