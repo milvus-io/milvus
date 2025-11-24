@@ -3854,8 +3854,8 @@ func (_c *MockDataCoordClient_ReportDataNodeTtMsgs_Call) RunAndReturn(run func(c
 	return _c
 }
 
-// RestoreSnapshot provides a mock function with given fields: ctx, in, opts
-func (_m *MockDataCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+// RestoreSnapshotData provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataCoordClient) RestoreSnapshotData(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -3866,7 +3866,7 @@ func (_m *MockDataCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.R
 	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
-		panic("no return value specified for RestoreSnapshot")
+		panic("no return value specified for RestoreSnapshotData")
 	}
 
 	var r0 *datapb.RestoreSnapshotResponse
@@ -3891,21 +3891,21 @@ func (_m *MockDataCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.R
 	return r0, r1
 }
 
-// MockDataCoordClient_RestoreSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshot'
-type MockDataCoordClient_RestoreSnapshot_Call struct {
+// MockDataCoordClient_RestoreSnapshotData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshotData'
+type MockDataCoordClient_RestoreSnapshotData_Call struct {
 	*mock.Call
 }
 
-// RestoreSnapshot is a helper method to define mock.On call
+// RestoreSnapshotData is a helper method to define mock.On call
 //   - ctx context.Context
 //   - in *datapb.RestoreSnapshotRequest
 //   - opts ...grpc.CallOption
-func (_e *MockDataCoordClient_Expecter) RestoreSnapshot(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_RestoreSnapshot_Call {
-	return &MockDataCoordClient_RestoreSnapshot_Call{Call: _e.mock.On("RestoreSnapshot",
+func (_e *MockDataCoordClient_Expecter) RestoreSnapshotData(ctx interface{}, in interface{}, opts ...interface{}) *MockDataCoordClient_RestoreSnapshotData_Call {
+	return &MockDataCoordClient_RestoreSnapshotData_Call{Call: _e.mock.On("RestoreSnapshotData",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockDataCoordClient_RestoreSnapshot_Call) Run(run func(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption)) *MockDataCoordClient_RestoreSnapshot_Call {
+func (_c *MockDataCoordClient_RestoreSnapshotData_Call) Run(run func(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption)) *MockDataCoordClient_RestoreSnapshotData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -3918,12 +3918,12 @@ func (_c *MockDataCoordClient_RestoreSnapshot_Call) Run(run func(ctx context.Con
 	return _c
 }
 
-func (_c *MockDataCoordClient_RestoreSnapshot_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MockDataCoordClient_RestoreSnapshot_Call {
+func (_c *MockDataCoordClient_RestoreSnapshotData_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MockDataCoordClient_RestoreSnapshotData_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockDataCoordClient_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error)) *MockDataCoordClient_RestoreSnapshot_Call {
+func (_c *MockDataCoordClient_RestoreSnapshotData_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error)) *MockDataCoordClient_RestoreSnapshotData_Call {
 	_c.Call.Return(run)
 	return _c
 }

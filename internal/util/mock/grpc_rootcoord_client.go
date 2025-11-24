@@ -321,3 +321,7 @@ func (m *GrpcRootCoordClient) Close() error {
 func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
 }
+
+func (m *GrpcRootCoordClient) RestoreSnapshot(ctx context.Context, in *milvuspb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*milvuspb.RestoreSnapshotResponse, error) {
+	return &milvuspb.RestoreSnapshotResponse{}, m.Err
+}

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -208,6 +209,9 @@ func createTestSnapshotData() *SnapshotData {
 func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
 	// Use real ChunkManager and Avro operations, only mock storage layer
 	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 	snapshotData := createTestSnapshotData()
@@ -232,7 +236,8 @@ func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
 }
 
 func TestSnapshotWriter_Save_StorageError(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 	snapshotData := createTestSnapshotData()
 	expectedError := errors.New("storage write failed")
@@ -247,7 +252,8 @@ func TestSnapshotWriter_Save_StorageError(t *testing.T) {
 }
 
 func TestSnapshotWriter_Save_EmptySegments(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 	snapshotData := createTestSnapshotData()
 	snapshotData.Segments = nil // Empty segments
@@ -263,11 +269,13 @@ func TestSnapshotWriter_Save_EmptySegments(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, metadataPath)
-	assert.Equal(t, 2, writeCallCount) // Must write 2 files even without segments
+	// When there are no segments, only metadata file is written (no manifest files)
+	assert.Equal(t, 1, writeCallCount) // Only metadata file is written
 }
 
 func TestSnapshotWriter_Drop_Success(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 
 	// Mock metadata file content
@@ -287,16 +295,11 @@ func TestSnapshotWriter_Drop_Success(t *testing.T) {
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 
-	// Mock file operations
-	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
-		[]string{"snapshots/100/metadata/00001-uuid.json"},
-		[]time.Time{},
-		nil,
-	).Build()
-	defer mockList.UnPatch()
+	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
 
+	// Mock file operations - no longer need ListAllChunkWithPrefix
 	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
-		if filePath == "snapshots/100/metadata/00001-uuid.json" {
+		if filePath == metadataFilePath {
 			return metadataJSON, nil
 		}
 		return []byte("mock-data"), nil
@@ -309,32 +312,47 @@ func TestSnapshotWriter_Drop_Success(t *testing.T) {
 	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).Return(nil).Build()
 	defer mockRemove.UnPatch()
 
-	err := writer.Drop(context.Background(), 100, 1)
+	err := writer.Drop(context.Background(), metadataFilePath)
 
 	assert.NoError(t, err)
 }
 
-func TestSnapshotWriter_Drop_SnapshotNotFound(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+func TestSnapshotWriter_Drop_MetadataReadFailed(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 
-	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
-		[]string{},
-		[]time.Time{},
-		nil,
-	).Build()
-	defer mockList.UnPatch()
+	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
 
-	err := writer.Drop(context.Background(), 100, 1)
+	// Mock Read to return error (file not found)
+	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).Return(
+		nil,
+		fmt.Errorf("file not found"),
+	).Build()
+	defer mockRead.UnPatch()
+
+	err := writer.Drop(context.Background(), metadataFilePath)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	assert.Contains(t, err.Error(), "failed to read metadata file")
+}
+
+func TestSnapshotWriter_Drop_EmptyPath(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	writer := NewSnapshotWriter(cm)
+
+	err := writer.Drop(context.Background(), "")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "metadata file path cannot be empty")
 }
 
 // =========================== SnapshotReader Tests ===========================
 
-func TestSnapshotReader_ReadSnapshot_LatestSnapshot_Success(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := NewSnapshotReader(cm)
 
 	metadata := &SnapshotMetadata{
@@ -353,11 +371,9 @@ func TestSnapshotReader_ReadSnapshot_LatestSnapshot_Success(t *testing.T) {
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 
-	// Generate valid manifest entries with all required fields including new ones
+	// Generate valid manifest entries with all required fields
 	manifestEntries := []ManifestEntry{
 		{
-			Status:            "ADDED",
-			SnapshotID:        1,
 			SegmentID:         1001,
 			PartitionID:       1,
 			SegmentLevel:      1,
@@ -381,16 +397,11 @@ func TestSnapshotReader_ReadSnapshot_LatestSnapshot_Success(t *testing.T) {
 	manifestSchema, _ := getManifestSchema()
 	validManifestData, _ := avro.Marshal(manifestSchema, manifestEntries)
 
-	// Mock file operations
-	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
-		[]string{"snapshots/100/metadata/00001-uuid.json"},
-		[]time.Time{},
-		nil,
-	).Build()
-	defer mockList.UnPatch()
+	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
 
+	// Mock file operations - no longer need ListAllChunkWithPrefix since we pass the path directly
 	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
-		if filePath == "snapshots/100/metadata/00001-uuid.json" {
+		if filePath == metadataFilePath {
 			return metadataJSON, nil
 		}
 		if filePath == "manifest1.avro" {
@@ -400,7 +411,7 @@ func TestSnapshotReader_ReadSnapshot_LatestSnapshot_Success(t *testing.T) {
 	}).Build()
 	defer mockRead.UnPatch()
 
-	snapshot, err := reader.ReadSnapshot(context.Background(), 100, 1, true)
+	snapshot, err := reader.ReadSnapshot(context.Background(), metadataFilePath, true)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, snapshot)
@@ -412,25 +423,41 @@ func TestSnapshotReader_ReadSnapshot_LatestSnapshot_Success(t *testing.T) {
 	assert.Equal(t, int64(100), snapshot.Segments[0].NumOfRows)
 }
 
-func TestSnapshotReader_ReadSnapshot_SnapshotNotFound(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+func TestSnapshotReader_ReadSnapshot_EmptyPath(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := NewSnapshotReader(cm)
 
-	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
-		[]string{},
-		[]time.Time{},
-		nil,
-	).Build()
-	defer mockList.UnPatch()
-
-	_, err := reader.ReadSnapshot(context.Background(), 100, 1, false)
+	// Test with empty path - should return error immediately
+	_, err := reader.ReadSnapshot(context.Background(), "", false)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	assert.Contains(t, err.Error(), "metadata file path cannot be empty")
+}
+
+func TestSnapshotReader_ReadSnapshot_FileNotFound(t *testing.T) {
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	metadataFilePath := "snapshots/100/metadata/nonexistent.json"
+
+	// Mock Read to return error (file not found)
+	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).Return(
+		nil,
+		fmt.Errorf("file not found"),
+	).Build()
+	defer mockRead.UnPatch()
+
+	_, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read metadata file")
 }
 
 func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
-	cm := &storage.LocalChunkManager{}
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := NewSnapshotReader(cm)
 
 	metadata1 := &SnapshotMetadata{
@@ -591,6 +618,9 @@ func TestSnapshotWriter_ManifestList_Roundtrip(t *testing.T) {
 func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	// Test complete snapshot workflow
 	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 	reader := NewSnapshotReader(cm)
@@ -603,8 +633,8 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, metadataPath)
 
-	// 3. Read snapshot
-	readSnapshot, err := reader.ReadSnapshot(context.Background(), 100, 1, true)
+	// 3. Read snapshot using the metadata path returned from Save
+	readSnapshot, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
 	assert.NoError(t, err)
 	assert.NotNil(t, readSnapshot)
 
@@ -631,8 +661,8 @@ func TestSnapshot_CompleteWorkflow(t *testing.T) {
 		assert.Equal(t, snapshotData.Indexes[0].IndexName, readSnapshot.Indexes[0].IndexName)
 	}
 
-	// 8. Cleanup
-	err = writer.Drop(context.Background(), 100, 1)
+	// 8. Cleanup - use the metadata path returned from Save
+	err = writer.Drop(context.Background(), metadataPath)
 	assert.NoError(t, err)
 }
 
@@ -642,6 +672,9 @@ func TestSnapshot_NewFields_Serialization(t *testing.T) {
 	// Test that all new fields (Bm25Statslogs, TextIndexFiles, JsonKeyIndexFiles,
 	// StartPosition, DmlPosition, StorageVersion, IsSorted) are properly serialized
 	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	writer := NewSnapshotWriter(cm)
 	reader := NewSnapshotReader(cm)
@@ -649,11 +682,11 @@ func TestSnapshot_NewFields_Serialization(t *testing.T) {
 	snapshotData := createTestSnapshotData()
 
 	// 1. Save snapshot
-	_, err := writer.Save(context.Background(), snapshotData)
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
 	assert.NoError(t, err)
 
-	// 2. Read snapshot back
-	readSnapshot, err := reader.ReadSnapshot(context.Background(), 100, 1, true)
+	// 2. Read snapshot back using the metadata path
+	readSnapshot, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
 	assert.NoError(t, err)
 	assert.NotNil(t, readSnapshot)
 	assert.Len(t, readSnapshot.Segments, 1)
@@ -719,8 +752,8 @@ func TestSnapshot_NewFields_Serialization(t *testing.T) {
 	// 9. Verify IsSorted field
 	assert.Equal(t, original.IsSorted, restored.IsSorted, "IsSorted should match")
 
-	// 10. Cleanup
-	err = writer.Drop(context.Background(), 100, 1)
+	// 10. Cleanup - use the metadata path returned from Save
+	err = writer.Drop(context.Background(), metadataPath)
 	assert.NoError(t, err)
 }
 
@@ -837,4 +870,91 @@ func TestSnapshot_ConversionFunctions(t *testing.T) {
 			assert.Equal(t, origStats.JsonKeyStatsDataFormat, restStats.JsonKeyStatsDataFormat)
 		}
 	})
+}
+
+// =========================== StorageV2 Manifest Tests ===========================
+
+func TestSnapshotWriter_Save_WithStorageV2Manifest(t *testing.T) {
+	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	defer cm.RemoveWithPrefix(context.Background(), "")
+
+	writer := NewSnapshotWriter(cm)
+	snapshotData := createTestSnapshotData()
+
+	// Add manifest_path to segment
+	snapshotData.Segments[0].ManifestPath = "s3://bucket/collection/partition/segment1/manifest.json"
+
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, metadataPath)
+
+	// Read back the metadata and verify StorageV2ManifestList
+	reader := NewSnapshotReader(cm)
+	metadata, err := reader.readMetadataFile(context.Background(), metadataPath)
+	assert.NoError(t, err)
+	assert.NotNil(t, metadata)
+	assert.Len(t, metadata.StorageV2ManifestList, 1)
+
+	// Verify the manifest list content
+	assert.Equal(t, int64(1001), metadata.StorageV2ManifestList[0].SegmentID)
+	assert.Equal(t, "s3://bucket/collection/partition/segment1/manifest.json", metadata.StorageV2ManifestList[0].Manifest)
+}
+
+func TestSnapshotReader_ReadSnapshot_WithStorageV2Manifest(t *testing.T) {
+	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	defer cm.RemoveWithPrefix(context.Background(), "")
+
+	// Write a snapshot with StorageV2 manifest
+	writer := NewSnapshotWriter(cm)
+	snapshotData := createTestSnapshotData()
+	snapshotData.Segments[0].ManifestPath = "s3://bucket/collection/partition/segment1/manifest.json"
+
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
+	assert.NoError(t, err)
+
+	// Read back the snapshot using the metadata path
+	reader := NewSnapshotReader(cm)
+	readData, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
+	assert.NoError(t, err)
+	assert.NotNil(t, readData)
+	assert.Len(t, readData.Segments, 1)
+
+	// Verify manifest_path is restored
+	assert.Equal(t, int64(1001), readData.Segments[0].GetSegmentId())
+	assert.Equal(t, "s3://bucket/collection/partition/segment1/manifest.json", readData.Segments[0].GetManifestPath())
+}
+
+func TestSnapshotWriter_Save_EmptyManifestPath(t *testing.T) {
+	tempDir := t.TempDir()
+	defer t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	defer cm.RemoveWithPrefix(context.Background(), "")
+
+	writer := NewSnapshotWriter(cm)
+	snapshotData := createTestSnapshotData()
+
+	// Segment without manifest_path (StorageV1 segment)
+	snapshotData.Segments[0].ManifestPath = ""
+
+	metadataPath, err := writer.Save(context.Background(), snapshotData)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, metadataPath)
+
+	// Read back the metadata
+	reader := NewSnapshotReader(cm)
+	metadata, err := reader.readMetadataFile(context.Background(), metadataPath)
+	assert.NoError(t, err)
+	assert.NotNil(t, metadata)
+	// StorageV2ManifestList should be empty since no segment has manifest_path
+	assert.Len(t, metadata.StorageV2ManifestList, 0)
 }

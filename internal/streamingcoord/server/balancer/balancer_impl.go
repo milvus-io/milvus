@@ -159,6 +159,12 @@ func (b *balancerImpl) AllocVirtualChannels(ctx context.Context, param AllocVCha
 	return b.channelMetaManager.AllocVirtualChannels(ctx, param)
 }
 
+// AllocVirtualChannelsWithPChannels allocates virtual channels on specified pchannels.
+// Used by snapshot restore to preserve pchannel mapping from the source collection.
+func (b *balancerImpl) AllocVirtualChannelsWithPChannels(ctx context.Context, collectionID int64, pchannels []string) ([]string, error) {
+	return b.channelMetaManager.AllocVirtualChannelsWithPChannels(ctx, collectionID, pchannels)
+}
+
 // UpdateBalancePolicy update the balance policy.
 func (b *balancerImpl) UpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {

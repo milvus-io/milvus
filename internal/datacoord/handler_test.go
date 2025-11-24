@@ -1745,13 +1745,14 @@ func TestGenSnapshot(t *testing.T) {
 	// Create mock mixCoord
 	mockMixCoord := mocks2.NewMixCoord(t)
 	mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:           merr.Success(),
-		Schema:           schema,
-		ShardsNum:        2,
-		NumPartitions:    1,
-		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-		Properties:       []*commonpb.KeyValuePair{},
-		CollectionID:     200,
+		Status:              merr.Success(),
+		Schema:              schema,
+		ShardsNum:           2,
+		NumPartitions:       1,
+		ConsistencyLevel:    commonpb.ConsistencyLevel_Strong,
+		Properties:          []*commonpb.KeyValuePair{},
+		CollectionID:        200,
+		VirtualChannelNames: []string{"dml_0_200v0", "dml_1_200v1"},
 	}, nil).Maybe()
 
 	mockMixCoord.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
@@ -1851,4 +1852,6 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, 1, len(snapshotData.Indexes))
 	assert.Equal(t, 1, len(snapshotData.Segments))
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
+	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
+	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }
