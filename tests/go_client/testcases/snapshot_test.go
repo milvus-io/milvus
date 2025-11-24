@@ -196,6 +196,8 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	err = loadTask.Await(ctx)
 	common.CheckErr(t, err, true)
 
+	time.Sleep(3 * time.Second)
+
 	// Verify restored partition data count
 	queryRes5, err := mc.Query(ctx,
 		client.NewQueryOption(restoredCollName).
@@ -1063,5 +1065,240 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	// Clean up
 	dropOpt2 := client.NewDropSnapshotOption(snapshotName)
 	err = mc.DropSnapshot(ctx, dropOpt2)
+	common.CheckErr(t, err, true)
+}
+
+// TestSnapshotRestoreAfterDropPartitionAndCollection tests snapshot restore functionality
+// after dropping partitions and the entire collection
+func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	insertBatchSize := 3000
+
+	// Step 1: Create collection with multiple partitions
+	collName := common.GenRandomString(snapshotPrefix, 6)
+	schema := client.SimpleCreateCollectionOptions(collName, common.DefaultDim)
+	schema.WithAutoID(false)
+	schema.WithShardNum(3)
+	err := mc.CreateCollection(ctx, schema)
+	common.CheckErr(t, err, true)
+
+	// Create 3 partitions
+	partitions := []string{"part_0", "part_1", "part_2"}
+	for _, partName := range partitions {
+		err := mc.CreatePartition(ctx, client.NewCreatePartitionOption(collName, partName))
+		common.CheckErr(t, err, true)
+	}
+	log.Info("Created partitions", zap.Strings("partitions", partitions))
+
+	// Get collection schema
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+
+	// Step 2: Insert data into each partition
+	log.Info("Inserting data into partitions")
+	for i, partName := range partitions {
+		insertOpt := hp.TNewDataOption().TWithNb(insertBatchSize).TWithStart(i * insertBatchSize)
+		_, insertRes := hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(coll.Schema).TWithPartitionName(partName), insertOpt)
+		require.Equal(t, insertBatchSize, insertRes.IDs.Len())
+	}
+
+	// Flush to ensure data is persisted
+	_, err = mc.Flush(ctx, client.NewFlushOption(collName))
+	common.CheckErr(t, err, true)
+	time.Sleep(10 * time.Second)
+
+	// Verify initial data count (3 partitions * 3000 = 9000)
+	queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	count, _ := queryRes.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(9000), count)
+	log.Info("Initial data count verified", zap.Int64("count", count))
+
+	// Step 3: Create snapshot
+	snapshotName := fmt.Sprintf("drop_test_snapshot_%s", common.GenRandomString(snapshotPrefix, 6))
+	createOpt := client.NewCreateSnapshotOption(snapshotName, collName).
+		WithDescription("Snapshot for testing restore after drop operations")
+
+	log.Info("Creating snapshot")
+	err = mc.CreateSnapshot(ctx, createOpt)
+	common.CheckErr(t, err, true)
+
+	// Verify snapshot was created
+	listOpt := client.NewListSnapshotsOption().WithCollectionName(collName)
+	snapshots, err := mc.ListSnapshots(ctx, listOpt)
+	common.CheckErr(t, err, true)
+	require.Contains(t, snapshots, snapshotName)
+
+	describeOpt := client.NewDescribeSnapshotOption(snapshotName)
+	snapshotInfo, err := mc.DescribeSnapshot(ctx, describeOpt)
+	common.CheckErr(t, err, true)
+	require.Equal(t, snapshotName, snapshotInfo.GetName())
+	log.Info("Snapshot created", zap.Any("info", snapshotInfo))
+
+	// Step 4: Test scenario 1 - Drop partition and restore
+	log.Info("Test scenario 1: Drop partition and restore")
+
+	// Release the partition before dropping it
+	dropPartName := "part_0"
+	err = mc.ReleasePartitions(ctx, client.NewReleasePartitionsOptions(collName, dropPartName))
+	common.CheckErr(t, err, true)
+	log.Info("Released partition", zap.String("partition", dropPartName))
+
+	// Drop one partition
+	err = mc.DropPartition(ctx, client.NewDropPartitionOption(collName, dropPartName))
+	common.CheckErr(t, err, true)
+	log.Info("Dropped partition", zap.String("partition", dropPartName))
+
+	// Wait for partition drop to take effect
+	time.Sleep(5 * time.Second)
+
+	// Verify remaining data count (2 partitions * 3000 = 6000)
+	queryRes2, err := mc.Query(ctx, client.NewQueryOption(collName).WithOutputFields(common.QueryCountFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	remainingCount, _ := queryRes2.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(6000), remainingCount)
+	log.Info("Data count after dropping partition", zap.Int64("count", remainingCount))
+
+	// Restore snapshot to new collection (v1)
+	restoredCollNameV1 := fmt.Sprintf("restored_v1_%s", collName)
+	restoreOptV1 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV1)
+	log.Info("Restoring snapshot after partition drop", zap.String("target", restoredCollNameV1))
+	restoreJobIDV1, err := mc.RestoreSnapshot(ctx, restoreOptV1)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	for {
+		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobIDV1))
+		common.CheckErr(t, err, true)
+		log.Info("Restore snapshot state", zap.Any("state", state))
+
+		if state.Progress == 100 || state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
+			break
+		}
+
+		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
+			t.Fatalf("restore snapshot failed after dropping partition, reason: %s", state.GetReason())
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	// Verify restored collection v1 exists
+	hasV1, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollNameV1))
+	common.CheckErr(t, err, true)
+	require.True(t, hasV1)
+
+	// Load restored collection v1
+	loadTaskV1, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollNameV1).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTaskV1.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Verify restored collection v1 has all original data (9000 records)
+	queryResV1, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollNameV1).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	restoredCountV1, _ := queryResV1.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(9000), restoredCountV1)
+	log.Info("Restored collection v1 data verified", zap.Int64("count", restoredCountV1))
+
+	// Verify all partitions are restored
+	restoredPartitionsV1, err := mc.ListPartitions(ctx, client.NewListPartitionOption(restoredCollNameV1))
+	common.CheckErr(t, err, true)
+	filteredPartitionsV1 := make([]string, 0)
+	for _, partName := range restoredPartitionsV1 {
+		if partName != "_default" {
+			filteredPartitionsV1 = append(filteredPartitionsV1, partName)
+		}
+	}
+	sort.Strings(filteredPartitionsV1)
+	require.Equal(t, partitions, filteredPartitionsV1)
+	log.Info("All partitions restored in v1", zap.Strings("partitions", filteredPartitionsV1))
+
+	// Step 5: Test scenario 2 - Drop entire collection and restore
+	log.Info("Test scenario 2: Drop entire collection and restore")
+
+	// Drop the original collection
+	err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	log.Info("Dropped entire collection", zap.String("collection", collName))
+
+	// Wait for collection drop to take effect
+	time.Sleep(5 * time.Second)
+
+	// Verify collection no longer exists
+	hasOriginal, err := mc.HasCollection(ctx, client.NewHasCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.False(t, hasOriginal)
+	log.Info("Verified collection is dropped")
+
+	// Restore snapshot to new collection (v2)
+	restoredCollNameV2 := fmt.Sprintf("restored_v2_%s", collName)
+	restoreOptV2 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV2)
+	log.Info("Restoring snapshot after collection drop", zap.String("target", restoredCollNameV2))
+	restoreJobIDV2, err := mc.RestoreSnapshot(ctx, restoreOptV2)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	for {
+		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobIDV2))
+		common.CheckErr(t, err, true)
+		log.Info("Restore snapshot state", zap.Any("state", state))
+
+		if state.Progress == 100 || state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
+			break
+		}
+
+		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
+			t.Fatalf("restore snapshot failed after dropping collection, reason: %s", state.GetReason())
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	// Verify restored collection v2 exists
+	hasV2, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollNameV2))
+	common.CheckErr(t, err, true)
+	require.True(t, hasV2)
+
+	// Load restored collection v2
+	loadTaskV2, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(restoredCollNameV2).WithReplica(1))
+	common.CheckErr(t, err, true)
+	err = loadTaskV2.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// Verify restored collection v2 has all original data (9000 records)
+	queryResV2, err := mc.Query(ctx,
+		client.NewQueryOption(restoredCollNameV2).
+			WithOutputFields(common.QueryCountFieldName).
+			WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	restoredCountV2, _ := queryResV2.Fields[0].GetAsInt64(0)
+	require.Equal(t, int64(9000), restoredCountV2)
+	log.Info("Restored collection v2 data verified", zap.Int64("count", restoredCountV2))
+
+	// Verify all partitions are restored
+	restoredPartitionsV2, err := mc.ListPartitions(ctx, client.NewListPartitionOption(restoredCollNameV2))
+	common.CheckErr(t, err, true)
+	filteredPartitionsV2 := make([]string, 0)
+	for _, partName := range restoredPartitionsV2 {
+		if partName != "_default" {
+			filteredPartitionsV2 = append(filteredPartitionsV2, partName)
+		}
+	}
+	sort.Strings(filteredPartitionsV2)
+	require.Equal(t, partitions, filteredPartitionsV2)
+	log.Info("All partitions restored in v2", zap.Strings("partitions", filteredPartitionsV2))
+
+	log.Info("Test completed successfully",
+		zap.String("snapshot", snapshotName),
+		zap.String("restored_v1", restoredCollNameV1),
+		zap.String("restored_v2", restoredCollNameV2))
+
+	// Clean up
+	dropSnapshotOpt := client.NewDropSnapshotOption(snapshotName)
+	err = mc.DropSnapshot(ctx, dropSnapshotOpt)
 	common.CheckErr(t, err, true)
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
@@ -395,6 +396,32 @@ func TestMixCoord_SnapshotMethods(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("RestoreSnapshot", func(t *testing.T) {
+		mockRootCoord := &rootcoord.Core{}
+		coord := &mixCoordImpl{
+			rootcoordServer: mockRootCoord,
+		}
+
+		req := &milvuspb.RestoreSnapshotRequest{
+			Name:           "test_snapshot",
+			CollectionName: "restored_collection",
+			DbName:         "default",
+		}
+
+		mockey.PatchConvey("test RestoreSnapshot", t, func() {
+			expectedResp := &milvuspb.RestoreSnapshotResponse{
+				Status: merr.Success(),
+				JobId:  12345,
+			}
+			mockey.Mock((*rootcoord.Core).RestoreSnapshot).Return(expectedResp, nil).Build()
+
+			resp, err := coord.RestoreSnapshot(ctx, req)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+			assert.Equal(t, int64(12345), resp.GetJobId())
+		})
+	})
+
+	t.Run("RestoreSnapshotData", func(t *testing.T) {
 		mockDataCoord := &datacoord.Server{}
 		coord := &mixCoordImpl{
 			datacoordServer: mockDataCoord,
@@ -405,14 +432,14 @@ func TestMixCoord_SnapshotMethods(t *testing.T) {
 			CollectionId: 1001,
 		}
 
-		mockey.PatchConvey("test RestoreSnapshot", t, func() {
+		mockey.PatchConvey("test RestoreSnapshotData", t, func() {
 			expectedResp := &datapb.RestoreSnapshotResponse{
 				Status: merr.Success(),
 				JobId:  12345,
 			}
-			mockey.Mock((*datacoord.Server).RestoreSnapshot).Return(expectedResp, nil).Build()
+			mockey.Mock((*datacoord.Server).RestoreSnapshotData).Return(expectedResp, nil).Build()
 
-			resp, err := coord.RestoreSnapshot(ctx, req)
+			resp, err := coord.RestoreSnapshotData(ctx, req)
 			assert.NoError(t, err)
 			assert.NotNil(t, resp)
 			assert.Equal(t, int64(12345), resp.GetJobId())
@@ -456,7 +483,7 @@ func TestMixCoord_SnapshotMethods(t *testing.T) {
 		}
 
 		req := &datapb.ListRestoreSnapshotJobsRequest{
-			CollectionName: "test_collection",
+			CollectionId: 1001,
 		}
 
 		mockey.PatchConvey("test ListRestoreSnapshotJobs", t, func() {

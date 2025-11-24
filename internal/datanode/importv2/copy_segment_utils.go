@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
@@ -748,23 +749,30 @@ func shortenJsonStatsPath(jsonStats map[int64]*datapb.JsonKeyStats) map[int64]*d
 
 // shortenSingleJsonStatsPath shortens a single JSON stats file path.
 //
-// This function finds the position of "shared_key_index" or "shredding_data" in the path
-// and extracts everything from that position onwards. This matches the behavior of C++ core's
-// path shortening logic in JsonKeyStats.cpp.
+// This function extracts the relative path from a full JSON stats file path by:
+//  1. Finding "shared_key_index" or "shredding_data" keywords and extracting from that position
+//  2. For files directly under fieldID directory (e.g., meta.json), extracting everything after
+//     the 7 path components following "json_stats"
+//
+// Path format: {root}/json_stats/{dataFormat}/{buildID}/{version}/{collID}/{partID}/{segID}/{fieldID}/...
 //
 // Path examples:
 //   - Input:  "files/json_stats/2/123/1/444/555/666/100/shared_key_index/inverted_index_0"
 //     Output: "shared_key_index/inverted_index_0"
 //   - Input:  "files/json_stats/2/123/1/444/555/666/100/shredding_data/parquet_data_0"
 //     Output: "shredding_data/parquet_data_0"
+//   - Input:  "files/json_stats/2/123/1/444/555/666/100/meta.json"
+//     Output: "meta.json"
 //   - Input:  "shared_key_index/inverted_index_0" (already shortened)
 //     Output: "shared_key_index/inverted_index_0" (idempotent)
+//   - Input:  "meta.json" (already shortened)
+//     Output: "meta.json" (idempotent)
 //
 // Parameters:
 //   - fullPath: Full or partial JSON stats file path
 //
 // Returns:
-//   - Shortened path with only the last 2+ segments, or original path if keywords not found
+//   - Shortened path relative to fieldID directory
 func shortenSingleJsonStatsPath(fullPath string) string {
 	// Find "shared_key_index" in path
 	if idx := strings.Index(fullPath, jsonStatsSharedIndexPath); idx != -1 {
@@ -774,6 +782,17 @@ func shortenSingleJsonStatsPath(fullPath string) string {
 	if idx := strings.Index(fullPath, jsonStatsShreddingDataPath); idx != -1 {
 		return fullPath[idx:]
 	}
-	// If neither keyword found, return as-is (handles edge cases or already-shortened paths)
+
+	// Handle files directly under fieldID directory (e.g., meta.json)
+	// Path format: .../json_stats/{dataFormat}/{build}/{ver}/{coll}/{part}/{seg}/{field}/filename
+	// json_stats is followed by 7 components, the 8th onwards is the file path
+	parts := strings.Split(fullPath, "/")
+	for i, part := range parts {
+		if part == common.JSONStatsPath && i+8 < len(parts) {
+			return strings.Join(parts[i+8:], "/")
+		}
+	}
+
+	// If already shortened or no json_stats found, return as-is
 	return fullPath
 }

@@ -80,85 +80,145 @@ Data is organized using Iceberg-like manifest format with the following director
 ```
 snapshots/{collection_id}/
 ├── metadata/
-│   ├── 00001-{uuid}.json          # Snapshot version 1 metadata (JSON format)
-│   ├── 00002-{uuid}.json          # Snapshot version 2 metadata (JSON format)
-│   └── ...
+│   └── {snapshot_id}.json         # Snapshot metadata (JSON format)
 │
 └── manifests/
-    ├── data-file-manifest-{uuid}.avro         # Manifest File containing segment details (Avro format)
-    └── ...
+    └── {snapshot_id}/             # Directory for each snapshot
+        ├── {segment_id_1}.avro    # Individual segment manifest (Avro format)
+        ├── {segment_id_2}.avro
+        └── ...
 ```
+
+**Design Note**: Each segment has its own manifest file to enable:
+- Parallel reading of segment data
+- Incremental updates without rewriting large files
+- Better fault isolation (corrupted file affects only one segment)
 
 ### File Format Details
 
-**1. metadata/*.json (JSON format)**
+**1. metadata/{snapshot_id}.json (JSON format)**
 - SnapshotInfo: snapshot basic information
 - CollectionDescription: complete collection schema
 - IndexInfo list: all index definitions
 - ManifestList: string array containing paths to all manifest files
+- SegmentIDs/IndexIDs: pre-computed ID lists for fast reload
+- StorageV2ManifestList: segment-to-manifest mappings for StorageV2 format (optional)
 
 **Structure of metadata JSON:**
 ```go
 type SnapshotMetadata struct {
-    SnapshotInfo *datapb.SnapshotInfo          // Snapshot basic info
-    Collection   *datapb.CollectionDescription // Complete schema
-    Indexes      []*indexpb.IndexInfo          // Index definitions
-    ManifestList []string                      // Array of manifest file paths
+    SnapshotInfo          *datapb.SnapshotInfo          // Snapshot basic info
+    Collection            *datapb.CollectionDescription // Complete schema
+    Indexes               []*indexpb.IndexInfo          // Index definitions
+    ManifestList          []string                      // Array of manifest file paths
+    SegmentIDs            []int64                       // Pre-computed segment IDs for fast reload
+    IndexIDs              []int64                       // Pre-computed index IDs for fast reload
+    StorageV2ManifestList []*StorageV2SegmentManifest   // StorageV2 (Lance/Arrow) manifest mappings
+}
+
+type StorageV2SegmentManifest struct {
+    SegmentID int64  // Segment ID
+    Manifest  string // Path to StorageV2 manifest file
 }
 ```
 
-**2. manifests/data-file-manifest-*.avro (Avro format)**
-- Array of ManifestEntry
-- Each entry contains complete SegmentDescription:
+**Fast Reload Optimization**: The `SegmentIDs` and `IndexIDs` fields enable DataCoord to quickly reload snapshot metadata during startup without parsing heavy Avro manifest files. Full segment data is loaded on-demand.
+
+**2. manifests/{snapshot_id}/{segment_id}.avro (Avro format)**
+- One file per segment for parallel I/O and fault isolation
+- Each file contains a single ManifestEntry with complete SegmentDescription:
   - segment_id, partition_id, segment_level
   - binlog_files, deltalog_files, statslog_files, bm25_statslog_files
   - index_files, text_index_files, json_key_index_files
   - num_of_rows, channel_name, storage_version
   - start_position, dml_position
+  - is_sorted (whether segment data is sorted by primary key)
 - Uses Avro format to provide schema evolution support
+
+**StorageV2 Support**: For segments using Milvus's newer storage format, additional manifest paths are stored in `StorageV2ManifestList`. This enables seamless snapshot/restore for both legacy and new storage formats.
 
 ### Write Process (SnapshotWriter)
 
 ```
-1. writeManifestFile() - Write segment details to manifest file
-   - Convert SegmentDescription to Avro ManifestEntry
-   - Serialize to Avro binary format
-   - Write to S3: manifests/data-file-manifest-{uuid}.avro
-   - Return manifest file path
+1. Save() - Main entry point for writing snapshot
+   a. Create manifest directory: manifests/{snapshot_id}/
+   b. For each segment, call writeSegmentManifest():
+      - Convert SegmentDescription to Avro ManifestEntry
+      - Serialize to Avro binary format
+      - Write to S3: manifests/{snapshot_id}/{segment_id}.avro
+   c. Collect StorageV2 manifest paths (if applicable)
+   d. Call writeMetadataFile()
 
-2. writeMetadataFile() - Write main metadata file
-   - Acquire version number (auto-increment based on existing files)
+2. writeSegmentManifest() - Write individual segment manifest
+   - Convert SegmentDescription to ManifestEntry (Avro struct)
+   - Include all binlog, deltalog, statslog, index files
+   - Include position info (start_position, dml_position)
+   - Serialize and write to: manifests/{snapshot_id}/{segment_id}.avro
+
+3. writeMetadataFile() - Write main metadata file
    - Create SnapshotMetadata containing:
      * SnapshotInfo
      * Collection schema
      * Index definitions
      * ManifestList array (paths from step 1)
+     * SegmentIDs/IndexIDs (pre-computed for fast reload)
+     * StorageV2ManifestList (if applicable)
    - Serialize to JSON format
-   - Write to S3: metadata/{version}-{uuid}.json
+   - Write to S3: metadata/{snapshot_id}.json
 ```
 
 ### Read Process (SnapshotReader)
 
 ```
-1. findMetadataFileBySnapshotID() - Locate metadata file for specific snapshot
-   - List all metadata files in metadata/ directory
-   - Iterate through files and parse each one
-   - Match SnapshotInfo.Id with target snapshot ID
-   - Return the matching metadata file path
+1. ReadSnapshot(metadataFilePath, includeSegments) - Read snapshot data
+   a. Read and parse metadata JSON file
+   b. If includeSegments=false:
+      - Return only SnapshotInfo, Collection, Indexes
+      - Use pre-computed SegmentIDs/IndexIDs for fast reload
+   c. If includeSegments=true:
+      - For each path in ManifestList array:
+        * Read Avro binary data
+        * Parse ManifestEntry records
+        * Convert to SegmentDescription
+      - Populate StorageV2 manifest paths if present
+   d. Return complete SnapshotData
 
-2. readMetadataFile() - Read and parse metadata JSON file
-   - Retrieve SnapshotInfo, CollectionDescription, Indexes
-   - Retrieve ManifestList array (contains all manifest file paths)
-
-3. readManifestFile() - Read and parse manifest Avro file(s)
-   - For each path in ManifestList array:
-     * Read Avro binary data
-     * Parse ManifestEntry records
-     * Convert to SegmentDescription
-   - Return all segments
+2. ListSnapshots(collectionID) - List all snapshots for a collection
+   - List all files in metadata/ directory
+   - Parse each metadata file to extract SnapshotInfo
+   - Return list of SnapshotInfo
 ```
 
+**Performance Optimization**: The `includeSegments` parameter allows DataCoord to defer loading heavy segment data. During startup, only metadata is loaded (includeSegments=false), and full segment data is loaded on-demand when needed for restore operations.
+
 ## Snapshot Data Management
+
+### SnapshotManager
+
+**SnapshotManager** centralizes all snapshot-related business logic, providing a unified interface for snapshot lifecycle management and restore operations.
+
+**Design Principles**:
+- Encapsulates business logic from RPC handlers
+- Manages dependencies through constructor injection
+- Eliminates code duplication (state conversion, progress calculation)
+- Maintains separation from background services (Checker/Inspector)
+
+**Core Interface**:
+```go
+type SnapshotManager interface {
+    // Snapshot lifecycle management
+    CreateSnapshot(ctx context.Context, collectionID int64, name, description string) (int64, error)
+    DropSnapshot(ctx context.Context, name string) error
+    DescribeSnapshot(ctx context.Context, name string) (*SnapshotData, error)
+    ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error)
+
+    // Restore operations
+    RestoreSnapshot(ctx context.Context, snapshotName string, targetCollectionID int64) (int64, error)
+    GetRestoreState(ctx context.Context, jobID int64) (*datapb.RestoreSnapshotInfo, error)
+    ListRestoreJobs(ctx context.Context, collectionID int64) ([]*datapb.RestoreSnapshotInfo, error)
+}
+```
+
 
 ### Snapshot Metadata Management
 
@@ -181,10 +241,37 @@ type snapshotMeta struct {
 
 **Core Functions**:
 
-**1. SaveSnapshot()**
-- Calls SnapshotWriter.Save() to write data to S3
-- Saves SnapshotInfo to Etcd catalog
-- Maintains snapshot-to-segment/index reference relationships in memory
+**1. SaveSnapshot() - Two-Phase Commit (2PC)**
+
+SaveSnapshot uses a two-phase commit approach to ensure atomic creation and enable GC cleanup of orphan files:
+
+```
+Phase 1 (Prepare):
+  - Save snapshot with PENDING state to catalog (etcd)
+  - Snapshot ID is allocated and stored
+  - PendingStartTime is recorded for timeout tracking
+
+Write S3 Data:
+  - Write segment manifest files to S3
+  - Write metadata.json to S3
+  - Update S3Location in snapshot info
+
+Phase 2 (Commit):
+  - Update snapshot state to COMMITTED in catalog
+  - Insert into in-memory cache with precomputed ID sets
+```
+
+**Failure Handling**:
+| Failure Point | State | Recovery Action |
+|--------------|-------|-----------------|
+| Phase 1 fails | No changes | Return error, no cleanup needed |
+| S3 write fails | PENDING in catalog | GC will cleanup S3 files using snapshot ID |
+| Phase 2 fails | PENDING in catalog, S3 data exists | GC will cleanup S3 files and catalog record |
+
+**Key Design Points**:
+- Snapshot ID is used to compute S3 paths, no S3 list operations needed for cleanup
+- PENDING snapshots are filtered out during DataCoord reload
+- GC uses `PendingStartTime` + timeout to identify orphaned snapshots
 
 **2. DropSnapshot()**
 - Removes snapshot metadata from memory and Etcd
@@ -194,8 +281,45 @@ type snapshotMeta struct {
 **3. GetSnapshotBySegment()/GetSnapshotByIndex()**
 - Queries which snapshots reference a specific segment or index
 - Used during GC to determine if resources can be deleted
+- Uses precomputed SegmentIDs/IndexIDs sets for O(1) lookup per snapshot
+
+**4. GetPendingSnapshots()**
+- Returns all PENDING snapshots that have exceeded the timeout
+- Used by GC to find orphaned snapshots for cleanup
+
+**5. CleanupPendingSnapshot()**
+- Removes a pending snapshot record from catalog
+- Called by GC after S3 files have been cleaned up
 
 ### Garbage Collection Integration
+
+**Pending Snapshot GC (recyclePendingSnapshots)**:
+
+Cleans up orphaned snapshot files from failed 2PC commits:
+
+```
+Process flow:
+1. Get all PENDING snapshots from catalog that have exceeded timeout
+2. For each pending snapshot:
+   a. Compute manifest directory: snapshots/{collection_id}/manifests/{snapshot_id}/
+   b. Compute metadata file: snapshots/{collection_id}/metadata/{snapshot_id}.json
+   c. Delete manifest directory using RemoveWithPrefix (no S3 list needed)
+   d. Delete metadata file
+   e. Delete etcd record
+```
+
+**Key Design Points**:
+- NO S3 list operations: Uses RemoveWithPrefix for directory cleanup
+- File paths computed from collection_id + snapshot_id stored in etcd
+- Timeout mechanism (configurable via `SnapshotPendingTimeout`) prevents cleanup of snapshots still being created
+- Runs as part of DataCoord's regular GC cycle
+
+**Configuration**:
+```yaml
+dataCoord:
+  gc:
+    snapshotPendingTimeout: 10m  # Time before pending snapshot is considered orphaned
+```
 
 **Segment GC Protection**:
 
@@ -257,6 +381,16 @@ Describe:
   User Request -> Proxy DescribeSnapshot -> DataCoord
     -> SnapshotMeta.GetSnapshot()
     -> Return SnapshotInfo
+
+Restore:
+  User Request -> Proxy RestoreSnapshot -> RootCoord
+    -> DescribeSnapshot() from DataCoord (get schema, partitions, indexes)
+    -> CreateCollection() with PreserveFieldId=true
+    -> CreatePartition() for each user partition
+    -> RestoreSnapshotDataAndIndex() to DataCoord
+       -> Create indexes with PreserveIndexId=true
+       -> Create CopySegmentJob
+    -> Return job_id for async tracking
 ```
 
 ## Restore Snapshot Implementation
@@ -265,40 +399,93 @@ Describe:
 
 Restore is implemented using the **Copy Segment mechanism**, which significantly improves recovery speed by directly copying segment files, avoiding the overhead of rewriting data and rebuilding indexes.
 
+### Architecture Overview
+
+The restore operation follows a layered architecture with clear separation of responsibilities:
+
+```
+User Request
+    │
+    ▼
+┌─────────┐
+│  Proxy  │  ← Entry point, request validation
+└────┬────┘
+     │
+     ▼
+┌───────────┐
+│ RootCoord │  ← Orchestration: CreateCollection, CreatePartition, coordinate DataCoord
+└─────┬─────┘
+      │
+      ▼
+┌───────────┐
+│ DataCoord │  ← Data restoration: CopySegmentJob creation, index creation
+└─────┬─────┘
+      │
+      ▼
+┌──────────┐
+│ DataNode │  ← Execution: Copy segment files from S3
+└──────────┘
+```
+
 ### Restore Process
 
-#### Phase 1: Collection and Schema Recreation (Proxy Layer)
+#### Phase 1: Request Entry (Proxy Layer)
 
 ```
 1. Proxy RestoreSnapshotTask.Execute():
-   - DescribeSnapshot() retrieves complete snapshot information
-   - CreateCollection() creates new collection, preserving field IDs (PreserveFieldId=true)
-   - CreatePartition() creates user-defined partitions
-   - CreateIndex() creates indexes, preserving index IDs (PreserveIndexId=true)
+   - Validates request parameters
+   - Delegates to RootCoord.RestoreSnapshot()
+   - RootCoord orchestrates the entire restore process
+```
+
+**Design Notes**:
+- Proxy layer is simplified to just delegate to RootCoord
+- All orchestration logic is centralized in RootCoord for better transactional control
+
+#### Phase 2: Collection and Schema Recreation (RootCoord Layer)
+
+```
+2. RootCoord restoreSnapshotTask.Execute():
+   a. Get snapshot info from DataCoord
+      - DescribeSnapshot() retrieves complete snapshot information (schema, partitions, indexes)
+
+   b. Create collection with preserved field IDs
+      - CreateCollection() with PreserveFieldId=true
+      - Schema properties are completely copied (consistency level, num_shards, etc.)
+
+   c. Create user partitions
+      - CreatePartition() for each user-created partition in snapshot
+
+   d. Restore data and indexes via DataCoord
+      - RestoreSnapshotDataAndIndex() handles data copying and index creation
 ```
 
 **Key Design Points**:
 - `PreserveFieldId=true`: Ensures new collection field IDs match those in snapshot
-- `PreserveIndexId=true`: Ensures index IDs match, allowing direct use of index files from snapshot
+- RootCoord handles rollback on failure (drops collection/partitions if restore fails)
 - Schema properties are completely copied, including consistency level, num_shards, etc.
 
-#### Phase 2: Data Restoration (DataCoord Layer)
+#### Phase 3: Data and Index Restoration (DataCoord Layer)
 
 ```
-2. DataCoord RestoreSnapshot():
+3. DataCoord RestoreSnapshotDataAndIndex():
    a. Read snapshot data
       - SnapshotMeta.ReadSnapshotData() reads complete segment information from S3
-   
+
    b. Generate mappings
       - Channel Mapping: Map snapshot channels to new collection channels
       - Partition Mapping: Map snapshot partition IDs to new partition IDs
-   
-   c. Pre-register Target Segments
+
+   c. Create indexes (if requested)
+      - Create indexes with PreserveIndexId=true
+      - Ensures index IDs match, allowing direct use of index files from snapshot
+
+   d. Pre-register Target Segments
       - Allocate new segment IDs
       - Create SegmentInfo (with correct PartitionID and InsertChannel)
       - Pre-register to meta via meta.AddSegment(), State set to Importing
-   
-   d. Create Copy Segment Job
+
+   e. Create Copy Segment Job
       - Create lightweight ID mappings (source_segment_id -> target_segment_id)
       - Generate CopySegmentJob and save to meta
       - CopySegmentChecker automatically creates CopySegmentTasks
@@ -322,10 +509,10 @@ message CopySegmentIDMapping {
   - Copy task reads segment information from meta during execution, no need to duplicate storage in IDMapping
 - **Mapping Application Flow**: Calculate channel/partition mappings during job creation → Create target segments and write to meta → IDMapping only retains ID references
 
-#### Phase 3: Copy Segment Execution (DataNode Layer)
+#### Phase 4: Copy Segment Execution (DataNode Layer)
 
 ```
-3. CopySegmentChecker monitors job execution:
+4. CopySegmentChecker monitors job execution:
    
    Pending -> Executing:
    - Group segments by maxSegmentsPerCopyTask (currently default 10/group)
@@ -698,7 +885,7 @@ message DescribeSnapshotResponse {
 
 **Function**: Restore data from snapshot to new collection
 
-**Request**:
+**Request** (milvuspb - User-facing API):
 ```protobuf
 message RestoreSnapshotRequest {
   common.MsgBase base = 1;
@@ -716,10 +903,28 @@ message RestoreSnapshotResponse {
 }
 ```
 
+**Internal API** (datapb - DataCoord API):
+```protobuf
+// RestoreSnapshotDataAndIndex - Called by RootCoord after collection/partition creation
+message RestoreSnapshotRequest {
+  common.MsgBase base = 1;
+  string name = 2;                  // snapshot name
+  int64 collection_id = 3;          // target collection ID (already created by RootCoord)
+  bool create_indexes = 4;          // whether to create indexes during restore
+}
+```
+
 **Implementation Flow**:
-1. Create new collection (preserve field/index IDs)
-2. Create partitions and indexes
-3. Create CopySegmentJob for data recovery
+1. **Proxy**: Validates request and delegates to RootCoord
+2. **RootCoord** (orchestration):
+   - Get snapshot info from DataCoord (schema, partitions, indexes)
+   - Create new collection with PreserveFieldId=true
+   - Create user partitions
+   - Call DataCoord.RestoreSnapshotDataAndIndex()
+   - Handle rollback on failure
+3. **DataCoord** (data restoration):
+   - Create indexes with PreserveIndexId=true (if requested)
+   - Create CopySegmentJob for data recovery
 4. Return job_id for progress tracking
 
 **Limitations**:

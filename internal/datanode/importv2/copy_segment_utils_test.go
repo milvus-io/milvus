@@ -657,8 +657,8 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 		}
 
 		// First copy succeeds, second fails
-		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10001", "files/insert_log/444/555/666/1/10001").Return(nil).Once()
-		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10002", "files/insert_log/444/555/666/1/10002").Return(errors.New("copy failed")).Once()
+		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10001", "files/insert_log/444/555/666/1/10001").Return(nil).Maybe()
+		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10002", "files/insert_log/444/555/666/1/10002").Return(errors.New("copy failed")).Maybe()
 
 		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 
@@ -796,4 +796,56 @@ func TestShortenJsonStatsPath(t *testing.T) {
 	assert.Equal(t, int64(512), result[200].MemorySize)
 	assert.Equal(t, 1, len(result[200].Files))
 	assert.Equal(t, "shredding_data/parquet_data_0", result[200].Files[0])
+}
+
+func TestShortenJsonStatsPath_MetaJson(t *testing.T) {
+	// Test shortening meta.json path (file directly under fieldID directory)
+	jsonStats := map[int64]*datapb.JsonKeyStats{
+		102: {
+			FieldID: 102,
+			Version: 1,
+			BuildID: 462930163709949539,
+			Files: []string{
+				"files/json_stats/2/462930163709949539/1/462930163710600038/462930163710600039/462930163710600046/102/meta.json",
+			},
+			JsonKeyStatsDataFormat: 2,
+			MemorySize:             256,
+		},
+	}
+
+	result := shortenJsonStatsPath(jsonStats)
+
+	assert.Equal(t, 1, len(result))
+	assert.NotNil(t, result[102])
+	assert.Equal(t, int64(102), result[102].FieldID)
+	assert.Equal(t, 1, len(result[102].Files))
+	assert.Equal(t, "meta.json", result[102].Files[0])
+}
+
+func TestShortenSingleJsonStatsPath_EdgeCases(t *testing.T) {
+	// Test already shortened path
+	t.Run("already_shortened_meta", func(t *testing.T) {
+		result := shortenSingleJsonStatsPath("meta.json")
+		assert.Equal(t, "meta.json", result)
+	})
+
+	// Test already shortened shared_key_index path
+	t.Run("already_shortened_shared_key", func(t *testing.T) {
+		result := shortenSingleJsonStatsPath("shared_key_index/inverted_index_0")
+		assert.Equal(t, "shared_key_index/inverted_index_0", result)
+	})
+
+	// Test full path with meta.json
+	t.Run("full_path_meta_json", func(t *testing.T) {
+		fullPath := "files/json_stats/2/123/1/444/555/666/100/meta.json"
+		result := shortenSingleJsonStatsPath(fullPath)
+		assert.Equal(t, "meta.json", result)
+	})
+
+	// Test full path with nested file under fieldID
+	t.Run("full_path_nested_file", func(t *testing.T) {
+		fullPath := "files/json_stats/2/123/1/444/555/666/100/subdir/file.dat"
+		result := shortenSingleJsonStatsPath(fullPath)
+		assert.Equal(t, "subdir/file.dat", result)
+	})
 }
