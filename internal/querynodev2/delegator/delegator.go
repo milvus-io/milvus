@@ -104,6 +104,7 @@ type ShardDelegator interface {
 
 	// analyzer
 	RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error)
+	GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error)
 
 	// control
 	Serviceable() bool
@@ -220,10 +221,6 @@ func (sd *shardDelegator) GetSegmentInfo(readable bool) ([]SnapshotItem, []Segme
 
 // SyncDistribution revises distribution.
 func (sd *shardDelegator) SyncDistribution(ctx context.Context, entries ...SegmentEntry) {
-	log := sd.getLogger(ctx)
-
-	log.Info("sync distribution", zap.Any("entries", entries))
-
 	sd.distribution.AddDistributions(entries...)
 }
 

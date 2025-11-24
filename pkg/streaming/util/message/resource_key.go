@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -46,6 +47,14 @@ func (r ResourceKey) String() string {
 	return fmt.Sprintf("%s:%s@X", domain, r.Key)
 }
 
+func (r ResourceKey) ShortString() string {
+	domain, _ := strings.CutPrefix(r.Domain.String(), "ResourceDomain")
+	if r.Shared {
+		return fmt.Sprintf("%s@R", domain)
+	}
+	return fmt.Sprintf("%s@X", domain)
+}
+
 // NewSharedClusterResourceKey creates a shared cluster resource key.
 func NewSharedClusterResourceKey() ResourceKey {
 	return ResourceKey{
@@ -66,6 +75,9 @@ func NewExclusiveClusterResourceKey() ResourceKey {
 
 // NewSharedCollectionNameResourceKey creates a shared collection name resource key.
 func NewSharedCollectionNameResourceKey(dbName string, collectionName string) ResourceKey {
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainCollectionName,
 		Key:    fmt.Sprintf("%s:%s", dbName, collectionName),
@@ -75,6 +87,9 @@ func NewSharedCollectionNameResourceKey(dbName string, collectionName string) Re
 
 // NewExclusiveCollectionNameResourceKey creates an exclusive collection name resource key.
 func NewExclusiveCollectionNameResourceKey(dbName string, collectionName string) ResourceKey {
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainCollectionName,
 		Key:    fmt.Sprintf("%s:%s", dbName, collectionName),
@@ -84,6 +99,9 @@ func NewExclusiveCollectionNameResourceKey(dbName string, collectionName string)
 
 // NewSharedDBNameResourceKey creates a shared db name resource key.
 func NewSharedDBNameResourceKey(dbName string) ResourceKey {
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainDBName,
 		Key:    dbName,
@@ -93,6 +111,9 @@ func NewSharedDBNameResourceKey(dbName string) ResourceKey {
 
 // NewExclusiveDBNameResourceKey creates an exclusive db name resource key.
 func NewExclusiveDBNameResourceKey(dbName string) ResourceKey {
+	if dbName == "" {
+		dbName = util.DefaultDBName
+	}
 	return ResourceKey{
 		Domain: messagespb.ResourceDomain_ResourceDomainDBName,
 		Key:    dbName,

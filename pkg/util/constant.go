@@ -44,12 +44,8 @@ const (
 	SegmentIndexPrefix = "segment-index"
 	FieldIndexPrefix   = "field-index"
 
-	HeaderAuthorize = "authorization"
-	HeaderToken     = "token"
-	// HeaderSourceID identify requests from Milvus members and client requests
-	HeaderSourceID = "sourceId"
-	// MemberCredID id for Milvus members (data/index/query node/coord component)
-	MemberCredID        = "@@milvus-member@@"
+	HeaderAuthorize     = "authorization"
+	HeaderToken         = "token"
 	CredentialSeperator = ":"
 	UserRoot            = "root"
 	PasswordHolder      = "___"
@@ -163,6 +159,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadWrite.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupCollectionAdmin.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String()),
 		},
 		commonpb.ObjectType_User.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
@@ -285,6 +282,7 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDropDatabase.String(),
 		commonpb.ObjectPrivilege_PrivilegeAlterDatabase.String(),
 		commonpb.ObjectPrivilege_PrivilegeFlush.String(),
+		commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
 	}
 )
 
@@ -385,6 +383,7 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeCreatePrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropPrivilegeGroup.String(),
 			commonpb.ObjectPrivilege_PrivilegeOperatePrivilegeGroup.String(),
+			commonpb.ObjectPrivilege_PrivilegeUpdateReplicateConfiguration.String(),
 		})...,
 	)
 )

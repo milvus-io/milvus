@@ -593,7 +593,10 @@ class InsertRecordSealed {
     clear() {
         timestamps_.clear();
         timestamp_index_ = TimestampIndex();
-        pk2offset_->clear();
+        if (pk2offset_) {
+            pk2offset_->clear();
+        }
+
         reserved = 0;
         if (estimated_memory_size_ > 0) {
             cachinglayer::Manager::GetInstance().RefundLoadedResource(
@@ -753,7 +756,9 @@ class InsertRecordGrowing {
     clear() {
         timestamps_.clear();
         timestamp_index_ = TimestampIndex();
-        pk2offset_->clear();
+        if (pk2offset_) {
+            pk2offset_->clear();
+        }
         reserved = 0;
         data_.clear();
         ack_responder_.clear();

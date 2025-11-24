@@ -696,6 +696,8 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	oldCollClone.Fields = newColl.Fields
 	oldCollClone.StructArrayFields = newColl.StructArrayFields
 	oldCollClone.UpdateTimestamp = newColl.UpdateTimestamp
+	oldCollClone.EnableDynamicField = newColl.EnableDynamicField
+	oldCollClone.SchemaVersion = newColl.SchemaVersion
 
 	newKey := BuildCollectionKey(newColl.DBID, oldColl.CollectionID)
 	value, err := proto.Marshal(model.MarshalCollectionModel(oldCollClone))
@@ -720,6 +722,15 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			k := BuildStructArrayFieldKey(newColl.CollectionID, structArrayField.FieldID)
 			structArrayFieldInfo := model.MarshalStructArrayFieldModel(structArrayField)
 			v, err := proto.Marshal(structArrayFieldInfo)
+			if err != nil {
+				return err
+			}
+			saves[k] = string(v)
+		}
+		for _, function := range newColl.Functions {
+			k := BuildFunctionKey(newColl.CollectionID, function.ID)
+			functionInfo := model.MarshalFunctionModel(function)
+			v, err := proto.Marshal(functionInfo)
 			if err != nil {
 				return err
 			}

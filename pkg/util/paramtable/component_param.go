@@ -846,7 +846,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.SessionTTL = ParamItem{
 		Key:          "common.session.ttl",
 		Version:      "2.0.0",
-		DefaultValue: "10",
+		DefaultValue: "30",
 		Doc:          "ttl value when session granting a lease to register service",
 		Export:       true,
 	}
@@ -6213,9 +6213,6 @@ type streamingConfig struct {
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
-
-	WALTruncateSampleInterval    ParamItem `refreshable:"true"`
-	WALTruncateRetentionInterval ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6378,10 +6375,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxCount = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxCount",
 		Version: "2.6.0",
-		Doc: `The max count of tombstone, 256 by default. 
+		Doc: `The max count of tombstone, 8192 by default. 
 Tombstone is used to reject duplicate submissions of DDL messages,
 too few tombstones may lead to ABA issues in the state of milvus cluster.`,
-		DefaultValue: "256",
+		DefaultValue: "8192",
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxCount.Init(base.mgr)
@@ -6389,10 +6386,10 @@ too few tombstones may lead to ABA issues in the state of milvus cluster.`,
 	p.WALBroadcasterTombstoneMaxLifetime = ParamItem{
 		Key:     "streaming.walBroadcaster.tombstone.maxLifetime",
 		Version: "2.6.0",
-		Doc: `The max lifetime of tombstone, 30m by default.
+		Doc: `The max lifetime of tombstone, 24h by default.
 Tombstone is used to reject duplicate submissions of DDL messages,
 too few tombstones may lead to ABA issues in the state of milvus cluster.`,
-		DefaultValue: "30m",
+		DefaultValue: "24h",
 		Export:       false,
 	}
 	p.WALBroadcasterTombstoneMaxLifetime.Init(base.mgr)
@@ -6540,32 +6537,6 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
-
-	p.WALTruncateSampleInterval = ParamItem{
-		Key:     "streaming.walTruncate.sampleInterval",
-		Version: "2.6.0",
-		Doc: `The interval of sampling wal checkpoint when truncate, 30m by default.
-Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
-More samples, more frequent truncate, more memory usage.`,
-		DefaultValue: "30m",
-		Export:       true,
-	}
-	p.WALTruncateSampleInterval.Init(base.mgr)
-
-	p.WALTruncateRetentionInterval = ParamItem{
-		Key:     "streaming.walTruncate.retentionInterval",
-		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 72h by default.
-If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
-Greater the interval, more wal storage usage, more redundant data in wal.
-Because current query path doesn't promise the read operation not happen before the truncate point,
-retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
-If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
-because the wal truncate operation is implemented by pulsar consumer.`,
-		DefaultValue: "72h",
-		Export:       true,
-	}
-	p.WALTruncateRetentionInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

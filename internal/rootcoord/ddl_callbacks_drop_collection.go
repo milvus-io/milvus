@@ -37,7 +37,7 @@ import (
 )
 
 func (c *Core) broadcastDropCollectionV1(ctx context.Context, req *milvuspb.DropCollectionRequest) error {
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -131,8 +131,7 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 		ce.OptLPCMDBName(body.DbName),
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
-		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)).Build(),
-		result.GetControlChannelResult().TimeTick)
+		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)).Build())
 }
 
 // newCollectionTombstone creates a new collection tombstone.

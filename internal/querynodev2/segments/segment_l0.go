@@ -182,6 +182,10 @@ func (s *L0Segment) FinishLoad() error {
 	return nil
 }
 
+func (s *L0Segment) Load(ctx context.Context) error {
+	return nil
+}
+
 func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()

@@ -992,6 +992,16 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 	toMergeResults := make([]*internalpb.RetrieveResults, len(req.GetDmlChannels()))
 	runningGp, runningCtx := errgroup.WithContext(ctx)
+	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
+		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
+		log.Warn("failed to query collection", zap.Error(err))
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer func() {
+		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
+	}()
 
 	for i, ch := range req.GetDmlChannels() {
 		ch := ch
@@ -1730,4 +1740,37 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 	}
 
 	return merr.Success(), nil
+}
+
+func (node *QueryNode) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &querypb.GetHighlightResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	// get delegator
+	sd, ok := node.delegators.Get(req.GetChannel())
+	if !ok {
+		err := merr.WrapErrChannelNotFound(req.GetChannel())
+		log.Warn("GetHighlight failed, failed to get shard delegator", zap.Error(err))
+		return &querypb.GetHighlightResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	results, err := sd.GetHighlight(ctx, req)
+	if err != nil {
+		log.Warn("GetHighlight failed, delegator run failed", zap.Error(err))
+		return &querypb.GetHighlightResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &querypb.GetHighlightResponse{
+		Status:  merr.Success(),
+		Results: results,
+	}, nil
 }

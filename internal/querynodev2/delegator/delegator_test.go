@@ -1596,6 +1596,159 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 	})
 }
 
+func (s *DelegatorSuite) TestGetHighlight() {
+	ctx := context.Background()
+	s.TestCreateDelegatorWithFunction()
+
+	s.Run("field analyzer not exist", func() {
+		_, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId: 999, // non-existent field
+				},
+			},
+		})
+		s.Require().Error(err)
+	})
+
+	s.Run("normal highlight with single analyzer", func() {
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    100,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+				},
+				{
+					FieldID:  101,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{101},
+			}},
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		s.ResetDelegator()
+
+		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{2},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test", "this is a test document", "another test case"},
+					SearchTextNum: 1,
+					CorpusTextNum: 2,
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(2, len(result))
+		// Check that we got highlight results
+		s.Require().NotNil(result[0].Fragments)
+		s.Require().NotNil(result[1].Fragments)
+	})
+
+	s.Run("highlight with multi analyzer", func() {
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+						"by_field": "analyzer",
+    					"analyzers": {
+							"standard": {},
+							"default": {}
+						}
+					}`}},
+				},
+				{
+					FieldID:  101,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+				{
+					FieldID:  102,
+					Name:     "analyzer",
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{101},
+			}},
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		s.ResetDelegator()
+
+		// two target with two analyzer
+		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1, 1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test1", "test2", "this is a test1 document", "another test2 case"},
+					AnalyzerNames: []string{"default", "standard", "default", "default"},
+					SearchTextNum: 2,
+					CorpusTextNum: 2,
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().Equal(2, len(result))
+	})
+
+	s.Run("empty target texts", func() {
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    100,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+				},
+				{
+					FieldID:  101,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{101},
+			}},
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		s.ResetDelegator()
+
+		result, err := s.delegator.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Topks: []int64{1},
+			Tasks: []*querypb.HighlightTask{
+				{
+					FieldId:       100,
+					Texts:         []string{"test document"},
+					SearchTextNum: 0,
+					CorpusTextNum: 1,
+				},
+			},
+		})
+		s.Require().NoError(err)
+		s.Require().NotNil(result)
+	})
+}
+
 // TestDelegatorLifetimeIntegration tests the integration of lifetime state checks with main delegator methods
 func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
 	sd := s.delegator.(*shardDelegator)

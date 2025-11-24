@@ -797,13 +797,14 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("error"))
 		meta := &MetaTable{
 			catalog:     catalog,
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
 		ctx := context.Background()
-		err := meta.AlterCollection(ctx, nil, nil, 0, false)
+		err := meta.AlterCollection(ctx, nil, nil, 0, false, false)
 		assert.Error(t, err)
 	})
 
@@ -839,6 +840,7 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
 			catalog:     catalog,
@@ -848,7 +850,7 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 
 		oldColl := &model.Collection{CollectionID: 1}
 		newColl := &model.Collection{CollectionID: 1}
-		err := meta.AlterCollection(ctx, oldColl, newColl, 0, false)
+		err := meta.AlterCollection(ctx, oldColl, newColl, 0, false, false)
 		assert.NoError(t, err)
 		assert.Equal(t, meta.collID2Meta[1], newColl)
 	})
@@ -1177,6 +1179,10 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
 		assert.Error(t, err)
+
+		meta.collID2Meta[100].State = pb.CollectionState_CollectionDropping
+		err = meta.RemoveCollection(ctx, 100, 9999)
+		assert.Error(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1191,7 +1197,7 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 			names:   newNameDb(),
 			aliases: newNameDb(),
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "collection"},
+				100: {Name: "collection", State: pb.CollectionState_CollectionDropping},
 			},
 		}
 		channel.ResetStaticPChannelStatsManager()
@@ -1201,6 +1207,74 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		meta.names.insert("", "alias2", 100)
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_RemovePartition(t *testing.T) {
+	t.Run("catalog error", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropPartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.AnythingOfType("uint64"),
+		).Return(errors.New("error mock AlterPartition"))
+
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					CollectionID: 100,
+					DBID:         int64(100),
+					Partitions: []*model.Partition{
+						{PartitionID: 100, State: pb.PartitionState_PartitionCreated},
+					},
+				},
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+
+		ctx := context.Background()
+		err := meta.RemovePartition(ctx, 100, 100, 9999)
+		assert.Error(t, err)
+
+		meta.collID2Meta[100].Partitions[0].State = pb.PartitionState_PartitionDropping
+		err = meta.RemovePartition(ctx, 100, 100, 9999)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropPartition",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name: "collection",
+					Partitions: []*model.Partition{
+						{PartitionID: 100, State: pb.PartitionState_PartitionDropping},
+					},
+				},
+			},
+		}
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager([]string{})
+		meta.names.insert("", "collection", 100)
+		meta.names.insert("", "alias1", 100)
+		meta.names.insert("", "alias2", 100)
+		ctx := context.Background()
+		err := meta.RemovePartition(ctx, 100, 100, 9999)
 		assert.NoError(t, err)
 	})
 }
@@ -1610,6 +1684,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("fail"))
 
 		meta := &MetaTable{
@@ -1663,6 +1738,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		catalog.On("GetCollectionByName",
 			mock.Anything,
@@ -1701,6 +1777,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 	t.Run("rename collection ok", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,

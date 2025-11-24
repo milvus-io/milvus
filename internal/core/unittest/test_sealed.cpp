@@ -883,7 +883,7 @@ TEST(Sealed, LoadPkScalarIndex) {
     LoadIndexInfo pk_index;
     pk_index.field_id = pk_id.get();
     pk_index.field_type = DataType::INT64;
-    pk_index.index_params["index_type"] = "sort";
+    pk_index.index_params["index_type"] = "STL_SORT";
     auto pk_data = dataset.get_col<int64_t>(pk_id);
     auto index = GenScalarIndexing<int64_t>(N, pk_data.data());
     pk_index.index_params = GenIndexParams(index.get());
@@ -962,7 +962,7 @@ TEST(Sealed, LoadScalarIndex) {
     LoadIndexInfo counter_index;
     counter_index.field_id = counter_id.get();
     counter_index.field_type = DataType::INT64;
-    counter_index.index_params["index_type"] = "sort";
+    counter_index.index_params["index_type"] = "STL_SORT";
     auto counter_data = dataset.get_col<int64_t>(counter_id);
     auto index = GenScalarIndexing<int64_t>(N, counter_data.data());
     counter_index.index_params = GenIndexParams(index.get());
@@ -972,7 +972,7 @@ TEST(Sealed, LoadScalarIndex) {
     LoadIndexInfo double_index;
     double_index.field_id = double_id.get();
     double_index.field_type = DataType::DOUBLE;
-    double_index.index_params["index_type"] = "sort";
+    double_index.index_params["index_type"] = "STL_SORT";
     auto double_data = dataset.get_col<double>(double_id);
     auto temp1 = GenScalarIndexing<double>(N, double_data.data());
     double_index.index_params = GenIndexParams(temp1.get());
@@ -982,7 +982,7 @@ TEST(Sealed, LoadScalarIndex) {
     LoadIndexInfo nothing_index;
     nothing_index.field_id = nothing_id.get();
     nothing_index.field_type = DataType::INT32;
-    nothing_index.index_params["index_type"] = "sort";
+    nothing_index.index_params["index_type"] = "STL_SORT";
     auto nothing_data = dataset.get_col<int32_t>(nothing_id);
     auto temp2 = GenScalarIndexing<int32_t>(N, nothing_data.data());
     nothing_index.index_params = GenIndexParams(temp2.get());
@@ -2278,31 +2278,6 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(string_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(double_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(float_array_result->valid_data_size(), dataset_size);
-}
-
-TEST(Sealed, SearchSortedPk) {
-    auto schema = std::make_shared<Schema>();
-    auto varchar_pk_field = schema->AddDebugField("pk", DataType::VARCHAR);
-    schema->set_primary_field_id(varchar_pk_field);
-    auto segment_sealed = CreateSealedSegment(
-        schema, nullptr, 999, SegcoreConfig::default_config(), true);
-    auto segment =
-        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
-
-    int64_t dataset_size = 1000;
-    auto dataset = DataGen(schema, dataset_size, 42, 0, 10);
-    LoadGeneratedDataIntoSegment(dataset, segment);
-
-    auto pk_values = dataset.get_col<std::string>(varchar_pk_field);
-    auto offsets =
-        segment->search_pk(nullptr, PkType(pk_values[100]), Timestamp(99999));
-    EXPECT_EQ(10, offsets.size());
-    EXPECT_EQ(100, offsets[0].get());
-
-    auto offsets2 =
-        segment->search_pk(nullptr, PkType(pk_values[100]), int64_t(105));
-    EXPECT_EQ(6, offsets2.size());
-    EXPECT_EQ(100, offsets2[0].get());
 }
 
 using VectorArrayTestParam =

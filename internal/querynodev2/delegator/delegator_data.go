@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -1000,4 +1001,60 @@ func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexR
 		}
 	}
 	return nil
+}
+
+func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
+	result := []*querypb.HighlightResult{}
+	for _, task := range req.GetTasks() {
+		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum()) {
+			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), task.GetSearchTextNum()+task.GetCorpusTextNum())
+		}
+		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
+		}
+		topks := req.GetTopks()
+		var results [][]*milvuspb.AnalyzerToken
+		var err error
+
+		if len(analyzer.GetInputFields()) == 1 {
+			results, err = analyzer.BatchAnalyze(true, false, task.GetTexts())
+			if err != nil {
+				return nil, err
+			}
+		} else if len(analyzer.GetInputFields()) == 2 {
+			// use analyzer names if analyzer need two input field
+			results, err = analyzer.BatchAnalyze(true, false, task.GetTexts(), task.GetAnalyzerNames())
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// analyze result of search text
+		searchResults := results[0:task.SearchTextNum]
+		// analyze result of corpus text
+		corpusResults := results[task.SearchTextNum:]
+		corpusIdx := 0
+		for i, tokens := range searchResults {
+			tokenSet := typeutil.NewSet[string]()
+			for _, token := range tokens {
+				tokenSet.Insert(token.GetToken())
+			}
+
+			for j := 0; j < int(topks[i]); j++ {
+				spans := SpanList{}
+				for _, token := range corpusResults[corpusIdx] {
+					if tokenSet.Contain(token.GetToken()) {
+						spans = append(spans, Span{token.GetStartOffset(), token.GetEndOffset()})
+					}
+				}
+				spans = mergeOffsets(spans)
+				frags := fetchFragmentsFromOffsets(task.Texts[int(task.SearchTextNum)+corpusIdx], spans, task.GetOptions().GetFragmentSize(), task.GetOptions().GetNumOfFragments())
+				result = append(result, &querypb.HighlightResult{Fragments: frags})
+				corpusIdx++
+			}
+		}
+	}
+
+	return result, nil
 }

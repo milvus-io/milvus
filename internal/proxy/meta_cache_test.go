@@ -1304,7 +1304,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
 			// periodically invalid collection cache
-			globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
+			globalMetaCache.RemoveCollection(ctx, dbName, "collection1", 0)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -1497,7 +1497,7 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
-	globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
+	globalMetaCache.RemoveCollection(ctx, dbName, "collection1", 0)
 	// no collectionInfo of collection2, should access RootCoord
 	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)

@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	sio "io"
 	"sort"
@@ -253,7 +254,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				pluginContext = &indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
-					EncryptionKey:    string(unsafe),
+					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 				}
 			}
 		}
@@ -326,7 +327,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				pluginContext = &indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
-					EncryptionKey:    string(unsafe),
+					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 				}
 			}
 		}

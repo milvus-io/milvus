@@ -104,7 +104,7 @@ type IMetaTable interface {
 	GetPChannelInfo(ctx context.Context, pchannel string) *rootcoordpb.GetPChannelInfoResponse
 	AddPartition(ctx context.Context, partition *model.Partition) error
 	DropPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
+	RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
 
 	// Alias
 	AlterAlias(ctx context.Context, result message.BroadcastResultAlterAliasMessageV2) error
@@ -377,12 +377,12 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	dbName := db.Name
-	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
 		return err
 	}
 
-	// Call back cipher plugin when creating database succeeded
-	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
+	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
+		hookutil.RemoveEZByDBProperties(db.Properties) // ignore the error since create database failed
 		return err
 	}
 
@@ -618,6 +618,9 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	if !ok {
 		log.Ctx(ctx).Warn("not found collection, skip remove", zap.Int64("collectionID", collectionID))
 		return nil
+	}
+	if coll.State != pb.CollectionState_CollectionDropping {
+		return fmt.Errorf("remove collection which state is not dropping, collectionID: %d, state: %s", collectionID, coll.State.String())
 	}
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
@@ -957,7 +960,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 			dbChanged = true
 		}
 	}
-	newColl.UpdateTimestamp = result.GetControlChannelResult().TimeTick
+	newColl.UpdateTimestamp = result.GetMaxTimeTick()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if !dbChanged {
@@ -1150,18 +1153,15 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 	return nil
 }
 
-func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.DropPartition(ctx1, dbID, collectionID, partitionID, ts); err != nil {
-		return err
-	}
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
 		return nil
 	}
+
 	loc := -1
 	for idx, part := range coll.Partitions {
 		if part.PartitionID == partitionID {
@@ -1169,9 +1169,20 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, dbID int64, collection
 			break
 		}
 	}
-	if loc != -1 {
-		coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
+	if loc == -1 {
+		log.Ctx(ctx).Warn("not found partition, skip remove", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID))
+		return nil
 	}
+	partition := coll.Partitions[loc]
+	if partition.State != pb.PartitionState_PartitionDropping {
+		return fmt.Errorf("remove partition which state is not dropping, collection: %d, partition: %d, state: %s", collectionID, partitionID, partition.State.String())
+	}
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.DropPartition(ctx1, coll.DBID, collectionID, partitionID, ts); err != nil {
+		return err
+	}
+	coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
 	log.Ctx(ctx).Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
 	return nil
 }

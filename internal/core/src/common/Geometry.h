@@ -203,6 +203,13 @@ class Geometry {
 
         return false;
     }
+    bool
+    is_valid() const {
+        if (!IsValid()) {
+            return false;
+        }
+        return GEOSisValid_r(ctx_, geometry_) == 1;
+    }
 
  private:
     // Convert degrees distance to meters using approximate location

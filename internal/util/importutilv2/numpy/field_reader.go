@@ -31,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -192,7 +192,7 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		int64Ts := make([]int64, 0, len(strs))
 		for _, strValue := range strs {
-			tz, err := funcutil.ValidateAndReturnUnixMicroTz(strValue, c.timezone)
+			tz, err := timestamptz.ValidateAndReturnUnixMicroTz(strValue, c.timezone)
 			if err != nil {
 				return nil, nil, err
 			}

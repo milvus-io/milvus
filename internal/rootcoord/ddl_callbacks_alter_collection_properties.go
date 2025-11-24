@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -48,7 +49,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, req.GetProperties())
-	if exist && !funcutil.IsTimezoneValid(tz) {
+	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
@@ -62,7 +63,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		return c.broadcastAlterCollectionForAlterDynamicField(ctx, req, targetValue)
 	}
 
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -145,7 +146,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 	if len(req.GetProperties()) != 1 {
 		return merr.WrapErrParameterInvalidMsg("cannot alter dynamic schema with other properties at the same time")
 	}
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithAliasOrCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
@@ -227,19 +228,19 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 }
 
 // getCacheExpireForCollection gets the cache expirations for collection.
-func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionName string) (*message.CacheExpirations, error) {
-	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionNameOrAlias string) (*message.CacheExpirations, error) {
+	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}
-	aliases, err := c.meta.ListAliases(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	aliases, err := c.meta.ListAliases(ctx, dbName, coll.Name, typeutil.MaxTimestamp)
 	if err != nil {
 		return nil, err
 	}
 	builder := ce.NewBuilder()
 	builder.WithLegacyProxyCollectionMetaCache(
 		ce.OptLPCMDBName(dbName),
-		ce.OptLPCMCollectionName(collectionName),
+		ce.OptLPCMCollectionName(coll.Name),
 		ce.OptLPCMCollectionID(coll.CollectionID),
 		ce.OptLPCMMsgType(commonpb.MsgType_AlterCollection),
 	)
@@ -296,5 +297,5 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
 		return errors.Wrap(err, "failed to broadcast altered collection")
 	}
-	return c.ExpireCaches(ctx, header, result.GetControlChannelResult().TimeTick)
+	return c.ExpireCaches(ctx, header)
 }

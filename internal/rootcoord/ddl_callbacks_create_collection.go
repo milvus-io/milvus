@@ -56,13 +56,13 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		req.NumPartitions = int64(1)
 	}
 
-	broadcaster, err := startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
 	}
 	defer broadcaster.Close()
 
-	// prepare and validate the create collection message.
+	// prepare and validate the creation collection message.
 	createCollectionTask := createCollectionTask{
 		Core:   c,
 		Req:    req,
@@ -77,7 +77,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 		return err
 	}
 
-	// setup the broadcast virtual channels and control channel, then make a broadcast message.
+	// set up the broadcast virtual channels and control channel, then make a broadcast message.
 	broadcastChannel := make([]string, 0, createCollectionTask.Req.ShardsNum+1)
 	broadcastChannel = append(broadcastChannel, streaming.WAL().ControlChannel())
 	for i := 0; i < int(createCollectionTask.Req.ShardsNum); i++ {
@@ -117,9 +117,7 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		ce.OptLPCMDBName(body.DbName),
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
-		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)),
-		newCollInfo.UpdateTimestamp,
-	)
+		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)))
 }
 
 func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message.CreateCollectionMessageHeader, body *message.CreateCollectionRequest, vchannel string, appendResult *message.AppendResult) error {

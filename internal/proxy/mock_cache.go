@@ -660,9 +660,9 @@ func (_c *MockCache_HasDatabase_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
-// RemoveCollection provides a mock function with given fields: ctx, database, collectionName
-func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string) {
-	_m.Called(ctx, database, collectionName)
+// RemoveCollection provides a mock function with given fields: ctx, database, collectionName, version
+func (_m *MockCache) RemoveCollection(ctx context.Context, database string, collectionName string, version uint64) {
+	_m.Called(ctx, database, collectionName, version)
 }
 
 // MockCache_RemoveCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveCollection'
@@ -674,13 +674,14 @@ type MockCache_RemoveCollection_Call struct {
 //   - ctx context.Context
 //   - database string
 //   - collectionName string
-func (_e *MockCache_Expecter) RemoveCollection(ctx interface{}, database interface{}, collectionName interface{}) *MockCache_RemoveCollection_Call {
-	return &MockCache_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, database, collectionName)}
+//   - version uint64
+func (_e *MockCache_Expecter) RemoveCollection(ctx interface{}, database interface{}, collectionName interface{}, version interface{}) *MockCache_RemoveCollection_Call {
+	return &MockCache_RemoveCollection_Call{Call: _e.mock.On("RemoveCollection", ctx, database, collectionName, version)}
 }
 
-func (_c *MockCache_RemoveCollection_Call) Run(run func(ctx context.Context, database string, collectionName string)) *MockCache_RemoveCollection_Call {
+func (_c *MockCache_RemoveCollection_Call) Run(run func(ctx context.Context, database string, collectionName string, version uint64)) *MockCache_RemoveCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
 	})
 	return _c
 }
@@ -690,7 +691,7 @@ func (_c *MockCache_RemoveCollection_Call) Return() *MockCache_RemoveCollection_
 	return _c
 }
 
-func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context, string, string)) *MockCache_RemoveCollection_Call {
+func (_c *MockCache_RemoveCollection_Call) RunAndReturn(run func(context.Context, string, string, uint64)) *MockCache_RemoveCollection_Call {
 	_c.Run(run)
 	return _c
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -59,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -786,7 +788,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
 }
 
-func validateFunction(coll *schemapb.CollectionSchema) error {
+func validateFunction(coll *schemapb.CollectionSchema, disableRuntimeCheck bool) error {
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
@@ -852,9 +854,10 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 			return err
 		}
 	}
-
-	if err := embedding.ValidateFunctions(coll); err != nil {
-		return err
+	if !disableRuntimeCheck {
+		if err := embedding.ValidateFunctions(coll, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: coll.DbName}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1046,6 +1049,103 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 	return primaryData, nil
 }
 
+// findLastOccurrenceIndices finds indices of last occurrences for each unique ID
+func findLastOccurrenceIndices[T comparable](ids []T) []int {
+	lastOccurrence := make(map[T]int, len(ids))
+	for idx, id := range ids {
+		lastOccurrence[id] = idx
+	}
+
+	keepIndices := make([]int, 0, len(lastOccurrence))
+	for idx, id := range ids {
+		if lastOccurrence[id] == idx {
+			keepIndices = append(keepIndices, idx)
+		}
+	}
+	return keepIndices
+}
+
+// DeduplicateFieldData removes duplicate primary keys from field data,
+// keeping the last occurrence of each ID
+func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData []*schemapb.FieldData, schema *schemaInfo) ([]*schemapb.FieldData, uint32, error) {
+	if len(fieldsData) == 0 {
+		return fieldsData, 0, nil
+	}
+
+	if err := fillFieldPropertiesOnly(fieldsData, schema); err != nil {
+		return nil, 0, err
+	}
+
+	// find primary field data
+	var primaryFieldData *schemapb.FieldData
+	for _, field := range fieldsData {
+		if field.GetFieldName() == primaryFieldSchema.GetName() {
+			primaryFieldData = field
+			break
+		}
+	}
+
+	if primaryFieldData == nil {
+		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.GetName()))
+	}
+
+	// get row count
+	var numRows int
+	switch primaryFieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := primaryFieldData.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			numRows = len(scalarField.GetLongData().GetData())
+		case *schemapb.ScalarField_StringData:
+			numRows = len(scalarField.GetStringData().GetData())
+		default:
+			return nil, 0, merr.WrapErrParameterInvalidMsg("unsupported primary key type")
+		}
+	default:
+		return nil, 0, merr.WrapErrParameterInvalidMsg("primary field must be scalar type")
+	}
+
+	if numRows == 0 {
+		return fieldsData, 0, nil
+	}
+
+	// build map to track last occurrence of each primary key
+	var keepIndices []int
+	switch primaryFieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := primaryFieldData.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			// for Int64 primary keys
+			intIDs := scalarField.GetLongData().GetData()
+			keepIndices = findLastOccurrenceIndices(intIDs)
+
+		case *schemapb.ScalarField_StringData:
+			// for VarChar primary keys
+			strIDs := scalarField.GetStringData().GetData()
+			keepIndices = findLastOccurrenceIndices(strIDs)
+		}
+	}
+
+	// if no duplicates found, return original data
+	if len(keepIndices) == numRows {
+		return fieldsData, uint32(numRows), nil
+	}
+
+	log.Info("duplicate primary keys detected in upsert request, deduplicating",
+		zap.Int("original_rows", numRows),
+		zap.Int("deduplicated_rows", len(keepIndices)))
+
+	// use typeutil.AppendFieldData to rebuild field data with deduplicated rows
+	result := typeutil.PrepareResultFieldData(fieldsData, int64(len(keepIndices)))
+	for _, idx := range keepIndices {
+		typeutil.AppendFieldData(result, fieldsData, int64(idx))
+	}
+
+	return result, uint32(len(keepIndices)), nil
+}
+
 // autoGenPrimaryFieldData generate primary data when autoID == true
 func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}) (*schemapb.FieldData, error) {
 	var fieldData schemapb.FieldData
@@ -1105,53 +1205,70 @@ func autoGenDynamicFieldData(data [][]byte) *schemapb.FieldData {
 	}
 }
 
-// fillFieldPropertiesBySchema set fieldID to fieldData according FieldSchemas
-func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
-
+// validateFieldDataColumns validates that all required fields are present and no unknown fields exist.
+// It checks:
+// 1. The number of columns matches the expected count (excluding BM25 output fields)
+// 2. All field names exist in the schema
+// Returns detailed error message listing expected and provided fields if validation fails.
+func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	expectColumnNum := 0
+
+	// Count expected columns
 	for _, field := range schema.GetFields() {
-		fieldName2Schema[field.Name] = field
-		if !typeutil.IsBM25FunctionOutputField(field, schema) {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-
 	for _, structField := range schema.GetStructArrayFields() {
-		for _, field := range structField.GetFields() {
-			fieldName2Schema[field.Name] = field
-			expectColumnNum++
-		}
+		expectColumnNum += len(structField.GetFields())
 	}
 
+	// Validate column count
 	if len(columns) != expectColumnNum {
 		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
 			expectColumnNum, len(columns))
 	}
 
+	// Validate field existence using schemaHelper
 	for _, fieldData := range columns {
-		if fieldSchema, ok := fieldName2Schema[fieldData.FieldName]; ok {
-			fieldData.FieldId = fieldSchema.FieldID
-			fieldData.Type = fieldSchema.DataType
-
-			// Set the ElementType because it may not be set in the insert request.
-			if fieldData.Type == schemapb.DataType_Array {
-				fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
-				if !ok || fd.Scalars.GetArrayData() == nil {
-					return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s,"+
-						" collectionName:%s", fieldData.FieldName, schema.Name)
-				}
-				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
-			} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
-				fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
-				if !ok || fd.Vectors.GetVectorArray() == nil {
-					return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s,"+
-						" collectionName:%s", fieldData.FieldName, schema.Name)
-				}
-				fd.Vectors.GetVectorArray().ElementType = fieldSchema.ElementType
-			}
-		} else {
+		_, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		if err != nil {
 			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
+		}
+	}
+
+	return nil
+}
+
+// fillFieldPropertiesOnly fills field properties (FieldId, Type, ElementType) from schema.
+// It assumes that columns have been validated and does not perform validation.
+// Use validateFieldDataColumns before calling this function if validation is needed.
+func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
+	for _, fieldData := range columns {
+		// Use schemaHelper to get field schema, automatically handles dynamic fields
+		fieldSchema, err := schema.schemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
+		if err != nil {
+			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
+		}
+
+		fieldData.FieldId = fieldSchema.FieldID
+		fieldData.Type = fieldSchema.DataType
+
+		// Set the ElementType because it may not be set in the insert request.
+		if fieldData.Type == schemapb.DataType_Array {
+			fd, ok := fieldData.Field.(*schemapb.FieldData_Scalars)
+			if !ok || fd.Scalars.GetArrayData() == nil {
+				return fmt.Errorf("field convert FieldData_Scalars fail in fieldData, fieldName: %s, collectionName: %s",
+					fieldData.FieldName, schema.Name)
+			}
+			fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
+		} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
+			fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
+			if !ok || fd.Vectors.GetVectorArray() == nil {
+				return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s, collectionName: %s",
+					fieldData.FieldName, schema.Name)
+			}
+			fd.Vectors.GetVectorArray().ElementType = fieldSchema.ElementType
 		}
 	}
 
@@ -2787,7 +2904,7 @@ func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) er
 			localTime := t.In(location)
 
 			// 3. Format using the optimized logic (max 6 digits, no trailing zeros)
-			isoStrings[i] = funcutil.FormatTimeMicroWithoutTrailingZeros(localTime)
+			isoStrings[i] = timestamptz.FormatTimeMicroWithoutTrailingZeros(localTime)
 		}
 
 		// Replace the TimestamptzData with the new StringData in place.
@@ -2899,7 +3016,7 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	if embedding.HasNonBM25Functions(schema.CollectionSchema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
-		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions)
+		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})
 		if err != nil {
 			return err
 		}
@@ -2910,4 +3027,10 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 		sp.AddEvent("Call-function-udf")
 	}
 	return nil
+}
+
+func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSchema) (*schemapb.FunctionSchema, bool) {
+	return lo.Find(functions, func(function *schemapb.FunctionSchema) bool {
+		return function.GetType() == schemapb.FunctionType_BM25 && function.OutputFieldIds[0] == fieldID
+	})
 }

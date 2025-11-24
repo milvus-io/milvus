@@ -1,13 +1,14 @@
 package broadcaster
 
 import (
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -17,68 +18,91 @@ func newBroadcasterMetrics() *broadcasterMetrics {
 		metrics.NodeIDLabelName: paramtable.GetStringNodeID(),
 	}
 	return &broadcasterMetrics{
-		taskTotal:         metrics.StreamingCoordBroadcasterTaskTotal.MustCurryWith(constLabel),
-		resourceKeyTotal:  metrics.StreamingCoordResourceKeyTotal.MustCurryWith(constLabel),
-		broadcastDuration: metrics.StreamingCoordBroadcastDurationSeconds.With(constLabel),
-		ackAllDuration:    metrics.StreamingCoordBroadcasterAckAllDurationSeconds.With(constLabel),
+		taskTotal:           metrics.StreamingCoordBroadcasterTaskTotal.MustCurryWith(constLabel),
+		executionDuration:   metrics.StreamingCoordBroadcasterTaskExecutionDurationSeconds.MustCurryWith(constLabel),
+		broadcastDuration:   metrics.StreamingCoordBroadcasterTaskBroadcastDurationSeconds.MustCurryWith(constLabel),
+		ackCallbackDuration: metrics.StreamingCoordBroadcasterTaskAckCallbackDurationSeconds.MustCurryWith(constLabel),
+		acquireLockDuration: metrics.StreamingCoordBroadcasterTaskAcquireLockDurationSeconds.MustCurryWith(constLabel),
 	}
 }
 
 // broadcasterMetrics is the metrics of the broadcaster.
 type broadcasterMetrics struct {
-	taskTotal         *prometheus.GaugeVec
-	resourceKeyTotal  *prometheus.GaugeVec
-	broadcastDuration prometheus.Observer
-	ackAllDuration    prometheus.Observer
+	taskTotal           *prometheus.GaugeVec
+	executionDuration   prometheus.ObserverVec
+	broadcastDuration   prometheus.ObserverVec
+	ackCallbackDuration prometheus.ObserverVec
+	acquireLockDuration prometheus.ObserverVec
+}
+
+// ObserveAcquireLockDuration observes the acquire lock duration.
+func (m *broadcasterMetrics) ObserveAcquireLockDuration(from time.Time, rks []message.ResourceKey) {
+	m.acquireLockDuration.WithLabelValues(formatResourceKeys(rks)).Observe(time.Since(from).Seconds())
 }
 
 // fromStateToState updates the metrics when the state of the broadcast task changes.
-func (m *broadcasterMetrics) fromStateToState(from streamingpb.BroadcastTaskState, to streamingpb.BroadcastTaskState) {
+func (m *broadcasterMetrics) fromStateToState(msgType message.MessageType, from streamingpb.BroadcastTaskState, to streamingpb.BroadcastTaskState) {
 	if from != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN {
-		m.taskTotal.WithLabelValues(from.String()).Dec()
+		m.taskTotal.WithLabelValues(msgType.String(), from.String()).Dec()
 	}
 	if to != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
-		m.taskTotal.WithLabelValues(to.String()).Inc()
+		m.taskTotal.WithLabelValues(msgType.String(), to.String()).Inc()
 	}
 }
 
 // NewBroadcastTask creates a new broadcast task.
-func (m *broadcasterMetrics) NewBroadcastTask(state streamingpb.BroadcastTaskState) *taskMetricsGuard {
+func (m *broadcasterMetrics) NewBroadcastTask(msgType message.MessageType, state streamingpb.BroadcastTaskState, rks []message.ResourceKey) *taskMetricsGuard {
+	rks = uniqueSortResourceKeys(rks)
 	g := &taskMetricsGuard{
 		start:              time.Now(),
+		ackCallbackBegin:   time.Now(),
 		state:              state,
+		resourceKeys:       formatResourceKeys(rks),
 		broadcasterMetrics: m,
+		messageType:        msgType,
 	}
-	g.broadcasterMetrics.fromStateToState(streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN, state)
+	g.broadcasterMetrics.fromStateToState(msgType, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_UNKNOWN, state)
 	return g
 }
 
-func (m *broadcasterMetrics) IncomingResourceKey(domain messagespb.ResourceDomain) {
-	m.resourceKeyTotal.WithLabelValues(domain.String()).Inc()
-}
-
-func (m *broadcasterMetrics) GoneResourceKey(domain messagespb.ResourceDomain) {
-	m.resourceKeyTotal.WithLabelValues(domain.String()).Dec()
-}
-
 type taskMetricsGuard struct {
-	start time.Time
-	state streamingpb.BroadcastTaskState
+	start            time.Time
+	ackCallbackBegin time.Time
+	state            streamingpb.BroadcastTaskState
+	resourceKeys     string
+	messageType      message.MessageType
 	*broadcasterMetrics
 }
 
-// ToState updates the state of the broadcast task.
-func (g *taskMetricsGuard) ToState(state streamingpb.BroadcastTaskState) {
-	g.broadcasterMetrics.fromStateToState(g.state, state)
+// ObserveStateChanged updates the state of the broadcast task.
+func (g *taskMetricsGuard) ObserveStateChanged(state streamingpb.BroadcastTaskState) {
+	g.broadcasterMetrics.fromStateToState(g.messageType, g.state, state)
+	if state == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+		g.executionDuration.WithLabelValues(g.messageType.String()).Observe(time.Since(g.start).Seconds())
+	}
 	g.state = state
 }
 
 // ObserveBroadcastDone observes the broadcast done.
 func (g *taskMetricsGuard) ObserveBroadcastDone() {
-	g.broadcastDuration.Observe(time.Since(g.start).Seconds())
+	g.broadcastDuration.WithLabelValues(g.messageType.String()).Observe(time.Since(g.start).Seconds())
 }
 
-// ObserverAckOne observes the ack all.
-func (g *taskMetricsGuard) ObserveAckAll() {
-	g.ackAllDuration.Observe(time.Since(g.start).Seconds())
+// ObserveAckCallbackBegin observes the ack callback begin.
+func (g *taskMetricsGuard) ObserveAckCallbackBegin() {
+	g.ackCallbackBegin = time.Now()
+}
+
+// ObserveAckCallbackDone observes the ack callback done.
+func (g *taskMetricsGuard) ObserveAckCallbackDone() {
+	g.ackCallbackDuration.WithLabelValues(g.messageType.String()).Observe(time.Since(g.ackCallbackBegin).Seconds())
+}
+
+// formatResourceKeys formats the resource keys.
+func formatResourceKeys(rks []message.ResourceKey) string {
+	keys := make([]string, 0, len(rks))
+	for _, rk := range rks {
+		keys = append(keys, rk.ShortString())
+	}
+	return strings.Join(keys, "|")
 }

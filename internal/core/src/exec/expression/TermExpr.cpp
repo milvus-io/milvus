@@ -838,29 +838,36 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         return nullptr;
     }
 
-    std::vector<IndexInnerType> vals;
-    for (auto& val : expr_->vals_) {
-        if constexpr (std::is_same_v<T, double>) {
-            if (val.has_int64_val()) {
-                // only json field will cast int to double because other fields are casted in proxy
-                vals.emplace_back(static_cast<double>(val.int64_val()));
-                continue;
+    if (!arg_inited_) {
+        std::vector<IndexInnerType> vals;
+        for (auto& val : expr_->vals_) {
+            if constexpr (std::is_same_v<T, double>) {
+                if (val.has_int64_val()) {
+                    // only json field will cast int to double because other fields are casted in proxy
+                    vals.emplace_back(static_cast<double>(val.int64_val()));
+                    continue;
+                }
+            }
+
+            // Generic overflow handling for all types
+            bool overflowed = false;
+            auto converted_val =
+                GetValueFromProtoWithOverflow<T>(val, overflowed);
+            if (!overflowed) {
+                vals.emplace_back(converted_val);
             }
         }
-
-        // Generic overflow handling for all types
-        bool overflowed = false;
-        auto converted_val = GetValueFromProtoWithOverflow<T>(val, overflowed);
-        if (!overflowed) {
-            vals.emplace_back(converted_val);
-        }
+        arg_set_ = std::make_shared<FlatVectorElement<IndexInnerType>>(vals);
+        arg_inited_ = true;
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<IndexInnerType>& vals) {
         TermIndexFunc<T> func;
         return func(index_ptr, vals.size(), vals.data());
     };
-    auto res = ProcessIndexChunks<T>(execute_sub_batch, vals);
+    auto args =
+        std::dynamic_pointer_cast<FlatVectorElement<IndexInnerType>>(arg_set_);
+    auto res = ProcessIndexChunks<T>(execute_sub_batch, args->values_);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -878,16 +885,21 @@ PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
         return nullptr;
     }
 
-    std::vector<uint8_t> vals;
-    for (auto& val : expr_->vals_) {
-        vals.emplace_back(GetValueFromProto<bool>(val) ? 1 : 0);
+    if (!arg_inited_) {
+        std::vector<uint8_t> vals;
+        for (auto& val : expr_->vals_) {
+            vals.emplace_back(GetValueFromProto<bool>(val) ? 1 : 0);
+        }
+        arg_set_ = std::make_shared<FlatVectorElement<uint8_t>>(vals);
+        arg_inited_ = true;
     }
     auto execute_sub_batch = [](Index* index_ptr,
                                 const std::vector<uint8_t>& vals) {
         TermIndexFunc<bool> func;
         return std::move(func(index_ptr, vals.size(), (bool*)vals.data()));
     };
-    auto res = ProcessIndexChunks<bool>(execute_sub_batch, vals);
+    auto args = std::dynamic_pointer_cast<FlatVectorElement<uint8_t>>(arg_set_);
+    auto res = ProcessIndexChunks<bool>(execute_sub_batch, args->values_);
     return res;
 }
 

@@ -40,6 +40,7 @@ const (
 	cohereProviderName      string = "cohere"
 	voyageaiProviderName    string = "voyageai"
 	aliProviderName         string = "ali"
+	zillizProviderName      string = "zilliz"
 
 	queryKeyName string = "queries"
 )
@@ -48,6 +49,9 @@ func parseMaxBatch(maxBatch string) (int, error) {
 	if batch, err := strconv.Atoi(maxBatch); err != nil {
 		return -1, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, maxBatch)
 	} else {
+		if batch <= 0 {
+			return -1, fmt.Errorf("[%s param's value: %s] must be greater than 0", models.MaxClientBatchSizeParamKey, maxBatch)
+		}
 		return batch, nil
 	}
 }
@@ -65,7 +69,7 @@ func (provider *baseProvider) maxBatch() int {
 	return provider.batchSize
 }
 
-func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
+func newProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
 	for _, param := range params {
 		if strings.ToLower(param.Key) == providerParamName {
 			provider := strings.ToLower(param.Value)
@@ -80,13 +84,16 @@ func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
 			case teiProviderName:
 				return newTeiProvider(params, conf, credentials)
 			case siliconflowProviderName:
-				return newSiliconflowProvider(params, conf, credentials)
+				return newSiliconflowProvider(params, conf, credentials, extraInfo)
 			case cohereProviderName:
-				return newCohereProvider(params, conf, credentials)
+				return newCohereProvider(params, conf, credentials, extraInfo)
 			case voyageaiProviderName:
-				return newVoyageaiProvider(params, conf, credentials)
+				return newVoyageaiProvider(params, conf, credentials, extraInfo)
 			case aliProviderName:
-				return newAliProvider(params, conf, credentials)
+				return newAliProvider(params, conf, credentials, extraInfo)
+			case zillizProviderName:
+				conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
+				return newZillizProvider(params, conf, extraInfo)
 			default:
 				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
 			}
@@ -102,7 +109,7 @@ type ModelFunction[T PKType] struct {
 	queries  []string
 }
 
-func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
+func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, extraInfo *models.ModelExtraInfo) (Reranker, error) {
 	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true)
 	if err != nil {
 		return nil, err
@@ -116,7 +123,7 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		return nil, fmt.Errorf("Rerank model only support varchar, bug got [%s]", base.GetInputFieldTypes()[0].String())
 	}
 
-	provider, err := newProvider(funcSchema.Params)
+	provider, err := newProvider(funcSchema.Params, extraInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +158,7 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 		ids := col.ids.([]T)
 		for idx, id := range ids {
 			if _, ok := uniqueData[id]; !ok {
-				idLocations[id] = IDLoc{batchIdx: i, offset: idx}
+				idLocations[id] = IDLoc{batchIdx: i, offset: idx + int(col.nqOffset)}
 				uniqueData[id] = texts[idx]
 			}
 		}

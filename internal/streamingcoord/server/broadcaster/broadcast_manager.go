@@ -3,6 +3,7 @@ package broadcaster
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -34,7 +35,7 @@ func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTaskManager {
 	logger := resource.Resource().Logger().With(log.FieldComponent("broadcaster"))
 	metrics := newBroadcasterMetrics()
-	rkLocker := newResourceKeyLocker(metrics)
+	rkLocker := newResourceKeyLocker()
 	ackScheduler := newAckCallbackScheduler(logger)
 
 	recoveryTasks := make([]*broadcastTask, 0, len(protos))
@@ -112,6 +113,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 		return nil, errors.Wrapf(err, "allocate new id failed")
 	}
 
+	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
 
@@ -120,6 +122,8 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 		guards.Unlock()
 		return nil, err
 	}
+	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
+
 	return &broadcasterWithRK{
 		broadcaster: bm,
 		broadcastID: id,
@@ -129,6 +133,9 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 
 // checkClusterRole checks if the cluster status is primary, otherwise return error.
 func (bm *broadcastTaskManager) checkClusterRole(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	// Check if the cluster status is primary, otherwise return error.
 	b, err := balance.GetWithContext(ctx)
 	if err != nil {
