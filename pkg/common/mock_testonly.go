@@ -22,7 +22,6 @@ package common
 
 import (
 	"context"
-	"fmt"
 	"log"
 )
 
@@ -37,11 +36,11 @@ func NewEmptyMockT() *MockTestingT {
 }
 
 func (m *MockTestingT) Logf(format string, args ...interface{}) {
-	log.Println(fmt.Sprintf(format, args...))
+	log.Printf(format, args...)
 }
 
 func (m *MockTestingT) Errorf(format string, args ...interface{}) {
-	log.Println(fmt.Sprintf(format, args...))
+	log.Printf(format, args...)
 }
 
 func (m *MockTestingT) FailNow() {
