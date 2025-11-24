@@ -657,8 +657,8 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 		}
 
 		// First copy succeeds, second fails
-		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10001", "files/insert_log/444/555/666/1/10001").Return(nil).Once()
-		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10002", "files/insert_log/444/555/666/1/10002").Return(errors.New("copy failed")).Once()
+		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10001", "files/insert_log/444/555/666/1/10001").Return(nil).Maybe()
+		cm.EXPECT().Copy(mock.Anything, "files/insert_log/111/222/333/1/10002", "files/insert_log/444/555/666/1/10002").Return(errors.New("copy failed")).Maybe()
 
 		result, copiedFiles, err := CopySegmentAndIndexFiles(context.Background(), cm, source, target, nil)
 

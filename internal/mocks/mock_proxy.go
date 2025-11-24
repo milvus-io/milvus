@@ -918,6 +918,65 @@ func (_c *MockProxy_CheckHealth_Call) RunAndReturn(run func(context.Context, *mi
 	return _c
 }
 
+// ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ComputePhraseMatchSlop(_a0 context.Context, _a1 *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputePhraseMatchSlop")
+	}
+
+	var r0 *milvuspb.ComputePhraseMatchSlopResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ComputePhraseMatchSlopRequest) *milvuspb.ComputePhraseMatchSlopResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ComputePhraseMatchSlopResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ComputePhraseMatchSlopRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
+type MockProxy_ComputePhraseMatchSlop_Call struct {
+	*mock.Call
+}
+
+// ComputePhraseMatchSlop is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ComputePhraseMatchSlopRequest
+func (_e *MockProxy_Expecter) ComputePhraseMatchSlop(_a0 interface{}, _a1 interface{}) *MockProxy_ComputePhraseMatchSlop_Call {
+	return &MockProxy_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop", _a0, _a1)}
+}
+
+func (_c *MockProxy_ComputePhraseMatchSlop_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ComputePhraseMatchSlopRequest)) *MockProxy_ComputePhraseMatchSlop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ComputePhraseMatchSlopRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ComputePhraseMatchSlop_Call) Return(_a0 *milvuspb.ComputePhraseMatchSlopResponse, _a1 error) *MockProxy_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error)) *MockProxy_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Connect provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) Connect(_a0 context.Context, _a1 *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8067,6 +8126,65 @@ func (_c *MockProxy_TransferReplica_Call) Return(_a0 *commonpb.Status, _a1 error
 }
 
 func (_c *MockProxy_TransferReplica_Call) RunAndReturn(run func(context.Context, *milvuspb.TransferReplicaRequest) (*commonpb.Status, error)) *MockProxy_TransferReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TruncateCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) TruncateCollection(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TruncateCollection")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TruncateCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_TruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TruncateCollection'
+type MockProxy_TruncateCollection_Call struct {
+	*mock.Call
+}
+
+// TruncateCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TruncateCollectionRequest
+func (_e *MockProxy_Expecter) TruncateCollection(_a0 interface{}, _a1 interface{}) *MockProxy_TruncateCollection_Call {
+	return &MockProxy_TruncateCollection_Call{Call: _e.mock.On("TruncateCollection", _a0, _a1)}
+}
+
+func (_c *MockProxy_TruncateCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest)) *MockProxy_TruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.TruncateCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_TruncateCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_TruncateCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)) *MockProxy_TruncateCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

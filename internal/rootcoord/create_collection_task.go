@@ -44,9 +44,10 @@ import (
 
 type createCollectionTask struct {
 	*Core
-	Req    *milvuspb.CreateCollectionRequest
-	header *message.CreateCollectionMessageHeader
-	body   *message.CreateCollectionRequest
+	Req             *milvuspb.CreateCollectionRequest
+	header          *message.CreateCollectionMessageHeader
+	body            *message.CreateCollectionRequest
+	preserveFieldID bool
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -371,7 +372,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	// if schema comes from restore snapshot
 	preservedDynamicFieldID := int64(-1)
 	preservedNamespaceFieldID := int64(-1)
-	if t.Req.GetPreserveFieldId() {
+	if t.preserveFieldID {
 		log.Ctx(ctx).Info("preserve field IDs from schema during create collection", zap.String("collection", t.Req.CollectionName))
 		fields := make([]*schemapb.FieldSchema, 0)
 		// filter out system fields
@@ -407,7 +408,7 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 
-	if t.Req.GetPreserveFieldId() {
+	if t.preserveFieldID {
 		// cause dynamic field is system field without internal id allocation
 		// we need to restore its field id here
 		for _, field := range t.body.CollectionSchema.Fields {

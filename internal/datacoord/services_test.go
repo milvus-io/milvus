@@ -3116,17 +3116,9 @@ func TestListRestoreSnapshotJobs(t *testing.T) {
 		assert.Len(t, resp.GetJobs(), 3)
 	})
 
-	t.Run("filter by collection name", func(t *testing.T) {
+	t.Run("filter by collection id", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-
-		// Add collection with schema
-		svr.meta.AddCollection(&collectionInfo{
-			ID: 100,
-			Schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-			},
-		})
 
 		// Add jobs for different collections
 		job1 := &copySegmentJob{
@@ -3154,7 +3146,7 @@ func TestListRestoreSnapshotJobs(t *testing.T) {
 		require.NoError(t, err)
 
 		req := &datapb.ListRestoreSnapshotJobsRequest{
-			CollectionName: "test_collection",
+			CollectionId: 100,
 		}
 
 		resp, err := svr.ListRestoreSnapshotJobs(context.Background(), req)
@@ -3162,5 +3154,176 @@ func TestListRestoreSnapshotJobs(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.GetStatus()))
 		assert.Len(t, resp.GetJobs(), 1)
 		assert.Equal(t, int64(201), resp.GetJobs()[0].GetJobId())
+	})
+}
+
+func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
+	t.Run("snapshot name already exists", func(t *testing.T) {
+		ctx := context.Background()
+		existingSnapshotName := "test_snapshot"
+
+		// Mock snapshotManager.GetSnapshot to simulate existing snapshot
+		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(func(
+			sm *snapshotManager,
+			ctx context.Context,
+			name string,
+		) (*datapb.SnapshotInfo, error) {
+			// Return a snapshot to simulate it already exists
+			return &datapb.SnapshotInfo{Name: name}, nil
+		}).Build()
+		defer mockGetSnapshot.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// Try to create snapshot with duplicate name
+		req := &datapb.CreateSnapshotRequest{
+			Name:         existingSnapshotName,
+			Description:  "duplicate snapshot",
+			CollectionId: 200,
+		}
+
+		resp, err := server.CreateSnapshot(ctx, req)
+
+		// Verify error response
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Error(t, merr.Error(resp))
+		assert.True(t, errors.Is(merr.Error(resp), merr.ErrParameterInvalid))
+		assert.Contains(t, resp.GetReason(), "already exists")
+		assert.Contains(t, resp.GetReason(), existingSnapshotName)
+	})
+}
+
+func TestServer_RestoreSnapshotData(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock RestoreSnapshot
+		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(func(
+			sm *snapshotManager,
+			ctx context.Context,
+			snapshotName string,
+			targetCollectionID int64,
+			jobID int64,
+		) error {
+			return nil
+		}).Build()
+		defer mockRestore.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			meta:            &meta{indexMeta: &indexMeta{}},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &datapb.RestoreSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+			JobId:        12345,
+		}
+
+		resp, err := server.RestoreSnapshotData(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(12345), resp.GetJobId())
+	})
+
+	t.Run("restore snapshot fails", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock RestoreSnapshot to fail
+		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(func(
+			sm *snapshotManager,
+			ctx context.Context,
+			snapshotName string,
+			targetCollectionID int64,
+			jobID int64,
+		) error {
+			return errors.New("restore failed")
+		}).Build()
+		defer mockRestore.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			meta:            &meta{indexMeta: &indexMeta{}},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &datapb.RestoreSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+			JobId:        12345,
+		}
+
+		resp, err := server.RestoreSnapshotData(ctx, req)
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("missing jobID", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			meta:            &meta{indexMeta: &indexMeta{}},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &datapb.RestoreSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+			JobId:        0, // Invalid jobID
+		}
+
+		resp, err := server.RestoreSnapshotData(ctx, req)
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	})
+
+	t.Run("negative jobID", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+			meta:            &meta{indexMeta: &indexMeta{}},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &datapb.RestoreSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+			JobId:        -1, // Negative jobID
+		}
+
+		resp, err := server.RestoreSnapshotData(ctx, req)
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &datapb.RestoreSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+			JobId:        12345,
+		}
+
+		resp, err := server.RestoreSnapshotData(ctx, req)
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 }
