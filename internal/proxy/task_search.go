@@ -581,7 +581,12 @@ func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
 
 func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
 	task := &highlightTask{
-		HighlightTask: &querypb.HighlightTask{},
+		HighlightTask: &querypb.HighlightTask{
+			Options: &querypb.HighlightOptions{
+				FragmentSize:   DefaultFragmentSize,
+				NumOfFragments: DefaultFragmentNum,
+			},
+		},
 	}
 
 	params := funcutil.KeyValuePair2Map(highlighter.GetParams())
@@ -641,6 +646,31 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		}
 	} else {
 		task.postTags = [][]byte{[]byte(DefaultPostTag)}
+	}
+
+	// set fragment config
+	if value, ok := params[FragmentSizeKey]; ok {
+		fragmentSize, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || fragmentSize <= 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid fragment_size: %s", value)
+		}
+		task.Options.FragmentSize = fragmentSize
+	}
+
+	if value, ok := params[FragmentNumKey]; ok {
+		fragmentNum, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || fragmentNum <= 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid fragment_size: %s", value)
+		}
+		task.Options.NumOfFragments = fragmentNum
+	}
+
+	if value, ok := params[FragmentOffsetKey]; ok {
+		fragmentOffset, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || fragmentOffset <= 0 {
+			return merr.WrapErrParameterInvalidMsg("invalid fragment_size: %s", value)
+		}
+		task.Options.NumOfFragments = fragmentOffset
 	}
 
 	// set bm25 search text as query texts

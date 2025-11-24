@@ -997,6 +997,12 @@ message RunAnalyzerRequest{
     bool with_hash = 7;
 }
 
+message HighlightOptions{
+    int64 fragment_size = 1;
+    int64 fragment_offset = 2;
+    int64 num_of_fragments = 3;
+}
+
 // HighlightTask fetch highlight for all queries at one field
 // len(texts) == search_text_num + corpus_text_num
 message HighlightTask{
@@ -1007,6 +1013,7 @@ message HighlightTask{
     
     int64 search_text_num = 5;
     int64 corpus_text_num = 6;
+    HighlightOptions options = 7;
 }
 
 message GetHighlightRequest{
