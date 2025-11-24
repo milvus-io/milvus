@@ -41,6 +41,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
@@ -1399,8 +1400,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto num_rows = load_info_.num_of_rows();
     auto primary_field_id =
         schema_->get_primary_field_id().value_or(FieldId(-1));
-    auto properties =
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().GetProperties();
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
     auto column_groups = GetColumnGroups(manifest_path, properties);
 
     auto arrow_schema = schema_->ConvertToArrowSchema();
@@ -1473,7 +1474,10 @@ SegmentGrowingImpl::LoadColumnGroup(
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
-    AssertInfo(chunk_reader_result.ok(), "get chunk reader failed, segment {}, column group index {}", get_segment_id(), index);
+    AssertInfo(chunk_reader_result.ok(),
+               "get chunk reader failed, segment {}, column group index {}",
+               get_segment_id(),
+               index);
 
     auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
 

@@ -71,6 +71,7 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "milvus-storage/ffi_c.h"
@@ -337,8 +338,8 @@ void
 ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
     LOG_INFO(
         "Loading segment {} field data with manifest {}", id_, manifest_path);
-    auto properties =
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().GetProperties();
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
     auto column_groups = GetColumnGroups(manifest_path, properties);
 
     auto arrow_schema = schema_->ConvertToArrowSchema();
@@ -393,15 +394,18 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
-    AssertInfo(chunk_reader_result.ok(), "get chunk reader failed, segment {}, column group index {}", get_segment_id(), index);
+    AssertInfo(chunk_reader_result.ok(),
+               "get chunk reader failed, segment {}, column group index {}",
+               get_segment_id(),
+               index);
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
     LOG_INFO(
-            "[StorageV2] segment {} loads manifest cg index {} with field ids "
-            "{} ",
-            this->get_segment_id(),
-            index);
+        "[StorageV2] segment {} loads manifest cg index {} with field ids "
+        "{} ",
+        this->get_segment_id(),
+        index);
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -440,7 +444,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             auto all_ts_chunks = timestamp_proxy_column->GetAllChunks(nullptr);
             std::vector<Timestamp> timestamps(num_rows);
             int64_t offset = 0;
-            for (auto & all_ts_chunk : all_ts_chunks) {
+            for (auto& all_ts_chunk : all_ts_chunks) {
                 auto chunk_data = all_ts_chunk.get();
                 auto fixed_chunk = dynamic_cast<FixedWidthChunk*>(chunk_data);
                 auto span = fixed_chunk->Span();

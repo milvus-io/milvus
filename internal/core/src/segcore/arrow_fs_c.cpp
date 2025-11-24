@@ -18,6 +18,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 
 CStatus
@@ -29,9 +30,7 @@ InitLocalArrowFileSystemSingleton(const char* c_path) {
         conf.storage_type = "local";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
-        auto properties = MakeInternalLocalProperies(c_path);
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().SetProperties(
-            properties);
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(c_path);
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -69,10 +68,8 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
         conf.max_connections = c_storage_config.max_connections;
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
-        auto properties =
-            MakeInternalPropertiesFromStorageConfig(c_storage_config);
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().SetProperties(
-            properties);
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance().Init(
+            c_storage_config);
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
