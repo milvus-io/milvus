@@ -21,7 +21,6 @@ import (
 	"context"
 	"runtime/debug"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -45,6 +44,8 @@ type TaskQueue interface {
 	GetTaskNum() (int, int)
 	GetUsingSlot() int64
 	GetActiveSlot() int64
+	GetUsingSlotV2() (float64, float64)
+	GetActiveSlotV2() (float64, float64)
 }
 
 // BaseTaskQueue is a basic instance of TaskQueue.
@@ -59,6 +60,9 @@ type IndexTaskQueue struct {
 
 	utBufChan chan struct{} // to block scheduler
 	usingSlot atomic.Int64
+
+	usingCpuSlot    atomic.Float64
+	usingMemorySlot atomic.Float64
 
 	sched *TaskScheduler
 }
@@ -105,6 +109,23 @@ func (queue *IndexTaskQueue) GetActiveSlot() int64 {
 	return slots
 }
 
+func (queue *IndexTaskQueue) GetUsingSlotV2() (float64, float64) {
+	return queue.usingCpuSlot.Load(), queue.usingMemorySlot.Load()
+}
+
+func (queue *IndexTaskQueue) GetActiveSlotV2() (float64, float64) {
+	queue.atLock.Lock()
+	defer queue.atLock.Unlock()
+
+	cpuSlots, memorySlot := float64(0), float64(0)
+	for _, t := range queue.activeTasks {
+		taskCpuSlot, taskMemorySlot := t.GetSlotV2()
+		cpuSlots += taskCpuSlot
+		memorySlot += taskMemorySlot
+	}
+	return cpuSlots, memorySlot
+}
+
 // PopUnissuedTask pops a task from tasks queue.
 func (queue *IndexTaskQueue) PopUnissuedTask() Task {
 	queue.utLock.Lock()
@@ -143,6 +164,9 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 	if ok {
 		delete(queue.activeTasks, tName)
 		queue.usingSlot.Sub(t.GetSlot())
+		taskCpuSlot, taskMemorySlot := t.GetSlotV2()
+		queue.usingCpuSlot.Sub(taskCpuSlot)
+		queue.usingMemorySlot.Sub(taskMemorySlot)
 		return t
 	}
 	log.Ctx(queue.sched.ctx).Debug("task was not found in the active task list", zap.String("TaskName", tName))
@@ -160,6 +184,9 @@ func (queue *IndexTaskQueue) Enqueue(t Task) error {
 	}
 
 	queue.usingSlot.Add(t.GetSlot())
+	taskCpuSlot, taskMemorySlot := t.GetSlotV2()
+	queue.usingCpuSlot.Add(taskCpuSlot)
+	queue.usingMemorySlot.Add(taskMemorySlot)
 	return nil
 }
 
@@ -190,7 +217,9 @@ func NewIndexBuildTaskQueue(sched *TaskScheduler) *IndexTaskQueue {
 		utBufChan: make(chan struct{}, 1024),
 		sched:     sched,
 
-		usingSlot: atomic.Int64{},
+		usingSlot:       atomic.Int64{},
+		usingCpuSlot:    atomic.Float64{},
+		usingMemorySlot: atomic.Float64{},
 	}
 }
 
@@ -264,17 +293,9 @@ func (sched *TaskScheduler) indexBuildLoop() {
 			return
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
-			for {
-				totalSlot := CalculateNodeSlots()
-				availableSlot := totalSlot - sched.TaskQueue.GetActiveSlot()
-				if availableSlot >= t.GetSlot() || totalSlot == availableSlot {
-					go func(t Task) {
-						sched.processTask(t, sched.TaskQueue)
-					}(t)
-					break
-				}
-				time.Sleep(time.Millisecond * 50)
-			}
+			go func(t Task) {
+				sched.processTask(t, sched.TaskQueue)
+			}(t)
 		}
 	}
 }

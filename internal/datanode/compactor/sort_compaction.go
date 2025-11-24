@@ -364,6 +364,10 @@ func (t *sortCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }
 
+func (t *sortCompactionTask) GetSlotUsageV2() (float64, float64) {
+	return t.plan.GetCpuSlot(), t.plan.GetMemorySlot()
+}
+
 func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	collectionID int64,
 	partitionID int64,

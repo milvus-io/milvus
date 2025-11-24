@@ -486,3 +486,7 @@ func (t *LevelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*
 func (t *LevelZeroCompactionTask) GetSlotUsage() int64 {
 	return t.plan.GetSlotUsage()
 }
+
+func (t *LevelZeroCompactionTask) GetSlotUsageV2() (float64, float64) {
+	return t.plan.GetCpuSlot(), t.plan.GetMemorySlot()
+}
