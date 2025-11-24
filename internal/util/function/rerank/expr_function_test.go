@@ -18,7 +18,7 @@ package rerank
 import (
 	"context"
 	"testing"
-
+	"math"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -429,6 +429,164 @@ func TestParseBool(t *testing.T) {
 				"parseBool(%s) should return %v", tt.input, tt.expected)
 		}
 	}
+}
+
+func TestTokenMatchCount(t *testing.T) {
+	tests := []struct {
+		name           string
+		fieldText      string
+		queryText      string
+		analyzerParams string
+		expected       float64
+	}{
+		{
+			name:           "exact match single token",
+			fieldText:      "apple",
+			queryText:      "apple",
+			analyzerParams: "{}",
+			expected:       1.0,
+		},
+		{
+			name:           "multiple matches",
+			fieldText:      "apple banana apple orange",
+			queryText:      "apple",
+			analyzerParams: "{}",
+			expected:       2.0,
+		},
+		{
+			name:           "partial match from multiple query tokens",
+			fieldText:      "apple banana orange",
+			queryText:      "apple grape",
+			analyzerParams: "{}",
+			expected:       1.0, // only "apple" matches
+		},
+		{
+			name:           "all query tokens match",
+			fieldText:      "apple banana orange apple",
+			queryText:      "apple banana",
+			analyzerParams: "{}",
+			expected:       3.0, // "apple" matches twice, "banana" matches once
+		},
+		{
+			name:           "no matches",
+			fieldText:      "apple banana",
+			queryText:      "grape watermelon",
+			analyzerParams: "{}",
+			expected:       0.0,
+		},
+		{
+			name:           "empty field text",
+			fieldText:      "",
+			queryText:      "apple",
+			analyzerParams: "{}",
+			expected:       0.0,
+		},
+		{
+			name:           "empty query text",
+			fieldText:      "apple banana",
+			queryText:      "",
+			analyzerParams: "{}",
+			expected:       0.0,
+		},
+		{
+			name:           "both empty",
+			fieldText:      "",
+			queryText:      "",
+			analyzerParams: "{}",
+			expected:       0.0,
+		},
+		{
+			name:           "punctuation separated",
+			fieldText:      "apple, banana, orange",
+			queryText:      "apple banana",
+			analyzerParams: "{}",
+			expected:       2.0,
+		},
+		{
+			name:           "case handling with standard tokenizer",
+			fieldText:      "Apple Banana ORANGE",
+			queryText:      "apple banana",
+			analyzerParams: "{}",
+			expected:       2.0,
+		},
+		{
+			name:           "duplicate tokens in query counted separately",
+			fieldText:      "red blue red green red",
+			queryText:      "red",
+			analyzerParams: "{}",
+			expected:       3.0, // "red" appears 3 times in field
+		},
+		{
+			name:           "standard tokenizer specified",
+			fieldText:      "The quick brown fox jumps",
+			queryText:      "quick fox",
+			analyzerParams: `{"tokenizer": "standard"}`,
+			expected:       2.0,
+		},
+		{
+			name:           "chinese text with jieba tokenizer",
+			fieldText:      "我爱自然语言处理",
+			queryText:      "自然 语言",
+			analyzerParams: `{"tokenizer": "jieba"}`,
+			expected:       2.0, // jieba splits into individual words: "自然" and "语言" 
+		},
+		{
+			name:           "chinese text jieba multiple different matches",
+			fieldText:      "北京是中国的首都，北京有很多人",
+			queryText:      "北京 中国",
+			analyzerParams: `{"tokenizer": "jieba"}`,
+			expected:       3.0, // "北京" twice + "中国" once
+		},
+		{
+			name:           "chinese text jieba no match",
+			fieldText:      "今天天气很好",
+			queryText:      "明天下雨",
+			analyzerParams: `{"tokenizer": "jieba"}`,
+			expected:       0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tokenMatchCount(tt.fieldText, tt.queryText, tt.analyzerParams)
+			assert.Equal(t, tt.expected, result,
+				"tokenMatchCount(%q, %q, %q) should return %v, got %v",
+				tt.fieldText, tt.queryText, tt.analyzerParams, tt.expected, result)
+		})
+	}
+}
+
+func TestTokenMatchCount_InvalidAnalyzer(t *testing.T) {
+	// Test with invalid analyzer parameters
+	result := tokenMatchCount("apple banana", "apple", "invalid json {")
+	assert.True(t, math.IsNaN(result), "Invalid analyzer params should return NaN")
+}
+
+func TestTokenMatchCount_InMathFunctions(t *testing.T) {
+	// Test that the function is properly registered in mathFunctions map
+	fn, exists := mathFunctions["token_match_count"]
+	assert.True(t, exists, "token_match_count should be registered in mathFunctions")
+	assert.NotNil(t, fn, "token_match_count function should not be nil")
+
+	// Test calling through the mathFunctions map
+	fnTyped := fn.(func(interface{}, interface{}, interface{}) float64)
+	
+	// Valid inputs
+	result := fnTyped("apple banana apple", "apple", "{}")
+	assert.Equal(t, 2.0, result, "Should return 2 matches")
+	
+	// Invalid input types - should return NaN
+	result = fnTyped(123, "apple", "{}")
+	assert.True(t, math.IsNaN(result), "Non-string field should return NaN")
+	
+	result = fnTyped("apple", 123, "{}")
+	assert.True(t, math.IsNaN(result), "Non-string query should return NaN")
+	
+	result = fnTyped("apple", "apple", 123)
+	assert.True(t, math.IsNaN(result), "Non-string analyzer params should return NaN")
+	
+	result = fnTyped(nil, "apple", "{}")
+	assert.True(t, math.IsNaN(result), "Nil field should return NaN")
 }
 
 func TestExprRerank_Metrics_SuccessfulProcess(t *testing.T) {
