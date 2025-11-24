@@ -931,6 +931,16 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		return errors.Wrap(err, "At FinishLoad")
 	}
 
+	for _, indexInfo := range loadInfo.IndexInfos {
+		segment.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
+	}
+
 	// load text indexes.
 	for _, info := range textIndexes {
 		if err := segment.LoadTextIndex(ctx, info, schemaHelper); err != nil {
