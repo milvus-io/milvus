@@ -69,9 +69,9 @@ type rwOptions struct {
 }
 
 func (o *rwOptions) validate() error {
-	if o.collectionID == 0 {
+	if o.op == OpRead && o.collectionID == 0 {
 		log.Warn("storage config collection id is empty when init BinlogReader")
-		// return merr.WrapErrServiceInternal("storage config collection id is empty")
+		return merr.WrapErrServiceInternal("storage config collection id is empty when init BinlogReader")
 	}
 	if o.op == OpWrite && o.uploader == nil {
 		return merr.WrapErrServiceInternal("uploader is nil for writer")
@@ -242,22 +242,6 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		return nil, err
 	}
 
-	binlogReaderOpts := []BinlogReaderOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
-		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
-			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
-
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    string(unsafe),
-				}
-			}
-		}
-	}
 	switch rwOptions.version {
 	case StorageV1:
 		var blobsReader ChunkedBlobsReader
@@ -265,7 +249,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		if err != nil {
 			return nil, err
 		}
-		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
+		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader)
 	case StorageV2:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
@@ -273,6 +257,20 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		sort.Slice(binlogs, func(i, j int) bool {
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
 		})
+
+		var pluginContext *indexcgopb.StoragePluginContext
+		if hookutil.IsClusterEncyptionEnabled() {
+			if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
+				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if len(unsafe) > 0 {
+					pluginContext = &indexcgopb.StoragePluginContext{
+						EncryptionZoneId: ez.EzID,
+						CollectionId:     ez.CollectionID,
+						EncryptionKey:    string(unsafe),
+					}
+				}
+			}
+		}
 
 		var err error
 		rr, err = NewRecordReaderFromBinlogs(binlogs, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
@@ -293,7 +291,6 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
 	rwOptions := DefaultWriterOptions()
-	option = append(option, WithCollectionID(collectionID))
 	for _, opt := range option {
 		opt(rwOptions)
 	}
@@ -310,35 +307,27 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		return rwOptions.uploader(ctx, kvs)
 	}
 
-	opts := []StreamWriterOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
-		if ez != nil {
-			encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
-			if err != nil {
-				return nil, err
-			}
-			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
-
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    string(unsafe),
-				}
-			}
-		}
-	}
-
 	switch rwOptions.version {
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
 		)
 	case StorageV2:
+		var pluginContext *indexcgopb.StoragePluginContext
+		if hookutil.IsClusterEncyptionEnabled() {
+			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
+			if ez != nil {
+				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if len(unsafe) > 0 {
+					pluginContext = &indexcgopb.StoragePluginContext{
+						EncryptionZoneId: ez.EzID,
+						CollectionId:     ez.CollectionID,
+						EncryptionKey:    string(unsafe),
+					}
+				}
+			}
+		}
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
