@@ -1,19 +1,16 @@
 import logging
 
-import numpy as np
-from common.constants import *
+
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_v2_base import TestMilvusClientV2Base
-from base.client_base import TestcaseBase
 import random
 import pytest
 import pandas as pd
 from faker import Faker
-import inspect
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
