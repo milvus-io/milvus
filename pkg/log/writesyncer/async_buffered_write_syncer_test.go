@@ -17,7 +17,6 @@
 package writesyncer
 
 import (
-	"errors"
 	"io"
 	"math/rand"
 	"os"
@@ -25,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap/zapcore"
 )
 
