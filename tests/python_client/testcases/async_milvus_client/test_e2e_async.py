@@ -390,7 +390,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         await self.async_milvus_client_wrap.create_database(db_name)
         await self.async_milvus_client_wrap.close()
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        self.async_milvus_client_wrap.init_async_client(uri, db_name=db_name)
+        self.async_milvus_client_wrap.init_async_client(uri, token=cf.param_info.param_token, db_name=db_name)
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
@@ -450,7 +450,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
     async def test_async_client_close(self):
         # init async client
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        self.async_milvus_client_wrap.init_async_client(uri)
+        self.async_milvus_client_wrap.init_async_client(uri, token=cf.param_info.param_token)
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
