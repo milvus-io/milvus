@@ -681,6 +681,15 @@ def gen_string_field(name=ct.default_string_field_name, description=ct.default_d
 def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     return gen_scalar_field(DataType.JSON, name=name, description=description, is_primary=is_primary, **kwargs)
 
+def gen_geometry_field(name=ct.default_geometry_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
+
+def gen_geometry_field(name="geo", description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.GEOMETRY, name=name, description=description, is_primary=is_primary, **kwargs)
+
+def gen_timestamptz_field(name=ct.default_timestamptz_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    return gen_scalar_field(DataType.TIMESTAMPTZ, name=name, description=description, is_primary=is_primary, **kwargs)
+
 
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
@@ -854,9 +863,43 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         # gen_timestamptz_field(name="timestamptz", nullable=nullable),
     ]
 
-    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id,
-                                                                    enable_dynamic_field=enable_dynamic_field, **kwargs)
+    # Create schema using MilvusClient
+    schema = MilvusClient.create_schema(
+        auto_id=auto_id,
+        enable_dynamic_field=enable_dynamic_field,
+        description=description,
+        **kwargs
+    )
+
+    # Add all fields using schema.add_field()
+    schema.add_field(primary_field, DataType.INT64, is_primary=True)
+    schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=nullable)
+    schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=ct.default_max_length, nullable=nullable)
+    schema.add_field("document", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True, nullable=nullable)
+    schema.add_field("text", DataType.VARCHAR, max_length=2000, enable_analyzer=True, enable_match=True,
+                    analyzer_params=analyzer_params)
+    schema.add_field(ct.default_json_field_name, DataType.JSON, nullable=nullable)
+    schema.add_field(ct.default_geometry_field_name, DataType.GEOMETRY, nullable=nullable)
+    schema.add_field(ct.default_timestamptz_field_name, DataType.TIMESTAMPTZ, nullable=nullable)
+    schema.add_field("array_int", DataType.ARRAY, element_type=DataType.INT64, max_capacity=ct.default_max_capacity)
+    schema.add_field("array_float", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=ct.default_max_capacity)
+    schema.add_field("array_varchar", DataType.ARRAY, element_type=DataType.VARCHAR, max_length=200, max_capacity=ct.default_max_capacity)
+    schema.add_field("array_bool", DataType.ARRAY, element_type=DataType.BOOL, max_capacity=ct.default_max_capacity)
+    schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=dim)
+    schema.add_field("image_emb", DataType.INT8_VECTOR, dim=dim)
+    schema.add_field("text_sparse_emb", DataType.SPARSE_FLOAT_VECTOR)
+    # schema.add_field("voice_emb", DataType.FLOAT_VECTOR, dim=dim)
+
+    # Add struct array field
+    if enable_struct_array_field:
+        struct_schema = MilvusClient.create_struct_field_schema()
+        struct_schema.add_field("name", DataType.VARCHAR, max_length=200)
+        struct_schema.add_field("age", DataType.INT64)
+        struct_schema.add_field("float_vector", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field("array_struct", datatype=DataType.ARRAY, element_type=DataType.STRUCT,
+                        struct_schema=struct_schema, max_capacity=10)
+
+    # Add BM25 function
     bm25_function = Function(
         name=f"text",
         function_type=FunctionType.BM25,
