@@ -140,7 +140,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))
 			return err
