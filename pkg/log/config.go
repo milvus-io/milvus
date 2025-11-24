@@ -71,6 +71,24 @@ type Config struct {
 	//
 	// Values configured here are per-second. See zapcore.NewSampler for details.
 	Sampling *zap.SamplingConfig `toml:"sampling" json:"sampling"`
+
+	// AsyncWriteEnable enables async write for the logger.
+	AsyncWriteEnable bool `toml:"async-write-enable" json:"async-write-enable"`
+
+	// AsyncWriteFlushInterval is the interval to flush the logs
+	AsyncWriteFlushInterval time.Duration `toml:"async-write-flush-interval" json:"async-write-flush-interval"`
+
+	// AsyncWriteDroppedTimeout is the timeout to drop the write request if the buffer is full
+	AsyncWriteDroppedTimeout time.Duration `toml:"async-write-dropped-timeout" json:"async-write-dropped-timeout"`
+
+	// AsyncWriteStopTimeout is the timeout to stop the async write
+	AsyncWriteStopTimeout time.Duration `toml:"async-write-stop-timeout" json:"async-write-stop-timeout"`
+
+	// AsyncWritePendingLength is the maximum number of pending write requests, the exceeded log operation will be dropped
+	AsyncWritePendingLength int `toml:"async-write-pending-length" json:"async-write-pending-length"`
+
+	// AsyncWriteBufferSize is the size of the write buffer
+	AsyncWriteBufferSize int `toml:"async-write-buffer-size" json:"async-write-buffer-size"`
 }
 
 // ZapProperties records some information about zap.

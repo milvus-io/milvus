@@ -28,11 +28,9 @@ import (
 	"github.com/twpayne/go-geom/encoding/wkb"
 	"github.com/twpayne/go-geom/encoding/wkbcommon"
 	"github.com/twpayne/go-geom/encoding/wkt"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 // system field id:
@@ -299,7 +297,6 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 			return param.Value
 		}
 	}
-	log.Warn("IndexType not found in indexParams")
 	return ""
 }
 
@@ -471,7 +468,6 @@ func GetCollectionLoadFields(schema *schemapb.CollectionSchema, skipDynamicField
 
 		v, err := ShouldFieldBeLoaded(field.GetTypeParams())
 		if err != nil {
-			log.Warn("type param parse skip load failed", zap.Error(err))
 			// if configuration cannot be parsed, ignore it and load field
 			return field.GetFieldID(), true
 		}
@@ -521,7 +517,6 @@ func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
 		if kv.GetKey() == ReplicateEndTSKey {
 			ts, err := strconv.ParseUint(kv.GetValue(), 10, 64)
 			if err != nil {
-				log.Warn("parse replicate end ts failed", zap.Error(err), zap.Stack("stack"))
 				return 0, false
 			}
 			return ts, true

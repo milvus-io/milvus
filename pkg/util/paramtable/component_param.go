@@ -1504,14 +1504,20 @@ func (t *holmesConfig) init(base *BaseTable) {
 }
 
 type logConfig struct {
-	Level        ParamItem `refreshable:"false"`
-	RootPath     ParamItem `refreshable:"false"`
-	MaxSize      ParamItem `refreshable:"false"`
-	MaxAge       ParamItem `refreshable:"false"`
-	MaxBackups   ParamItem `refreshable:"false"`
-	Format       ParamItem `refreshable:"false"`
-	Stdout       ParamItem `refreshable:"false"`
-	GrpcLogLevel ParamItem `refreshable:"false"`
+	Level                    ParamItem `refreshable:"false"`
+	RootPath                 ParamItem `refreshable:"false"`
+	MaxSize                  ParamItem `refreshable:"false"`
+	MaxAge                   ParamItem `refreshable:"false"`
+	MaxBackups               ParamItem `refreshable:"false"`
+	Format                   ParamItem `refreshable:"false"`
+	Stdout                   ParamItem `refreshable:"false"`
+	GrpcLogLevel             ParamItem `refreshable:"false"`
+	AsyncWriteEnable         ParamItem `refreshable:"false"`
+	AsyncWriteFlushInterval  ParamItem `refreshable:"false"`
+	AsyncWriteDroppedTimeout ParamItem `refreshable:"false"`
+	AsyncWriteStopTimeout    ParamItem `refreshable:"false"`
+	AsyncWritePendingLength  ParamItem `refreshable:"false"`
+	AsyncWriteBufferSize     ParamItem `refreshable:"false"`
 }
 
 func (l *logConfig) init(base *BaseTable) {
@@ -1588,6 +1594,73 @@ Set this parameter as the path that you have permission to write.`,
 		Export:       true,
 	}
 	l.GrpcLogLevel.Init(base.mgr)
+
+	l.AsyncWriteEnable = ParamItem{
+		Key:          "log.asyncWrite.enable",
+		DefaultValue: "true",
+		Version:      "2.6.7",
+		Doc:          "Enable async write for the logger.",
+		Export:       false,
+	}
+	l.AsyncWriteEnable.Init(base.mgr)
+
+	l.AsyncWriteFlushInterval = ParamItem{
+		Key:          "log.asyncWrite.flushInterval",
+		DefaultValue: "10s",
+		Version:      "2.6.7",
+		Doc: `The interval to flush the logs.
+Lower the interval, More frequent the flush will be applied, 
+Faster the logging writes can be seen by the underlying file system.`,
+		Export: false,
+	}
+	l.AsyncWriteFlushInterval.Init(base.mgr)
+
+	l.AsyncWriteDroppedTimeout = ParamItem{
+		Key:          "log.asyncWrite.droppedTimeout",
+		DefaultValue: "100ms",
+		Version:      "2.6.7",
+		Doc: `The timeout to drop the write operation if the buffer is full.
+Once the underlying buffered writer is blocked or too slow and
+the pending length is larger than the pending length threshold,
+the new incoming write operation will be dropped if it exceeds the timeout.`,
+		Export: false,
+	}
+	l.AsyncWriteDroppedTimeout.Init(base.mgr)
+
+	l.AsyncWriteStopTimeout = ParamItem{
+		Key:          "log.asyncWrite.stopTimeout",
+		DefaultValue: "1s",
+		Version:      "2.6.7",
+		Doc: `The timeout to stop the async write.
+When the milvus is on shutdown, 
+the async writer of logger will try to flush all the pending write operations 
+to the underlying file system until reaching the timeout.`,
+		Export: false,
+	}
+	l.AsyncWriteStopTimeout.Init(base.mgr)
+
+	l.AsyncWritePendingLength = ParamItem{
+		Key:          "log.asyncWrite.pendingLength",
+		DefaultValue: "128",
+		Version:      "2.6.7",
+		Doc: `The maximum number of pending write operation.
+Once the underlying buffered writer is blocked or too slow, 
+the pending write operation will be cached in the buffer.
+The larger the pending length, the more memory is used, the less logging writes will be dropped.`,
+		Export: false,
+	}
+	l.AsyncWritePendingLength.Init(base.mgr)
+
+	l.AsyncWriteBufferSize = ParamItem{
+		Key:          "log.asyncWrite.bufferSize",
+		DefaultValue: "256k",
+		Version:      "2.6.7",
+		Doc: `The buffer size of the underlying bufio writer. 
+The larger the buffer size, the more memory is used, 
+but the less the number of writes to the underlying file system.`,
+		Export: false,
+	}
+	l.AsyncWriteBufferSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

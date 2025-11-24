@@ -290,6 +290,7 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 	RegisterStreamingServiceClient(registry)
 	RegisterQueryCoord(registry)
 	RegisterDataCoord(registry)
+	RegisterLoggingMetrics(registry)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {
