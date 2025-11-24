@@ -218,7 +218,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         await asyncio.gather(*tasks)
 
     @pytest.mark.tags(CaseLabel.L0)
-    async def test_async_client_with_schema(self, schema):
+    async def test_async_client_with_schema(self):
         # init async client
         pk_field_name = "id"
         self.init_async_milvus_client()
