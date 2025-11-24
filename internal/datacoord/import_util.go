@@ -298,9 +298,9 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		Schema:        job.GetSchema(),
 		ImportFiles:   importFiles,
 		Options:       job.GetOptions(),
-		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
 	}
+	req.CpuSlot, req.MemorySlot = task.GetTaskSlot()
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req
 }
@@ -376,9 +376,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
 	}
+	req.CpuSlot, req.MemorySlot = task.GetTaskSlot()
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
 }
@@ -816,7 +816,7 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 // 1. CPU constraint: Based on the number of files to process in parallel
 // 2. Memory constraint: Based on the total buffer size required for all virtual channels and partitions
 // Returns the maximum of the two constraints to ensure sufficient resources
-func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
+func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) (float64, float64) {
 	job := importMeta.GetJob(context.TODO(), task.GetJobID())
 
 	// Calculate CPU-based slots
@@ -841,14 +841,9 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		// L0 import use fixed buffer size
 		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
-	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
-	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
+	memoryBasedSlots := float64(taskBufferSize) / 1024 / 1024 / 1024 // GB
 
-	// Return the larger value to ensure both CPU and memory constraints are satisfied
-	if cpuBasedSlots > memoryBasedSlots {
-		return cpuBasedSlots
-	}
-	return memoryBasedSlots
+	return float64(cpuBasedSlots), memoryBasedSlots
 }
 
 func createSortCompactionTask(ctx context.Context,

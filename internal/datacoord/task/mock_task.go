@@ -139,21 +139,31 @@ func (_c *MockTask_GetTaskID_Call) RunAndReturn(run func() int64) *MockTask_GetT
 }
 
 // GetTaskSlot provides a mock function with no fields
-func (_m *MockTask) GetTaskSlot() int64 {
+func (_m *MockTask) GetTaskSlot() (float64, float64) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTaskSlot")
 	}
 
-	var r0 int64
-	if rf, ok := ret.Get(0).(func() int64); ok {
+	var r0 float64
+	var r1 float64
+	if rf, ok := ret.Get(0).(func() (float64, float64)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() float64); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(int64)
+		r0 = ret.Get(0).(float64)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func() float64); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(float64)
+	}
+
+	return r0, r1
 }
 
 // MockTask_GetTaskSlot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTaskSlot'
@@ -173,12 +183,12 @@ func (_c *MockTask_GetTaskSlot_Call) Run(run func()) *MockTask_GetTaskSlot_Call 
 	return _c
 }
 
-func (_c *MockTask_GetTaskSlot_Call) Return(_a0 int64) *MockTask_GetTaskSlot_Call {
-	_c.Call.Return(_a0)
+func (_c *MockTask_GetTaskSlot_Call) Return(_a0 float64, _a1 float64) *MockTask_GetTaskSlot_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockTask_GetTaskSlot_Call) RunAndReturn(run func() int64) *MockTask_GetTaskSlot_Call {
+func (_c *MockTask_GetTaskSlot_Call) RunAndReturn(run func() (float64, float64)) *MockTask_GetTaskSlot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -394,6 +404,51 @@ func (_c *MockTask_QueryTaskOnWorker_Call) Return() *MockTask_QueryTaskOnWorker_
 
 func (_c *MockTask_QueryTaskOnWorker_Call) RunAndReturn(run func(session.Cluster)) *MockTask_QueryTaskOnWorker_Call {
 	_c.Run(run)
+	return _c
+}
+
+// RequiresExclusiveWorker provides a mock function with no fields
+func (_m *MockTask) RequiresExclusiveWorker() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for RequiresExclusiveWorker")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockTask_RequiresExclusiveWorker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RequiresExclusiveWorker'
+type MockTask_RequiresExclusiveWorker_Call struct {
+	*mock.Call
+}
+
+// RequiresExclusiveWorker is a helper method to define mock.On call
+func (_e *MockTask_Expecter) RequiresExclusiveWorker() *MockTask_RequiresExclusiveWorker_Call {
+	return &MockTask_RequiresExclusiveWorker_Call{Call: _e.mock.On("RequiresExclusiveWorker")}
+}
+
+func (_c *MockTask_RequiresExclusiveWorker_Call) Run(run func()) *MockTask_RequiresExclusiveWorker_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_RequiresExclusiveWorker_Call) Return(_a0 bool) *MockTask_RequiresExclusiveWorker_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTask_RequiresExclusiveWorker_Call) RunAndReturn(run func() bool) *MockTask_RequiresExclusiveWorker_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

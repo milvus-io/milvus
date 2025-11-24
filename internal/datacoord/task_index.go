@@ -46,7 +46,9 @@ import (
 type indexBuildTask struct {
 	*model.SegmentIndex
 
-	taskSlot int64
+	cpuSlot       float64
+	memorySlot    float64
+	isVectorIndex bool
 
 	times *taskcommon.Times
 
@@ -59,7 +61,9 @@ type indexBuildTask struct {
 var _ globalTask.Task = (*indexBuildTask)(nil)
 
 func newIndexBuildTask(segIndex *model.SegmentIndex,
-	taskSlot int64,
+	cpuSlot float64,
+	memorySlot float64,
+	isVectorIndex bool,
 	meta *meta,
 	handler Handler,
 	chunkManager storage.ChunkManager,
@@ -67,7 +71,9 @@ func newIndexBuildTask(segIndex *model.SegmentIndex,
 ) *indexBuildTask {
 	return &indexBuildTask{
 		SegmentIndex:              segIndex,
-		taskSlot:                  taskSlot,
+		cpuSlot:                   cpuSlot,
+		memorySlot:                memorySlot,
+		isVectorIndex:             isVectorIndex,
 		times:                     taskcommon.NewTimes(),
 		meta:                      meta,
 		handler:                   handler,
@@ -80,8 +86,8 @@ func (it *indexBuildTask) GetTaskID() int64 {
 	return it.BuildID
 }
 
-func (it *indexBuildTask) GetTaskSlot() int64 {
-	return it.taskSlot
+func (it *indexBuildTask) GetTaskSlot() (float64, float64) {
+	return it.cpuSlot, it.memorySlot
 }
 
 func (it *indexBuildTask) GetTaskState() taskcommon.State {
@@ -324,9 +330,10 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
-		TaskSlot:                  it.taskSlot,
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
+		CpuSlot:                   it.cpuSlot,
+		MemorySlot:                it.memorySlot,
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
@@ -416,4 +423,8 @@ func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {
 
 func (it *indexBuildTask) DropTaskOnWorker(cluster session.Cluster) {
 	it.tryDropTaskOnWorker(cluster)
+}
+
+func (it *indexBuildTask) RequiresExclusiveWorker() bool {
+	return it.isVectorIndex && it.cpuSlot > 4
 }
