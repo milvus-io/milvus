@@ -285,6 +285,8 @@ func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 
 	start := time.Now()
 
+	// Perform a search first to ensure that the proxy initializes its shard-leader cache.
+	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	log.Info("=========================Root Coordinators stopped=========================")
 	c.DefaultMixCoord().Stop()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
