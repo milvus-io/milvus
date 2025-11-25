@@ -21,9 +21,8 @@ default_vector_name = "vector"
 class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
+        if self.async_milvus_client_wrap.async_milvus_client is not None:
+            asyncio.run(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     @pytest.mark.tags(CaseLabel.L0)
