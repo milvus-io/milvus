@@ -19,6 +19,7 @@ package rerank
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"math"
 	"reflect"
 	"strconv"
@@ -155,10 +156,74 @@ var mathFunctions = map[string]interface{}{
 		return xf
 	},
 
+	// Token match count function
+	"token_match_count": func(field interface{}, query interface{}, analyzerParam interface{}) float64 {
+		fieldStr, ok1 := field.(string)
+		queryStr, ok2 := query.(string)
+		analyzerStr, ok3 := analyzerParam.(string)
+		if !ok1 || !ok2 || !ok3 {
+			log.Warn("token_match_count: type assertion failed",
+				zap.String("field_type", fmt.Sprintf("%T", field)),
+				zap.String("query_type", fmt.Sprintf("%T", query)),
+				zap.String("analyzer_param_type", fmt.Sprintf("%T", analyzerParam)),
+				zap.Bool("field_ok", ok1),
+				zap.Bool("query_ok", ok2),
+				zap.Bool("analyzer_param_ok", ok3))
+			return math.NaN()
+		}
+		return tokenMatchCount(fieldStr, queryStr, analyzerStr)
+	},
+
 	// Mathematical constants
 	"PI": math.Pi,
 	"E":  math.E,
 }
+
+func tokenMatchCount(fieldText string, queryText string, analyzerParams string) float64 {
+	an, err := analyzer.NewAnalyzer(analyzerParams)
+	if err != nil {
+		log.Warn("token_match_count: failed to create analyzer",
+			zap.String("analyzer_params", analyzerParams),
+			zap.Error(err))
+		return math.NaN()
+	}
+	defer an.Destroy()
+
+	// token stream of the queryText - collect unique tokens
+	queryTokens := make(map[string]bool)
+	tok1 := an.NewTokenStream(queryText)
+	if tok1 == nil {
+		log.Warn("token_match_count: failed to create query token stream",
+			zap.String("query_text", queryText))
+		return math.NaN()
+	}
+	defer tok1.Destroy()
+
+	for tok1.Advance() {
+		token := tok1.Token()
+		queryTokens[token] = true
+	}
+
+	// token stream of the fieldText - count matches
+	matchCount := 0
+	tok2 := an.NewTokenStream(fieldText)
+	if tok2 == nil {
+		log.Warn("token_match_count: failed to create field token stream",
+			zap.String("field_text", fieldText))
+		return math.NaN()
+	}
+	defer tok2.Destroy()
+
+	for tok2.Advance() {
+		token := tok2.Token()
+		if queryTokens[token] {
+			matchCount++
+		}
+	}
+
+	return float64(matchCount)
+}
+
 
 func newExprFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
 	base, err := newRerankBase(collSchema, funcSchema, ExprName, false)
