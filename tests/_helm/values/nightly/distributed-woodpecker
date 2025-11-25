@@ -94,6 +94,8 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    queryCoord:
+      checkNodeInReplicaInterval: 3
 metrics:
   serviceMonitor:
     enabled: true
