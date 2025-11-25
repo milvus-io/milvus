@@ -168,7 +168,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
-    if (!has_offset_input_ && is_pk_field_ && segment_->type() == SegmentType::Sealed) {
+    if (!has_offset_input_ && is_pk_field_ &&
+        segment_->type() == SegmentType::Sealed) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
         } else {

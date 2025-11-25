@@ -516,10 +516,10 @@ class InsertRecordSealed {
 
     void
     search_pk_binary_range(const PkType& lower_pk,
-                          bool lower_inclusive,
-                          const PkType& upper_pk,
-                          bool upper_inclusive,
-                          BitsetTypeView& bitset) const {
+                           bool lower_inclusive,
+                           const PkType& upper_pk,
+                           bool upper_inclusive,
+                           BitsetTypeView& bitset) const {
         auto lower_op = lower_inclusive ? proto::plan::OpType::GreaterEqual
                                         : proto::plan::OpType::GreaterThan;
         auto upper_op = upper_inclusive ? proto::plan::OpType::LessEqual
@@ -534,7 +534,9 @@ class InsertRecordSealed {
 
         // values <= upper_pk (or < upper_pk if not inclusive)
         pk2offset_->find_range(
-            upper_pk, upper_op, upper_view, [](int64_t offset) { return true; });
+            upper_pk, upper_op, upper_view, [](int64_t offset) {
+                return true;
+            });
 
         bitset &= upper_result;
     }
