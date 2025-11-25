@@ -1822,7 +1822,6 @@ func TestProxy_AddFileResource(t *testing.T) {
 			Base: &commonpb.MsgBase{},
 			Name: "test_resource",
 			Path: "/path/to/resource",
-			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
 		}
 
 		resp, err := proxy.AddFileResource(context.Background(), req)

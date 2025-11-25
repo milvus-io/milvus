@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <shared_mutex>
 #include <string>
 
 #include "common/Schema.h"
@@ -36,7 +37,27 @@ class Collection {
  public:
     SchemaPtr
     get_schema() {
+        std::shared_lock lock(schema_mutex_);
         return schema_;
+    }
+
+    uint64_t
+    get_schema_version() {
+        std::shared_lock lock(schema_mutex_);
+        return schema_->get_schema_version();
+    }
+
+    void
+    set_schema(SchemaPtr& new_schema) {
+        std::unique_lock lock(schema_mutex_);
+        auto old_schema = schema_;
+        if (new_schema->get_schema_version() > schema_->get_schema_version()) {
+            schema_ = new_schema;
+        }
+
+        if (old_schema) {
+            schema_->UpdateLoadFields(old_schema->load_fields());
+        }
     }
 
     IndexMetaPtr&
@@ -57,6 +78,7 @@ class Collection {
  private:
     std::string collection_name_;
     SchemaPtr schema_;
+    std::shared_mutex schema_mutex_;
     IndexMetaPtr index_meta_;
 };
 
