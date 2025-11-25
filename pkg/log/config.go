@@ -89,6 +89,9 @@ type Config struct {
 
 	// AsyncWriteBufferSize is the size of the write buffer
 	AsyncWriteBufferSize int `toml:"async-write-buffer-size" json:"async-write-buffer-size"`
+
+	// AsyncWriteMaxBytesPerLog is the max bytes per log
+	AsyncWriteMaxBytesPerLog int `toml:"async-write-max-bytes-per-log" json:"async-write-max-bytes-per-log"`
 }
 
 // ZapProperties records some information about zap.
@@ -127,4 +130,26 @@ func (cfg *Config) buildOptions(errSink zapcore.WriteSyncer) []zap.Option {
 		}))
 	}
 	return opts
+}
+
+// initialize initializes the config.
+func (cfg *Config) initialize() {
+	if cfg.AsyncWriteFlushInterval <= 0 {
+		cfg.AsyncWriteFlushInterval = 10 * time.Second
+	}
+	if cfg.AsyncWriteDroppedTimeout <= 0 {
+		cfg.AsyncWriteDroppedTimeout = 100 * time.Millisecond
+	}
+	if cfg.AsyncWriteStopTimeout <= 0 {
+		cfg.AsyncWriteStopTimeout = 1 * time.Second
+	}
+	if cfg.AsyncWritePendingLength <= 0 {
+		cfg.AsyncWritePendingLength = 128
+	}
+	if cfg.AsyncWriteBufferSize <= 0 {
+		cfg.AsyncWriteBufferSize = 256 * 1024
+	}
+	if cfg.AsyncWriteMaxBytesPerLog <= 0 {
+		cfg.AsyncWriteMaxBytesPerLog = 1024 * 1024
+	}
 }

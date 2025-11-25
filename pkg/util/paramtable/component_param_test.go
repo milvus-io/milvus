@@ -163,6 +163,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1*time.Second, Params.AsyncWriteStopTimeout.GetAsDurationByParse())
 		assert.Equal(t, 128, Params.AsyncWritePendingLength.GetAsInt())
 		assert.Equal(t, int64(256*1024), Params.AsyncWriteBufferSize.GetAsSize())
+		assert.Equal(t, int64(1024*1024), Params.AsyncWriteMaxBytesPerLog.GetAsSize())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

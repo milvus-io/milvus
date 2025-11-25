@@ -43,8 +43,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"gopkg.in/natefinch/lumberjack.v2"
-
-	"github.com/milvus-io/milvus/pkg/v2/log/writesyncer"
 )
 
 var _globalL, _globalP, _globalS, _globalR, _globalCleanup atomic.Value
@@ -87,11 +85,6 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 	}
 	debugCfg := *cfg
 	debugCfg.Level = "debug"
-	if cfg.AsyncWriteEnable {
-		var cleanup func()
-		outputs, cleanup = withAsyncBufferedWriteSyncer(outputs, cfg)
-		registerCleanup(cleanup)
-	}
 	outputsWriter := zap.CombineWriteSyncers(outputs...)
 	debugL, r, err := InitLoggerWithWriteSyncer(&debugCfg, outputsWriter, opts...)
 	if err != nil {
@@ -129,7 +122,13 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	if err != nil {
 		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
 	}
-	core := NewTextCore(newZapTextEncoder(cfg), output, level)
+	var core zapcore.Core
+	if cfg.AsyncWriteEnable {
+		core = NewAsyncTextIOCore(cfg, output, level)
+		registerCleanup(core.(*asyncTextIOCore).Stop)
+	} else {
+		core = NewTextCore(newZapTextEncoder(cfg), output, level)
+	}
 	opts = append(cfg.buildOptions(output), opts...)
 	lg := zap.New(core, opts...)
 	r := &ZapProperties{
@@ -276,26 +275,4 @@ func Sync() error {
 
 func Level() zap.AtomicLevel {
 	return _globalP.Load().(*ZapProperties).Level
-}
-
-func withAsyncBufferedWriteSyncer(outputs []zapcore.WriteSyncer, cfg *Config) ([]zapcore.WriteSyncer, func()) {
-	syncers := make([]*writesyncer.AsyncBufferedWriteSyncer, len(outputs))
-	newOutputs := make([]zapcore.WriteSyncer, len(outputs))
-	for i, output := range outputs {
-		asyncSyncer := writesyncer.NewAsyncBufferedWriteSyncer(writesyncer.AsyncBufferedWriteSyncerConfig{
-			WS:                  output,
-			FlushInterval:       cfg.AsyncWriteFlushInterval,
-			WriteDroppedTimeout: cfg.AsyncWriteDroppedTimeout,
-			StopTimeout:         cfg.AsyncWriteStopTimeout,
-			PendingItemSize:     cfg.AsyncWritePendingLength,
-			WriteBufferSize:     cfg.AsyncWriteBufferSize,
-		})
-		syncers[i] = asyncSyncer
-		newOutputs[i] = asyncSyncer
-	}
-	return newOutputs, func() {
-		for _, syncer := range syncers {
-			syncer.Stop()
-		}
-	}
 }
