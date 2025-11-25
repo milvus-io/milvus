@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -30,16 +29,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -598,192 +594,8 @@ func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs 
 	return []any{result}, nil
 }
 
-const (
-	PreTagsKey             = "pre_tags"
-	PostTagsKey            = "post_tags"
-	HighlightSearchTextKey = "highlight_search_data"
-	FragmentOffsetKey      = "fragment_offset"
-	FragmentSizeKey        = "fragment_size"
-	FragmentNumKey         = "num_of_fragments"
-	DefaultFragmentSize    = 100
-	DefaultFragmentNum     = 1
-	DefaultPreTag          = "<em>"
-	DefaultPostTag         = "</em>"
-)
-
-type highlightTask struct {
-	*querypb.HighlightTask
-	preTags  [][]byte
-	postTags [][]byte
-}
-
-type highlightOperator struct {
-	tasks        []*highlightTask
-	fieldSchemas []*schemapb.FieldSchema
-	lbPolicy     shardclient.LBPolicy
-	scheduler    *taskScheduler
-
-	collectionName string
-	collectionID   int64
-	dbName         string
-
-	preTag  []byte
-	postTag []byte
-}
-
 func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
-	return &highlightOperator{
-		tasks:          t.highlightTasks,
-		lbPolicy:       t.lb,
-		scheduler:      t.node.(*Proxy).sched,
-		fieldSchemas:   typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
-		collectionName: t.request.CollectionName,
-		collectionID:   t.CollectionID,
-		dbName:         t.request.DbName,
-	}, nil
-}
-
-func sliceByRune(s string, start, end int) string {
-	if start >= end {
-		return ""
-	}
-
-	i, from, to := 0, 0, len(s)
-	for idx := range s {
-		if i == start {
-			from = idx
-		}
-		if i == end {
-			to = idx
-			break
-		}
-		i++
-	}
-
-	return s[from:to]
-}
-
-// get slice texts according to fragment options
-func getHighlightTexts(task *querypb.HighlightTask, datas []string) []string {
-	if task.GetOptions().GetNumOfFragments() == 0 {
-		return datas
-	}
-
-	results := make([]string, len(datas))
-	offset := int(task.GetOptions().GetFragmentOffset())
-	size := offset + int(task.GetOptions().GetFragmentSize()*task.GetOptions().GetNumOfFragments())
-	for i, text := range datas {
-		results[i] = sliceByRune(text, min(offset, len(text)), min(size, len(text)))
-	}
-	return results
-}
-
-func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.Results.GetFieldsData()
-	req := &querypb.GetHighlightRequest{
-		Topks: result.GetResults().GetTopks(),
-		Tasks: lo.Map(op.tasks, func(task *highlightTask, _ int) *querypb.HighlightTask { return task.HighlightTask }),
-	}
-
-	for _, task := range req.GetTasks() {
-		textFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == task.GetFieldId() })
-		if !ok {
-			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
-		}
-		texts := getHighlightTexts(task, textFieldDatas.GetScalars().GetStringData().GetData())
-		task.Texts = append(task.Texts, texts...)
-		task.CorpusTextNum = int64(len(texts))
-		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
-			return schema.GetFieldID() == task.GetFieldId()
-		})
-		if !ok {
-			return nil, errors.Errorf("get highlight failed, field not found in schema %s: %d", task.GetFieldName(), task.GetFieldId())
-		}
-
-		// if use multi analyzer
-		// get analyzer field data
-		helper := typeutil.CreateFieldSchemaHelper(field)
-		if v, ok := helper.GetMultiAnalyzerParams(); ok {
-			params := map[string]any{}
-			err := json.Unmarshal([]byte(v), &params)
-			if err != nil {
-				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params-: %v", err)
-			}
-			analyzerField, ok := params["by_field"]
-			if !ok {
-				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params, no by_field")
-			}
-
-			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldName == analyzerField.(string) })
-			if !ok {
-				return nil, errors.Errorf("get highlight failed, analyzer field not in output field")
-			}
-			task.AnalyzerNames = append(task.AnalyzerNames, analyzerFieldDatas.GetScalars().GetStringData().GetData()...)
-		}
-	}
-
-	task := &HighlightTask{
-		ctx:                 ctx,
-		lb:                  op.lbPolicy,
-		Condition:           NewTaskCondition(ctx),
-		GetHighlightRequest: req,
-		collectionName:      op.collectionName,
-		collectionID:        op.collectionID,
-		dbName:              op.dbName,
-	}
-	if err := op.scheduler.dqQueue.Enqueue(task); err != nil {
-		return nil, err
-	}
-
-	if err := task.WaitToFinish(); err != nil {
-		return nil, err
-	}
-
-	rowNum := len(result.Results.GetScores())
-	HighlightResults := []*commonpb.HighlightResult{}
-	if rowNum != 0 {
-		rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
-			return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
-		})
-
-		for i, task := range req.GetTasks() {
-			HighlightResults = append(HighlightResults, &commonpb.HighlightResult{
-				FieldName: task.GetFieldName(),
-				Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
-			})
-		}
-	}
-
-	result.Results.HighlightResults = HighlightResults
-	return []any{result}, nil
-}
-
-func buildStringFragments(task *highlightTask, idx int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
-	bytes := []byte(task.Texts[int(task.GetSearchTextNum())+idx])
-	preTagsNum := len(task.preTags)
-	postTagsNum := len(task.postTags)
-	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
-	for _, frag := range frags {
-		fragBytes := []byte{}
-		cursor := int(frag.GetStartOffset())
-		for i := 0; i < len(frag.GetOffsets())/2; i++ {
-			startOffset := int(frag.Offsets[i<<1])
-			endOffset := int(frag.Offsets[(i<<1)+1])
-			if cursor < startOffset {
-				fragBytes = append(fragBytes, bytes[cursor:startOffset]...)
-			}
-			fragBytes = append(fragBytes, task.preTags[i%preTagsNum]...)
-			fragBytes = append(fragBytes, bytes[startOffset:endOffset]...)
-			fragBytes = append(fragBytes, task.postTags[i%postTagsNum]...)
-			cursor = endOffset
-		}
-		if cursor < int(frag.GetEndOffset()) {
-			fragBytes = append(fragBytes, bytes[cursor:frag.GetEndOffset()]...)
-		}
-		result.Fragments = append(result.Fragments, string(fragBytes))
-	}
-	return result
+	return t.highlighter.AsSearchPipelineOperator(t)
 }
 
 func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
@@ -1318,7 +1130,7 @@ func newSearchPipeline(t *searchTask) (*pipeline, error) {
 		return nil, err
 	}
 
-	if len(t.highlightTasks) > 0 {
+	if t.highlighter != nil {
 		err := p.AddNodes(t, highlightNode, filterFieldNode)
 		if err != nil {
 			return nil, err

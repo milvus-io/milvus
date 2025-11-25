@@ -1020,19 +1020,32 @@ message HighlightOptions{
     int64 num_of_fragments = 3;
 }
 
+enum HighlightQueryType{
+    TextMatch = 0;
+}
+
+message HighlightQuery{
+    HighlightQueryType type = 1;
+}
+
 // HighlightTask fetch highlight for all queries at one field
-// len(texts) == search_text_num + corpus_text_num
+// search_text_num/search_num == len(topks) == nq
+// corpus_text_num == sum(topks) == len(search_results)
 message HighlightTask{
     string field_name = 1;
     int64 field_id = 2;
+    // len(texts) = search_text_num + corpus_text_num + len(queries);
+    // text = search_text...corpus_text...query_text
     repeated string texts = 3;
     repeated string analyzer_names = 4; // used if field with multi-analyzer
     
     int64 search_text_num = 5;
     int64 corpus_text_num = 6;
     HighlightOptions options = 7;
+    repeated HighlightQuery queries = 8;
 }
 
+// Get Lexical highlight from delegator
 message GetHighlightRequest{
     common.MsgBase base = 1;
     string channel = 2;
