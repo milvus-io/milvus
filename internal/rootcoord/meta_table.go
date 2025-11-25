@@ -341,6 +341,10 @@ func (mt *MetaTable) createDefaultDb() error {
 
 		cipherProps := hookutil.GetDBCipherProperties(ezID, defaultRootKey)
 		defaultProperties = append(defaultProperties, cipherProps...)
+
+		if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
+			return err
+		}
 	}
 
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
@@ -377,12 +381,7 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 
 func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
 	dbName := db.Name
-	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
-		return err
-	}
-
 	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
-		hookutil.RemoveEZByDBProperties(db.Properties) // ignore the error since create database failed
 		return err
 	}
 
@@ -441,11 +440,6 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 		return nil
 	}
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
-		return err
-	}
-
-	// Call back cipher plugin when dropping database succeeded
-	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
 		return err
 	}
 
