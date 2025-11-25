@@ -23,6 +23,7 @@
 #include "common/Consts.h"
 #include "boost/filesystem/path.hpp"
 #include "log/Log.h"
+#include "milvus-storage/properties.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -61,12 +62,27 @@ struct FileManagerContext {
         plugin_context = context;
     }
 
+    /**
+     * @brief Set the loon FFI properties for storage access
+     *
+     * Configures the properties used for accessing loon storage through
+     * the FFI interface. These properties contain storage configuration
+     * such as endpoints, credentials, and connection settings.
+     *
+     * @param properties Shared pointer to Properties object
+     */
+    void
+    set_loon_ffi_properties(std::shared_ptr<Properties> properties) {
+        loon_ffi_properties = std::move(properties);
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
+    std::shared_ptr<Properties> loon_ffi_properties;
 };
 
 #define FILEMANAGER_TRY try {
@@ -207,6 +223,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::shared_ptr<Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
 };
 
