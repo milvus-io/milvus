@@ -47,6 +47,11 @@ func (c *Core) broadcastDropDatabase(ctx context.Context, req *milvuspb.DropData
 		return errors.Wrap(err, "failed to get database name")
 	}
 
+	// Call back cipher plugin when dropping database succeeded
+	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
+		return errors.Wrap(err, "failed to remove ez by db properties")
+	}
+
 	msg := message.NewDropDatabaseMessageBuilderV2().
 		WithHeader(&message.DropDatabaseMessageHeader{
 			DbName: req.GetDbName(),
