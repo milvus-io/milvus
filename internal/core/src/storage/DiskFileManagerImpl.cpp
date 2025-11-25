@@ -59,6 +59,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     plugin_context_ = fileManagerContext.plugin_context;
+    loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {

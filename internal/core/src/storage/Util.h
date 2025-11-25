@@ -192,7 +192,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<Properties>& loon_ffi_properties,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,

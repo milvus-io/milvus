@@ -64,6 +64,7 @@
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::storage {
 
@@ -1366,17 +1367,17 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 std::vector<FieldDataPtr>
 GetFieldDatasFromManifest(
     const std::string& manifest_path,
-    const std::shared_ptr<Properties>& loon_ffi_properties,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
     const FieldDataMeta& field_meta,
     std::optional<DataType> data_type,
     int64_t dim,
     std::optional<DataType> element_type) {
-    auto manifest_content = GetManifest(manifest_path, loon_ffi_properties);
+    auto column_groups = GetColumnGroups(manifest_path, loon_ffi_properties);
 
-    ReaderHandle reader_handler = 0;
+    // ReaderHandle reader_handler = 0;
 
     std::string field_id_str = std::to_string(field_meta.field_id);
-    std::vector<const char*> needed_columns = {field_id_str.c_str()};
+    std::vector<std::string> needed_columns = {field_id_str};
 
     // Create arrow schema from field meta
     std::shared_ptr<arrow::Schema> arrow_schema;
@@ -1401,60 +1402,33 @@ GetFieldDatasFromManifest(
         arrow_schema = CreateArrowSchema(data_type.value(), nullable);
     }
 
-    auto updated_schema = arrow::Schema({arrow_schema->field(0)->WithName(
-        std::to_string((field_meta.field_id)))});
+    auto updated_schema = std::make_shared<arrow::Schema>(
+        arrow::Schema({arrow_schema->field(0)->WithName(
+            std::to_string((field_meta.field_id)))}));
 
-    struct ArrowSchema out;
-    arrow::ExportSchema(updated_schema, &out);
+    auto reader = milvus_storage::api::Reader::create(
+        column_groups,
+        updated_schema,
+        std::make_shared<std::vector<std::string>>(needed_columns),
+        *loon_ffi_properties);
 
-    FFIResult result = reader_new(const_cast<char*>(manifest_content.c_str()),
-                                  &out,
-                                  needed_columns.data(),
-                                  needed_columns.size(),
-                                  loon_ffi_properties.get(),
-                                  &reader_handler);
-    if (!IsSuccess(&result)) {
-        auto message = GetErrorMessage(&result);
-        // Copy the error message before freeing the FFIResult
-        std::string error_msg = message ? message : "Unknown error";
-        FreeFFIResult(&result);
-        throw std::runtime_error(error_msg);
-    }
-    FreeFFIResult(&result);
+    AssertInfo(reader != nullptr, "Failed to create reader");
 
-    // Get ArrowArrayStream from reader
-    ArrowArrayStream stream;
-    const char* predicate = nullptr;  // No filtering
-    result = get_record_batch_reader(reader_handler, predicate, &stream);
-    if (!IsSuccess(&result)) {
-        auto message = GetErrorMessage(&result);
-        std::string error_msg =
-            message ? message : "Failed to get record batch reader";
-        FreeFFIResult(&result);
-        reader_destroy(reader_handler);
-        throw std::runtime_error(error_msg);
-    }
-    FreeFFIResult(&result);
+    // without predicate
+    auto reader_result = reader->get_record_batch_reader("");
+    AssertInfo(reader_result.ok(),
+               "Failed to get record batch reader: " +
+                   reader_result.status().ToString());
 
-    // Import ArrowArrayStream to Arrow RecordBatchReader
-    auto maybe_reader = arrow::ImportRecordBatchReader(&stream);
-    if (!maybe_reader.ok()) {
-        reader_destroy(reader_handler);
-        throw std::runtime_error("Failed to import record batch reader: " +
-                                 maybe_reader.status().ToString());
-    }
-    auto record_batch_reader = maybe_reader.ValueOrDie();
+    auto record_batch_reader = reader_result.ValueOrDie();
 
     // Read all record batches and convert to FieldDataPtr
     std::vector<FieldDataPtr> field_datas;
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = record_batch_reader->ReadNext(&batch);
-        if (!status.ok()) {
-            reader_destroy(reader_handler);
-            throw std::runtime_error("Failed to read record batch: " +
-                                     status.ToString());
-        }
+        AssertInfo(status.ok(),
+                   "Failed to read record batch: " + status.ToString());
         if (batch == nullptr) {
             break;  // End of stream
         }
@@ -1476,8 +1450,6 @@ GetFieldDatasFromManifest(
         field_datas.push_back(field_data);
     }
 
-    // Clean up
-    reader_destroy(reader_handler);
     return field_datas;
 }
 

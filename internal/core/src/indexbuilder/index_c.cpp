@@ -254,7 +254,7 @@ CreateIndex(CIndex* res_index,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
         if (build_index_info->manifest() != "") {
-            auto loon_properties = MakePropertiesFromStorageConfig(
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
@@ -361,7 +361,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             field_meta, index_meta, chunk_manager, fs);
 
         if (build_index_info->manifest() != "") {
-            auto loon_properties = MakePropertiesFromStorageConfig(
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
@@ -452,7 +452,7 @@ BuildTextIndex(ProtoLayoutInterface result,
             field_meta, index_meta, chunk_manager, fs);
 
         if (build_index_info->manifest() != "") {
-            auto loon_properties = MakePropertiesFromStorageConfig(
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
                 ToCStorageConfig(storage_config));
             fileManagerContext.set_loon_ffi_properties(loon_properties);
         }
