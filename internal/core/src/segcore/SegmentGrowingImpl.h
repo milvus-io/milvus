@@ -569,6 +569,34 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     CreateTextIndexes();
 
+    /**
+     * @brief Load all column groups from a manifest file path
+     *
+     * This method parses the manifest path to retrieve column groups metadata
+     * and loads each column group into the growing segment.
+     *
+     * @param manifest_path JSON string containing base_path and version fields
+     */
+    void
+    LoadColumnsGroups(std::string manifest_path);
+
+    /**
+     * @brief Load a single column group and return field data
+     *
+     * Reads a specific column group from milvus storage and converts it to
+     * field data format that can be inserted into the growing segment.
+     *
+     * @param column_groups Metadata about all available column groups
+     * @param properties Storage properties for accessing the data
+     * @param index Index of the column group to load
+     * @return Map of field IDs to their corresponding field data vectors
+     */
+    std::unordered_map<FieldId, std::vector<FieldDataPtr>>
+    LoadColumnGroup(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        int64_t index);
+
     void
     InitializeArrayOffsets();
 
@@ -592,6 +620,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t id_;
 
     SegmentStats stats_{};
+
+    // milvus storage internal api reader instance
+    std::unique_ptr<milvus_storage::api::Reader> reader_;
 
     // field_id -> ArrayOffsetsGrowing (for fast lookup via GetArrayOffsets)
     // Multiple field_ids from the same struct point to the same ArrayOffsetsGrowing

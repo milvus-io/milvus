@@ -34,6 +34,12 @@ type PackedWriter struct {
 	cPackedWriter C.CPackedWriter
 }
 
+type FFIPackedWriter struct {
+	basePath      string
+	cWriterHandle C.WriterHandle
+	cProperties   *C.Properties
+}
+
 type PackedReader struct {
 	cPackedReader C.CPackedReader
 	arr           *cdata.CArrowArray

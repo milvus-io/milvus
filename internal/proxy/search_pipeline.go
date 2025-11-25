@@ -602,6 +602,11 @@ const (
 	PreTagsKey             = "pre_tags"
 	PostTagsKey            = "post_tags"
 	HighlightSearchTextKey = "highlight_search_data"
+	FragmentOffsetKey      = "fragment_offset"
+	FragmentSizeKey        = "fragment_size"
+	FragmentNumKey         = "num_of_fragments"
+	DefaultFragmentSize    = 100
+	DefaultFragmentNum     = 1
 	DefaultPreTag          = "<em>"
 	DefaultPostTag         = "</em>"
 )
@@ -638,6 +643,41 @@ func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
 	}, nil
 }
 
+func sliceByRune(s string, start, end int) string {
+	if start >= end {
+		return ""
+	}
+
+	i, from, to := 0, 0, len(s)
+	for idx := range s {
+		if i == start {
+			from = idx
+		}
+		if i == end {
+			to = idx
+			break
+		}
+		i++
+	}
+
+	return s[from:to]
+}
+
+// get slice texts according to fragment options
+func getHighlightTexts(task *querypb.HighlightTask, datas []string) []string {
+	if task.GetOptions().GetNumOfFragments() == 0 {
+		return datas
+	}
+
+	results := make([]string, len(datas))
+	offset := int(task.GetOptions().GetFragmentOffset())
+	size := offset + int(task.GetOptions().GetFragmentSize()*task.GetOptions().GetNumOfFragments())
+	for i, text := range datas {
+		results[i] = sliceByRune(text, min(offset, len(text)), min(size, len(text)))
+	}
+	return results
+}
+
 func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
 	datas := result.Results.GetFieldsData()
@@ -651,7 +691,7 @@ func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ..
 		if !ok {
 			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
 		}
-		texts := textFieldDatas.GetScalars().GetStringData().GetData()
+		texts := getHighlightTexts(task, textFieldDatas.GetScalars().GetStringData().GetData())
 		task.Texts = append(task.Texts, texts...)
 		task.CorpusTextNum = int64(len(texts))
 		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {

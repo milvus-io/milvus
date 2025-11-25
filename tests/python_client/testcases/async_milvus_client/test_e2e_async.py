@@ -21,9 +21,8 @@ default_vector_name = "vector"
 class TestAsyncMilvusClient(TestMilvusClientV2Base):
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
+        if self.async_milvus_client_wrap.async_milvus_client is not None:
+            asyncio.run(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -218,7 +217,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         await asyncio.gather(*tasks)
 
     @pytest.mark.tags(CaseLabel.L0)
-    async def test_async_client_with_schema(self, schema):
+    async def test_async_client_with_schema(self):
         # init async client
         pk_field_name = "id"
         self.init_async_milvus_client()
@@ -390,7 +389,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         await self.async_milvus_client_wrap.create_database(db_name)
         await self.async_milvus_client_wrap.close()
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        self.async_milvus_client_wrap.init_async_client(uri, db_name=db_name)
+        self.async_milvus_client_wrap.init_async_client(uri, token=cf.param_info.param_token, db_name=db_name)
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
@@ -450,7 +449,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
     async def test_async_client_close(self):
         # init async client
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
-        self.async_milvus_client_wrap.init_async_client(uri)
+        self.async_milvus_client_wrap.init_async_client(uri, token=cf.param_info.param_token)
 
         # create collection
         c_name = cf.gen_unique_str(prefix)
