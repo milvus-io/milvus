@@ -289,6 +289,7 @@ func (mr *MilvusRoles) setupLogger() {
 		AsyncWriteStopTimeout:    params.LogCfg.AsyncWriteStopTimeout.GetAsDurationByParse(),
 		AsyncWritePendingLength:  params.LogCfg.AsyncWritePendingLength.GetAsInt(),
 		AsyncWriteBufferSize:     int(params.LogCfg.AsyncWriteBufferSize.GetAsSize()),
+		AsyncWriteMaxBytesPerLog: int(params.LogCfg.AsyncWriteMaxBytesPerLog.GetAsSize()),
 	}
 	id := paramtable.GetNodeID()
 	roleName := paramtable.GetRole()

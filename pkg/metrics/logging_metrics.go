@@ -43,6 +43,20 @@ var (
 		Help:      "The total bytes of pending writes in the logging buffer",
 	})
 
+	LoggingTruncatedWrites = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: milvusNamespace,
+		Subsystem: loggingMetricSubsystem,
+		Name:      "truncated_writes",
+		Help:      "The number of truncated writes due to exceeding the max bytes per log",
+	})
+
+	LoggingTruncatedWriteBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: milvusNamespace,
+		Subsystem: loggingMetricSubsystem,
+		Name:      "truncated_write_bytes",
+		Help:      "The total bytes of truncated writes due to exceeding the max bytes per log",
+	})
+
 	LoggingDroppedWrites = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: milvusNamespace,
 		Subsystem: loggingMetricSubsystem,
@@ -63,6 +77,8 @@ func RegisterLoggingMetrics(registry *prometheus.Registry) {
 	LoggingMetricsRegisterOnce.Do(func() {
 		registry.MustRegister(LoggingPendingWriteLength)
 		registry.MustRegister(LoggingPendingWriteBytes)
+		registry.MustRegister(LoggingTruncatedWrites)
+		registry.MustRegister(LoggingTruncatedWriteBytes)
 		registry.MustRegister(LoggingDroppedWrites)
 		registry.MustRegister(LoggingIOFailure)
 	})

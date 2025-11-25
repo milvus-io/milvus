@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package writesyncer
+package log
 
 import (
 	"io"
@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -32,19 +33,30 @@ func TestAsyncBufferedWriteSyncer(t *testing.T) {
 	blockWriter := &blockWriter{
 		Writer: os.Stdout,
 	}
-	syncer := NewAsyncBufferedWriteSyncer(AsyncBufferedWriteSyncerConfig{
-		WS:                  zapcore.AddSync(blockWriter),
-		FlushInterval:       1 * time.Second,
-		WriteDroppedTimeout: 100 * time.Millisecond,
-		StopTimeout:         1 * time.Second,
-		PendingItemSize:     100,
-		WriteBufferSize:     5,
-	})
+	syncer := NewAsyncTextIOCore(
+		&Config{
+			AsyncWriteEnable:         true,
+			AsyncWriteFlushInterval:  1 * time.Second,
+			AsyncWriteDroppedTimeout: 100 * time.Millisecond,
+			AsyncWriteStopTimeout:    1 * time.Second,
+			AsyncWritePendingLength:  100,
+			AsyncWriteBufferSize:     5,
+			AsyncWriteMaxBytesPerLog: 2,
+		},
+		zapcore.AddSync(blockWriter),
+		zap.DebugLevel,
+	)
 	wg := &sync.WaitGroup{}
 	for i := 0; i < 1000; i++ {
 		wg.Add(1)
 		go func() {
-			syncer.Write([]byte("test\n"))
+			syncer.Write(zapcore.Entry{
+				Level:   zap.DebugLevel,
+				Message: "test",
+			}, []zapcore.Field{
+				zap.String("test", "test"),
+				zap.Int("test", 1),
+			})
 			wg.Done()
 		}()
 	}

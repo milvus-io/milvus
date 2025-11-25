@@ -1518,6 +1518,7 @@ type logConfig struct {
 	AsyncWriteStopTimeout    ParamItem `refreshable:"false"`
 	AsyncWritePendingLength  ParamItem `refreshable:"false"`
 	AsyncWriteBufferSize     ParamItem `refreshable:"false"`
+	AsyncWriteMaxBytesPerLog ParamItem `refreshable:"false"`
 }
 
 func (l *logConfig) init(base *BaseTable) {
@@ -1661,6 +1662,16 @@ but the less the number of writes to the underlying file system.`,
 		Export: false,
 	}
 	l.AsyncWriteBufferSize.Init(base.mgr)
+
+	l.AsyncWriteMaxBytesPerLog = ParamItem{
+		Key:          "log.asyncWrite.maxBytesPerLog",
+		DefaultValue: "1m",
+		Version:      "2.6.7",
+		Doc: `The max bytes per log.
+Once the log message exceeds the max bytes per log, it will be truncated.`,
+		Export: false,
+	}
+	l.AsyncWriteMaxBytesPerLog.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
