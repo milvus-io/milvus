@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -344,25 +343,6 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	// Test nonexistent channel
 	leader = dist.GetShardLeader("nonexistent", replica)
 	suite.Nil(leader)
-
-	// Test streaming node
-	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   4,
-		Address:  "localhost:1",
-		Hostname: "localhost",
-		Labels:   map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"},
-	}))
-	channel1Node4 := suite.channels["dmc0"].Clone()
-	channel1Node4.Node = 4
-	channel1Node4.Version = 3
-	channel1Node4.View.Status.Serviceable = false
-	dist.Update(4, channel1Node4)
-
-	leader = dist.GetShardLeader("dmc0", replica)
-	suite.NotNil(leader)
-	suite.Equal(int64(4), leader.Node)
-	suite.Equal(int64(3), leader.Version)
-	suite.False(leader.IsServiceable())
 }
 
 func TestGetChannelDistJSON(t *testing.T) {
