@@ -37,8 +37,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -293,6 +296,10 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
+	if err := node.blockUntilRoleGreaterThanVersion(node.ctx, typeutil.ProxyRole, common.VersionChecker260); err != nil {
+		return err
+	}
+
 	hookutil.GetExtension().Report(map[string]any{
 		hookutil.OpTypeKey: hookutil.OpTypeNodeID,
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
@@ -304,6 +311,29 @@ func (node *Proxy) Start() error {
 	// register devops api
 	RegisterMgrRoute(node)
 
+	return nil
+}
+
+// blockUntilRoleGreaterThanVersion block until the role is greater than the version.
+func (node *Proxy) blockUntilRoleGreaterThanVersion(ctx context.Context, role string, versionChecker string) error {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	rb := resolver.NewSessionBuilder(etcdCli, sessionutil.GetSessionPrefixByRole(typeutil.ProxyRole), common.VersionChecker260)
+	defer rb.Close()
+
+	doneErr := errors.New("done")
+	r := rb.Resolver()
+	err := r.Watch(ctx, func(vs resolver.VersionedState) error {
+		if len(vs.Sessions()) == 0 {
+			return doneErr
+		}
+		log.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
+		return nil
+	})
+	if err != nil && !errors.Is(err, doneErr) {
+		log.Info("fail to wait that the nodes is greater than version", zap.String("version", versionChecker), zap.Error(err))
+		return err
+	}
+	log.Info("all nodes is greater than version when watching", zap.String("version", versionChecker))
 	return nil
 }
 
