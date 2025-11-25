@@ -469,8 +469,8 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 
-	if hookutil.GetEzPropByDBProperties(db.Properties) != nil {
-		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(db.Properties))
+	if ezProps := hookutil.GetEzPropByDBProperties(db.Properties); ezProps != nil {
+		t.Req.Properties = append(t.Req.Properties, ezProps)
 	}
 
 	t.header.DbId = db.ID
