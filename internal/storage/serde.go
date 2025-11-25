@@ -45,11 +45,6 @@ type Record interface {
 	Retain()
 }
 
-type RecordReader interface {
-	Next() (Record, error)
-	Close() error
-}
-
 type RecordWriter interface {
 	Write(r Record) error
 	GetWrittenUncompressed() uint64

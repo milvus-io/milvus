@@ -118,4 +118,5 @@ message SegmentLoadInfo {
   repeated FieldBinlog bm25logs = 18;
   map<int64, JsonKeyStats> jsonKeyStatsLogs = 19;
   common.LoadPriority priority = 20;
+  string manifest_path = 21;
 }

@@ -16,6 +16,7 @@
 #include <numeric>
 #include <optional>
 #include <queue>
+#include <string>
 #include <thread>
 #include <boost/iterator/counting_iterator.hpp>
 #include <type_traits>
@@ -40,6 +41,8 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
@@ -1337,6 +1340,12 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     // Set load priority
     field_data_info.load_priority = load_info_.priority();
 
+    auto manifest_path = load_info_.manifest_path();
+    if (manifest_path != "") {
+        LoadColumnsGroups(manifest_path);
+        return;
+    }
+
     // Convert binlog_paths to field_infos
     for (const auto& field_binlog : load_info_.binlog_paths()) {
         FieldBinlogInfo binlog_info;
@@ -1344,6 +1353,10 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
         // Process each binlog
         int64_t total_row_count = 0;
+        auto binlog_count = field_binlog.binlogs().size();
+        binlog_info.entries_nums.reserve(binlog_count);
+        binlog_info.insert_files.reserve(binlog_count);
+        binlog_info.memory_sizes.reserve(binlog_count);
         for (const auto& binlog : field_binlog.binlogs()) {
             binlog_info.entries_nums.push_back(binlog.entries_num());
             binlog_info.insert_files.push_back(binlog.log_path());
@@ -1353,6 +1366,7 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
         binlog_info.row_count = total_row_count;
 
         // Set child field ids
+        binlog_info.child_field_ids.reserve(field_binlog.child_fields().size());
         for (const auto& child_field : field_binlog.child_fields()) {
             binlog_info.child_field_ids.push_back(child_field);
         }
@@ -1381,6 +1395,157 @@ SegmentGrowingImpl::FinishLoad() {
             fill_empty_field(field_meta);
         }
     }
+}
+
+void
+SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
+    LOG_INFO(
+        "Loading segment {} field data with manifest {}", id_, manifest_path);
+    // size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
+    auto num_rows = load_info_.num_of_rows();
+    auto primary_field_id =
+        schema_->get_primary_field_id().value_or(FieldId(-1));
+    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                          .GetProperties();
+    auto column_groups = GetColumnGroups(manifest_path, properties);
+
+    auto arrow_schema = schema_->ConvertToArrowSchema();
+    reader_ = milvus_storage::api::Reader::create(
+        column_groups, arrow_schema, nullptr, *properties);
+
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
+    std::vector<
+        std::future<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>>
+        load_group_futures;
+    for (int64_t i = 0; i < column_groups->size(); ++i) {
+        auto future = pool.Submit([this, column_groups, properties, i] {
+            return LoadColumnGroup(column_groups, properties, i);
+        });
+        load_group_futures.emplace_back(std::move(future));
+    }
+
+    std::vector<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
+        column_group_results;
+    std::vector<std::exception_ptr> load_exceptions;
+    for (auto& future : load_group_futures) {
+        try {
+            column_group_results.emplace_back(future.get());
+        } catch (...) {
+            load_exceptions.push_back(std::current_exception());
+        }
+    }
+
+    // If any exceptions occurred during index loading, handle them
+    if (!load_exceptions.empty()) {
+        LOG_ERROR("Failed to load {} out of {} indexes for segment {}",
+                  load_exceptions.size(),
+                  load_group_futures.size(),
+                  id_);
+
+        // Rethrow the first exception
+        std::rethrow_exception(load_exceptions[0]);
+    }
+
+    auto reserved_offset = PreInsert(num_rows);
+
+    for (auto& column_group_result : column_group_results) {
+        for (auto& [field_id, field_data] : column_group_result) {
+            load_field_data_common(field_id,
+                                   reserved_offset,
+                                   field_data,
+                                   primary_field_id,
+                                   num_rows);
+            // Build geometry cache for GEOMETRY fields
+            if (schema_->operator[](field_id).get_data_type() ==
+                    DataType::GEOMETRY &&
+                segcore_config_.get_enable_geometry_cache()) {
+                BuildGeometryCacheForLoad(field_id, field_data);
+            }
+        }
+    }
+
+    insert_record_.ack_responder_.AddSegment(reserved_offset,
+                                             reserved_offset + num_rows);
+}
+
+std::unordered_map<FieldId, std::vector<FieldDataPtr>>
+SegmentGrowingImpl::LoadColumnGroup(
+    const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    int64_t index) {
+    AssertInfo(index < column_groups->size(),
+               "load column group index out of range");
+    auto column_group = column_groups->get_column_group(index);
+    LOG_INFO("Loading segment {} column group {}", id_, index);
+
+    auto chunk_reader_result = reader_->get_chunk_reader(index);
+    AssertInfo(chunk_reader_result.ok(),
+               "get chunk reader failed, segment {}, column group index {}",
+               get_segment_id(),
+               index);
+
+    auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
+
+    auto parallel_degree =
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+
+    std::vector<int64_t> all_row_groups(chunk_reader->total_number_of_chunks());
+
+    std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+
+    // create parallel degree split strategy
+    auto strategy =
+        std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
+    auto split_result = strategy->split(all_row_groups);
+
+    auto& thread_pool =
+        ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+
+    auto part_futures = std::vector<
+        std::future<std::vector<std::shared_ptr<arrow::RecordBatch>>>>();
+    for (const auto& part : split_result) {
+        part_futures.emplace_back(
+            thread_pool.Submit([chunk_reader = chunk_reader.get(), part]() {
+                std::vector<int64_t> chunk_ids(part.count);
+                std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
+
+                auto result = chunk_reader->get_chunks(chunk_ids, 1);
+                AssertInfo(result.ok(), "get chunks failed");
+                return result.ValueOrDie();
+            }));
+    }
+
+    std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
+    for (auto& future : part_futures) {
+        auto part_result = future.get();
+        for (auto& record_batch : part_result) {
+            // result->emplace_back(std::move(record_batch));
+            auto batch_num_rows = record_batch->num_rows();
+            for (auto i = 0; i < column_group->columns.size(); ++i) {
+                auto column = column_group->columns[i];
+                auto field_id = FieldId(std::stoll(column));
+
+                auto field = schema_->operator[](field_id);
+                auto data_type = field.get_data_type();
+
+                auto field_data = storage::CreateFieldData(
+                    data_type,
+                    field.get_element_type(),
+                    field.is_nullable(),
+                    IsVectorDataType(data_type) &&
+                            !IsSparseFloatVectorDataType(data_type)
+                        ? field.get_dim()
+                        : 1,
+                    batch_num_rows);
+                auto array = record_batch->column(i);
+                field_data->FillFieldData(array);
+                field_data_map[FieldId(field_id)].push_back(field_data);
+            }
+        }
+    }
+
+    LOG_INFO("Finished loading segment {} column group {}", id_, index);
+    return field_data_map;
 }
 
 void

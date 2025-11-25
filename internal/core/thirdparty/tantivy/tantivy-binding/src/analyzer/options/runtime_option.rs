@@ -2,6 +2,7 @@ use crate::error::{Result, TantivyBindingError};
 use once_cell::sync::Lazy;
 use serde_json as json;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 static GLOBAL_OPTIONS: Lazy<Arc<RuntimeOption>> = Lazy::new(|| Arc::new(RuntimeOption::new()));
@@ -26,8 +27,8 @@ pub fn get_lindera_download_url(kind: &str) -> Option<Vec<String>> {
     GLOBAL_OPTIONS.get_lindera_download_urls(kind)
 }
 
-pub fn get_resource_id(name: &str) -> Option<i64> {
-    GLOBAL_OPTIONS.get_resource_id(name)
+pub fn get_resource_file_path(resource_name: &str, file_name: &str) -> Result<PathBuf> {
+    GLOBAL_OPTIONS.get_resource_file_path(resource_name, file_name)
 }
 
 // analyzer options
@@ -57,9 +58,28 @@ impl RuntimeOption {
         r.lindera_download_urls.get(kind).map(|v| v.clone())
     }
 
-    fn get_resource_id(&self, name: &str) -> Option<i64> {
+    fn get_resource_file_path(&self, resource_name: &str, file_name: &str) -> Result<PathBuf> {
         let r = self.inner.read().unwrap();
-        r.resource_map.get(name).cloned()
+        let resource_id =
+            r.resource_map
+                .get(resource_name)
+                .ok_or(TantivyBindingError::InternalError(format!(
+                    "file resource: {} not found in local resource list",
+                    resource_name
+                )))?;
+        let base = r
+            .params
+            .get(RESOURCE_PATH_KEY)
+            .ok_or(TantivyBindingError::InternalError(
+                "local_resource_path config not init success".to_string(),
+            ))?
+            .as_str()
+            .ok_or("local_resource_path must set as string")?;
+
+        return Ok(PathBuf::new()
+            .join(base)
+            .join(resource_id.to_string())
+            .join(file_name));
     }
 }
 

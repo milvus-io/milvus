@@ -40,6 +40,7 @@
 #include "folly/concurrency/ConcurrentHashMap.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
 
@@ -846,6 +847,33 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
+    /**
+     * @brief Load all column groups from a manifest file path
+     *
+     * This method reads the manifest file to retrieve column groups metadata
+     * and loads each column group into the segment.
+     *
+     * @param manifest_path JSON string containing base_path and version fields
+     */
+    void
+    LoadColumnGroups(const std::string& manifest_path);
+
+    /**
+     * @brief Load a single column group at the specified index
+     *
+     * Reads a specific column group from milvus storage, converts the data
+     * to internal format, and stores it in the segment's field data structures.
+     *
+     * @param column_groups Metadata about all available column groups
+     * @param properties Storage properties for accessing the data
+     * @param index Index of the column group to load
+     */
+    void
+    LoadColumnGroup(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        int64_t index);
+
     void
     load_field_data_common(
         FieldId field_id,
@@ -934,6 +962,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
+
+    // milvus storage internal api reader instance
+    std::unique_ptr<milvus_storage::api::Reader> reader_;
 };
 
 inline SegmentSealedUPtr
