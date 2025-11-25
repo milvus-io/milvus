@@ -2444,22 +2444,51 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
-    std::unique_lock lck(mutex_);
-    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
-               "field {} data already loaded",
-               field_id.get());
-    set_bit(field_data_ready_bitset_, field_id, true);
-    update_row_count(num_rows);
-    if (generated_interim_index) {
-        auto column = get_column(field_id);
-        if (column) {
-            column->ManualEvictCache();
+    {
+        std::unique_lock lck(mutex_);
+        AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+                   "field {} data already loaded",
+                   field_id.get());
+        set_bit(field_data_ready_bitset_, field_id, true);
+        update_row_count(num_rows);
+        if (generated_interim_index) {
+            auto column = get_column(field_id);
+            if (column) {
+                column->ManualEvictCache();
+            }
+        }
+        if (data_type == DataType::GEOMETRY &&
+            segcore_config_.get_enable_geometry_cache()) {
+            // Construct GeometryCache for the entire field
+            LoadGeometryCache(field_id, column);
         }
     }
-    if (data_type == DataType::GEOMETRY &&
-        segcore_config_.get_enable_geometry_cache()) {
-        // Construct GeometryCache for the entire field
-        LoadGeometryCache(field_id, column);
+
+    // Build ArrayOffsetsSealed for array fields that belong to a struct
+    if (data_type == DataType::ARRAY || data_type == DataType::VECTOR_ARRAY) {
+        auto& field_meta = schema_->operator[](field_id);
+        const std::string& field_name = field_meta.get_name().get();
+
+        // Check if this field belongs to a struct (field name contains '[' and ']')
+        if (field_name.find('[') != std::string::npos &&
+            field_name.find(']') != std::string::npos) {
+            // Extract struct name: "structA[field_name]" -> "structA"
+            std::string struct_name =
+                field_name.substr(0, field_name.find('['));
+
+            // Check if ArrayOffsetsSealed for this struct already exists
+            if (struct_to_array_offsets_.find(struct_name) ==
+                struct_to_array_offsets_.end()) {
+                // First field of this struct, build ArrayOffsetsSealed
+                auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
+                    ArrayOffsetsSealed::BuildFromSegment(this, field_meta));
+                struct_to_array_offsets_[struct_name] = array_offsets;
+            }
+
+            // Map this field_id to the shared ArrayOffsetsSealed
+            array_offsets_map_[field_id] =
+                struct_to_array_offsets_[struct_name];
+        }
     }
 }
 

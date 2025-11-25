@@ -96,6 +96,28 @@ SearchOnSealedIndex(const Schema& schema,
                     std::round(distances[i] * multiplier) / multiplier;
             }
         }
+
+        // Handle element-level conversion if needed
+        if (search_info.array_offsets_ != nullptr) {
+            std::vector<int64_t> element_ids =
+                std::move(search_result.seg_offsets_);
+            search_result.seg_offsets_.resize(element_ids.size());
+            search_result.element_indices_.resize(element_ids.size());
+
+            for (size_t i = 0; i < element_ids.size(); i++) {
+                if (element_ids[i] == INVALID_SEG_OFFSET) {
+                    search_result.seg_offsets_[i] = INVALID_SEG_OFFSET;
+                    search_result.element_indices_[i] = -1;
+                } else {
+                    auto [doc_id, elem_index] =
+                        search_info.array_offsets_->ElementIDToDoc(
+                            element_ids[i]);
+                    search_result.seg_offsets_[i] = doc_id;
+                    search_result.element_indices_[i] = elem_index;
+                }
+            }
+            search_result.element_level_ = true;
+        }
     }
     search_result.total_nq_ = num_queries;
     search_result.unity_topK_ = topK;
@@ -150,6 +172,11 @@ SearchOnSealedColumn(const Schema& schema,
                              search_info.metric_type_,
                              search_info.round_decimal_);
 
+    if (data_type == DataType::VECTOR_ARRAY && query_offsets == nullptr) {
+        // embedding-search-embedding on embedding list pattern
+        data_type = element_type;
+    }
+
     auto offset = 0;
 
     auto vector_chunks = column->GetAllChunks(op_context);
@@ -201,8 +228,17 @@ SearchOnSealedColumn(const Schema& schema,
                                             column->GetNumRowsUntilChunk(),
                                             final_qr.chunk_iterators());
     } else {
+        if (search_info.array_offsets_ != nullptr) {
+            auto [seg_offsets, elem_indicies] =
+                final_qr.convert_as_element_offsets(
+                    search_info.array_offsets_.get());
+            result.seg_offsets_ = std::move(seg_offsets);
+            result.element_indices_ = std::move(elem_indicies);
+            result.element_level_ = true;
+        } else {
+            result.seg_offsets_ = std::move(final_qr.mutable_offsets());
+        }
         result.distances_ = std::move(final_qr.mutable_distances());
-        result.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
     }
     result.unity_topK_ = query_dataset.topk;
     result.total_nq_ = query_dataset.num_queries;

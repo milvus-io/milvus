@@ -34,11 +34,24 @@ StreamReducerHelper::AssembleMergedResult() {
             std::make_unique<MergedSearchResult>();
         std::vector<PkType> new_merged_pks;
         std::vector<float> new_merged_distances;
+        std::vector<int32_t> new_merged_element_indices;
         std::vector<GroupByValueType> new_merged_groupBy_vals;
         std::vector<MergeBase> merge_output_data_bases;
         std::vector<int64_t> new_result_offsets;
         bool need_handle_groupBy =
             plan_->plan_node_->search_info_.group_by_field_id_.has_value();
+        bool need_handle_element_level = false;
+        // Check if any search result is element-level
+        for (auto search_result : search_results_to_merge_) {
+            if (search_result->element_level_) {
+                need_handle_element_level = true;
+                break;
+            }
+        }
+        if (merged_search_result && merged_search_result->has_result_ &&
+            merged_search_result->element_level_) {
+            need_handle_element_level = true;
+        }
         int valid_size = 0;
         std::vector<int> real_topKs(total_nq_);
         for (int i = 0; i < num_slice_; i++) {
@@ -68,6 +81,9 @@ StreamReducerHelper::AssembleMergedResult() {
             if (need_handle_groupBy) {
                 new_merged_groupBy_vals.resize(valid_size);
             }
+            if (need_handle_element_level) {
+                new_merged_element_indices.resize(valid_size);
+            }
             for (auto qi = nq_begin; qi < nq_end; qi++) {
                 for (auto search_result : search_results_to_merge_) {
                     AssertInfo(search_result != nullptr,
@@ -95,6 +111,10 @@ StreamReducerHelper::AssembleMergedResult() {
                         if (need_handle_groupBy) {
                             new_merged_groupBy_vals[nq_base_offset + loc] =
                                 search_result->group_by_values_.value()[ki];
+                        }
+                        if (search_result->element_level_) {
+                            new_merged_element_indices[nq_base_offset + loc] =
+                                search_result->element_indices_[ki];
                         }
                         merge_output_data_bases[nq_base_offset + loc] = {
                             &search_result->output_fields_data_, ki};
@@ -125,6 +145,10 @@ StreamReducerHelper::AssembleMergedResult() {
                                 merged_search_result->group_by_values_
                                     .value()[ki];
                         }
+                        if (merged_search_result->element_level_) {
+                            new_merged_element_indices[nq_base_offset + loc] =
+                                merged_search_result->element_indices_[ki];
+                        }
                         merge_output_data_bases[nq_base_offset + loc] = {
                             &merged_search_result->output_fields_data_, ki};
                         new_result_offsets[nq_base_offset + loc] = loc;
@@ -138,6 +162,11 @@ StreamReducerHelper::AssembleMergedResult() {
         if (need_handle_groupBy) {
             new_merged_result->group_by_values_ =
                 std::move(new_merged_groupBy_vals);
+        }
+        if (need_handle_element_level) {
+            new_merged_result->element_indices_ =
+                std::move(new_merged_element_indices);
+            new_merged_result->element_level_ = true;
         }
         new_merged_result->topk_per_nq_prefix_sum_.resize(total_nq_ + 1);
         std::partial_sum(
@@ -312,6 +341,9 @@ StreamReducerHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                 if (search_result->group_by_values_.has_value())
                     search_result->group_by_values_.value()[valid_index] =
                         search_result->group_by_values_.value()[index];
+                if (search_result->element_level_)
+                    search_result->element_indices_[valid_index] =
+                        search_result->element_indices_[index];
                 valid_index++;
             }
         }
@@ -320,6 +352,8 @@ StreamReducerHelper::FilterInvalidSearchResult(SearchResult* search_result) {
     distances.resize(valid_index);
     if (search_result->group_by_values_.has_value())
         search_result->group_by_values_.value().resize(valid_index);
+    if (search_result->element_level_)
+        search_result->element_indices_.resize(valid_index);
 
     search_result->topk_per_nq_prefix_sum_.resize(total_nq + 1);
     std::partial_sum(real_topKs.begin(),
@@ -462,6 +496,10 @@ StreamReducerHelper::RefreshSearchResult() {
             std::vector<float> reduced_distances(final_size);
             std::vector<int64_t> reduced_seg_offsets(final_size);
             std::vector<GroupByValueType> reduced_group_by_values(final_size);
+            std::vector<int32_t> reduced_element_indices;
+            if (search_result->element_level_) {
+                reduced_element_indices.resize(final_size);
+            }
 
             uint32_t final_index = 0;
             for (int j = 0; j < total_nq_; j++) {
@@ -475,6 +513,10 @@ StreamReducerHelper::RefreshSearchResult() {
                     if (search_result->group_by_values_.has_value())
                         reduced_group_by_values[final_index] =
                             search_result->group_by_values_.value()[offset];
+                    if (search_result->element_level_) {
+                        reduced_element_indices[final_index] =
+                            search_result->element_indices_[offset];
+                    }
                     final_index++;
                     real_topKs[j]++;
                 }
@@ -485,6 +527,9 @@ StreamReducerHelper::RefreshSearchResult() {
             if (search_result->group_by_values_.has_value()) {
                 search_result->group_by_values_.value().swap(
                     reduced_group_by_values);
+            }
+            if (search_result->element_level_) {
+                search_result->element_indices_.swap(reduced_element_indices);
             }
         }
         std::partial_sum(real_topKs.begin(),
@@ -501,6 +546,10 @@ StreamReducerHelper::RefreshSearchResult() {
             std::vector<float> reduced_distances(final_size);
             std::vector<int64_t> reduced_seg_offsets(final_size);
             std::vector<GroupByValueType> reduced_group_by_values(final_size);
+            std::vector<int32_t> reduced_element_indices;
+            if (merged_search_result->element_level_) {
+                reduced_element_indices.resize(final_size);
+            }
 
             uint32_t final_index = 0;
             for (int j = 0; j < total_nq_; j++) {
@@ -509,19 +558,30 @@ StreamReducerHelper::RefreshSearchResult() {
                         merged_search_result->primary_keys_[offset];
                     reduced_distances[final_index] =
                         merged_search_result->distances_[offset];
+                    reduced_seg_offsets[final_index] =
+                        merged_search_result->reduced_offsets_[offset];
                     if (merged_search_result->group_by_values_.has_value())
                         reduced_group_by_values[final_index] =
                             merged_search_result->group_by_values_
                                 .value()[offset];
+                    if (merged_search_result->element_level_) {
+                        reduced_element_indices[final_index] =
+                            merged_search_result->element_indices_[offset];
+                    }
                     final_index++;
                     real_topKs[j]++;
                 }
             }
             merged_search_result->primary_keys_.swap(reduced_pks);
             merged_search_result->distances_.swap(reduced_distances);
+            merged_search_result->reduced_offsets_.swap(reduced_seg_offsets);
             if (merged_search_result->group_by_values_.has_value()) {
                 merged_search_result->group_by_values_.value().swap(
                     reduced_group_by_values);
+            }
+            if (merged_search_result->element_level_) {
+                merged_search_result->element_indices_.swap(
+                    reduced_element_indices);
             }
         }
         std::partial_sum(
@@ -596,6 +656,12 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index,
     // reserve space for distances
     search_result_data->mutable_scores()->Resize(result_count, 0);
 
+    // reserve space for element_indices if needed
+    if (merged_search_result->element_level_) {
+        search_result_data->mutable_element_indices()->mutable_data()->Resize(
+            result_count, -1);
+    }
+
     //reserve space for group_by_values
     std::vector<GroupByValueType> group_by_values;
     if (plan_->plan_node_->search_info_.group_by_field_id_.has_value()) {
@@ -652,6 +718,15 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index,
 
             search_result_data->mutable_scores()->Set(
                 loc, merged_search_result->distances_[ki]);
+
+            // set element_indices if present
+            if (merged_search_result->element_level_) {
+                int32_t elem_idx = merged_search_result->element_indices_[ki];
+                search_result_data->mutable_element_indices()
+                    ->mutable_data()
+                    ->Set(loc, elem_idx);
+            }
+
             // set group by values
             if (merged_search_result->group_by_values_.has_value() &&
                 ki < merged_search_result->group_by_values_.value().size())

@@ -37,6 +37,10 @@ class MergedSearchResult {
     // fill data during reducing search result
     std::vector<int64_t> result_offsets_;
     std::vector<int64_t> reduced_offsets_;
+
+    // Element-level search support
+    bool element_level_{false};
+    std::vector<int32_t> element_indices_;
 };
 
 struct StreamSearchResultPair {

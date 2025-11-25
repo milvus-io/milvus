@@ -17,6 +17,8 @@
 #include "VectorSearchNode.h"
 #include "common/Tracer.h"
 #include "fmt/format.h"
+#include "common/ArrayOffsets.h"
+#include "exec/operator/Utils.h"
 
 #include "monitor/Monitor.h"
 namespace milvus {
@@ -78,10 +80,44 @@ PhyVectorSearchNode::GetOutput() {
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
+    auto array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
+    if (ph.element_level_) {
+        AssertInfo(array_offsets != nullptr, "Array offsets not available");
+        query_context_->set_array_offsets(array_offsets);
+        search_info_.array_offsets_ = array_offsets;
+    }
+
+    // There are two types of execution: pre-filter and iterative filter
+    // For **pre-filter**, we have execution path: FilterBitsNode -> MvccNode -> ElementFilterBitsNode -> VectorSearchNode -> ...
+    // For **iterative filter**, we have execution path: MvccNode -> VectorSearchNode -> ElementFilterNode -> FilterNode -> ...
+    //
+    // When embedding search embedding on embedding list is used, which means element_level_ is true, we need to transform doc-level
+    // bitset to element-level bitset. In pre-filter path, ElementFilterBitsNode already transforms the bitset. We need to transform it
+    // in iterative filter path.
+    if (milvus::exec::UseVectorIterator(search_info_) && ph.element_level_) {
+        auto col_input = GetColumnVector(input_);
+        TargetBitmapView view(col_input->GetRawData(), col_input->size());
+        TargetBitmapView valid_view(col_input->GetValidRawData(),
+                                    col_input->size());
+
+        auto [element_bitset, valid_element_bitset] =
+            array_offsets->DocBitsetToElementBitset(view, valid_view);
+
+        query_context_->set_active_element_count(element_bitset.size());
+
+        std::vector<VectorPtr> col_res;
+        col_res.push_back(std::make_shared<ColumnVector>(
+            std::move(element_bitset), std::move(valid_element_bitset)));
+        input_ = std::make_shared<RowVector>(col_res);
+    }
+
     milvus::SearchResult search_result;
 
     auto col_input = GetColumnVector(input_);
     TargetBitmapView view(col_input->GetRawData(), col_input->size());
+    TargetBitmapView valid_view(col_input->GetValidRawData(),
+                                col_input->size());
+
     if (view.all()) {
         query_context_->set_search_result(
             std::move(empty_search_result(num_queries)));
@@ -92,6 +128,7 @@ PhyVectorSearchNode::GetOutput() {
     milvus::BitsetView final_view((uint8_t*)col_input->GetRawData(),
                                   col_input->size());
     auto op_context = query_context_->get_op_context();
+    // todo(SpadeA): need to pass element_level to make check more rigorously?
     segment_->vector_search(search_info_,
                             src_data,
                             src_offsets,
@@ -102,6 +139,7 @@ PhyVectorSearchNode::GetOutput() {
                             search_result);
 
     search_result.total_data_cnt_ = final_view.size();
+    search_result.element_level_ = ph.element_level_;
 
     span.GetSpan()->SetAttribute(
         "result_count", static_cast<int>(search_result.seg_offsets_.size()));

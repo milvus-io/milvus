@@ -50,6 +50,8 @@ constexpr int64_t kCollectionID = 1;
 constexpr int64_t kPartitionID = 1;
 constexpr int64_t kSegmentID = 1;
 
+inline std::atomic<int64_t> g_vector_counter(0);
+
 namespace milvus::segcore {
 
 struct GeneratedData {
@@ -566,20 +568,25 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
-    auto generate_float_vector = [&seed, &offset, &random, &distr](
-                                     auto& field_meta, int64_t N) {
+    auto generate_float_vector = [&offset](auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
         bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
+
+        // Get base offset for this call to ensure uniqueness across multiple calls
+        int64_t base_offset = g_vector_counter.fetch_add(N);
+
 #pragma omp parallel for
         for (int n = 0; n < N; ++n) {
             vector<float> data(dim);
             float sum = 0;
 
-            std::default_random_engine er2(seed + n);
-            std::normal_distribution<> distr2(0, 1);
+            // Each thread uses a unique seed based on base_offset + n
+            std::default_random_engine er(base_offset + n);
+            std::normal_distribution<> distr(0, 1);
+
             for (auto& x : data) {
-                x = distr2(er2) + offset;
+                x = distr(er) + offset;
                 sum += x * x;
             }
             if (is_ip) {
@@ -1151,7 +1158,10 @@ CreatePlaceholderGroup(int64_t num_queries,
 
 template <class TraitType = milvus::FloatVector>
 auto
-CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
+CreatePlaceholderGroup(int64_t num_queries,
+                       int dim,
+                       int64_t seed = 42,
+                       bool element_level = false) {
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         assert(dim % 8 == 0);
     }
@@ -1162,6 +1172,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
     value->set_type(TraitType::placeholder_type);
+    value->set_element_level(element_level);
     // TODO caiyd: need update for Int8Vector
     std::normal_distribution<double> dis(0, 1);
     std::default_random_engine e(seed);
