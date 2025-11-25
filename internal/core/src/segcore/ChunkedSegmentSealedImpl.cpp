@@ -285,6 +285,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         // warmup will be disabled only when all columns are not in load list
         bool merged_in_load_list = false;
         std::vector<FieldId> milvus_field_ids;
+        milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
             merged_in_load_list = merged_in_load_list ||
