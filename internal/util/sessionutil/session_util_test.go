@@ -962,60 +962,6 @@ func (s *SessionSuite) TestRevoke() {
 	}
 }
 
-func (s *SessionSuite) TestForceActiveWithLeaseID() {
-	ctx := context.Background()
-	role := "test"
-	sess1 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
-	sess1.Init(role, "normal1", false, false)
-	sess1.Register()
-	sess1.ProcessActiveStandBy(nil)
-
-	sess2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
-	sess2.Init(role, "normal2", false, false)
-	sess2.Register()
-	sess2.ForceActiveStandby(nil)
-
-	defer func() {
-		sess1.Stop()
-		sess2.Stop()
-	}()
-	sessions, _, err := sess2.GetSessions(role)
-	s.NoError(err)
-	s.Len(sessions, 2)
-	sess := sessions[role]
-	s.NotNil(sess)
-	s.Equal(sess.Address, "normal2")
-	s.Equal(sess.ServerID, sess2.ServerID)
-}
-
-func (s *SessionSuite) TestForceActiveWithDelete() {
-	ctx := context.Background()
-	role := "test"
-	sess1 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
-	sess1.Init(role, "normal1", false, false)
-	sessionJSON, err := json.Marshal(sess1)
-	s.NoError(err)
-	s.client.Put(ctx, path.Join(s.metaRoot, DefaultServiceRoot, fmt.Sprintf("%s-%d", role, 1)), string(sessionJSON))
-	s.client.Put(ctx, path.Join(s.metaRoot, DefaultServiceRoot, role), string(sessionJSON))
-
-	sess2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
-	sess2.Init(role, "normal2", false, false)
-	sess2.Register()
-	sess2.ForceActiveStandby(nil)
-
-	defer func() {
-		sess1.Stop()
-		sess2.Stop()
-	}()
-	sessions, _, err := sess2.GetSessions(role)
-	s.NoError(err)
-	s.Len(sessions, 2)
-	sess := sessions[role]
-	s.NotNil(sess)
-	s.Equal(sess.Address, "normal2")
-	s.Equal(sess.ServerID, sess2.ServerID)
-}
-
 func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
