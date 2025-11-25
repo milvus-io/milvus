@@ -31,9 +31,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
     """ Test case of partition interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
@@ -582,9 +579,6 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
     """ Test case of partition interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
