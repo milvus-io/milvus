@@ -177,11 +177,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
  public:
     explicit ProxyChunkColumn(std::shared_ptr<ChunkedColumnGroup> group,
                               FieldId field_id,
-                              const FieldMeta& field_meta)
+                              const FieldMeta& field_meta,
+                              int64_t segment_id = 0)
         : group_(group),
           field_id_(field_id),
           field_meta_(field_meta),
-          data_type_(field_meta.get_data_type()) {
+          data_type_(field_meta.get_data_type()),
+          segment_id_(segment_id) {
     }
 
     void
@@ -230,6 +232,15 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto ca = group_->GetGroupChunks(op_ctx, cids);
         for (int64_t i = 0; i < count; i++) {
             auto* group_chunk = ca->get_cell_of(cids[i]);
+            if (group_chunk == nullptr) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          fmt::format(
+                              "xxx[StorageV2] GroupChunk not found for cid {}, "
+                              "field_id {}, segment_id {}",
+                              cids[i],
+                              field_id_.get(),
+                              segment_id_));
+            }
             auto chunk = group_chunk->GetChunk(field_id_);
             auto valid = chunk->isValid(offsets_in_chunk[i]);
             fn(valid, i);
@@ -672,6 +683,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     FieldId field_id_;
     const FieldMeta field_meta_;
     DataType data_type_;
+    int64_t segment_id_;
 };
 
 }  // namespace milvus

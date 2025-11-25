@@ -423,7 +423,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     for (const auto& field_id : milvus_field_ids) {
         auto field_meta = field_metas.at(field_id);
         auto column = std::make_shared<ProxyChunkColumn>(
-            chunked_column_group, field_id, field_meta);
+            chunked_column_group, field_id, field_meta, get_segment_id());
         auto data_type = field_meta.get_data_type();
         std::optional<ParquetStatistics> statistics_opt;
         load_field_data_common(
@@ -578,7 +578,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         for (const auto& field_id : milvus_field_ids) {
             auto field_meta = field_metas.at(field_id);
             auto column = std::make_shared<ProxyChunkColumn>(
-                chunked_column_group, field_id, field_meta);
+                chunked_column_group, field_id, field_meta, get_segment_id());
             auto data_type = field_meta.get_data_type();
             std::optional<ParquetStatistics> statistics_opt;
             if (ENABLE_PARQUET_STATS_SKIP_INDEX) {
