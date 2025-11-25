@@ -15,6 +15,8 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/properties.h"
+#include "milvus-storage/transaction/manifest.h"
 #include "storage/Types.h"
 
 /**
@@ -38,9 +40,69 @@
 std::shared_ptr<Properties>
 MakePropertiesFromStorageConfig(CStorageConfig c_storage_config);
 
+/**
+ * @brief Create internal API Properties from CStorageConfig
+ * Similar to MakePropertiesFromStorageConfig but creates a Properties
+ * object using the internal milvus_storage::api interface instead of FFI.
+ * All configuration fields from CStorageConfig are mapped to properties.
+ *
+ * @param c_storage_config The storage configuration to convert
+ * @return Shared pointer to milvus_storage::api::Properties
+ */
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config);
+
+/**
+ * @brief Create Properties for local filesystem storage
+ *
+ * Creates a minimal Properties object configured for local file storage
+ * with the specified path as the root.
+ *
+ * @param c_path Local filesystem path to use as storage root
+ * @return Shared pointer to Properties configured for local storage
+ */
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalLocalProperies(const char* c_path);
+
+/**
+ * @brief Convert StorageConfig to C-style CStorageConfig
+ *
+ * Converts the C++ StorageConfig object into a CStorageConfig structure
+ * suitable for passing through FFI boundaries.
+ *
+ * @param config The StorageConfig object to convert
+ * @return CStorageConfig struct with copied configuration values
+ */
 CStorageConfig
 ToCStorageConfig(const milvus::storage::StorageConfig& config);
 
+/**
+ * @brief Retrieve manifest/column groups from storage via FFI
+ *
+ * Parses the manifest path JSON to extract base_path and version,
+ * then fetches the latest column groups from storage using FFI.
+ *
+ * @param path JSON string containing "base_path" and "ver" fields
+ * @param properties Storage properties for accessing the manifest
+ * @return JSON string containing column groups information
+ * @throws std::runtime_error If JSON parsing fails or FFI call fails
+ */
 std::string
 GetManifest(const std::string& path,
             const std::shared_ptr<Properties>& properties);
+
+/**
+ * @brief Retrieve ColumnGroups metadata from manifest path
+ *
+ * Parses the manifest path JSON and fetches the latest manifest
+ * containing column groups metadata from the storage.
+ *
+ * @param path JSON string containing "base_path" and "ver" fields
+ * @param properties Storage properties for accessing the manifest
+ * @return Shared pointer to ColumnGroups metadata
+ * @throws std::runtime_error If JSON parsing or manifest fetch fails
+ */
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+GetColumnGroups(
+    const std::string& path,
+    const std::shared_ptr<milvus_storage::api::Properties>& properties);
