@@ -117,7 +117,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int32_t consistency_level,
                                    Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
-    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
+    tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(
         *this, timestamp, consistency_level, collection_ttl);
