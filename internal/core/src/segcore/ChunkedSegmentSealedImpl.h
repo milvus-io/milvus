@@ -427,9 +427,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 auto end_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
                                last_in_chunk_offset;
 
-                for (int64_t idx = start_idx; idx <= end_idx; idx++) {
-                    bitset[idx] = true;
-                }
+                bitset.set(start_idx, end_idx - start_idx + 1, true);
             }
         } else if (op == proto::plan::OpType::GreaterEqual ||
                    op == proto::plan::OpType::GreaterThan) {
