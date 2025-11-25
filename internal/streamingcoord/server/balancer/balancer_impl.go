@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -22,11 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
-)
-
-const (
-	versionChecker260 = "<2.6.0-dev"
-	versionChecker265 = "<2.6.6-dev"
 )
 
 // RecoverBalancer recover the balancer working.
@@ -119,7 +115,7 @@ func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
 	if err := b.channelMetaManager.WaitUntilStreamingEnabled(ctx); err != nil {
 		return err
 	}
-	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.StreamingNodeRole, versionChecker265); err != nil {
+	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.StreamingNodeRole, common.VersionChecker266); err != nil {
 		return err
 	}
 	return b.channelMetaManager.MarkWALBasedDDLEnabled(ctx)
@@ -330,7 +326,7 @@ func (b *balancerImpl) checkIfAllNodeGreaterThan260(ctx context.Context) (bool, 
 // checkIfRoleGreaterThan260 check if the role is greater than 2.6.0.
 func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role string) (bool, error) {
 	logger := b.Logger().With(zap.String("role", role))
-	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), common.VersionChecker260)
 	defer rb.Close()
 
 	r := rb.Resolver()
@@ -350,7 +346,7 @@ func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role strin
 func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260AtBackground(ctx context.Context) error {
 	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole, typeutil.QueryNodeRole}
 	for _, role := range expectedRoles {
-		if err := b.blockUntilRoleGreaterThanVersion(ctx, role, versionChecker260); err != nil {
+		if err := b.blockUntilRoleGreaterThanVersion(ctx, role, common.VersionChecker260); err != nil {
 			return err
 		}
 	}
