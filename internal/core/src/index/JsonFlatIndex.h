@@ -95,7 +95,6 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
 
     const TargetBitmap
     Range(T value, OpType op) override {
-        LOG_INFO("[executor] JsonFlatIndexQueryExecutor Range");
         TargetBitmap bitset(this->Count());
         switch (op) {
             case OpType::LessThan: {
@@ -194,9 +193,6 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
         if (!json_path.empty()) {
             json_path = json_path.substr(1);
         }
-
-        LOG_INFO("Create JsonFlatIndexQueryExecutor with json_path: {}",
-                 json_path);
 
         return std::make_shared<JsonFlatIndexQueryExecutor<T>>(json_path,
                                                                *this);
