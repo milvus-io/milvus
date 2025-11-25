@@ -219,8 +219,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         await async_client.release_collection(collection_name)
         # 2. drop index
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the first character of a collection "
-                                                f"name must be an underscore or letter: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
         await async_client.drop_index(name, "vector", check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
@@ -241,11 +240,11 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         await async_client.create_collection(collection_name, default_dim, consistency_level="Strong")
         await async_client.release_collection(collection_name)
         # 2. drop index
-        error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. the length of a collection name "
-                                                f"must be less than 255 characters: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: f"collection not found[database=default][collection={name}]"}
         await async_client.drop_index(name, "vector", check_task=CheckTasks.err_res, check_items=error)
         # 3. drop action
         await async_client.drop_collection(collection_name)
+
 
 class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
     """ Test case of index interface """
