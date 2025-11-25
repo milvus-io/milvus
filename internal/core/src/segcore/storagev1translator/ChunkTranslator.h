@@ -19,6 +19,7 @@
 #include "common/Chunk.h"
 #include "common/type_c.h"
 #include "mmap/Types.h"
+#include "storage/Types.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -64,7 +65,9 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     FieldDataInfo field_data_info,
                     std::vector<FileInfo>&& file_infos,
                     bool use_mmap,
-                    milvus::proto::common::LoadPriority load_priority);
+                    milvus::proto::common::LoadPriority load_priority,
+                    storage::FieldDataMeta field_data_meta,
+                    storage::IndexMeta index_meta);
 
     size_t
     num_cells() const override;
@@ -107,6 +110,12 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     std::string mmap_dir_path_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+
+    // collection meta for load binlog
+    storage::FieldDataMeta field_data_meta_;
+
+    // index meta for load binlog
+    storage::IndexMeta index_meta_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

@@ -135,6 +135,11 @@ PrepareInsertBinlog(int64_t collection_id,
         }
     }
 
+    // Set the metadata fields before returning
+    load_info.collection_id = collection_id;
+    load_info.partition_id = partition_id;
+    load_info.segment_id = segment_id;
+
     return load_info;
 }
 
@@ -185,6 +190,11 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
                         serialized_insert_sizes,
                         enable_mmap,
                         files});
+
+    // Set the metadata fields before returning
+    load_info.collection_id = collection_id;
+    load_info.partition_id = partition_id;
+    load_info.segment_id = segment_id;
 
     return load_info;
 }

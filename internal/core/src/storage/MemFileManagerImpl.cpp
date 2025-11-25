@@ -126,8 +126,11 @@ MemFileManagerImpl::LoadIndexToMemory(
     std::vector<std::string> batch_files;
 
     auto LoadBatchIndexFiles = [&]() {
-        auto index_datas = GetObjectData(
-            rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
+        auto index_datas = GetObjectData(rcm_.get(),
+                                         batch_files,
+                                         field_meta_,
+                                         index_meta_,
+                                         milvus::PriorityForLoad(priority));
         for (size_t idx = 0; idx < batch_files.size(); ++idx) {
             auto file_name =
                 batch_files[idx].substr(batch_files[idx].find_last_of('/') + 1);
@@ -178,7 +181,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
     std::vector<FieldDataPtr> field_datas;
 
     auto FetchRawData = [&]() {
-        auto raw_datas = GetObjectData(rcm_.get(), batch_files);
+        auto raw_datas =
+            GetObjectData(rcm_.get(), batch_files, field_meta_, index_meta_);
         for (auto& data : raw_datas) {
             field_datas.emplace_back(data.get()->GetFieldData());
         }
@@ -327,7 +331,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
 
         SortByPath(field_paths);
         std::vector<FieldDataPtr> field_datas =
-            FetchFieldData(rcm_.get(), field_paths);
+            FetchFieldData(rcm_.get(), field_paths, field_meta_, index_meta_);
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }
     return res;

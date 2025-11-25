@@ -57,13 +57,10 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
 	assert.NoError(t, err)
 
-	idxBuildID, v, collID, parID, segID, fID, params, idxName, idxID, blobs, err := codec.DeserializeImpl(serializedBlobs)
+	idxBuildID, v, fID, params, idxName, idxID, blobs, err := codec.DeserializeImpl(serializedBlobs)
 	assert.NoError(t, err)
 	assert.Equal(t, indexBuildID, idxBuildID)
 	assert.Equal(t, version, v)
-	assert.Equal(t, collectionID, collID)
-	assert.Equal(t, partitionID, parID)
-	assert.Equal(t, segmentID, segID)
 	assert.Equal(t, fieldID, fID)
 	assert.Equal(t, len(indexParams), len(params))
 	for key, value := range indexParams {
@@ -83,7 +80,7 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 	assert.Equal(t, indexID, idxID)
 
 	// empty
-	_, _, _, _, _, _, _, _, _, _, err = codec.DeserializeImpl(nil)
+	_, _, _, _, _, _, _, err = codec.DeserializeImpl(nil)
 	assert.Error(t, err)
 }
 

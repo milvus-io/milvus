@@ -171,6 +171,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 		ctx := context.Background()
 
 		s.Run("v2.3.x", func() {
+			s.T().Skip("remove support for v2.3.x cause we won't parse collectionID, partitionID, segmentID, fieldID, fieldType from binlog")
 			buildID := int64(1)
 			dataPath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, s.fieldID, s.logID+13)
 			s.NoError(err)
@@ -234,6 +235,7 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_Compatibility() {
 		})
 
 		s.Run("v2.4.x", func() {
+			s.T().Skip("remove support for v2.4.x cause we won't parse collectionID, partitionID, segmentID, fieldID, fieldType from binlog")
 			buildID := int64(2)
 			req := &workerpb.CreateJobRequest{
 				ClusterID:       "cluster1",
@@ -388,6 +390,11 @@ func (s *IndexServiceSuite) Test_CreateIndexJob_ScalarIndex() {
 		dataPath, err := binlog.BuildLogPath(storage.InsertBinlog, s.collID, s.partID, s.segID, fieldID, s.logID+5)
 		s.NoError(err)
 		req := &workerpb.CreateJobRequest{
+			CollectionID:    s.collID,
+			PartitionID:     s.partID,
+			SegmentID:       s.segID,
+			FieldID:         fieldID,
+			FieldType:       schemapb.DataType_Int64,
 			ClusterID:       "cluster1",
 			IndexFilePrefix: "index-service-ut/index_files",
 			BuildID:         buildID,
