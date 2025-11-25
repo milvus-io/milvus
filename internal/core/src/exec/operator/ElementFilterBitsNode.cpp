@@ -135,7 +135,7 @@ PhyElementFilterBitsNode::DocBitsetToElementOffsets(
                doc_count);
 
     FixedVector<int32_t> element_offsets;
-    element_offsets.reserve(doc_count * 3);
+    element_offsets.reserve(array_offsets->GetTotalElementCount());
 
     // For each document that passes the filter, get all its element offsets
     for (int64_t doc_id = 0; doc_id < doc_count; ++doc_id) {
