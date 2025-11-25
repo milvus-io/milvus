@@ -342,7 +342,7 @@ func (mt *MetaTable) createDefaultDb() error {
 		cipherProps := hookutil.GetDBCipherProperties(ezID, defaultRootKey)
 		defaultProperties = append(defaultProperties, cipherProps...)
 
-		if err := hookutil.CreateEZByDBProperties(DefaultRateAllocateStrategy); err != nil {
+		if err := hookutil.CreateEZByDBProperties(defaultProperties); err != nil {
 			return err
 		}
 	}
