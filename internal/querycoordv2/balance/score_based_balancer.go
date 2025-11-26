@@ -19,15 +19,13 @@ package balance
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -36,432 +34,49 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-// score based segment use (collection_row_count + global_row_count * factor) as node' score
-// and try to make each node has almost same score through balance segment.
+// ScoreBasedBalancer implements a score-based load balancing strategy.
+// It calculates node scores using the formula: (collection_row_count + global_row_count * factor)
+// and attempts to equalize scores across nodes by redistributing segments.
+// This approach considers both collection-specific and global workload to achieve
+// comprehensive load balancing.
 type ScoreBasedBalancer struct {
-	*RowCountBasedBalancer
+	scheduler    task.Scheduler
+	nodeManager  *session.NodeManager
+	dist         *meta.DistributionManager
+	meta         *meta.Meta
+	targetMgr    meta.TargetManagerInterface
+	assignPolicy assign.AssignPolicy
 }
 
+// NewScoreBasedBalancer creates a new ScoreBasedBalancer instance.
+// It uses the ScoreBased assign policy from the global factory.
 func NewScoreBasedBalancer(scheduler task.Scheduler,
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 ) *ScoreBasedBalancer {
+	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeScoreBased)
 	return &ScoreBasedBalancer{
-		RowCountBasedBalancer: NewRowCountBasedBalancer(scheduler, nodeManager, dist, meta, targetMgr),
+		scheduler:    scheduler,
+		nodeManager:  nodeManager,
+		dist:         dist,
+		meta:         meta,
+		targetMgr:    targetMgr,
+		assignPolicy: policy,
 	}
 }
 
-// AssignSegment got a segment list, and try to assign each segment to node's with lowest score
-func (b *ScoreBasedBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
-	br := NewBalanceReport()
-	return b.assignSegment(br, collectionID, segments, nodes, forceAssign)
+// GetAssignPolicy returns the assign policy used by this balancer.
+func (b *ScoreBasedBalancer) GetAssignPolicy() assign.AssignPolicy {
+	return b.assignPolicy
 }
 
-func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
-	balanceBatchSize := math.MaxInt64
-	if !forceAssign {
-		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-			info := b.nodeManager.Get(node)
-			normalNode := info != nil && info.GetState() == session.NodeStateNormal
-			if !normalNode {
-				br.AddRecord(StrRecord(fmt.Sprintf("non-manual balance, skip abnormal node: %d", node)))
-			}
-			return normalNode
-		})
-		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
-	}
-
-	// Filter out query nodes that are currently marked as resource exhausted.
-	// These nodes have recently reported OOM or disk full errors and are under
-	// a penalty period during which they won't receive new loading tasks.
-	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-		return !b.nodeManager.IsResourceExhausted(node)
-	})
-
-	// calculate each node's score
-	nodeItemsMap := b.convertToNodeItemsBySegment(br, collectionID, nodes)
-	if len(nodeItemsMap) == 0 {
-		return nil
-	}
-
-	queue := NewPriorityQueue()
-	for _, item := range nodeItemsMap {
-		queue.Push(item)
-	}
-
-	// sort segments by segment row count, if segment has same row count, sort by node's score
-	sort.Slice(segments, func(i, j int) bool {
-		if segments[i].GetNumOfRows() == segments[j].GetNumOfRows() {
-			node1 := nodeItemsMap[segments[i].Node]
-			node2 := nodeItemsMap[segments[j].Node]
-			if node1 != nil && node2 != nil {
-				return node1.getPriority() > node2.getPriority()
-			}
-		}
-		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
-	})
-
-	plans := make([]SegmentAssignPlan, 0, len(segments))
-	for _, s := range segments {
-		func(s *meta.Segment) {
-			// for each segment, pick the node with the least score
-			targetNode := queue.Pop().(*nodeItem)
-			// make sure candidate is always push back
-			defer queue.Push(targetNode)
-			scoreChanges := b.calculateSegmentScore(s)
-
-			sourceNode := nodeItemsMap[s.Node]
-			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
-			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
-			// notice: we should skip benefit check for forceAssign
-			if !forceAssign && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
-				br.AddRecord(StrRecordf("skip generate balance plan for segment %d since no enough benefit", s.ID))
-				return
-			}
-
-			from := int64(-1)
-			fromScore := int64(0)
-			if sourceNode != nil {
-				from = sourceNode.nodeID
-				fromScore = int64(sourceNode.getPriority())
-			}
-
-			plan := SegmentAssignPlan{
-				From:         from,
-				To:           targetNode.nodeID,
-				Segment:      s,
-				FromScore:    fromScore,
-				ToScore:      int64(targetNode.getPriority()),
-				SegmentScore: int64(scoreChanges),
-			}
-			br.AddRecord(StrRecordf("add segment plan %s", plan))
-			plans = append(plans, plan)
-
-			// update the sourceNode and targetNode's score
-			if sourceNode != nil {
-				sourceNode.AddCurrentScoreDelta(-scoreChanges)
-			}
-			targetNode.AddCurrentScoreDelta(scoreChanges)
-		}(s)
-
-		if len(plans) >= balanceBatchSize {
-			break
-		}
-	}
-	return plans
-}
-
-func (b *ScoreBasedBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
-	br := NewBalanceReport()
-	return b.assignChannel(br, collectionID, channels, nodes, forceAssign)
-}
-
-func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
-	nodes = filterSQNIfStreamingServiceEnabled(nodes)
-
-	balanceBatchSize := math.MaxInt64
-	if !forceAssign {
-		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-			info := b.nodeManager.Get(node)
-			normalNode := info != nil && info.GetState() == session.NodeStateNormal
-			if !normalNode {
-				br.AddRecord(StrRecord(fmt.Sprintf("non-manual balance, skip abnormal node: %d", node)))
-			}
-			return normalNode
-		})
-		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.GetAsInt()
-	}
-
-	// Filter out query nodes that are currently marked as resource exhausted.
-	// These nodes have recently reported OOM or disk full errors and are under
-	// a penalty period during which they won't receive new loading tasks.
-	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-		return !b.nodeManager.IsResourceExhausted(node)
-	})
-
-	// calculate each node's score
-	nodeItemsMap := b.convertToNodeItemsByChannel(br, collectionID, nodes)
-	if len(nodeItemsMap) == 0 {
-		return nil
-	}
-
-	queue := NewPriorityQueue()
-	for _, item := range nodeItemsMap {
-		queue.Push(item)
-	}
-	plans := make([]ChannelAssignPlan, 0, len(channels))
-	for _, ch := range channels {
-		func(ch *meta.DmChannel) {
-			var targetNode *nodeItem
-			forceAssignChannel := forceAssign
-			if streamingutil.IsStreamingServiceEnabled() {
-				// When streaming service is enabled, we need to assign channel to the node where WAL is located.
-				nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
-				if item, ok := nodeItemsMap[nodeID]; ok {
-					targetNode = item
-					// assgin channel to the node where WAL is located always has enough benefits.
-					forceAssignChannel = true
-				}
-			}
-			// for each channel, pick the node with the least score
-			if targetNode == nil {
-				targetNode = queue.Pop().(*nodeItem)
-			}
-			// make sure candidate is always push back
-			defer queue.Push(targetNode)
-			scoreChanges := b.calculateChannelScore(ch, collectionID)
-
-			sourceNode := nodeItemsMap[ch.Node]
-			if sourceNode != nil && sourceNode.nodeID == targetNode.nodeID {
-				// if the channel is already on the target node, skip assignment operation.
-				return
-			}
-
-			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
-			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
-			// notice: we should skip benefit check for forceAssign
-			if !forceAssignChannel && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, scoreChanges) {
-				br.AddRecord(StrRecordf("skip generate balance plan for channel %s since no enough benefit", ch.GetChannelName()))
-				return
-			}
-
-			from := int64(-1)
-			fromScore := int64(0)
-			if sourceNode != nil {
-				from = sourceNode.nodeID
-				fromScore = int64(sourceNode.getPriority())
-			}
-
-			plan := ChannelAssignPlan{
-				From:         from,
-				To:           targetNode.nodeID,
-				Channel:      ch,
-				FromScore:    fromScore,
-				ToScore:      int64(targetNode.getPriority()),
-				ChannelScore: int64(scoreChanges),
-			}
-			br.AddRecord(StrRecordf("add segment plan %s", plan))
-			plans = append(plans, plan)
-
-			// update the sourceNode and targetNode's score
-			if sourceNode != nil {
-				sourceNode.AddCurrentScoreDelta(-scoreChanges)
-			}
-			targetNode.AddCurrentScoreDelta(scoreChanges)
-		}(ch)
-
-		if len(plans) >= balanceBatchSize {
-			break
-		}
-	}
-
-	return plans
-}
-
-func (b *ScoreBasedBalancer) hasEnoughBenefit(sourceNode *nodeItem, targetNode *nodeItem, scoreChanges float64) bool {
-	// if the score diff between sourceNode and targetNode is lower than the unbalance toleration factor, there is no need to assign it targetNode
-	oldPriorityDiff := math.Abs(float64(sourceNode.getPriority()) - float64(targetNode.getPriority()))
-	if oldPriorityDiff < float64(targetNode.getPriority())*params.Params.QueryCoordCfg.ScoreUnbalanceTolerationFactor.GetAsFloat() {
-		return false
-	}
-
-	newSourcePriority := sourceNode.getPriorityWithCurrentScoreDelta(-scoreChanges)
-	newTargetPriority := targetNode.getPriorityWithCurrentScoreDelta(scoreChanges)
-	if newTargetPriority > newSourcePriority {
-		// if score diff reverted after segment reassignment, we will consider the benefit
-		// only trigger following segment reassignment when the generated reverted score diff
-		// is far smaller than the original score diff
-		newScoreDiff := math.Abs(float64(newSourcePriority) - float64(newTargetPriority))
-		if newScoreDiff*params.Params.QueryCoordCfg.ReverseUnbalanceTolerationFactor.GetAsFloat() >= oldPriorityDiff {
-			return false
-		}
-	}
-
-	return true
-}
-
-func (b *ScoreBasedBalancer) convertToNodeItemsBySegment(br *balanceReport, collectionID int64, nodeIDs []int64) map[int64]*nodeItem {
-	totalScore := 0
-	nodeScoreMap := make(map[int64]*nodeItem)
-	nodeMemMap := make(map[int64]float64)
-	totalMemCapacity := float64(0)
-	allNodeHasMemInfo := true
-	for _, node := range nodeIDs {
-		score := b.calculateScoreBySegment(br, collectionID, node)
-		nodeItem := newNodeItem(score, node)
-		nodeScoreMap[node] = &nodeItem
-		totalScore += score
-		br.AddNodeItem(nodeScoreMap[node])
-
-		// set memory default to 1.0, will multiply average value to compute assigned score
-		nodeInfo := b.nodeManager.Get(node)
-		if nodeInfo != nil {
-			totalMemCapacity += nodeInfo.MemCapacity()
-			nodeMemMap[node] = nodeInfo.MemCapacity()
-		}
-		allNodeHasMemInfo = allNodeHasMemInfo && nodeInfo != nil && nodeInfo.MemCapacity() > 0
-	}
-
-	if totalScore == 0 {
-		return nodeScoreMap
-	}
-
-	// if all node has memory info, we will use totalScore / totalMemCapacity to calculate the score, then average means average score on memory unit
-	// otherwise, we will use totalScore / len(nodeItemsMap) to calculate the score, then average means average score on node unit
-	average := float64(0)
-	if allNodeHasMemInfo {
-		average = float64(totalScore) / totalMemCapacity
-	} else {
-		average = float64(totalScore) / float64(len(nodeIDs))
-	}
-
-	delegatorOverloadFactor := params.Params.QueryCoordCfg.DelegatorMemoryOverloadFactor.GetAsFloat()
-	for _, node := range nodeIDs {
-		if allNodeHasMemInfo {
-			nodeScoreMap[node].setAssignedScore(nodeMemMap[node] * average)
-			br.SetMemoryFactor(node, nodeMemMap[node])
-		} else {
-			nodeScoreMap[node].setAssignedScore(average)
-		}
-		// use assignedScore * delegatorOverloadFactor * delegator_num, to preserve fixed memory size for delegator
-		collDelegator := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(node))
-		if len(collDelegator) > 0 {
-			delegatorDelta := nodeScoreMap[node].getAssignedScore() * delegatorOverloadFactor * float64(len(collDelegator))
-			nodeScoreMap[node].AddCurrentScoreDelta(delegatorDelta)
-			br.SetDelegatorScore(node, delegatorDelta)
-		}
-	}
-	return nodeScoreMap
-}
-
-func (b *ScoreBasedBalancer) convertToNodeItemsByChannel(br *balanceReport, collectionID int64, nodeIDs []int64) map[int64]*nodeItem {
-	totalScore := 0
-	nodeScoreMap := make(map[int64]*nodeItem)
-	nodeMemMap := make(map[int64]float64)
-	totalMemCapacity := float64(0)
-	allNodeHasMemInfo := true
-	for _, node := range nodeIDs {
-		score := b.calculateScoreByChannel(br, collectionID, node)
-		nodeItem := newNodeItem(score, node)
-		nodeScoreMap[node] = &nodeItem
-		totalScore += score
-		br.AddNodeItem(nodeScoreMap[node])
-
-		// set memory default to 1.0, will multiply average value to compute assigned score
-		nodeInfo := b.nodeManager.Get(node)
-		if nodeInfo != nil {
-			totalMemCapacity += nodeInfo.MemCapacity()
-			nodeMemMap[node] = nodeInfo.MemCapacity()
-		}
-		allNodeHasMemInfo = allNodeHasMemInfo && nodeInfo != nil && nodeInfo.MemCapacity() > 0
-	}
-
-	if totalScore == 0 {
-		return nodeScoreMap
-	}
-
-	// if all node has memory info, we will use totalScore / totalMemCapacity to calculate the score, then average means average score on memory unit
-	// otherwise, we will use totalScore / len(nodeItemsMap) to calculate the score, then average means average score on node unit
-	average := float64(0)
-	if allNodeHasMemInfo {
-		average = float64(totalScore) / totalMemCapacity
-	} else {
-		average = float64(totalScore) / float64(len(nodeIDs))
-	}
-
-	for _, node := range nodeIDs {
-		if allNodeHasMemInfo {
-			nodeScoreMap[node].setAssignedScore(nodeMemMap[node] * average)
-			br.SetMemoryFactor(node, nodeMemMap[node])
-		} else {
-			nodeScoreMap[node].setAssignedScore(average)
-		}
-	}
-	return nodeScoreMap
-}
-
-func (b *ScoreBasedBalancer) calculateScoreBySegment(br *balanceReport, collectionID, nodeID int64) int {
-	nodeRowCount := 0
-	// calculate global sealed segment row count
-	globalSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(nodeID))
-	for _, s := range globalSegments {
-		nodeRowCount += int(s.GetNumOfRows())
-	}
-
-	// calculate global growing segment row count
-	delegatorList := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
-	for _, d := range delegatorList {
-		nodeRowCount += int(float64(d.View.NumOfGrowingRows))
-	}
-
-	// calculate executing task cost in scheduler
-	nodeRowCount += b.scheduler.GetSegmentTaskDelta(nodeID, -1)
-
-	collectionRowCount := 0
-	// calculate collection sealed segment row count
-	collectionSegments := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(nodeID))
-	for _, s := range collectionSegments {
-		collectionRowCount += int(s.GetNumOfRows())
-	}
-
-	// calculate collection growing segment row count
-	collDelegatorList := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID), meta.WithNodeID2Channel(nodeID))
-	for _, d := range collDelegatorList {
-		collectionRowCount += int(float64(d.View.NumOfGrowingRows))
-	}
-
-	// calculate executing task cost in scheduler
-	collectionRowCount += b.scheduler.GetSegmentTaskDelta(nodeID, collectionID)
-
-	br.AddDetailRecord(StrRecordf("Calcalute score for collection %d on node %d, global row count: %d, collection row count: %d",
-		collectionID, nodeID, nodeRowCount, collectionRowCount))
-
-	return collectionRowCount + int(float64(nodeRowCount)*
-		params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
-}
-
-func (b *ScoreBasedBalancer) calculateScoreByChannel(br *balanceReport, collectionID, nodeID int64) int {
-	// calculate global sealed segment row count
-	channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(nodeID))
-
-	nodeChannelNum, collectionChannelNum := 0, 0
-	for _, ch := range channels {
-		if ch.GetCollectionID() == collectionID {
-			collectionChannelNum += 1
-		} else {
-			nodeChannelNum += int(b.calculateChannelScore(ch, -1))
-		}
-	}
-
-	// calculate executing task cost in scheduler
-	nodeChannelNum += b.scheduler.GetChannelTaskDelta(nodeID, -1)
-	collectionChannelNum += b.scheduler.GetChannelTaskDelta(nodeID, collectionID)
-
-	br.AddDetailRecord(StrRecordf("Calcalute score for collection %d on node %d, global row count: %d, collection row count: %d",
-		collectionID, nodeID, nodeChannelNum, collectionChannelNum))
-
-	// give a higher weight to distribute collection's channels evenly across multiple nodes.
-	channelWeight := paramtable.Get().QueryCoordCfg.CollectionChannelCountFactor.GetAsFloat()
-	return nodeChannelNum + int(float64(collectionChannelNum)*math.Max(1.0, channelWeight))
-}
-
-// calculateSegmentScore calculate the score which the segment represented
-func (b *ScoreBasedBalancer) calculateSegmentScore(s *meta.Segment) float64 {
-	return float64(s.GetNumOfRows()) * (1 + params.Params.QueryCoordCfg.GlobalRowCountFactor.GetAsFloat())
-}
-
-func (b *ScoreBasedBalancer) calculateChannelScore(ch *meta.DmChannel, currentCollection int64) float64 {
-	if ch.GetCollectionID() == currentCollection {
-		// give a higher weight to distribute current collection's channels evenly across multiple nodes.
-		channelWeight := paramtable.Get().QueryCoordCfg.CollectionChannelCountFactor.GetAsFloat()
-		return math.Max(1.0, channelWeight)
-	}
-	return 1
-}
-
-func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []SegmentAssignPlan, channelPlans []ChannelAssignPlan) {
+// BalanceReplica balances segments and channels across nodes within a replica based on node scores.
+// It first attempts to balance channels if AutoBalanceChannel is enabled, then balances segments
+// if no channel plans were generated. The balancing considers both collection-specific and global
+// workload through score calculation.
+func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
 	log := log.With(
 		zap.Int64("collection", replica.GetCollectionID()),
 		zap.Int64("replica id", replica.GetID()),
@@ -477,110 +92,66 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 		}
 	}()
 
-	if replica.NodesCount() == 0 {
-		br.AddRecord(StrRecord("replica has no querynode"))
+	if replica.NodesCount() < 2 {
+		br.AddRecord(StrRecord("replica has less than 2 querynodes"))
 		return nil, nil
 	}
 
-	stoppingBalance := paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool()
-
-	channelPlans = b.balanceChannels(ctx, br, replica, stoppingBalance)
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		channelPlans = b.balanceChannels(ctx, br, replica)
+	}
 	if len(channelPlans) == 0 {
-		segmentPlans = b.balanceSegments(ctx, br, replica, stoppingBalance)
+		segmentPlans = b.balanceSegments(ctx, br, replica)
 	}
 	return
 }
 
-func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
+// balanceChannels generates channel balance plans for a replica.
+// It requires at least 2 RW nodes to perform balancing.
+func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
 	var rwNodes []int64
-	var roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
 	} else {
-		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
+		rwNodes = replica.GetRWNodes()
 	}
-
-	if len(rwNodes) == 0 {
+	if len(rwNodes) < 2 {
+		br.AddRecord(StrRecord("no enough rwNodes to balance channels"))
 		return nil
 	}
 
-	if len(roNodes) != 0 {
-		if !stoppingBalance {
-			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			br.AddRecord(StrRecord("stopping balance is disabled"))
-			return nil
-		}
-
-		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
-		return b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)
-	}
-
-	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-		return b.genChannelPlan(ctx, br, replica, rwNodes)
-	}
-	return nil
+	return b.genChannelPlan(ctx, br, replica, rwNodes)
 }
 
-func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []SegmentAssignPlan {
+// balanceSegments generates segment balance plans for a replica.
+// It requires at least 2 RW nodes to perform balancing.
+func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.SegmentAssignPlan {
 	rwNodes := replica.GetRWNodes()
-	roNodes := replica.GetRONodes()
-
-	if len(rwNodes) == 0 {
-		// no available nodes to balance
-		br.AddRecord(StrRecord("no rwNodes to balance"))
+	if len(rwNodes) < 2 {
+		br.AddRecord(StrRecord("no enough rwNodes to balance segments"))
 		return nil
 	}
-	// print current distribution before generating plans
-	if len(roNodes) != 0 {
-		if !stoppingBalance {
-			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
-			return nil
-		}
 
-		log.Info("Handle stopping nodes",
-			zap.Any("stopping nodes", roNodes),
-			zap.Any("available nodes", rwNodes),
-		)
-		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		return b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)
-	}
 	return b.genSegmentPlan(ctx, br, replica, rwNodes)
 }
 
-func (b *ScoreBasedBalancer) genStoppingChannelPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64, roNodes []int64) []ChannelAssignPlan {
-	channelPlans := make([]ChannelAssignPlan, 0)
-	for _, nodeID := range roNodes {
-		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))
-		plans := b.AssignChannel(ctx, replica.GetCollectionID(), dmChannels, rwNodes, false)
-		for i := range plans {
-			plans[i].From = nodeID
-			plans[i].Replica = replica
-		}
-		channelPlans = append(channelPlans, plans...)
+// genSegmentPlan generates segment balance plans based on node scores.
+// It identifies segments on nodes with scores above their assigned quota and moves them
+// to nodes with lower scores. Redundant segments (appearing multiple times in distribution)
+// are skipped to avoid conflicts.
+func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []assign.SegmentAssignPlan {
+	// Delegate to the assign policy's implementation with safe type assertion
+	policy, ok := b.assignPolicy.(*assign.ScoreBasedAssignPolicy)
+	if !ok {
+		log.Error("invalid policy type for ScoreBasedBalancer",
+			zap.String("expected", "*assign.ScoreBasedAssignPolicy"),
+			zap.String("actual", fmt.Sprintf("%T", b.assignPolicy)))
+		return nil
 	}
-	return channelPlans
-}
-
-func (b *ScoreBasedBalancer) genStoppingSegmentPlan(ctx context.Context, replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
-	segmentPlans := make([]SegmentAssignPlan, 0)
-	for _, nodeID := range offlineNodes {
-		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
-		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
-		})
-		plans := b.AssignSegment(ctx, replica.GetCollectionID(), segments, onlineNodes, false)
-		for i := range plans {
-			plans[i].From = nodeID
-			plans[i].Replica = replica
-		}
-		segmentPlans = append(segmentPlans, plans...)
+	nodeItemsMap := policy.ConvertToNodeItemsBySegment(replica.GetCollectionID(), onlineNodes)
+	for _, item := range nodeItemsMap {
+		br.AddNodeItem(item)
 	}
-	return segmentPlans
-}
-
-func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
-	segmentDist := make(map[int64][]*meta.Segment)
-	nodeItemsMap := b.convertToNodeItemsBySegment(br, replica.GetCollectionID(), onlineNodes)
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -591,6 +162,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 			zap.Int64("replicaID", replica.GetID()),
 			zap.Stringers("nodes", lo.Values(nodeItemsMap)))
 
+	segmentDist := make(map[int64][]*meta.Segment)
 	// list all segment which could be balanced, and calculate node's score
 	for _, node := range onlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
@@ -603,8 +175,8 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 	// find the segment from the node which has more score than the average
 	segmentsToMove := make([]*meta.Segment, 0)
 	for node, segments := range segmentDist {
-		currentScore := nodeItemsMap[node].getCurrentScore()
-		assignedScore := nodeItemsMap[node].getAssignedScore()
+		currentScore := nodeItemsMap[node].GetCurrentScore()
+		assignedScore := nodeItemsMap[node].GetAssignedScore()
 		if currentScore <= assignedScore {
 			br.AddRecord(StrRecordf("node %d skip balance since current score(%f) lower than assigned one (%f)", node, currentScore, assignedScore))
 			continue
@@ -614,7 +186,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 			return segments[i].GetNumOfRows() < segments[j].GetNumOfRows()
 		})
 		for _, s := range segments {
-			segmentScore := b.calculateSegmentScore(s)
+			segmentScore := policy.CalculateSegmentScore(s)
 			br.AddRecord(StrRecordf("pick segment %d with score %f from node %d", s.ID, segmentScore, node))
 			segmentsToMove = append(segmentsToMove, s)
 			currentScore -= segmentScore
@@ -639,7 +211,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	segmentPlans := b.assignSegment(br, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
+	segmentPlans := b.GetAssignPolicy().AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica
@@ -648,8 +220,24 @@ func (b *ScoreBasedBalancer) genSegmentPlan(ctx context.Context, br *balanceRepo
 	return segmentPlans
 }
 
-func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []ChannelAssignPlan {
-	nodeItemsMap := b.convertToNodeItemsByChannel(br, replica.GetCollectionID(), onlineNodes)
+// genChannelPlan generates channel balance plans based on node scores.
+// It identifies channels on nodes with scores above their assigned quota and moves them
+// to nodes with lower scores. Redundant channels are skipped to avoid conflicts.
+func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceReport, replica *meta.Replica, onlineNodes []int64) []assign.ChannelAssignPlan {
+	// Delegate to the assign policy's implementation with safe type assertion
+	policy, ok := b.assignPolicy.(*assign.ScoreBasedAssignPolicy)
+	if !ok {
+		log.Error("invalid policy type for ScoreBasedBalancer",
+			zap.String("expected", "*assign.ScoreBasedAssignPolicy"),
+			zap.String("actual", fmt.Sprintf("%T", b.assignPolicy)))
+		return nil
+	}
+	nodeItemsMap := policy.ConvertToNodeItemsByChannel(replica.GetCollectionID(), onlineNodes)
+	// Add nodes to balance report for logging
+	for _, item := range nodeItemsMap {
+		br.AddNodeItem(item)
+	}
+
 	if len(nodeItemsMap) == 0 {
 		return nil
 	}
@@ -668,8 +256,8 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 	// find the segment from the node which has more score than the average
 	channelsToMove := make([]*meta.DmChannel, 0)
 	for node, channels := range channelDist {
-		currentScore := nodeItemsMap[node].getCurrentScore()
-		assignedScore := nodeItemsMap[node].getAssignedScore()
+		currentScore := nodeItemsMap[node].GetCurrentScore()
+		assignedScore := nodeItemsMap[node].GetAssignedScore()
 		if currentScore <= assignedScore {
 			br.AddRecord(StrRecordf("node %d skip balance since current score(%f) lower than assigned one (%f)", node, currentScore, assignedScore))
 			continue
@@ -677,7 +265,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		channels = sortIfChannelAtWALLocated(channels)
 
 		for _, ch := range channels {
-			channelScore := b.calculateChannelScore(ch, replica.GetCollectionID())
+			channelScore := policy.CalculateChannelScore(ch, replica.GetCollectionID())
 			br.AddRecord(StrRecordf("pick channel %s with score %f from node %d", ch.GetChannelName(), channelScore, node))
 			channelsToMove = append(channelsToMove, ch)
 
@@ -703,7 +291,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 		return nil
 	}
 
-	channelPlans := b.assignChannel(br, replica.GetCollectionID(), channelsToMove, onlineNodes, false)
+	channelPlans := b.GetAssignPolicy().AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, onlineNodes, false)
 	for i := range channelPlans {
 		channelPlans[i].From = channelPlans[i].Channel.Node
 		channelPlans[i].Replica = replica

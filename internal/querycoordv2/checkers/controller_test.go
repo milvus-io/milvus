@@ -27,6 +27,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -83,7 +84,18 @@ func (suite *CheckerControllerSuite) SetupTest() {
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
 	suite.scheduler = task.NewMockScheduler(suite.T())
-	suite.controller = NewCheckerController(suite.meta, suite.dist, suite.targetManager, suite.nodeMgr, suite.scheduler, suite.broker, func() balance.Balance { return suite.balancer })
+
+	// Initialize global factories before creating checkers
+	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetManager)
+	balance.InitGlobalBalancerFactory(suite.scheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetManager)
+
+	suite.controller = NewCheckerController(suite.meta, suite.dist, suite.targetManager, suite.nodeMgr, suite.scheduler, suite.broker)
+}
+
+func (suite *CheckerControllerSuite) TearDownTest() {
+	suite.kv.Close()
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+	balance.ResetGlobalBalancerFactoryForTest()
 }
 
 func (suite *CheckerControllerSuite) TestBasic() {
@@ -143,30 +155,32 @@ func (suite *CheckerControllerSuite) TestBasic() {
 		},
 	})
 
-	counter := atomic.NewInt64(0)
-	suite.scheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
-		counter.Inc()
+	channelTaskCounter := atomic.NewInt64(0)
+	segmentTaskCounter := atomic.NewInt64(0)
+
+	// Track channel and segment tasks separately
+	suite.scheduler.EXPECT().Add(mock.Anything).Run(func(t task.Task) {
+		switch t.Actions()[0].Type() {
+		case task.ActionTypeGrow:
+			if _, ok := t.(*task.ChannelTask); ok {
+				channelTaskCounter.Inc()
+			} else if _, ok := t.(*task.SegmentTask); ok {
+				segmentTaskCounter.Inc()
+			}
+		}
 	}).Return(nil)
 	suite.scheduler.EXPECT().GetSegmentTaskNum().Return(0).Maybe()
 	suite.scheduler.EXPECT().GetChannelTaskNum().Return(0).Maybe()
+	suite.scheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	suite.scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
-	assignSegCounter := atomic.NewInt32(0)
-	assingChanCounter := atomic.NewInt32(0)
-	suite.balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, i1 int64, s []*meta.Segment, i2 []int64, i4 bool) []balance.SegmentAssignPlan {
-		assignSegCounter.Inc()
-		return nil
-	})
-	suite.balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64, dc []*meta.DmChannel, i []int64, _ bool) []balance.ChannelAssignPlan {
-		assingChanCounter.Inc()
-		return nil
-	})
 	suite.controller.Start()
 	defer suite.controller.Stop()
 
-	// expect assign channel first
+	// expect channel task first
 	suite.Eventually(func() bool {
 		suite.controller.Check()
-		return counter.Load() > 0 && assingChanCounter.Load() > 0
+		return channelTaskCounter.Load() > 0
 	}, 3*time.Second, 1*time.Millisecond)
 
 	// until new channel has been subscribed
@@ -187,10 +201,10 @@ func (suite *CheckerControllerSuite) TestBasic() {
 		},
 	})
 
-	// expect assign segment after channel has been subscribed
+	// expect segment task after channel has been subscribed
 	suite.Eventually(func() bool {
 		suite.controller.Check()
-		return counter.Load() > 0 && assignSegCounter.Load() > 0
+		return segmentTaskCounter.Load() > 0
 	}, 3*time.Second, 1*time.Millisecond)
 }
 

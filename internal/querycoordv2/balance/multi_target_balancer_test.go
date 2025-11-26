@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -123,7 +124,7 @@ func (suite *MultiTargetBalancerTestSuite) TestBaseGeneratorApplyPlans() {
 
 	for i := 0; i < len(casePlans); i++ {
 		nodeSegments := make(map[int64][]*meta.Segment)
-		appliedPlans := make([]SegmentAssignPlan, 0)
+		appliedPlans := make([]assign.SegmentAssignPlan, 0)
 		d := distribution[i]
 		for i, nodeID := range d.nodeID {
 			nodeSegments[nodeID] = make([]*meta.Segment, 0)
@@ -136,7 +137,7 @@ func (suite *MultiTargetBalancerTestSuite) TestBaseGeneratorApplyPlans() {
 
 		p := casePlans[i]
 		for j := 0; j < len(p.segments); j++ {
-			appliedPlans = append(appliedPlans, SegmentAssignPlan{
+			appliedPlans = append(appliedPlans, assign.SegmentAssignPlan{
 				Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: p.segments[i]}},
 				From:    p.from[i],
 				To:      p.to[i],
@@ -176,17 +177,17 @@ func (suite *MultiTargetBalancerTestSuite) TestBaseGeneratorMergePlans() {
 
 	for i := 0; i < len(cases); i++ {
 		planGenerator := &basePlanGenerator{}
-		curr := make([]SegmentAssignPlan, 0)
-		inc := make([]SegmentAssignPlan, 0)
+		curr := make([]assign.SegmentAssignPlan, 0)
+		inc := make([]assign.SegmentAssignPlan, 0)
 		for j := 0; j < len(cases[i][0].segment); j++ {
-			curr = append(curr, SegmentAssignPlan{
+			curr = append(curr, assign.SegmentAssignPlan{
 				Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: cases[i][0].segment[j]}},
 				From:    cases[i][0].from[j],
 				To:      cases[i][0].to[j],
 			})
 		}
 		for j := 0; j < len(cases[i][1].segment); j++ {
-			inc = append(inc, SegmentAssignPlan{
+			inc = append(inc, assign.SegmentAssignPlan{
 				Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: cases[i][1].segment[j]}},
 				From:    cases[i][1].from[j],
 				To:      cases[i][1].to[j],

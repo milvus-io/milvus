@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -39,11 +40,12 @@ import (
 // TODO(sunby): have too much similar codes with SegmentChecker
 type ChannelChecker struct {
 	*checkerActivation
-	meta            *meta.Meta
-	dist            *meta.DistributionManager
-	targetMgr       meta.TargetManagerInterface
-	nodeMgr         *session.NodeManager
-	getBalancerFunc GetBalancerFunc
+	meta         *meta.Meta
+	dist         *meta.DistributionManager
+	targetMgr    meta.TargetManagerInterface
+	nodeMgr      *session.NodeManager
+	scheduler    task.Scheduler
+	assignPolicy assign.AssignPolicy
 }
 
 func NewChannelChecker(
@@ -51,15 +53,20 @@ func NewChannelChecker(
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
-	getBalancerFunc GetBalancerFunc,
+	scheduler task.Scheduler,
 ) *ChannelChecker {
+	// Create RoundRobin assign policy in constructor to maximize loading speed
+	// Note: RoundRobin may break short-term balance but prioritizes loading speed
+	assignPolicy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)
+
 	return &ChannelChecker{
 		checkerActivation: newCheckerActivation(),
 		meta:              meta,
 		dist:              dist,
 		targetMgr:         targetMgr,
 		nodeMgr:           nodeMgr,
-		getBalancerFunc:   getBalancerFunc,
+		scheduler:         scheduler,
+		assignPolicy:      assignPolicy,
 	}
 }
 
@@ -205,7 +212,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
-	plans := make([]balance.ChannelAssignPlan, 0)
+	plans := make([]assign.ChannelAssignPlan, 0)
 	for _, ch := range channels {
 		var rwNodes []int64
 		if streamingutil.IsStreamingServiceEnabled() {
@@ -215,7 +222,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 				rwNodes = replica.GetRWNodes()
 			}
 		}
-		plan := c.getBalancerFunc().AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
+		plan := c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), []*meta.DmChannel{ch}, rwNodes, true)
 		plans = append(plans, plan...)
 	}
 
