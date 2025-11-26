@@ -577,7 +577,13 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 		ex.removeTask(task, step)
 	}()
 
-	view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node())
+	if replica == nil {
+		err = merr.WrapErrNodeNotAvailable(action.Node())
+		log.Warn("node doesn't belong to any replica", zap.Error(err))
+		return
+	}
+	view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
 	if view == nil {
 		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 		log.Warn("failed to get shard leader", zap.Error(err))
