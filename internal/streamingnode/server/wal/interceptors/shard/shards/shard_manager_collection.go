@@ -1,6 +1,7 @@
 package shards
 
 import (
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
@@ -118,4 +119,12 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	}
 	logger.Info("collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()
+}
+
+// ListCollections return the collections list in the shard.
+func (m *shardManagerImpl) ListCollections() []int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return lo.Keys(m.collections)
 }

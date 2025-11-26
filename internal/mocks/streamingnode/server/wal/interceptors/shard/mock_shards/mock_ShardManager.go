@@ -776,6 +776,53 @@ func (_c *MockShardManager_FlushSegment_Call) RunAndReturn(run func(message.Immu
 	return _c
 }
 
+// ListCollections provides a mock function with no fields
+func (_m *MockShardManager) ListCollections() []int64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCollections")
+	}
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func() []int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockShardManager_ListCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCollections'
+type MockShardManager_ListCollections_Call struct {
+	*mock.Call
+}
+
+// ListCollections is a helper method to define mock.On call
+func (_e *MockShardManager_Expecter) ListCollections() *MockShardManager_ListCollections_Call {
+	return &MockShardManager_ListCollections_Call{Call: _e.mock.On("ListCollections")}
+}
+
+func (_c *MockShardManager_ListCollections_Call) Run(run func()) *MockShardManager_ListCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardManager_ListCollections_Call) Return(_a0 []int64) *MockShardManager_ListCollections_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardManager_ListCollections_Call) RunAndReturn(run func() []int64) *MockShardManager_ListCollections_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Logger provides a mock function with no fields
 func (_m *MockShardManager) Logger() *log.MLogger {
 	ret := _m.Called()

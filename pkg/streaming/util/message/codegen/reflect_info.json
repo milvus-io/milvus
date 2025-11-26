@@ -434,6 +434,16 @@
                 "MessageType": "MessageTypeDropIndex",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.FlushAllMessageHeader",
+                "BodyType": "messagespb.FlushAllMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeFlushAll",
+                "Version": 2
+            }
         }
     ]
 }

@@ -404,6 +404,39 @@ func (_c *MockWriteBuffer_MemorySize_Call) RunAndReturn(run func() int64) *MockW
 	return _c
 }
 
+// SealAllSegments provides a mock function with given fields: ctx
+func (_m *MockWriteBuffer) SealAllSegments(ctx context.Context) {
+	_m.Called(ctx)
+}
+
+// MockWriteBuffer_SealAllSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SealAllSegments'
+type MockWriteBuffer_SealAllSegments_Call struct {
+	*mock.Call
+}
+
+// SealAllSegments is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockWriteBuffer_Expecter) SealAllSegments(ctx interface{}) *MockWriteBuffer_SealAllSegments_Call {
+	return &MockWriteBuffer_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx)}
+}
+
+func (_c *MockWriteBuffer_SealAllSegments_Call) Run(run func(ctx context.Context)) *MockWriteBuffer_SealAllSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_SealAllSegments_Call) Return() *MockWriteBuffer_SealAllSegments_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWriteBuffer_SealAllSegments_Call) RunAndReturn(run func(context.Context)) *MockWriteBuffer_SealAllSegments_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SealSegments provides a mock function with given fields: ctx, segmentIDs
 func (_m *MockWriteBuffer) SealSegments(ctx context.Context, segmentIDs []int64) error {
 	ret := _m.Called(ctx, segmentIDs)

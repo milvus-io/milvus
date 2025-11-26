@@ -20,6 +20,8 @@ type ShardManager interface {
 
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
 
+	ListCollections() []int64
+
 	CheckIfPartitionCanBeCreated(uniquePartitionKey PartitionUniqueKey) error
 
 	CheckIfPartitionExists(uniquePartitionKey PartitionUniqueKey) error
