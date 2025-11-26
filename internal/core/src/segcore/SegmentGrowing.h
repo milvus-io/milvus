@@ -39,6 +39,17 @@ class SegmentGrowing : public SegmentInternalInterface {
         return SegmentType::Growing;
     }
 
+    void
+    pk_binary_range(milvus::OpContext* op_ctx,
+                    const PkType& lower_pk,
+                    bool lower_inclusive,
+                    const PkType& upper_pk,
+                    bool upper_inclusive,
+                    BitsetTypeView& bitset) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "pk_binary_range is not supported for growing segment");
+    }
+
     // virtual int64_t
     // PreDelete(int64_t size) = 0;
 
