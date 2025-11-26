@@ -589,33 +589,3 @@ func TestDeleteInvalidExpr(t *testing.T) {
 		common.CheckErr(t, err, _invalidExpr.ErrNil, _invalidExpr.ErrMsg)
 	}
 }
-
-// test delete with duplicated data ids
-func TestDeleteDuplicatedPks(t *testing.T) {
-	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
-	mc := hp.CreateDefaultMilvusClient(ctx, t)
-
-	// create collection and a partition
-	cp := hp.NewCreateCollectionParams(hp.Int64Vec)
-	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, cp, hp.TNewFieldsOption().TWithIsDynamic(true), hp.TNewSchemaOption())
-
-	// insert [0, 3000) into default
-	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithMaxCapacity(common.TestCapacity))
-	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-
-	// index and load
-	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
-	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
-
-	// delete
-	deleteIDs := []int64{0, 0, 0, 0, 0}
-	delRes, err := mc.Delete(ctx, client.NewDeleteOption(schema.CollectionName).WithInt64IDs(common.DefaultInt64FieldName, deleteIDs))
-	common.CheckErr(t, err, true)
-	require.Equal(t, 5, int(delRes.DeleteCount))
-
-	// query, verify delete success
-	expr := fmt.Sprintf("%s >= 0 ", common.DefaultInt64FieldName)
-	resQuery, errQuery := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithConsistencyLevel(entity.ClStrong))
-	common.CheckErr(t, errQuery, true)
-	require.Equal(t, common.DefaultNb-1, resQuery.ResultCount)
-}

@@ -287,6 +287,8 @@ func ParseRanges(expr *planpb.Expr, kType KeyType) ([]*PlanRange, bool) {
 		res, matchALL = ParseRangesFromUnaryRangeExpr(expr.UnaryRangeExpr, kType)
 	case *planpb.Expr_TermExpr:
 		res, matchALL = ParseRangesFromTermExpr(expr.TermExpr, kType)
+	case *planpb.Expr_BinaryRangeExpr:
+		res, matchALL = ParseRangesFromBinaryRangeExpr(expr.BinaryRangeExpr, kType)
 	case *planpb.Expr_UnaryExpr:
 		res, matchALL = nil, true
 		// we don't handle NOT operation, just consider as unable_to_parse_range
@@ -402,6 +404,21 @@ func ParseRangesFromTermExpr(expr *planpb.TermExpr, kType KeyType) ([]*PlanRange
 			})
 		}
 		return res, false
+	}
+	return nil, true
+}
+
+func ParseRangesFromBinaryRangeExpr(expr *planpb.BinaryRangeExpr, kType KeyType) ([]*PlanRange, bool) {
+	if expr.GetColumnInfo().GetIsPartitionKey() && kType == PartitionKey ||
+		expr.GetColumnInfo().GetIsClusteringKey() && kType == ClusteringKey {
+		return []*PlanRange{
+			{
+				lower:        expr.GetLowerValue(),
+				upper:        expr.GetUpperValue(),
+				includeLower: expr.GetLowerInclusive(),
+				includeUpper: expr.GetUpperInclusive(),
+			},
+		}, false
 	}
 	return nil, true
 }
