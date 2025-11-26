@@ -82,53 +82,6 @@ ExecPlanNodeVisitor::ExecuteTask(
     return bitset_holder;
 }
 
-void
-ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
-    assert(!search_result_opt_.has_value());
-    auto segment =
-        dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
-    AssertInfo(segment, "support SegmentSmallIndex Only");
-
-    auto active_count = segment->get_active_count(timestamp_);
-
-    // PreExecute: skip all calculation
-    if (active_count == 0) {
-        search_result_opt_ = std::move(
-            empty_search_result(placeholder_group_->at(0).num_of_queries_));
-        return;
-    }
-
-    // Construct plan fragment
-    auto plan = plan::PlanFragment(node.plannodes_);
-
-    // Set query context
-    auto query_context =
-        std::make_shared<milvus::exec::QueryContext>(DEAFULT_QUERY_ID,
-                                                     segment,
-                                                     active_count,
-                                                     timestamp_,
-                                                     collection_ttl_timestamp_,
-                                                     consystency_level_,
-                                                     node.plan_options_);
-
-    query_context->set_search_info(node.search_info_);
-    query_context->set_placeholder_group(placeholder_group_);
-
-    // Set op context to query context
-    auto op_context = milvus::OpContext();
-    query_context->set_op_context(&op_context);
-
-    // Do plan fragment task work
-    auto result = ExecuteTask(plan, query_context);
-
-    // Store result
-    search_result_opt_ = std::move(query_context->get_search_result());
-    search_result_opt_->search_storage_cost_.scanned_remote_bytes =
-        op_context.storage_usage.scanned_cold_bytes.load();
-    search_result_opt_->search_storage_cost_.scanned_total_bytes =
-        op_context.storage_usage.scanned_total_bytes.load();
-}
-
 std::unique_ptr<RetrieveResult>
 wrap_num_entities(int64_t cnt) {
     auto retrieve_result = std::make_unique<RetrieveResult>();
@@ -174,11 +127,11 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                                      active_count,
                                                      timestamp_,
                                                      collection_ttl_timestamp_,
-                                                     consystency_level_,
+                                                     consistency_level_,
                                                      node.plan_options_);
 
     // Set op context to query context
-    auto op_context = milvus::OpContext();
+    auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
 
     // Do task execution
@@ -207,7 +160,49 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
 void
 ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
-    VectorVisitorImpl(node);
+    assert(!search_result_opt_.has_value());
+    auto segment =
+        dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+    AssertInfo(segment, "support SegmentSmallIndex Only");
+
+    auto active_count = segment->get_active_count(timestamp_);
+
+    // PreExecute: skip all calculation
+    if (active_count == 0) {
+        search_result_opt_ = std::move(
+            empty_search_result(placeholder_group_->at(0).num_of_queries_));
+        return;
+    }
+
+    // Construct plan fragment
+    auto plan = plan::PlanFragment(node.plannodes_);
+
+    // Set query context
+    auto query_context =
+        std::make_shared<milvus::exec::QueryContext>(DEAFULT_QUERY_ID,
+                                                     segment,
+                                                     active_count,
+                                                     timestamp_,
+                                                     collection_ttl_timestamp_,
+                                                     consistency_level_,
+                                                     node.plan_options_);
+
+    query_context->set_search_info(node.search_info_);
+    query_context->set_placeholder_group(placeholder_group_);
+
+    // Set op context to query context
+    auto op_context = milvus::OpContext(cancel_token_);
+    query_context->set_op_context(&op_context);
+
+    // Do plan fragment task work
+    auto result = ExecuteTask(plan, query_context);
+
+    // Store result
+    search_result_opt_ = std::move(query_context->get_search_result());
+    search_result_opt_->search_storage_cost_.scanned_remote_bytes =
+        op_context.storage_usage.scanned_cold_bytes.load();
+    search_result_opt_->search_storage_cost_.scanned_total_bytes =
+        op_context.storage_usage.scanned_total_bytes.load();
 }
 
 }  // namespace milvus::query

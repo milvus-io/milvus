@@ -21,6 +21,7 @@
 #include "common/Chunk.h"
 #include "common/VectorArray.h"
 #include "common/Types.h"
+#include "common/FieldMeta.h"
 #include "pb/schema.pb.h"
 #include "test_utils/DataGen.h"
 
@@ -243,11 +244,14 @@ TEST_F(VectorArrayChunkTest, TestWriteMultipleBatches) {
             createFloatVectorListArray(batch_data, batch_offsets, dim));
     }
 
-    // Write using VectorArrayChunkWriter
-    VectorArrayChunkWriter writer(dim, DataType::VECTOR_FLOAT);
-    writer.write(array_vec);
-
-    auto chunk = writer.finish();
+    // Write using create_chunk with FieldMeta
+    FieldMeta field_meta(FieldName("va"),
+                         FieldId(1),
+                         DataType::VECTOR_ARRAY,
+                         DataType::VECTOR_FLOAT,
+                         dim,
+                         std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
     // Verify total rows
@@ -297,11 +301,14 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
     auto list_array = createFloatVectorListArray(all_data, offsets, dim);
     arrow::ArrayVector array_vec = {list_array};
 
-    // Write with mmap
-    VectorArrayChunkWriter writer(dim, DataType::VECTOR_FLOAT, temp_file);
-    writer.write(array_vec);
-
-    auto chunk = writer.finish();
+    // Write with mmap using create_chunk
+    FieldMeta field_meta(FieldName("va"),
+                         FieldId(2),
+                         DataType::VECTOR_ARRAY,
+                         DataType::VECTOR_FLOAT,
+                         dim,
+                         std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec, temp_file);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
     // Verify mmap write
@@ -330,10 +337,13 @@ TEST_F(VectorArrayChunkTest, TestEmptyVectorArray) {
 
     arrow::ArrayVector array_vec;
 
-    VectorArrayChunkWriter writer(dim, DataType::VECTOR_FLOAT);
-    writer.write(array_vec);
-
-    auto chunk = writer.finish();
+    FieldMeta field_meta(FieldName("va"),
+                         FieldId(3),
+                         DataType::VECTOR_ARRAY,
+                         DataType::VECTOR_FLOAT,
+                         dim,
+                         std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
     EXPECT_EQ(vector_array_chunk->RowNums(), 0);
@@ -469,11 +479,14 @@ TEST_P(VectorArrayChunkParameterizedTest, TestWriteVectorArray) {
         createVectorListArray(all_data, offsets, param.dim, param.data_type);
     arrow::ArrayVector array_vec = {list_array};
 
-    // Test VectorArrayChunkWriter
-    VectorArrayChunkWriter writer(param.dim, param.data_type);
-    writer.write(array_vec);
-
-    auto chunk = writer.finish();
+    // Test create_chunk with FieldMeta for VECTOR_ARRAY
+    FieldMeta field_meta(FieldName("va_param"),
+                         FieldId(100),
+                         DataType::VECTOR_ARRAY,
+                         param.data_type,
+                         param.dim,
+                         std::nullopt);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
 
     // Verify results

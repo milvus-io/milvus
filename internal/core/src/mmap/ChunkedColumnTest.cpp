@@ -23,8 +23,10 @@ TEST(test_chunked_column, test_get_chunkid) {
     std::vector<std::unique_ptr<Chunk>> chunks;
     for (auto i = 0; i < num_chunks; ++i) {
         auto row_num = num_rows_per_chunk[i];
-        auto chunk =
-            std::make_unique<FixedWidthChunk>(row_num, 1, nullptr, 0, 4, false);
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+        auto chunk = std::make_unique<FixedWidthChunk>(
+            row_num, 1, nullptr, 0, 4, false, chunk_mmap_guard);
         chunks.push_back(std::move(chunk));
     }
     auto translator = std::make_unique<TestChunkTranslator>(

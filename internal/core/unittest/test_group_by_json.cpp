@@ -24,7 +24,8 @@ run_group_by_search(const std::string& raw_plan,
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    auto search_result =
+        segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     CheckGroupBySearchResult(*search_result, topK, num_queries, false);
     return search_result;
 }
@@ -597,11 +598,11 @@ TEST(GroupBYJSON, Reduce) {
 
         CSearchResult c_search_res_1;
         CSearchResult c_search_res_2;
-        auto status =
-            CSearch(c_segment_1, c_plan, c_ph_group, 1L << 63, &c_search_res_1);
+        auto status = CSearch(
+            c_segment_1, c_plan, c_ph_group, MAX_TIMESTAMP, &c_search_res_1);
         ASSERT_EQ(status.error_code, Success);
-        status =
-            CSearch(c_segment_2, c_plan, c_ph_group, 1L << 63, &c_search_res_2);
+        status = CSearch(
+            c_segment_2, c_plan, c_ph_group, MAX_TIMESTAMP, &c_search_res_2);
         ASSERT_EQ(status.error_code, Success);
         std::vector<CSearchResult> results;
         results.push_back(c_search_res_1);

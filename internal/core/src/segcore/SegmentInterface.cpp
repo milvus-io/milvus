@@ -20,6 +20,7 @@
 #include "common/Types.h"
 #include "monitor/Monitor.h"
 #include "query/ExecPlanNodeVisitor.h"
+#include "futures/Future.h"
 
 namespace milvus::segcore {
 
@@ -95,13 +96,18 @@ SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group,
     Timestamp timestamp,
+    const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
     Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
-    query::ExecPlanNodeVisitor visitor(
-        *this, timestamp, placeholder_group, consistency_level, collection_ttl);
+    query::ExecPlanNodeVisitor visitor(*this,
+                                       timestamp,
+                                       placeholder_group,
+                                       cancel_token,
+                                       consistency_level,
+                                       collection_ttl);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -114,13 +120,14 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    Timestamp timestamp,
                                    int64_t limit_size,
                                    bool ignore_non_pk,
+                                   const folly::CancellationToken& cancel_token,
                                    int32_t consistency_level,
                                    Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(
-        *this, timestamp, consistency_level, collection_ttl);
+        *this, timestamp, cancel_token, consistency_level, collection_ttl);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
@@ -167,6 +174,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                 .count();
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
+    milvus::futures::throwIfCancelled(cancel_token);
     return results;
 }
 
@@ -323,8 +331,14 @@ SegmentInternalInterface::get_real_count() const {
         milvus::plan::GetNextPlanNodeId(), sources);
     plan->plan_node_->plannodes_ = plannode;
     plan->plan_node_->is_count_ = true;
-    auto res =
-        Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false, 0);
+    auto res = Retrieve(nullptr,
+                        plan.get(),
+                        MAX_TIMESTAMP,
+                        INT64_MAX,
+                        false,
+                        folly::CancellationToken(),
+                        0,
+                        0);
     AssertInfo(res->fields_data().size() == 1,
                "count result should only have one column");
     AssertInfo(res->fields_data()[0].has_scalars(),

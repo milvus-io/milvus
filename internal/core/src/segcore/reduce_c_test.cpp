@@ -80,7 +80,7 @@ TEST(CApiTest, ReduceNullResult) {
         auto slice_topKs = std::vector<int64_t>{1};
         std::vector<CSearchResult> results;
         CSearchResult res;
-        status = CSearch(segment, plan, placeholderGroup, 1L << 63, &res);
+        status = CSearch(segment, plan, placeholderGroup, MAX_TIMESTAMP, &res);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;

@@ -170,7 +170,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return segcore_config_.get_chunk_rows();
     }
 
-    virtual int64_t
+    int64_t
     chunk_size(FieldId field_id, int64_t chunk_id) const final {
         return segcore_config_.get_chunk_rows();
     }
@@ -381,7 +381,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     bool
-    HasIndex(FieldId field_id) const {
+    HasIndex(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);
         if ((IsVectorDataType(field_meta.get_data_type()) ||
              IsGeometryType(field_meta.get_data_type())) &&

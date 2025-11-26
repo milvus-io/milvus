@@ -814,8 +814,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len =
-        std::nullopt) const {
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk string view impl not implement for growing segment");
 }
@@ -825,8 +824,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len =
-        std::nullopt) const {
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk array view impl not implement for growing segment");
 }
@@ -836,8 +834,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len =
-        std::nullopt) const {
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk vector array view impl not implement for growing segment");
 }
