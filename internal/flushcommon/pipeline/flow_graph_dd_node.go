@@ -274,6 +274,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle manual flush message success")
 			}
+		case commonpb.MsgType_FlushAll:
+			flushAllMsg := msg.(*adaptor.FlushAllMessageBody)
+			log.Info("receive flush all message",
+				zap.String("vchannel", ddn.Name()),
+				zap.Int32("msgType", int32(msg.Type())),
+				zap.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
+			)
+			ddn.msgHandler.HandleFlushAll(ddn.vChannelName, flushAllMsg.FlushAllMessage)
 		case commonpb.MsgType_AddCollectionField:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 			logger := log.With(

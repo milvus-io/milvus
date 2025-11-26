@@ -434,6 +434,53 @@ func (_c *MockBufferManager_RemoveChannel_Call) RunAndReturn(run func(string)) *
 	return _c
 }
 
+// SealAllSegments provides a mock function with given fields: ctx, channel
+func (_m *MockBufferManager) SealAllSegments(ctx context.Context, channel string) error {
+	ret := _m.Called(ctx, channel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SealAllSegments")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, channel)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBufferManager_SealAllSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SealAllSegments'
+type MockBufferManager_SealAllSegments_Call struct {
+	*mock.Call
+}
+
+// SealAllSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+func (_e *MockBufferManager_Expecter) SealAllSegments(ctx interface{}, channel interface{}) *MockBufferManager_SealAllSegments_Call {
+	return &MockBufferManager_SealAllSegments_Call{Call: _e.mock.On("SealAllSegments", ctx, channel)}
+}
+
+func (_c *MockBufferManager_SealAllSegments_Call) Run(run func(ctx context.Context, channel string)) *MockBufferManager_SealAllSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_SealAllSegments_Call) Return(_a0 error) *MockBufferManager_SealAllSegments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBufferManager_SealAllSegments_Call) RunAndReturn(run func(context.Context, string) error) *MockBufferManager_SealAllSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SealSegments provides a mock function with given fields: ctx, channel, segmentIDs
 func (_m *MockBufferManager) SealSegments(ctx context.Context, channel string, segmentIDs []int64) error {
 	ret := _m.Called(ctx, channel, segmentIDs)

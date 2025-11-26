@@ -31,6 +31,7 @@ func RegisterDDLCallbacks(s *Server) {
 		Server: s,
 	}
 	ddlCallback.registerIndexCallbacks()
+	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
 }
 
 type DDLCallbacks struct {
