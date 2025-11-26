@@ -49,12 +49,12 @@ func (r *Runner) watchByPrefix(prefix string) {
 	_, revision, err := r.session.GetSessions(prefix)
 	fn := func() { r.Stop() }
 	console.AbnormalExitIf(err, r.backupFinished.Load(), console.AddCallbacks(fn))
-	eventCh := r.session.WatchServices(prefix, revision, nil)
+	watcher := r.session.WatchServices(prefix, revision, nil)
 	for {
 		select {
 		case <-r.ctx.Done():
 			return
-		case event := <-eventCh:
+		case event := <-watcher.EventChannel():
 			msg := fmt.Sprintf("session up/down, exit migration, event type: %s, session: %s", event.EventType.String(), event.Session.String())
 			console.AbnormalExit(r.backupFinished.Load(), msg, console.AddCallbacks(fn))
 		}
@@ -79,7 +79,8 @@ func (r *Runner) initEtcdCli() {
 		r.cfg.EtcdCfg.EtcdTLSCert.GetValue(),
 		r.cfg.EtcdCfg.EtcdTLSKey.GetValue(),
 		r.cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue(),
+		r.cfg.EtcdCfg.ClientOptions()...)
 	console.AbnormalExitIf(err, r.backupFinished.Load())
 	r.etcdCli = cli
 }

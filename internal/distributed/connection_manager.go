@@ -119,8 +119,8 @@ func (cm *ConnectionManager) AddDependency(roleName string) error {
 		}
 	}
 
-	eventChannel := cm.session.WatchServices(roleName, rev, nil)
-	go cm.processEvent(eventChannel)
+	watcher := cm.session.WatchServices(roleName, rev, nil)
+	go cm.processEvent(watcher.EventChannel())
 
 	return nil
 }
