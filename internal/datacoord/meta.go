@@ -185,10 +185,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		return nil, err
 	}
 
-	ectm, err := newExternalCollectionTaskMeta(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
+	// TODO: add external collection task meta
+	// ectm, err := newExternalCollectionTaskMeta(ctx, catalog)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	mt := &meta{
 		ctx:                        ctx,
@@ -202,7 +203,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		partitionStatsMeta:         psm,
 		compactionTaskMeta:         ctm,
 		statsTaskMeta:              stm,
-		externalCollectionTaskMeta: ectm,
+		// externalCollectionTaskMeta: ectm,
 		resourceMeta:               make(map[string]*model.FileResource),
 	}
 	err = mt.reloadFromKV(ctx, broker)
