@@ -19,6 +19,7 @@ package packed
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
 */
@@ -28,6 +29,8 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/arrio"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
 type PackedWriter struct {
@@ -36,8 +39,8 @@ type PackedWriter struct {
 
 type FFIPackedWriter struct {
 	basePath      string
-	cWriterHandle C.WriterHandle
-	cProperties   *C.Properties
+	loonWriter    C.LoonWriterHandler
+	storageConfig *indexpb.StorageConfig
 }
 
 type PackedReader struct {
