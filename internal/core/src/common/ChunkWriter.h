@@ -30,11 +30,19 @@
 namespace milvus {
 class ChunkWriterBase {
  public:
-    explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
+    explicit ChunkWriterBase(const FieldMeta& field_meta)
+        : nullable_(field_meta.is_nullable()),
+          default_value_(field_meta.default_value()) {
     }
 
-    ChunkWriterBase(std::string file_path, bool nullable)
-        : file_path_(std::move(file_path)), nullable_(nullable) {
+    ChunkWriterBase(std::string file_path, const FieldMeta& field_meta)
+        : file_path_(std::move(file_path)),
+          nullable_(field_meta.is_nullable()),
+          default_value_(field_meta.default_value()) {
+    }
+
+    explicit ChunkWriterBase(std::string file_path)
+        : file_path_(std::move(file_path)), default_value_(std::nullopt) {
     }
 
     virtual void
@@ -89,17 +97,22 @@ class ChunkWriterBase {
     int row_nums_ = 0;
     std::string file_path_{""};
     bool nullable_ = false;
+    std::optional<DefaultValueType> default_value_;
     std::shared_ptr<ChunkTarget> target_;
 };
 
 template <typename ArrowType, typename T>
 class ChunkWriter final : public ChunkWriterBase {
  public:
-    ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
+    // ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
+    // }
+
+    ChunkWriter(int dim, const FieldMeta& field_meta)
+        : ChunkWriterBase(field_meta), dim_(dim) {
     }
 
-    ChunkWriter(int dim, std::string file_path, bool nullable)
-        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim){};
+    ChunkWriter(int dim, std::string file_path, const FieldMeta& field_meta)
+        : ChunkWriterBase(std::move(file_path), field_meta), dim_(dim){};
 
     void
     write(const arrow::ArrayVector& array_vec) override {
@@ -127,20 +140,53 @@ class ChunkWriter final : public ChunkWriterBase {
         // 2. Data values: Contiguous storage of data elements in the order:
         //    data1, data2, ..., dataN where each data element has size dim_*sizeof(T)
         if (nullable_) {
-            // tuple <data, size, offset>
-            std::vector<std::tuple<const uint8_t*, int64_t, int64_t>>
-                null_bitmaps;
-            for (const auto& data : array_vec) {
-                null_bitmaps.emplace_back(
-                    data->null_bitmap_data(), data->length(), data->offset());
+            // When default value is set, all nulls will be filled with the default value
+            // So we need to mark all positions as non-null in the bitmap
+            if (default_value_.has_value()) {
+                // Create an all-valid bitmap (all bits set to 1)
+                std::vector<uint8_t> all_valid_bitmap((row_nums + 7) / 8, 0xFF);
+                target_->write(all_valid_bitmap.data(),
+                               all_valid_bitmap.size());
+            } else {
+                // tuple <data, size, offset>
+                std::vector<std::tuple<const uint8_t*, int64_t, int64_t>>
+                    null_bitmaps;
+                for (const auto& data : array_vec) {
+                    null_bitmaps.emplace_back(data->null_bitmap_data(),
+                                              data->length(),
+                                              data->offset());
+                }
+                write_null_bit_maps(null_bitmaps);
             }
-            write_null_bit_maps(null_bitmaps);
         }
 
-        for (const auto& data : array_vec) {
-            auto array = std::static_pointer_cast<ArrowType>(data);
-            auto data_ptr = array->raw_values();
-            target_->write(data_ptr, array->length() * dim_ * sizeof(T));
+        // Write data with default value filling for nulls
+        if (nullable_ && default_value_.has_value()) {
+            T default_val = get_default_value();
+            for (const auto& data : array_vec) {
+                auto array = std::static_pointer_cast<ArrowType>(data);
+                auto data_ptr = array->raw_values();
+
+                // Write each element, checking for nulls
+                for (int64_t i = 0; i < array->length(); ++i) {
+                    if (array->IsNull(i)) {
+                        // Write default value for each dimension
+                        for (int d = 0; d < dim_; ++d) {
+                            target_->write(&default_val, sizeof(T));
+                        }
+                    } else {
+                        // Write actual value
+                        target_->write(&data_ptr[i * dim_], dim_ * sizeof(T));
+                    }
+                }
+            }
+        } else {
+            // Original fast path when no default value filling is needed
+            for (const auto& data : array_vec) {
+                auto array = std::static_pointer_cast<ArrowType>(data);
+                auto data_ptr = array->raw_values();
+                target_->write(data_ptr, array->length() * dim_ * sizeof(T));
+            }
         }
     }
 
@@ -160,6 +206,30 @@ class ChunkWriter final : public ChunkWriterBase {
     }
 
  private:
+    T
+    get_default_value() const {
+        const auto& value_field = default_value_.value();
+        if constexpr (std::is_same_v<T, bool>) {
+            return value_field.bool_data();
+        } else if constexpr (std::is_same_v<T, int8_t>) {
+            return static_cast<int8_t>(value_field.int_data());
+        } else if constexpr (std::is_same_v<T, int16_t>) {
+            return static_cast<int16_t>(value_field.int_data());
+        } else if constexpr (std::is_same_v<T, int32_t>) {
+            return value_field.int_data();
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            return value_field.long_data();
+        } else if constexpr (std::is_same_v<T, float>) {
+            return value_field.float_data();
+        } else if constexpr (std::is_same_v<T, double>) {
+            return value_field.double_data();
+        } else {
+            // For vector types like knowhere::fp32, fp16, bf16, etc.
+            // Use float_data as default
+            return static_cast<T>(value_field.float_data());
+        }
+    }
+
     int dim_;
 };
 
@@ -184,20 +254,41 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
     }
 
     if (nullable_) {
-        // tuple <data, size, offset>
-        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
-        for (const auto& data : array_vec) {
-            null_bitmaps.emplace_back(
-                data->null_bitmap_data(), data->length(), data->offset());
+        // When default value is set, all nulls will be filled with the default value
+        // So we need to mark all positions as non-null in the bitmap
+        if (default_value_.has_value()) {
+            // Create an all-valid bitmap (all bits set to 1)
+            std::vector<uint8_t> all_valid_bitmap((row_nums + 7) / 8, 0xFF);
+            target_->write(all_valid_bitmap.data(), all_valid_bitmap.size());
+        } else {
+            // tuple <data, size, offset>
+            std::vector<std::tuple<const uint8_t*, int64_t, int64_t>>
+                null_bitmaps;
+            for (const auto& data : array_vec) {
+                null_bitmaps.emplace_back(
+                    data->null_bitmap_data(), data->length(), data->offset());
+            }
+            write_null_bit_maps(null_bitmaps);
         }
-        write_null_bit_maps(null_bitmaps);
     }
 
-    for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
-        for (int i = 0; i < array->length(); i++) {
-            auto value = array->Value(i);
-            target_->write(&value, sizeof(bool));
+    // Write data with default value filling for nulls
+    if (nullable_ && default_value_.has_value()) {
+        bool default_val = default_value_.value().bool_data();
+        for (const auto& data : array_vec) {
+            auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
+            for (int i = 0; i < array->length(); i++) {
+                bool value = array->IsNull(i) ? default_val : array->Value(i);
+                target_->write(&value, sizeof(bool));
+            }
+        }
+    } else {
+        for (const auto& data : array_vec) {
+            auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(data);
+            for (int i = 0; i < array->length(); i++) {
+                auto value = array->Value(i);
+                target_->write(&value, sizeof(bool));
+            }
         }
     }
 }
@@ -236,13 +327,14 @@ class GeometryChunkWriter : public ChunkWriterBase {
 
 class ArrayChunkWriter : public ChunkWriterBase {
  public:
-    ArrayChunkWriter(const milvus::DataType element_type, bool nullable)
-        : ChunkWriterBase(nullable), element_type_(element_type) {
+    ArrayChunkWriter(const milvus::DataType element_type,
+                     const FieldMeta& field_meta)
+        : ChunkWriterBase(field_meta), element_type_(element_type) {
     }
     ArrayChunkWriter(const milvus::DataType element_type,
                      std::string file_path,
-                     bool nullable)
-        : ChunkWriterBase(std::move(file_path), nullable),
+                     const FieldMeta& field_meta)
+        : ChunkWriterBase(std::move(file_path), field_meta),
           element_type_(element_type) {
     }
 
@@ -261,7 +353,7 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
     VectorArrayChunkWriter(int64_t dim,
                            const milvus::DataType element_type,
                            std::string file_path = "")
-        : ChunkWriterBase(std::move(file_path), false),
+        : ChunkWriterBase(std::move(file_path)),
           element_type_(element_type),
           dim_(dim) {
     }
