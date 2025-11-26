@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -119,10 +120,6 @@ type Server struct {
 	leaderCacheObserver  *observers.LeaderCacheObserver
 	fileResourceObserver *observers.FileResourceObserver
 
-	getBalancerFunc checkers.GetBalancerFunc
-	balancerMap     map[string]balance.Balance
-	balancerLock    sync.RWMutex
-
 	// Active-standby
 	enableActiveStandBy bool
 	activateFunc        func() error
@@ -144,7 +141,6 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 	server := &Server{
 		ctx:            ctx,
 		cancel:         cancel,
-		balancerMap:    make(map[string]balance.Balance),
 		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -327,38 +323,16 @@ func (s *Server) initQueryCoord() error {
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
+	// Init global assign policy factory
+	log.Info("init global assign policy factory")
+	assign.InitGlobalAssignPolicyFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+
+	// Init global balancer factory
+	log.Info("init global balancer factory")
+	balance.InitGlobalBalancerFactory(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
+
 	// Init checker controller
 	log.Info("init checker controller")
-	s.getBalancerFunc = func() balance.Balance {
-		balanceKey := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
-		s.balancerLock.Lock()
-		defer s.balancerLock.Unlock()
-
-		balancer, ok := s.balancerMap[balanceKey]
-		if ok {
-			return balancer
-		}
-
-		log.Info("switch to new balancer", zap.String("name", balanceKey))
-		switch balanceKey {
-		case meta.RoundRobinBalancerName:
-			balancer = balance.NewRoundRobinBalancer(s.taskScheduler, s.nodeMgr)
-		case meta.RowCountBasedBalancerName:
-			balancer = balance.NewRowCountBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		case meta.ScoreBasedBalancerName:
-			balancer = balance.NewScoreBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		case meta.MultiTargetBalancerName:
-			balancer = balance.NewMultiTargetBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		case meta.ChannelLevelScoreBalancerName:
-			balancer = balance.NewChannelLevelScoreBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		default:
-			log.Info(fmt.Sprintf("default to use %s", meta.ScoreBasedBalancerName))
-			balancer = balance.NewScoreBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-		}
-
-		s.balancerMap[balanceKey] = balancer
-		return balancer
-	}
 	s.checkerController = checkers.NewCheckerController(
 		s.meta,
 		s.dist,
@@ -366,7 +340,6 @@ func (s *Server) initQueryCoord() error {
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
-		s.getBalancerFunc,
 	)
 
 	// Init observers
