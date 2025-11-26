@@ -1441,6 +1441,54 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
     }
 }
 
+void
+ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
+                                          const PkType& lower_pk,
+                                          bool lower_inclusive,
+                                          const PkType& upper_pk,
+                                          bool upper_inclusive,
+                                          BitsetTypeView& bitset) const {
+    if (!is_sorted_by_pk_) {
+        // For unsorted segments, use the InsertRecord's binary range search
+        insert_record_.search_pk_binary_range(
+            lower_pk, lower_inclusive, upper_pk, upper_inclusive, bitset);
+        return;
+    }
+
+    // For sorted segments, use binary search
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = get_column(pk_field_id);
+    AssertInfo(pk_column != nullptr, "primary key column not loaded");
+
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64:
+            search_sorted_pk_binary_range_impl<int64_t>(
+                std::get<int64_t>(lower_pk),
+                lower_inclusive,
+                std::get<int64_t>(upper_pk),
+                upper_inclusive,
+                pk_column,
+                bitset);
+            break;
+        case DataType::VARCHAR:
+            search_sorted_pk_binary_range_impl<std::string>(
+                std::get<std::string>(lower_pk),
+                lower_inclusive,
+                std::get<std::string>(upper_pk),
+                upper_inclusive,
+                pk_column,
+                bitset);
+            break;
+        default:
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+    }
+}
+
 std::pair<std::vector<OffsetMap::OffsetType>, bool>
 ChunkedSegmentSealedImpl::find_first(int64_t limit,
                                      const BitsetType& bitset) const {
