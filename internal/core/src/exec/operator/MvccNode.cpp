@@ -43,6 +43,10 @@ PhyMvccNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyMvccNode::GetOutput() {
+    auto* query_context =
+        operator_context_->get_exec_context()->get_query_context();
+    milvus::exec::checkCancellation(query_context);
+
     if (is_finished_) {
         return nullptr;
     }

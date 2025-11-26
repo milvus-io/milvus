@@ -89,6 +89,10 @@ PhyRandomSampleNode::Sample(const uint32_t N, const float factor) {
 
 RowVectorPtr
 PhyRandomSampleNode::GetOutput() {
+    auto* query_context =
+        operator_context_->get_exec_context()->get_query_context();
+    milvus::exec::checkCancellation(query_context);
+
     if (is_finished_) {
         return nullptr;
     }
@@ -167,6 +171,7 @@ PhyRandomSampleNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_random_sample.Observe(
         duration / 1000);
     is_finished_ = true;
+
     return result;
 }
 
