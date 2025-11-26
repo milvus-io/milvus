@@ -1007,7 +1007,7 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
 		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
-			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), task.GetSearchTextNum()+task.GetCorpusTextNum())
+			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
 		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
 		if !ok {
@@ -1066,7 +1066,18 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 					}
 				}
 				spans = mergeOffsets(spans)
-				frags := fetchFragmentsFromOffsets(task.Texts[corpusStartOffset+corpusIdx], spans, task.GetOptions().GetFragmentSize(), task.GetOptions().GetNumOfFragments())
+
+				// Convert byte offsets from analyzer to rune (character) offsets
+				corpusText := task.Texts[corpusStartOffset+corpusIdx]
+				err := bytesOffsetToRuneOffset(corpusText, spans)
+				if err != nil {
+					return nil, err
+				}
+
+				frags := fetchFragmentsFromOffsets(corpusText, spans,
+					task.GetOptions().GetFragmentOffset(),
+					task.GetOptions().GetFragmentSize(),
+					task.GetOptions().GetNumOfFragments())
 				result = append(result, &querypb.HighlightResult{Fragments: frags})
 				corpusIdx++
 			}

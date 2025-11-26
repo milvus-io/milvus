@@ -8103,9 +8103,10 @@ type HighlightFragment struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	StartOffset int64   `protobuf:"varint,1,opt,name=start_offset,json=startOffset,proto3" json:"start_offset,omitempty"`
-	EndOffset   int64   `protobuf:"varint,2,opt,name=end_offset,json=endOffset,proto3" json:"end_offset,omitempty"`
-	Offsets     []int64 `protobuf:"varint,3,rep,packed,name=offsets,proto3" json:"offsets,omitempty"`
+	StartOffset int64 `protobuf:"varint,1,opt,name=start_offset,json=startOffset,proto3" json:"start_offset,omitempty"`
+	EndOffset   int64 `protobuf:"varint,2,opt,name=end_offset,json=endOffset,proto3" json:"end_offset,omitempty"`
+	// char offset of the highlight terms in the fragment
+	Offsets []int64 `protobuf:"varint,3,rep,packed,name=offsets,proto3" json:"offsets,omitempty"`
 }
 
 func (x *HighlightFragment) Reset() {

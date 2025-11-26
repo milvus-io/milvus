@@ -1058,6 +1058,7 @@ message GetHighlightRequest{
 message HighlightFragment{      
     int64 start_offset = 1;
     int64 end_offset = 2;
+    // char offset of the highlight terms in the fragment
     repeated int64 offsets = 3;
 }
 

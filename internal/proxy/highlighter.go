@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -28,7 +29,7 @@ const (
 	FragmentSizeKey        = "fragment_size"
 	FragmentNumKey         = "num_of_fragments"
 	DefaultFragmentSize    = 100
-	DefaultFragmentNum     = 1
+	DefaultFragmentNum     = 5
 	DefaultPreTag          = "<em>"
 	DefaultPostTag         = "</em>"
 )
@@ -37,7 +38,7 @@ type Highlighter interface {
 	AsSearchPipelineOperator(t *searchTask) (operator, error)
 }
 
-// highligt task for one field
+// highlight task for one field
 type highlightTask struct {
 	*querypb.HighlightTask
 	preTags  [][]byte
@@ -66,7 +67,7 @@ type LexicalHighlighter struct {
 func (h *LexicalHighlighter) addTaskWithSearchText(fieldID int64, fieldName string, analyzerName string, texts []string) error {
 	_, ok := h.tasks[fieldID]
 	if ok {
-		return merr.WrapErrParameterInvalidMsg("not support hybird search with highlight now", fieldID)
+		return merr.WrapErrParameterInvalidMsg("not support hybrid search with highlight now. fieldID: %d", fieldID)
 	}
 
 	task := &highlightTask{
@@ -146,9 +147,6 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 		for i, tag := range tags {
 			h.preTags[i] = []byte(tag)
 		}
-		if len(h.preTags) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("pre_tags cannot be empty list")
-		}
 	} else {
 		h.preTags = [][]byte{[]byte(DefaultPreTag)}
 	}
@@ -164,9 +162,6 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 		h.postTags = make([][]byte, len(tags))
 		for i, tag := range tags {
 			h.postTags[i] = []byte(tag)
-		}
-		if len(h.postTags) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("post_tags cannot be empty list")
 		}
 	} else {
 		h.postTags = [][]byte{[]byte(DefaultPostTag)}
@@ -204,7 +199,7 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 	if value, ok := params[HighlightSearchTextKey]; ok {
 		enable, err := strconv.ParseBool(value)
 		if err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight_search_data as bool failed: %v", err)
+			return nil, merr.WrapErrParameterInvalidMsg("unmarshal highlight_search_text as bool failed: %v", err)
 		}
 
 		h.highlightSearch = enable
@@ -275,9 +270,6 @@ type lexicalHighlightOperator struct {
 	collectionName string
 	collectionID   int64
 	dbName         string
-
-	preTag  []byte
-	postTag []byte
 }
 
 func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operator, error) {
@@ -290,41 +282,6 @@ func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operato
 		collectionID:   t.CollectionID,
 		dbName:         t.request.DbName,
 	}, nil
-}
-
-func sliceByRune(s string, start, end int) string {
-	if start >= end {
-		return ""
-	}
-
-	i, from, to := 0, 0, len(s)
-	for idx := range s {
-		if i == start {
-			from = idx
-		}
-		if i == end {
-			to = idx
-			break
-		}
-		i++
-	}
-
-	return s[from:to]
-}
-
-// get slice texts according to fragment options
-func getHighlightTexts(task *querypb.HighlightTask, datas []string) []string {
-	if task.GetOptions().GetNumOfFragments() == 0 {
-		return datas
-	}
-
-	results := make([]string, len(datas))
-	offset := int(task.GetOptions().GetFragmentOffset())
-	size := offset + int(task.GetOptions().GetFragmentSize()*task.GetOptions().GetNumOfFragments())
-	for i, text := range datas {
-		results[i] = sliceByRune(text, min(offset, len(text)), min(size, len(text)))
-	}
-	return results
 }
 
 func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
@@ -340,7 +297,7 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 		if !ok {
 			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
 		}
-		texts := getHighlightTexts(task, textFieldDatas.GetScalars().GetStringData().GetData())
+		texts := textFieldDatas.GetScalars().GetStringData().GetData()
 		task.Texts = append(task.Texts, texts...)
 		task.CorpusTextNum = int64(len(texts))
 		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
@@ -410,28 +367,28 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 
 func buildStringFragments(task *highlightTask, idx int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
 	startOffset := int(task.GetSearchTextNum()) + len(task.Queries)
-	bytes := []byte(task.Texts[startOffset+idx])
+	text := []rune(task.Texts[startOffset+idx])
 	preTagsNum := len(task.preTags)
 	postTagsNum := len(task.postTags)
 	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
 	for _, frag := range frags {
-		fragBytes := []byte{}
+		var fragString strings.Builder
 		cursor := int(frag.GetStartOffset())
 		for i := 0; i < len(frag.GetOffsets())/2; i++ {
 			startOffset := int(frag.Offsets[i<<1])
 			endOffset := int(frag.Offsets[(i<<1)+1])
 			if cursor < startOffset {
-				fragBytes = append(fragBytes, bytes[cursor:startOffset]...)
+				fragString.WriteString(string(text[cursor:startOffset]))
 			}
-			fragBytes = append(fragBytes, task.preTags[i%preTagsNum]...)
-			fragBytes = append(fragBytes, bytes[startOffset:endOffset]...)
-			fragBytes = append(fragBytes, task.postTags[i%postTagsNum]...)
+			fragString.WriteString(string(task.preTags[i%preTagsNum]))
+			fragString.WriteString(string(text[startOffset:endOffset]))
+			fragString.WriteString(string(task.postTags[i%postTagsNum]))
 			cursor = endOffset
 		}
 		if cursor < int(frag.GetEndOffset()) {
-			fragBytes = append(fragBytes, bytes[cursor:frag.GetEndOffset()]...)
+			fragString.WriteString(string(text[cursor:frag.GetEndOffset()]))
 		}
-		result.Fragments = append(result.Fragments, string(fragBytes))
+		result.Fragments = append(result.Fragments, fragString.String())
 	}
 	return result
 }
