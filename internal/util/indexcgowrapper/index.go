@@ -156,7 +156,14 @@ func CreateTextIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexI
 	return res, nil
 }
 
-func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (map[string]int64, error) {
+type JSONKeyStatsResult struct {
+	// MemSize is the actual memory size when loaded
+	MemSize int64
+	// Files maps file name to file size on disk
+	Files map[string]int64
+}
+
+func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (*JSONKeyStatsResult, error) {
 	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
 	if err != nil {
 		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
@@ -177,12 +184,17 @@ func CreateJSONKeyStats(ctx context.Context, buildIndexInfo *indexcgopb.BuildInd
 		return nil, err
 	}
 
-	res := make(map[string]int64)
+	files := make(map[string]int64)
+	var logSize int64
 	for _, indexInfo := range indexStats.GetSerializedIndexInfos() {
-		res[indexInfo.FileName] = indexInfo.FileSize
+		files[indexInfo.FileName] = indexInfo.FileSize
+		logSize += indexInfo.FileSize
 	}
 
-	return res, nil
+	return &JSONKeyStatsResult{
+		MemSize: indexStats.GetMemSize(),
+		Files:   files,
+	}, nil
 }
 
 // TODO: this seems to be used only for test. We should mark the method
