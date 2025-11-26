@@ -128,8 +128,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 	var writerHandler C.LoonWriterHandler
 
-	var status C.CStatus
-	status = C.NewPackedLoonWriter(cBasePath, cSchema, cStorageConfig, cPattern, &writerHandler)
+	status := C.NewPackedLoonWriter(cBasePath, cSchema, cStorageConfig, cPattern, &writerHandler)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
