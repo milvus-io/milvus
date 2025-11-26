@@ -192,19 +192,19 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// }
 
 	mt := &meta{
-		ctx:                        ctx,
-		catalog:                    catalog,
-		collections:                typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:                   NewSegmentsInfo(),
-		channelCPs:                 newChannelCps(),
-		indexMeta:                  im,
-		analyzeMeta:                am,
-		chunkManager:               chunkManager,
-		partitionStatsMeta:         psm,
-		compactionTaskMeta:         ctm,
-		statsTaskMeta:              stm,
+		ctx:                ctx,
+		catalog:            catalog,
+		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:           NewSegmentsInfo(),
+		channelCPs:         newChannelCps(),
+		indexMeta:          im,
+		analyzeMeta:        am,
+		chunkManager:       chunkManager,
+		partitionStatsMeta: psm,
+		compactionTaskMeta: ctm,
+		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta:               make(map[string]*model.FileResource),
+		resourceMeta: make(map[string]*model.FileResource),
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
