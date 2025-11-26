@@ -117,7 +117,8 @@ TEST_F(ArrayOffsetsTest, SealedDocBitsetToElementBitset) {
     TargetBitmap valid_doc_bitset(3, true);
 
     TargetBitmapView doc_view(doc_bitset.data(), doc_bitset.size());
-    TargetBitmapView valid_view(valid_doc_bitset.data(), valid_doc_bitset.size());
+    TargetBitmapView valid_view(valid_doc_bitset.data(),
+                                valid_doc_bitset.size());
 
     auto [elem_bitset, valid_elem_bitset] =
         offsets.DocBitsetToElementBitset(doc_view, valid_view);
@@ -138,7 +139,8 @@ TEST_F(ArrayOffsetsTest, SealedEmptyArrays) {
     // Test with some docs having empty arrays
     ArrayOffsetsSealed offsets;
     offsets.doc_count = 4;
-    offsets.doc_to_element_start_ = {0, 2, 2, 5, 5};  // doc 1 and doc 3 are empty
+    offsets.doc_to_element_start_ = {
+        0, 2, 2, 5, 5};  // doc 1 and doc 3 are empty
 
     offsets.element_doc_ids = {0, 0, 2, 2, 2};
 
@@ -313,7 +315,8 @@ TEST_F(ArrayOffsetsTest, GrowingDocBitsetToElementBitset) {
     TargetBitmap valid_doc_bitset(3, true);
 
     TargetBitmapView doc_view(doc_bitset.data(), doc_bitset.size());
-    TargetBitmapView valid_view(valid_doc_bitset.data(), valid_doc_bitset.size());
+    TargetBitmapView valid_view(valid_doc_bitset.data(),
+                                valid_doc_bitset.size());
 
     auto [elem_bitset, valid_elem_bitset] =
         offsets.DocBitsetToElementBitset(doc_view, valid_view);
