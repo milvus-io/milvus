@@ -355,7 +355,7 @@ class Checker:
         self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
 
-        # Initialize MilvusClient
+        # Initialize MilvusClient - prioritize uri and token
         if cf.param_info.param_uri:
             uri = cf.param_info.param_uri
         else:
@@ -371,10 +371,8 @@ class Checker:
         self.alias = cf.gen_unique_str("checker_alias_")
         connections.connect(
             alias=self.alias,
-            host=cf.param_info.param_host,
-            port=str(cf.param_info.param_port),
-            user=cf.param_info.param_user,
-            password=cf.param_info.param_password
+            uri=uri,
+            token=token
         )
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
@@ -904,7 +902,7 @@ class SearchChecker(Checker):
                 data=self.data,
                 anns_field=self.anns_field_name,
                 search_params=self.search_param,
-                limit=1,
+                limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout
             )
@@ -962,7 +960,7 @@ class TensorSearchChecker(Checker):
                 data=self.data,
                 anns_field=self.anns_field_name,
                 search_params=self.search_param,
-                limit=1,
+                limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout
             )
@@ -1018,7 +1016,7 @@ class FullTextSearchChecker(Checker):
                 data=cf.gen_vectors(5, self.dim, vector_data_type="TEXT_SPARSE_VECTOR"),
                 anns_field=bm25_anns_field,
                 search_params=constants.DEFAULT_BM25_SEARCH_PARAM,
-                limit=1,
+                limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout
             )
@@ -1862,7 +1860,7 @@ class QueryChecker(Checker):
     @trace()
     def query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"query error: {e}")
@@ -1897,7 +1895,7 @@ class TextMatchChecker(Checker):
     @trace()
     def text_match(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"text_match error: {e}")
@@ -1937,7 +1935,7 @@ class PhraseMatchChecker(Checker):
     @trace()
     def phrase_match(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"phrase_match error: {e}")
@@ -1990,7 +1988,7 @@ class JsonQueryChecker(Checker):
     @trace()
     def json_query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"json_query error: {e}")
@@ -2029,7 +2027,7 @@ class GeoQueryChecker(Checker):
     @trace()
     def geo_query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"geo_query error: {e}")
