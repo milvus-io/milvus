@@ -88,6 +88,11 @@ func (job *LoadCollectionJob) Execute() error {
 
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
+	log.Info("start load collection job",
+		zap.Int("replicaConfigs", len(req.GetReplicas())),
+		zap.Int("channelNum", len(vchannels)),
+		zap.Int("partitionNum", len(req.GetPartitionIds())),
+	)
 
 	// 1. create replica if not exist
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
@@ -151,6 +156,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 	}
 	if len(toReleasePartitions) > 0 {
+		log.Info("release stale partitions", zap.Int64s("toReleasePartitions", toReleasePartitions))
 		job.targetObserver.ReleasePartition(req.GetCollectionId(), toReleasePartitions...)
 		if err := job.meta.CollectionManager.RemovePartition(job.ctx, req.GetCollectionId(), toReleasePartitions...); err != nil {
 			return errors.Wrap(err, "failed to remove partitions")
@@ -177,7 +183,9 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 
 	// 6. register load task into collection observer
-	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), incomingPartitions.Collect())
+	incomingPartitionIDs := incomingPartitions.Collect()
+	log.Info("trigger collection observer load", zap.Int64s("incomingPartitions", incomingPartitionIDs))
+	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), incomingPartitionIDs)
 
 	// 7. wait for partition released if any partition is released
 	if len(toReleasePartitions) > 0 {
@@ -193,5 +201,6 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 		log.Info("wait for partition released done", zap.Int64s("toReleasePartitions", toReleasePartitions))
 	}
+	log.Info("load collection job finished successfully")
 	return nil
 }

@@ -234,9 +234,25 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	_, exist := node.delegators.Get(channel.GetChannelName())
+	current, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
-		log.Info("channel already subscribed")
+		var (
+			loadedRatio      float64
+			queryViewVersion int64
+			serviceable      bool
+		)
+		if view := current.GetChannelQueryView(); view != nil {
+			loadedRatio = view.GetLoadedRatio()
+			queryViewVersion = view.GetVersion()
+			serviceable = view.Serviceable()
+		}
+		log.Info("channel already subscribed",
+			zap.Int64("delegatorVersion", delegator.Version()),
+			zap.Float64("loadedRatio", loadedRatio),
+			zap.Bool("serviceable", serviceable),
+			zap.Int64("queryViewVersion", queryViewVersion),
+			zap.Time("tSafe", tsoutil.PhysicalTime(delegator.GetTSafe())),
+		)
 		return merr.Success(), nil
 	}
 

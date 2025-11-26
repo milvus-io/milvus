@@ -678,6 +678,7 @@ func (s *Server) watchNodes(revision int64) {
 
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
+				log.Info("adding a node")
 				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 					NodeID:   nodeID,
 					Address:  addr,

@@ -524,6 +524,7 @@ func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceRep
 		}
 
 		log.Info("Handle stopping nodes",
+			zap.Any("replica", replica.GetID()),
 			zap.Any("stopping nodes", roNodes),
 			zap.Any("available nodes", rwNodes),
 		)
