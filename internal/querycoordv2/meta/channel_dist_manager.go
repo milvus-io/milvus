@@ -409,7 +409,12 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 		}
 	}
 	if candidates != nil {
-		logger.Debug("final", zap.Any("candidates", candidates),
+		logger.Debug("final",
+			zap.String("channel", candidates.GetChannelName()),
+			zap.Int64("collectionID", candidates.GetCollectionID()),
+			zap.Int("droppedSegmentsCount", len(candidates.GetDroppedSegmentIds())),
+			zap.Int("unflushedSegmentsCount", len(candidates.GetUnflushedSegmentIds())),
+			zap.Int("flushedSegmentsCount", len(candidates.GetFlushedSegmentIds())),
 			zap.Int64("candidates version", candidates.Version),
 			zap.Int64("candidates node", candidates.Node))
 	}
