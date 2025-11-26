@@ -20,6 +20,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "index/JsonInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus {
 namespace exec {
@@ -199,8 +200,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         cached_index_chunk_id_ = 0;
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -216,11 +216,18 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
             res_view |= temp_valid_view;
         }
 
+        if (bson_index_.get() == nullptr) {
+            bson_index_ = index->GetBsonIndex(op_ctx_);
+        }
+        AssertInfo(bson_index_.get() != nullptr,
+                   "bson index is not loaded for field: {}",
+                   expr_->column_.field_id_.get());
         if (!index->CanSkipShared(pointer)) {
             // process shared data, need to check if the value is empty
             // which match the semantics of exists in Json.h
             index->ExecuteForSharedData(
                 op_ctx_,
+                bson_index_.get(),
                 pointer,
                 [&](BsonView bson, uint32_t row_id, uint32_t offset) {
                     res_view[row_id] = !bson.IsBsonValueEmpty(offset);

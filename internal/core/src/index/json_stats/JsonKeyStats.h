@@ -162,28 +162,30 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     }
 
  public:
+    PinWrapper<BsonInvertedIndex*>
+    GetBsonIndex(milvus::OpContext* op_ctx) const {
+        if (bson_index_cache_slot_ == nullptr) {
+            return PinWrapper<BsonInvertedIndex*>(nullptr);
+        }
+        auto ca = SemiInlineGet(bson_index_cache_slot_->PinCells(op_ctx, {0}));
+        auto index = ca->get_cell_of(0);
+        return PinWrapper<BsonInvertedIndex*>(ca, index);
+    }
+
     void
     ExecuteForSharedData(
         milvus::OpContext* op_ctx,
+        BsonInvertedIndex* bson_index,
         const std::string& path,
         std::function<void(BsonView bson, uint32_t row_id, uint32_t offset)>
             func) {
-        bson_inverted_index_->TermQuery(
+        bson_index->TermQuery(
             path,
             [this, &func, op_ctx](const uint32_t* row_id_array,
                                   const uint32_t* offset_array,
                                   const int64_t array_len) {
                 shared_column_->BulkRawBsonAt(
                     op_ctx, func, row_id_array, offset_array, array_len);
-            });
-    }
-
-    void
-    ExecuteExistsPathForSharedData(const std::string& path,
-                                   TargetBitmapView bitset) {
-        bson_inverted_index_->TermQueryEach(
-            path, [&bitset](uint32_t row_id, uint32_t offset) {
-                bitset[row_id] = true;
             });
     }
 
@@ -426,16 +428,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         return JSONType::UNKNOWN;
     }
 
-    cachinglayer::ResourceUsage
-    CellByteSize() const {
-        return cell_size_;
-    }
-
-    void
-    SetCellSize(cachinglayer::ResourceUsage cell_size) {
-        cell_size_ = cell_size;
-    }
-
  private:
     void
     CollectSingleJsonStatsInfo(const char* json_str,
@@ -656,6 +648,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string
     AddBucketName(const std::string& remote_prefix);
 
+    void
+    LoadSharedKeyIndex(const std::vector<std::string>& shared_key_index_files,
+                       bool enable_mmap,
+                       int64_t index_size);
+
  private:
     proto::schema::FieldSchema schema_;
     int64_t segment_id_;
@@ -676,6 +673,9 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::set<JsonKey> column_keys_;
     std::shared_ptr<JsonStatsParquetWriter> parquet_writer_;
     std::shared_ptr<BsonInvertedIndex> bson_inverted_index_;
+    // cache slot for bson inverted index when using translator
+    std::shared_ptr<milvus::cachinglayer::CacheSlot<BsonInvertedIndex>>
+        bson_index_cache_slot_;
 
     milvus::proto::common::LoadPriority load_priority_;
     // some meta cache for searching
@@ -704,14 +704,10 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string shared_column_field_name_;
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
     SkipIndex skip_index_;
-    cachinglayer::ResourceUsage cell_size_ = {0, 0};
 
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
     friend class ::CollectSingleJsonStatsInfoAccessor;
 };
-
-using CacheJsonKeyStatsPtr =
-    std::shared_ptr<milvus::cachinglayer::CacheSlot<JsonKeyStats>>;
 
 }  // namespace milvus::index

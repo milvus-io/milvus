@@ -231,25 +231,13 @@ TEST_P(JsonKeyStatsTest, TestBasicOperations) {
 TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
     std::string path = "/int_shared";
     int count = 0;
+    auto bson_index = index_->GetBsonIndex(nullptr);
     index_->ExecuteForSharedData(
-        nullptr, path, [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-            count++;
-        });
+        nullptr,
+        bson_index.get(),
+        path,
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) { count++; });
     std::cout << "count: " << count << std::endl;
-    if (nullable_) {
-        EXPECT_EQ(count, 100);
-    } else {
-        EXPECT_EQ(count, 200);
-    }
-}
-
-TEST_P(JsonKeyStatsTest, TestExecuteExistsPathForSharedData) {
-    std::string path = "/int_shared";
-    TargetBitmap bitset(size_);
-    TargetBitmapView bitset_view(bitset);
-    index_->ExecuteExistsPathForSharedData(path, bitset_view);
-    std::cout << "bitset.count(): " << bitset.count() << std::endl;
-    auto count = bitset.count();
     if (nullable_) {
         EXPECT_EQ(count, 100);
     } else {
@@ -269,7 +257,14 @@ TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
     }
     if (!index_->CanSkipShared(path)) {
         std::cout << "can not skip shared" << std::endl;
-        index_->ExecuteExistsPathForSharedData(path, valid_res_view);
+        auto bson_index = index_->GetBsonIndex(nullptr);
+        index_->ExecuteForSharedData(
+            nullptr,
+            bson_index.get(),
+            path,
+            [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                valid_res[row_id] = true;
+            });
     }
     std::cout << "valid_res.count(): " << valid_res.count() << std::endl;
     if (nullable_) {
@@ -451,7 +446,17 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     VerifyPathInShared(const std::string& path) {
         TargetBitmap bitset(data_.size());
         TargetBitmapView bitset_view(bitset);
-        load_index_->ExecuteExistsPathForSharedData(path, bitset_view);
+        auto bson_index = load_index_->GetBsonIndex(nullptr);
+        AssertInfo(bson_index.get() != nullptr,
+                   "bson index is not loaded for field: {}",
+                   field_id_);
+        load_index_->ExecuteForSharedData(
+            nullptr,
+            bson_index.get(),
+            path,
+            [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                bitset[row_id] = true;
+            });
         EXPECT_GT(bitset.size(), 0);
     }
 

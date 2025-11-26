@@ -1001,8 +1001,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
         cached_index_chunk_res_ =
             (op_type == proto::plan::OpType::NotEqual)
@@ -1107,7 +1106,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                     pointer, milvus::index::JSONType::ARRAY);
                 if (!target_field.empty()) {
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
-                    index->template ExecutorForShreddingData<std::string_view>(
+                    index->ExecutorForShreddingData<std::string_view>(
                         op_ctx_,
                         target_field,
                         executor,
@@ -1265,8 +1264,15 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                         ms);
                 });
 
+            if (bson_index_.get() == nullptr) {
+                bson_index_ = index->GetBsonIndex(op_ctx_);
+            }
+            AssertInfo(bson_index_.get() != nullptr,
+                       "bson index is not loaded for field: {}",
+                       expr_->column_.field_id_.get());
             if (!index->CanSkipShared(pointer, target_types)) {
-                index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+                index->ExecuteForSharedData(
+                    op_ctx_, bson_index_.get(), pointer, shared_executor);
             }
         }
 

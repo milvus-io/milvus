@@ -566,8 +566,7 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         auto segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto vals = expr_->vals_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
+        auto* index = segment->GetJsonStats(op_ctx_, field_id);
         Assert(index != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
@@ -601,13 +600,12 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                         }
                     }
                 };
-                index->template ExecutorForShreddingData<ColType>(
-                    op_ctx_,
-                    target_field,
-                    shredding_executor,
-                    nullptr,
-                    res_view,
-                    valid_res_view);
+                index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                         target_field,
+                                                         shredding_executor,
+                                                         nullptr,
+                                                         res_view,
+                                                         valid_res_view);
                 LOG_DEBUG("using shredding data's field: {} count {}",
                           target_field,
                           res_view.count());
@@ -687,8 +685,16 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                 return;
             }
         };
+
+        if (bson_index_.get() == nullptr) {
+            bson_index_ = index->GetBsonIndex(op_ctx_);
+        }
+        AssertInfo(bson_index_.get() != nullptr,
+                   "bson index is not loaded for field: {}",
+                   expr_->column_.field_id_.get());
         if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_.get(), pointer, shared_executor);
         }
         cached_index_chunk_id_ = 0;
     }
