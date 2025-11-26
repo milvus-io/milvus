@@ -31,9 +31,6 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
     """ Test case of index interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
@@ -250,9 +247,6 @@ class TestAsyncMilvusClientIndexValid(TestMilvusClientV2Base):
     """ Test case of index interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     @pytest.fixture(scope="function", params=["COSINE", "L2", "IP"])
