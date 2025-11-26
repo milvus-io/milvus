@@ -84,7 +84,7 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            &executor, 0, [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](folly::CancellationToken token) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 return new int(1);
             });
@@ -110,7 +110,7 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            &executor, 0, [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](folly::CancellationToken token) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 throw milvus::SegcoreError(milvus::NotImplemented,
                                            "unimplemented");
@@ -136,7 +136,7 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            &executor, 0, [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](folly::CancellationToken token) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 throw std::runtime_error("unimplemented");
                 return new int(1);
@@ -160,7 +160,7 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            &executor, 0, [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](folly::CancellationToken token) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 throw folly::FutureNotReady();
                 return new int(1);
@@ -185,9 +185,9 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            &executor, 0, [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](folly::CancellationToken token) {
                 for (int i = 0; i < 10; i++) {
-                    token.throwIfCancelled();
+                    milvus::futures::throwIfCancelled(token);
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
                 return new int(1);

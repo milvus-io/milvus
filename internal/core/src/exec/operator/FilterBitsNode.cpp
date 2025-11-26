@@ -61,6 +61,8 @@ PhyFilterBitsNode::IsFinished() {
 
 RowVectorPtr
 PhyFilterBitsNode::GetOutput() {
+    milvus::exec::checkCancellation(query_context_);
+
     if (AllInputProcessed()) {
         return nullptr;
     }

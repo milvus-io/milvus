@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "common/Schema.h"
+#include "common/Types.h"
 #include "query/Plan.h"
 
 #include "segcore/reduce_c.h"
@@ -96,7 +97,7 @@ TEST(Rescorer, Normal) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     }
 
     // search result not empty but no boost filter
@@ -140,7 +141,7 @@ TEST(Rescorer, Normal) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     }
 
     // random function with seed
@@ -186,7 +187,7 @@ TEST(Rescorer, Normal) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     }
 
     // random function with field as random seed
@@ -232,7 +233,7 @@ TEST(Rescorer, Normal) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
     }
 
     // random function with field and seed
@@ -279,10 +280,10 @@ TEST(Rescorer, Normal) {
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         auto search_result_same_seed =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
+            segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
         // should return same score when use same seed
         for (auto i = 0; i < 10; i++) {
