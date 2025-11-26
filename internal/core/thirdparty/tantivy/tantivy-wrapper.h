@@ -355,6 +355,7 @@ struct TantivyIndexWrapper {
                         int64_t offset_begin) {
         assert(!finished_);
         std::vector<const char*> views;
+        views.reserve(len);
         for (uintptr_t i = 0; i < len; i++) {
             views.push_back(array[i].c_str());
         }
@@ -435,6 +436,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, std::string>) {
             std::vector<const char*> views;
+            views.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
                 views.push_back(array[i].c_str());
             }
@@ -621,6 +623,7 @@ struct TantivyIndexWrapper {
 
         if constexpr (std::is_same_v<T, std::string>) {
             std::vector<const char*> views;
+            views.reserve(len);
             for (uintptr_t i = 0; i < len; i++) {
                 views.push_back(array[i].c_str());
             }
@@ -709,6 +712,7 @@ struct TantivyIndexWrapper {
                 } else {
                     // smaller integer should be converted first
                     std::vector<int64_t> buf(len);
+                    buf.reserve(len);
                     for (uintptr_t i = 0; i < len; ++i) {
                         buf[i] = static_cast<int64_t>(terms[i]);
                     }
@@ -726,6 +730,7 @@ struct TantivyIndexWrapper {
                         bitset);
                 } else {
                     std::vector<double> buf(len);
+                    buf.reserve(len);
                     for (uintptr_t i = 0; i < len; ++i) {
                         buf[i] = static_cast<double>(terms[i]);
                     }
@@ -736,6 +741,7 @@ struct TantivyIndexWrapper {
 
             if constexpr (std::is_same_v<T, std::string>) {
                 std::vector<const char*> views;
+                views.reserve(len);
                 for (uintptr_t i = 0; i < len; i++) {
                     views.push_back(terms[i].c_str());
                 }
