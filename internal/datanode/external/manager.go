@@ -111,28 +111,20 @@ type ExternalCollectionManager struct {
 	tasks     map[TaskKey]*TaskInfo
 	pool      *conc.Pool[any]
 	closeOnce sync.Once
-	closeChan chan struct{}
 }
 
 // NewExternalCollectionManager constructs a manager with the provided worker pool size.
 func NewExternalCollectionManager(ctx context.Context, poolSize int) *ExternalCollectionManager {
 	return &ExternalCollectionManager{
-		ctx:       ctx,
-		tasks:     make(map[TaskKey]*TaskInfo),
-		pool:      conc.NewPool[any](poolSize),
-		closeChan: make(chan struct{}),
+		ctx:   ctx,
+		tasks: make(map[TaskKey]*TaskInfo),
+		pool:  conc.NewPool[any](poolSize),
 	}
-}
-
-// Start currently only logs a message to keep behaviour aligned with other components.
-func (m *ExternalCollectionManager) Start() {
-	log.Info("external collection manager started")
 }
 
 // Close releases all background resources.
 func (m *ExternalCollectionManager) Close() {
 	m.closeOnce.Do(func() {
-		close(m.closeChan)
 		if m.pool != nil {
 			m.pool.Release()
 		}
