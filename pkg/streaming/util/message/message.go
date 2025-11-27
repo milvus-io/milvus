@@ -161,8 +161,8 @@ type ImmutableMessage interface {
 	MessageID() MessageID
 
 	// LastConfirmedMessageID returns the last confirmed message id of current message.
-	// last confirmed message is always a timetick message.
-	// Read from this message id will guarantee the time tick greater than this message is consumed.
+	// Read from this message id will guarantee the time tick greater than this message's time tick,
+	// also promise for the txn message.
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	LastConfirmedMessageID() MessageID
