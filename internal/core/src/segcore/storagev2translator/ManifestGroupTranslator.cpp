@@ -165,6 +165,13 @@ ManifestGroupTranslator::get_cells(
     auto chunks = read_result.ValueOrDie();
     for (size_t i = 0; i < chunks.size(); ++i) {
         auto& chunk = chunks[i];
+        AssertInfo(chunk != nullptr,
+                   "chunk is null, idx = {}, group index = {}, segment id = "
+                   "{}, parallel degree = {}",
+                   i,
+                   column_group_index_,
+                   segment_id_,
+                   parallel_degree);
         auto cid = cids[i];
         auto group_chunk = load_group_chunk(chunk, cid);
         cells.emplace_back(cid, std::move(group_chunk));
