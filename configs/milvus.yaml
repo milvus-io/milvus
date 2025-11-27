@@ -440,6 +440,7 @@ queryCoord:
   # During this period, the node won't receive new tasks to loading resource.
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
+  resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord

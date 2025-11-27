@@ -83,7 +83,9 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 		})
 	}
 
-	// filter out query node which resource exhausted
+	// Filter out query nodes that are currently marked as resource exhausted.
+	// These nodes have recently reported OOM or disk full errors and are under
+	// a penalty period during which they won't receive new loading tasks.
 	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 		return !b.nodeManager.IsResourceExhausted(node)
 	})
@@ -129,7 +131,9 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 		})
 	}
 
-	// filter out query node which resource exhausted
+	// Filter out query nodes that are currently marked as resource exhausted.
+	// These nodes have recently reported OOM or disk full errors and are under
+	// a penalty period during which they won't receive new loading tasks.
 	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 		return !b.nodeManager.IsResourceExhausted(node)
 	})

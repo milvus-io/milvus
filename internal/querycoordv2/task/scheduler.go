@@ -1001,12 +1001,19 @@ func (scheduler *taskScheduler) remove(task Task) {
 		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
 	}
 
-	// if task failed due to segment request resource failed, suspend the node from loading based on configured penalty duration
+	// If task failed due to resource exhaustion (OOM, disk full, GPU OOM, etc.),
+	// mark the node as resource exhausted for a penalty period.
+	// During this period, the balancer will skip this node when assigning new segments/channels.
+	// This prevents continuous failures on the same node and allows it time to recover.
 	if errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
-		nodeID := task.Actions()[0].Node()
-		duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
-		scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
-		log.Info("mark resource exhaustion for node", zap.Int64("nodeID", nodeID), zap.Duration("duration", duration), zap.Error(task.Err()))
+		for _, action := range task.Actions() {
+			if action.Type() == ActionTypeGrow {
+				nodeID := action.Node()
+				duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
+				scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
+				log.Info("mark resource exhaustion for node", zap.Int64("nodeID", nodeID), zap.Duration("duration", duration), zap.Error(task.Err()))
+			}
+		}
 	}
 
 	task.Cancel(nil)

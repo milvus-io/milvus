@@ -759,6 +759,10 @@ func WrapErrSegmentLoadFailed(id int64, msg ...string) error {
 	return err
 }
 
+// WrapErrSegmentRequestResourceFailed creates a resource exhaustion error for segment loading.
+// resourceType should be one of: "Memory", "Disk", "GPU".
+// This error triggers the query coordinator to mark the node as resource exhausted,
+// applying a penalty period controlled by queryCoord.resourceExhaustionPenaltyDuration.
 func WrapErrSegmentRequestResourceFailed(
 	resourceType string,
 	msg ...string,

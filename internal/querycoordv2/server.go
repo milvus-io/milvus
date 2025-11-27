@@ -293,6 +293,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init meta
 	s.nodeMgr = session.NewNodeManager()
+	s.nodeMgr.Start(s.ctx)
 	err = s.initMeta()
 	if err != nil {
 		return err

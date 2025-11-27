@@ -101,11 +101,15 @@ var (
 	ErrChannelCPExceededMaxLag = newMilvusError("channel checkpoint exceed max lag", 504, false)
 
 	// Segment related
-	ErrSegmentNotFound              = newMilvusError("segment not found", 600, false)
-	ErrSegmentNotLoaded             = newMilvusError("segment not loaded", 601, false)
-	ErrSegmentLack                  = newMilvusError("segment lacks", 602, false)
-	ErrSegmentReduplicate           = newMilvusError("segment reduplicates", 603, false)
-	ErrSegmentLoadFailed            = newMilvusError("segment load failed", 604, false)
+	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
+	ErrSegmentNotLoaded   = newMilvusError("segment not loaded", 601, false)
+	ErrSegmentLack        = newMilvusError("segment lacks", 602, false)
+	ErrSegmentReduplicate = newMilvusError("segment reduplicates", 603, false)
+	ErrSegmentLoadFailed  = newMilvusError("segment load failed", 604, false)
+	// ErrSegmentRequestResourceFailed indicates the query node cannot load the segment
+	// due to resource exhaustion (Memory, Disk, or GPU). When this error is returned,
+	// the query coordinator will mark the node as resource exhausted and apply a
+	// penalty period during which the node won't receive new loading tasks.
 	ErrSegmentRequestResourceFailed = newMilvusError("segment request resource failed", 605, false)
 
 	// Index related

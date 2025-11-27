@@ -73,7 +73,9 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	}
 
-	// filter out query node which resource exhausted
+	// Filter out query nodes that are currently marked as resource exhausted.
+	// These nodes have recently reported OOM or disk full errors and are under
+	// a penalty period during which they won't receive new loading tasks.
 	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 		return !b.nodeManager.IsResourceExhausted(node)
 	})
@@ -172,7 +174,9 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 		balanceBatchSize = paramtable.Get().QueryCoordCfg.BalanceChannelBatchSize.GetAsInt()
 	}
 
-	// filter out query node which resource exhausted
+	// Filter out query nodes that are currently marked as resource exhausted.
+	// These nodes have recently reported OOM or disk full errors and are under
+	// a penalty period during which they won't receive new loading tasks.
 	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 		return !b.nodeManager.IsResourceExhausted(node)
 	})
