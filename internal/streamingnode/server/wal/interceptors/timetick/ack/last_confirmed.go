@@ -7,8 +7,9 @@ import (
 )
 
 type uncommittedTxnInfo struct {
-	session   *txn.TxnSession   // if nil, it's a non-txn(autocommit) message.
-	messageID message.MessageID // the message id of the txn begins.
+	session      *txn.TxnSession   // if nil, it's a non-txn(autocommit) message.
+	messageID    message.MessageID // the message id of the txn begins.
+	EndTimestamp uint64            // the end timestamp of the txn.
 }
 
 // newLastConfirmedManager creates a new last confirmed manager.
@@ -32,8 +33,9 @@ func (m *lastConfirmedManager) AddConfirmedDetails(details sortedDetails, ts uin
 			continue
 		}
 		m.notDoneTxnMessage.Push(&uncommittedTxnInfo{
-			session:   detail.TxnSession,
-			messageID: detail.Message.MessageID(),
+			session:      detail.TxnSession,
+			messageID:    detail.Message.MessageID(),
+			EndTimestamp: detail.EndTimestamp,
 		})
 	}
 	m.updateLastConfirmedMessageID(ts)
@@ -46,7 +48,13 @@ func (m *lastConfirmedManager) GetLastConfirmedMessageID() message.MessageID {
 
 // updateLastConfirmedMessageID updates the last confirmed message id.
 func (m *lastConfirmedManager) updateLastConfirmedMessageID(ts uint64) {
+	// only if the end timestamp is less than the last confirmed time tick, it can be used to update the last confirmed message id.
+	// once the end timestamp is greater than the last confirmed time tick, there's current write operation is in progress,
+	// so there may be some messages which message id is less than the peek of the notDoneTxnMessage.
+	// Otherwise, the message id in the notDoneTxnMessage is dense and continuous, can be used to update the last confirmed message id.
+	// to make the LastConfirmedMessageID promise, also see the message.LastConfirmedMessageID() method.
 	for m.notDoneTxnMessage.Len() > 0 &&
+		m.notDoneTxnMessage.Peek().EndTimestamp < ts &&
 		(m.notDoneTxnMessage.Peek().session == nil || m.notDoneTxnMessage.Peek().session.IsExpiredOrDone(ts)) {
 		info := m.notDoneTxnMessage.Pop()
 		if m.lastConfirmedMessageID.LT(info.messageID) {

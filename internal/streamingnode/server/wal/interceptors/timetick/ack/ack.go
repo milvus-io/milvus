@@ -5,10 +5,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var (
-	_ typeutil.HeapInterface = (*ackersOrderByTimestamp)(nil)
-	_ typeutil.HeapInterface = (*ackersOrderByEndTimestamp)(nil)
-)
+var _ typeutil.HeapInterface = (*ackersOrderByTimestamp)(nil)
 
 // Acker records the timestamp and last confirmed message id that has not been acknowledged.
 type Acker struct {
@@ -51,16 +48,6 @@ type ackersOrderByTimestamp struct {
 // Less returns true if the element at index i is less than the element at index j.
 func (h ackersOrderByTimestamp) Less(i, j int) bool {
 	return h.ackers[i].detail.BeginTimestamp < h.ackers[j].detail.BeginTimestamp
-}
-
-// ackersOrderByEndTimestamp is a heap underlying represent of timestampAck.
-type ackersOrderByEndTimestamp struct {
-	ackers
-}
-
-// Less returns true if the element at index i is less than the element at index j.
-func (h ackersOrderByEndTimestamp) Less(i, j int) bool {
-	return h.ackers[i].detail.EndTimestamp < h.ackers[j].detail.EndTimestamp
 }
 
 // ackers is a heap underlying represent of timestampAck.
