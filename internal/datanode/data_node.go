@@ -244,8 +244,6 @@ func (node *DataNode) Start() error {
 
 		go node.importScheduler.Start()
 
-		node.externalCollectionManager.Start()
-
 		err := node.taskScheduler.Start()
 		if err != nil {
 			startErr = err

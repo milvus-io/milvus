@@ -33,9 +33,6 @@ import (
 func TestExternalCollectionManager_Basic(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	// Start manager
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -87,8 +84,6 @@ func TestExternalCollectionManager_Basic(t *testing.T) {
 func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -130,8 +125,6 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -166,8 +159,6 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 func TestExternalCollectionManager_CancelTask(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -242,7 +233,6 @@ func TestExtractSegmentIDs(t *testing.T) {
 func TestCancelTaskMultipleTimes(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 1)
-	manager.Start()
 	defer manager.Close()
 
 	var calls int32
@@ -265,8 +255,6 @@ func TestCancelTaskMultipleTimes(t *testing.T) {
 func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -311,8 +299,6 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -355,8 +341,6 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
 
-	manager.Start()
-
 	clusterID := "test-cluster"
 	taskID := int64(5)
 	collID := int64(500)
@@ -392,8 +376,6 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 func TestExternalCollectionManager_UpdateStateNonExistent(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
@@ -410,8 +392,6 @@ func TestExternalCollectionManager_UpdateStateNonExistent(t *testing.T) {
 func TestExternalCollectionManager_DeleteNonExistent(t *testing.T) {
 	ctx := context.Background()
 	manager := NewExternalCollectionManager(ctx, 4)
-
-	manager.Start()
 	defer manager.Close()
 
 	clusterID := "test-cluster"
