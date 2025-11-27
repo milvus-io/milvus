@@ -232,6 +232,7 @@ require (
 )
 
 replace (
+	github.com/milvus-io/milvus-proto/go-api/v2 => github.com/SpadeA-Tang/milvus-proto/go-api/v2 v2.0.0-20251127094749-397b138d82ab
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0

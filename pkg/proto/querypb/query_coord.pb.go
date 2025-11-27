@@ -401,6 +401,140 @@ func (SyncType) EnumDescriptor() ([]byte, []int) {
 	return file_query_coord_proto_rawDescGZIP(), []int{6}
 }
 
+type ComputePhraseMatchSlopRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base           *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	AnalyzerParams string            `protobuf:"bytes,2,opt,name=analyzer_params,json=analyzerParams,proto3" json:"analyzer_params,omitempty"`
+	QueryText      string            `protobuf:"bytes,3,opt,name=query_text,json=queryText,proto3" json:"query_text,omitempty"`
+	DataText       []string          `protobuf:"bytes,4,rep,name=data_text,json=dataText,proto3" json:"data_text,omitempty"`
+}
+
+func (x *ComputePhraseMatchSlopRequest) Reset() {
+	*x = ComputePhraseMatchSlopRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_query_coord_proto_msgTypes[0]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ComputePhraseMatchSlopRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ComputePhraseMatchSlopRequest) ProtoMessage() {}
+
+func (x *ComputePhraseMatchSlopRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_query_coord_proto_msgTypes[0]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ComputePhraseMatchSlopRequest.ProtoReflect.Descriptor instead.
+func (*ComputePhraseMatchSlopRequest) Descriptor() ([]byte, []int) {
+	return file_query_coord_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ComputePhraseMatchSlopRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *ComputePhraseMatchSlopRequest) GetAnalyzerParams() string {
+	if x != nil {
+		return x.AnalyzerParams
+	}
+	return ""
+}
+
+func (x *ComputePhraseMatchSlopRequest) GetQueryText() string {
+	if x != nil {
+		return x.QueryText
+	}
+	return ""
+}
+
+func (x *ComputePhraseMatchSlopRequest) GetDataText() []string {
+	if x != nil {
+		return x.DataText
+	}
+	return nil
+}
+
+type ComputePhraseMatchSlopResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status  *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	IsMatch []bool           `protobuf:"varint,2,rep,packed,name=is_match,json=isMatch,proto3" json:"is_match,omitempty"`
+	Slop    []int64          `protobuf:"varint,3,rep,packed,name=slop,proto3" json:"slop,omitempty"`
+}
+
+func (x *ComputePhraseMatchSlopResponse) Reset() {
+	*x = ComputePhraseMatchSlopResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_query_coord_proto_msgTypes[1]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ComputePhraseMatchSlopResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ComputePhraseMatchSlopResponse) ProtoMessage() {}
+
+func (x *ComputePhraseMatchSlopResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_query_coord_proto_msgTypes[1]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ComputePhraseMatchSlopResponse.ProtoReflect.Descriptor instead.
+func (*ComputePhraseMatchSlopResponse) Descriptor() ([]byte, []int) {
+	return file_query_coord_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ComputePhraseMatchSlopResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *ComputePhraseMatchSlopResponse) GetIsMatch() []bool {
+	if x != nil {
+		return x.IsMatch
+	}
+	return nil
+}
+
+func (x *ComputePhraseMatchSlopResponse) GetSlop() []int64 {
+	if x != nil {
+		return x.Slop
+	}
+	return nil
+}
+
 type ShowCollectionsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -415,7 +549,7 @@ type ShowCollectionsRequest struct {
 func (x *ShowCollectionsRequest) Reset() {
 	*x = ShowCollectionsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[0]
+		mi := &file_query_coord_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -428,7 +562,7 @@ func (x *ShowCollectionsRequest) String() string {
 func (*ShowCollectionsRequest) ProtoMessage() {}
 
 func (x *ShowCollectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[0]
+	mi := &file_query_coord_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +575,7 @@ func (x *ShowCollectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShowCollectionsRequest.ProtoReflect.Descriptor instead.
 func (*ShowCollectionsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{0}
+	return file_query_coord_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ShowCollectionsRequest) GetBase() *commonpb.MsgBase {
@@ -481,7 +615,7 @@ type ShowCollectionsResponse struct {
 func (x *ShowCollectionsResponse) Reset() {
 	*x = ShowCollectionsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[1]
+		mi := &file_query_coord_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -494,7 +628,7 @@ func (x *ShowCollectionsResponse) String() string {
 func (*ShowCollectionsResponse) ProtoMessage() {}
 
 func (x *ShowCollectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[1]
+	mi := &file_query_coord_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -507,7 +641,7 @@ func (x *ShowCollectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShowCollectionsResponse.ProtoReflect.Descriptor instead.
 func (*ShowCollectionsResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{1}
+	return file_query_coord_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ShowCollectionsResponse) GetStatus() *commonpb.Status {
@@ -566,7 +700,7 @@ type ShowPartitionsRequest struct {
 func (x *ShowPartitionsRequest) Reset() {
 	*x = ShowPartitionsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[2]
+		mi := &file_query_coord_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -579,7 +713,7 @@ func (x *ShowPartitionsRequest) String() string {
 func (*ShowPartitionsRequest) ProtoMessage() {}
 
 func (x *ShowPartitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[2]
+	mi := &file_query_coord_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +726,7 @@ func (x *ShowPartitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShowPartitionsRequest.ProtoReflect.Descriptor instead.
 func (*ShowPartitionsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{2}
+	return file_query_coord_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ShowPartitionsRequest) GetBase() *commonpb.MsgBase {
@@ -637,7 +771,7 @@ type ShowPartitionsResponse struct {
 func (x *ShowPartitionsResponse) Reset() {
 	*x = ShowPartitionsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[3]
+		mi := &file_query_coord_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -650,7 +784,7 @@ func (x *ShowPartitionsResponse) String() string {
 func (*ShowPartitionsResponse) ProtoMessage() {}
 
 func (x *ShowPartitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[3]
+	mi := &file_query_coord_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +797,7 @@ func (x *ShowPartitionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShowPartitionsResponse.ProtoReflect.Descriptor instead.
 func (*ShowPartitionsResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{3}
+	return file_query_coord_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ShowPartitionsResponse) GetStatus() *commonpb.Status {
@@ -716,7 +850,7 @@ type LoadCollectionRequest struct {
 func (x *LoadCollectionRequest) Reset() {
 	*x = LoadCollectionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[4]
+		mi := &file_query_coord_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -729,7 +863,7 @@ func (x *LoadCollectionRequest) String() string {
 func (*LoadCollectionRequest) ProtoMessage() {}
 
 func (x *LoadCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[4]
+	mi := &file_query_coord_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -742,7 +876,7 @@ func (x *LoadCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadCollectionRequest.ProtoReflect.Descriptor instead.
 func (*LoadCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{4}
+	return file_query_coord_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LoadCollectionRequest) GetBase() *commonpb.MsgBase {
@@ -829,7 +963,7 @@ type ReleaseCollectionRequest struct {
 func (x *ReleaseCollectionRequest) Reset() {
 	*x = ReleaseCollectionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[5]
+		mi := &file_query_coord_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -842,7 +976,7 @@ func (x *ReleaseCollectionRequest) String() string {
 func (*ReleaseCollectionRequest) ProtoMessage() {}
 
 func (x *ReleaseCollectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[5]
+	mi := &file_query_coord_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -855,7 +989,7 @@ func (x *ReleaseCollectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseCollectionRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseCollectionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{5}
+	return file_query_coord_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReleaseCollectionRequest) GetBase() *commonpb.MsgBase {
@@ -901,7 +1035,7 @@ type GetStatisticsRequest struct {
 func (x *GetStatisticsRequest) Reset() {
 	*x = GetStatisticsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[6]
+		mi := &file_query_coord_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -914,7 +1048,7 @@ func (x *GetStatisticsRequest) String() string {
 func (*GetStatisticsRequest) ProtoMessage() {}
 
 func (x *GetStatisticsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[6]
+	mi := &file_query_coord_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -927,7 +1061,7 @@ func (x *GetStatisticsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatisticsRequest.ProtoReflect.Descriptor instead.
 func (*GetStatisticsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{6}
+	return file_query_coord_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetStatisticsRequest) GetReq() *internalpb.GetStatisticsRequest {
@@ -989,7 +1123,7 @@ type LoadPartitionsRequest struct {
 func (x *LoadPartitionsRequest) Reset() {
 	*x = LoadPartitionsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[7]
+		mi := &file_query_coord_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1002,7 +1136,7 @@ func (x *LoadPartitionsRequest) String() string {
 func (*LoadPartitionsRequest) ProtoMessage() {}
 
 func (x *LoadPartitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[7]
+	mi := &file_query_coord_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1015,7 +1149,7 @@ func (x *LoadPartitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadPartitionsRequest.ProtoReflect.Descriptor instead.
 func (*LoadPartitionsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{7}
+	return file_query_coord_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *LoadPartitionsRequest) GetBase() *commonpb.MsgBase {
@@ -1117,7 +1251,7 @@ type ReleasePartitionsRequest struct {
 func (x *ReleasePartitionsRequest) Reset() {
 	*x = ReleasePartitionsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[8]
+		mi := &file_query_coord_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1130,7 +1264,7 @@ func (x *ReleasePartitionsRequest) String() string {
 func (*ReleasePartitionsRequest) ProtoMessage() {}
 
 func (x *ReleasePartitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[8]
+	mi := &file_query_coord_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1277,7 @@ func (x *ReleasePartitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleasePartitionsRequest.ProtoReflect.Descriptor instead.
 func (*ReleasePartitionsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{8}
+	return file_query_coord_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ReleasePartitionsRequest) GetBase() *commonpb.MsgBase {
@@ -1195,7 +1329,7 @@ type GetPartitionStatesRequest struct {
 func (x *GetPartitionStatesRequest) Reset() {
 	*x = GetPartitionStatesRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[9]
+		mi := &file_query_coord_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1208,7 +1342,7 @@ func (x *GetPartitionStatesRequest) String() string {
 func (*GetPartitionStatesRequest) ProtoMessage() {}
 
 func (x *GetPartitionStatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[9]
+	mi := &file_query_coord_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1221,7 +1355,7 @@ func (x *GetPartitionStatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPartitionStatesRequest.ProtoReflect.Descriptor instead.
 func (*GetPartitionStatesRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{9}
+	return file_query_coord_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetPartitionStatesRequest) GetBase() *commonpb.MsgBase {
@@ -1264,7 +1398,7 @@ type GetPartitionStatesResponse struct {
 func (x *GetPartitionStatesResponse) Reset() {
 	*x = GetPartitionStatesResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[10]
+		mi := &file_query_coord_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1277,7 +1411,7 @@ func (x *GetPartitionStatesResponse) String() string {
 func (*GetPartitionStatesResponse) ProtoMessage() {}
 
 func (x *GetPartitionStatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[10]
+	mi := &file_query_coord_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1290,7 +1424,7 @@ func (x *GetPartitionStatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPartitionStatesResponse.ProtoReflect.Descriptor instead.
 func (*GetPartitionStatesResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{10}
+	return file_query_coord_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetPartitionStatesResponse) GetStatus() *commonpb.Status {
@@ -1320,7 +1454,7 @@ type GetSegmentInfoRequest struct {
 func (x *GetSegmentInfoRequest) Reset() {
 	*x = GetSegmentInfoRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[11]
+		mi := &file_query_coord_proto_msgTypes[13]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1333,7 +1467,7 @@ func (x *GetSegmentInfoRequest) String() string {
 func (*GetSegmentInfoRequest) ProtoMessage() {}
 
 func (x *GetSegmentInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[11]
+	mi := &file_query_coord_proto_msgTypes[13]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1346,7 +1480,7 @@ func (x *GetSegmentInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSegmentInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetSegmentInfoRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{11}
+	return file_query_coord_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetSegmentInfoRequest) GetBase() *commonpb.MsgBase {
@@ -1382,7 +1516,7 @@ type GetSegmentInfoResponse struct {
 func (x *GetSegmentInfoResponse) Reset() {
 	*x = GetSegmentInfoResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[12]
+		mi := &file_query_coord_proto_msgTypes[14]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1395,7 +1529,7 @@ func (x *GetSegmentInfoResponse) String() string {
 func (*GetSegmentInfoResponse) ProtoMessage() {}
 
 func (x *GetSegmentInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[12]
+	mi := &file_query_coord_proto_msgTypes[14]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1408,7 +1542,7 @@ func (x *GetSegmentInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSegmentInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetSegmentInfoResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{12}
+	return file_query_coord_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetSegmentInfoResponse) GetStatus() *commonpb.Status {
@@ -1438,7 +1572,7 @@ type GetShardLeadersRequest struct {
 func (x *GetShardLeadersRequest) Reset() {
 	*x = GetShardLeadersRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[13]
+		mi := &file_query_coord_proto_msgTypes[15]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1451,7 +1585,7 @@ func (x *GetShardLeadersRequest) String() string {
 func (*GetShardLeadersRequest) ProtoMessage() {}
 
 func (x *GetShardLeadersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[13]
+	mi := &file_query_coord_proto_msgTypes[15]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1464,7 +1598,7 @@ func (x *GetShardLeadersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetShardLeadersRequest.ProtoReflect.Descriptor instead.
 func (*GetShardLeadersRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{13}
+	return file_query_coord_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetShardLeadersRequest) GetBase() *commonpb.MsgBase {
@@ -1500,7 +1634,7 @@ type GetShardLeadersResponse struct {
 func (x *GetShardLeadersResponse) Reset() {
 	*x = GetShardLeadersResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[14]
+		mi := &file_query_coord_proto_msgTypes[16]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1513,7 +1647,7 @@ func (x *GetShardLeadersResponse) String() string {
 func (*GetShardLeadersResponse) ProtoMessage() {}
 
 func (x *GetShardLeadersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[14]
+	mi := &file_query_coord_proto_msgTypes[16]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1660,7 @@ func (x *GetShardLeadersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetShardLeadersResponse.ProtoReflect.Descriptor instead.
 func (*GetShardLeadersResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{14}
+	return file_query_coord_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetShardLeadersResponse) GetStatus() *commonpb.Status {
@@ -1555,7 +1689,7 @@ type UpdateResourceGroupsRequest struct {
 func (x *UpdateResourceGroupsRequest) Reset() {
 	*x = UpdateResourceGroupsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[15]
+		mi := &file_query_coord_proto_msgTypes[17]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1568,7 +1702,7 @@ func (x *UpdateResourceGroupsRequest) String() string {
 func (*UpdateResourceGroupsRequest) ProtoMessage() {}
 
 func (x *UpdateResourceGroupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[15]
+	mi := &file_query_coord_proto_msgTypes[17]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1581,7 +1715,7 @@ func (x *UpdateResourceGroupsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateResourceGroupsRequest.ProtoReflect.Descriptor instead.
 func (*UpdateResourceGroupsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{15}
+	return file_query_coord_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UpdateResourceGroupsRequest) GetBase() *commonpb.MsgBase {
@@ -1612,7 +1746,7 @@ type ShardLeadersList struct {
 func (x *ShardLeadersList) Reset() {
 	*x = ShardLeadersList{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[16]
+		mi := &file_query_coord_proto_msgTypes[18]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1625,7 +1759,7 @@ func (x *ShardLeadersList) String() string {
 func (*ShardLeadersList) ProtoMessage() {}
 
 func (x *ShardLeadersList) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[16]
+	mi := &file_query_coord_proto_msgTypes[18]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1638,7 +1772,7 @@ func (x *ShardLeadersList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardLeadersList.ProtoReflect.Descriptor instead.
 func (*ShardLeadersList) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{16}
+	return file_query_coord_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ShardLeadersList) GetChannelName() string {
@@ -1682,7 +1816,7 @@ type SyncNewCreatedPartitionRequest struct {
 func (x *SyncNewCreatedPartitionRequest) Reset() {
 	*x = SyncNewCreatedPartitionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[17]
+		mi := &file_query_coord_proto_msgTypes[19]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1695,7 +1829,7 @@ func (x *SyncNewCreatedPartitionRequest) String() string {
 func (*SyncNewCreatedPartitionRequest) ProtoMessage() {}
 
 func (x *SyncNewCreatedPartitionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[17]
+	mi := &file_query_coord_proto_msgTypes[19]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1708,7 +1842,7 @@ func (x *SyncNewCreatedPartitionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncNewCreatedPartitionRequest.ProtoReflect.Descriptor instead.
 func (*SyncNewCreatedPartitionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{17}
+	return file_query_coord_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SyncNewCreatedPartitionRequest) GetBase() *commonpb.MsgBase {
@@ -1752,7 +1886,7 @@ type LoadMetaInfo struct {
 func (x *LoadMetaInfo) Reset() {
 	*x = LoadMetaInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[18]
+		mi := &file_query_coord_proto_msgTypes[20]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1765,7 +1899,7 @@ func (x *LoadMetaInfo) String() string {
 func (*LoadMetaInfo) ProtoMessage() {}
 
 func (x *LoadMetaInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[18]
+	mi := &file_query_coord_proto_msgTypes[20]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1778,7 +1912,7 @@ func (x *LoadMetaInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadMetaInfo.ProtoReflect.Descriptor instead.
 func (*LoadMetaInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{18}
+	return file_query_coord_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *LoadMetaInfo) GetLoadType() LoadType {
@@ -1872,7 +2006,7 @@ type WatchDmChannelsRequest struct {
 func (x *WatchDmChannelsRequest) Reset() {
 	*x = WatchDmChannelsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[19]
+		mi := &file_query_coord_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1885,7 +2019,7 @@ func (x *WatchDmChannelsRequest) String() string {
 func (*WatchDmChannelsRequest) ProtoMessage() {}
 
 func (x *WatchDmChannelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[19]
+	mi := &file_query_coord_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1898,7 +2032,7 @@ func (x *WatchDmChannelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchDmChannelsRequest.ProtoReflect.Descriptor instead.
 func (*WatchDmChannelsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{19}
+	return file_query_coord_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *WatchDmChannelsRequest) GetBase() *commonpb.MsgBase {
@@ -2020,7 +2154,7 @@ type UnsubDmChannelRequest struct {
 func (x *UnsubDmChannelRequest) Reset() {
 	*x = UnsubDmChannelRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[20]
+		mi := &file_query_coord_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2033,7 +2167,7 @@ func (x *UnsubDmChannelRequest) String() string {
 func (*UnsubDmChannelRequest) ProtoMessage() {}
 
 func (x *UnsubDmChannelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[20]
+	mi := &file_query_coord_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2046,7 +2180,7 @@ func (x *UnsubDmChannelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubDmChannelRequest.ProtoReflect.Descriptor instead.
 func (*UnsubDmChannelRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{20}
+	return file_query_coord_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UnsubDmChannelRequest) GetBase() *commonpb.MsgBase {
@@ -2112,7 +2246,7 @@ type SegmentLoadInfo struct {
 func (x *SegmentLoadInfo) Reset() {
 	*x = SegmentLoadInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[21]
+		mi := &file_query_coord_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2125,7 +2259,7 @@ func (x *SegmentLoadInfo) String() string {
 func (*SegmentLoadInfo) ProtoMessage() {}
 
 func (x *SegmentLoadInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[21]
+	mi := &file_query_coord_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2138,7 +2272,7 @@ func (x *SegmentLoadInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentLoadInfo.ProtoReflect.Descriptor instead.
 func (*SegmentLoadInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{21}
+	return file_query_coord_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SegmentLoadInfo) GetSegmentID() int64 {
@@ -2333,7 +2467,7 @@ type FieldIndexInfo struct {
 func (x *FieldIndexInfo) Reset() {
 	*x = FieldIndexInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[22]
+		mi := &file_query_coord_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2346,7 +2480,7 @@ func (x *FieldIndexInfo) String() string {
 func (*FieldIndexInfo) ProtoMessage() {}
 
 func (x *FieldIndexInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[22]
+	mi := &file_query_coord_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2359,7 +2493,7 @@ func (x *FieldIndexInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FieldIndexInfo.ProtoReflect.Descriptor instead.
 func (*FieldIndexInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{22}
+	return file_query_coord_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *FieldIndexInfo) GetFieldID() int64 {
@@ -2461,7 +2595,7 @@ type JsonStatsInfo struct {
 func (x *JsonStatsInfo) Reset() {
 	*x = JsonStatsInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[23]
+		mi := &file_query_coord_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2474,7 +2608,7 @@ func (x *JsonStatsInfo) String() string {
 func (*JsonStatsInfo) ProtoMessage() {}
 
 func (x *JsonStatsInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[23]
+	mi := &file_query_coord_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2487,7 +2621,7 @@ func (x *JsonStatsInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JsonStatsInfo.ProtoReflect.Descriptor instead.
 func (*JsonStatsInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{23}
+	return file_query_coord_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *JsonStatsInfo) GetFieldID() int64 {
@@ -2549,7 +2683,7 @@ type LoadSegmentsRequest struct {
 func (x *LoadSegmentsRequest) Reset() {
 	*x = LoadSegmentsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[24]
+		mi := &file_query_coord_proto_msgTypes[26]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2562,7 +2696,7 @@ func (x *LoadSegmentsRequest) String() string {
 func (*LoadSegmentsRequest) ProtoMessage() {}
 
 func (x *LoadSegmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[24]
+	mi := &file_query_coord_proto_msgTypes[26]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2575,7 +2709,7 @@ func (x *LoadSegmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadSegmentsRequest.ProtoReflect.Descriptor instead.
 func (*LoadSegmentsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{24}
+	return file_query_coord_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *LoadSegmentsRequest) GetBase() *commonpb.MsgBase {
@@ -2697,7 +2831,7 @@ type ReleaseSegmentsRequest struct {
 func (x *ReleaseSegmentsRequest) Reset() {
 	*x = ReleaseSegmentsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[25]
+		mi := &file_query_coord_proto_msgTypes[27]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2710,7 +2844,7 @@ func (x *ReleaseSegmentsRequest) String() string {
 func (*ReleaseSegmentsRequest) ProtoMessage() {}
 
 func (x *ReleaseSegmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[25]
+	mi := &file_query_coord_proto_msgTypes[27]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2723,7 +2857,7 @@ func (x *ReleaseSegmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseSegmentsRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseSegmentsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{25}
+	return file_query_coord_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ReleaseSegmentsRequest) GetBase() *commonpb.MsgBase {
@@ -2812,7 +2946,7 @@ type SearchRequest struct {
 func (x *SearchRequest) Reset() {
 	*x = SearchRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[26]
+		mi := &file_query_coord_proto_msgTypes[28]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2825,7 +2959,7 @@ func (x *SearchRequest) String() string {
 func (*SearchRequest) ProtoMessage() {}
 
 func (x *SearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[26]
+	mi := &file_query_coord_proto_msgTypes[28]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2838,7 +2972,7 @@ func (x *SearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
 func (*SearchRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{26}
+	return file_query_coord_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SearchRequest) GetReq() *internalpb.SearchRequest {
@@ -2898,7 +3032,7 @@ type QueryRequest struct {
 func (x *QueryRequest) Reset() {
 	*x = QueryRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[27]
+		mi := &file_query_coord_proto_msgTypes[29]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2911,7 +3045,7 @@ func (x *QueryRequest) String() string {
 func (*QueryRequest) ProtoMessage() {}
 
 func (x *QueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[27]
+	mi := &file_query_coord_proto_msgTypes[29]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2924,7 +3058,7 @@ func (x *QueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryRequest.ProtoReflect.Descriptor instead.
 func (*QueryRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{27}
+	return file_query_coord_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *QueryRequest) GetReq() *internalpb.RetrieveRequest {
@@ -2975,7 +3109,7 @@ type SyncReplicaSegmentsRequest struct {
 func (x *SyncReplicaSegmentsRequest) Reset() {
 	*x = SyncReplicaSegmentsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[28]
+		mi := &file_query_coord_proto_msgTypes[30]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -2988,7 +3122,7 @@ func (x *SyncReplicaSegmentsRequest) String() string {
 func (*SyncReplicaSegmentsRequest) ProtoMessage() {}
 
 func (x *SyncReplicaSegmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[28]
+	mi := &file_query_coord_proto_msgTypes[30]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3001,7 +3135,7 @@ func (x *SyncReplicaSegmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncReplicaSegmentsRequest.ProtoReflect.Descriptor instead.
 func (*SyncReplicaSegmentsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{28}
+	return file_query_coord_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SyncReplicaSegmentsRequest) GetBase() *commonpb.MsgBase {
@@ -3039,7 +3173,7 @@ type ReplicaSegmentsInfo struct {
 func (x *ReplicaSegmentsInfo) Reset() {
 	*x = ReplicaSegmentsInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[29]
+		mi := &file_query_coord_proto_msgTypes[31]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3052,7 +3186,7 @@ func (x *ReplicaSegmentsInfo) String() string {
 func (*ReplicaSegmentsInfo) ProtoMessage() {}
 
 func (x *ReplicaSegmentsInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[29]
+	mi := &file_query_coord_proto_msgTypes[31]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3065,7 +3199,7 @@ func (x *ReplicaSegmentsInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicaSegmentsInfo.ProtoReflect.Descriptor instead.
 func (*ReplicaSegmentsInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{29}
+	return file_query_coord_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ReplicaSegmentsInfo) GetNodeId() int64 {
@@ -3108,7 +3242,7 @@ type GetLoadInfoRequest struct {
 func (x *GetLoadInfoRequest) Reset() {
 	*x = GetLoadInfoRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[30]
+		mi := &file_query_coord_proto_msgTypes[32]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3121,7 +3255,7 @@ func (x *GetLoadInfoRequest) String() string {
 func (*GetLoadInfoRequest) ProtoMessage() {}
 
 func (x *GetLoadInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[30]
+	mi := &file_query_coord_proto_msgTypes[32]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3134,7 +3268,7 @@ func (x *GetLoadInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLoadInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetLoadInfoRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{30}
+	return file_query_coord_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetLoadInfoRequest) GetBase() *commonpb.MsgBase {
@@ -3165,7 +3299,7 @@ type GetLoadInfoResponse struct {
 func (x *GetLoadInfoResponse) Reset() {
 	*x = GetLoadInfoResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[31]
+		mi := &file_query_coord_proto_msgTypes[33]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3178,7 +3312,7 @@ func (x *GetLoadInfoResponse) String() string {
 func (*GetLoadInfoResponse) ProtoMessage() {}
 
 func (x *GetLoadInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[31]
+	mi := &file_query_coord_proto_msgTypes[33]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3191,7 +3325,7 @@ func (x *GetLoadInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLoadInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetLoadInfoResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{31}
+	return file_query_coord_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GetLoadInfoResponse) GetStatus() *commonpb.Status {
@@ -3235,7 +3369,7 @@ type HandoffSegmentsRequest struct {
 func (x *HandoffSegmentsRequest) Reset() {
 	*x = HandoffSegmentsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[32]
+		mi := &file_query_coord_proto_msgTypes[34]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3248,7 +3382,7 @@ func (x *HandoffSegmentsRequest) String() string {
 func (*HandoffSegmentsRequest) ProtoMessage() {}
 
 func (x *HandoffSegmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[32]
+	mi := &file_query_coord_proto_msgTypes[34]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3261,7 +3395,7 @@ func (x *HandoffSegmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandoffSegmentsRequest.ProtoReflect.Descriptor instead.
 func (*HandoffSegmentsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{32}
+	return file_query_coord_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *HandoffSegmentsRequest) GetBase() *commonpb.MsgBase {
@@ -3301,7 +3435,7 @@ type LoadBalanceRequest struct {
 func (x *LoadBalanceRequest) Reset() {
 	*x = LoadBalanceRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[33]
+		mi := &file_query_coord_proto_msgTypes[35]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3314,7 +3448,7 @@ func (x *LoadBalanceRequest) String() string {
 func (*LoadBalanceRequest) ProtoMessage() {}
 
 func (x *LoadBalanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[33]
+	mi := &file_query_coord_proto_msgTypes[35]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3327,7 +3461,7 @@ func (x *LoadBalanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadBalanceRequest.ProtoReflect.Descriptor instead.
 func (*LoadBalanceRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{33}
+	return file_query_coord_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *LoadBalanceRequest) GetBase() *commonpb.MsgBase {
@@ -3387,7 +3521,7 @@ type DmChannelWatchInfo struct {
 func (x *DmChannelWatchInfo) Reset() {
 	*x = DmChannelWatchInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[34]
+		mi := &file_query_coord_proto_msgTypes[36]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3400,7 +3534,7 @@ func (x *DmChannelWatchInfo) String() string {
 func (*DmChannelWatchInfo) ProtoMessage() {}
 
 func (x *DmChannelWatchInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[34]
+	mi := &file_query_coord_proto_msgTypes[36]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3413,7 +3547,7 @@ func (x *DmChannelWatchInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DmChannelWatchInfo.ProtoReflect.Descriptor instead.
 func (*DmChannelWatchInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{34}
+	return file_query_coord_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DmChannelWatchInfo) GetCollectionID() int64 {
@@ -3466,7 +3600,7 @@ type QueryChannelInfo struct {
 func (x *QueryChannelInfo) Reset() {
 	*x = QueryChannelInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[35]
+		mi := &file_query_coord_proto_msgTypes[37]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3479,7 +3613,7 @@ func (x *QueryChannelInfo) String() string {
 func (*QueryChannelInfo) ProtoMessage() {}
 
 func (x *QueryChannelInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[35]
+	mi := &file_query_coord_proto_msgTypes[37]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3492,7 +3626,7 @@ func (x *QueryChannelInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryChannelInfo.ProtoReflect.Descriptor instead.
 func (*QueryChannelInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{35}
+	return file_query_coord_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *QueryChannelInfo) GetCollectionID() int64 {
@@ -3543,7 +3677,7 @@ type PartitionStates struct {
 func (x *PartitionStates) Reset() {
 	*x = PartitionStates{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[36]
+		mi := &file_query_coord_proto_msgTypes[38]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3556,7 +3690,7 @@ func (x *PartitionStates) String() string {
 func (*PartitionStates) ProtoMessage() {}
 
 func (x *PartitionStates) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[36]
+	mi := &file_query_coord_proto_msgTypes[38]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3569,7 +3703,7 @@ func (x *PartitionStates) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionStates.ProtoReflect.Descriptor instead.
 func (*PartitionStates) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{36}
+	return file_query_coord_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PartitionStates) GetPartitionID() int64 {
@@ -3624,7 +3758,7 @@ type SegmentInfo struct {
 func (x *SegmentInfo) Reset() {
 	*x = SegmentInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[37]
+		mi := &file_query_coord_proto_msgTypes[39]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3637,7 +3771,7 @@ func (x *SegmentInfo) String() string {
 func (*SegmentInfo) ProtoMessage() {}
 
 func (x *SegmentInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[37]
+	mi := &file_query_coord_proto_msgTypes[39]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3650,7 +3784,7 @@ func (x *SegmentInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentInfo.ProtoReflect.Descriptor instead.
 func (*SegmentInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{37}
+	return file_query_coord_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SegmentInfo) GetSegmentID() int64 {
@@ -3812,7 +3946,7 @@ type CollectionInfo struct {
 func (x *CollectionInfo) Reset() {
 	*x = CollectionInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[38]
+		mi := &file_query_coord_proto_msgTypes[40]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3825,7 +3959,7 @@ func (x *CollectionInfo) String() string {
 func (*CollectionInfo) ProtoMessage() {}
 
 func (x *CollectionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[38]
+	mi := &file_query_coord_proto_msgTypes[40]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3838,7 +3972,7 @@ func (x *CollectionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionInfo.ProtoReflect.Descriptor instead.
 func (*CollectionInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{38}
+	return file_query_coord_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *CollectionInfo) GetCollectionID() int64 {
@@ -3916,7 +4050,7 @@ type UnsubscribeChannels struct {
 func (x *UnsubscribeChannels) Reset() {
 	*x = UnsubscribeChannels{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[39]
+		mi := &file_query_coord_proto_msgTypes[41]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3929,7 +4063,7 @@ func (x *UnsubscribeChannels) String() string {
 func (*UnsubscribeChannels) ProtoMessage() {}
 
 func (x *UnsubscribeChannels) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[39]
+	mi := &file_query_coord_proto_msgTypes[41]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3942,7 +4076,7 @@ func (x *UnsubscribeChannels) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeChannels.ProtoReflect.Descriptor instead.
 func (*UnsubscribeChannels) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{39}
+	return file_query_coord_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *UnsubscribeChannels) GetCollectionID() int64 {
@@ -3971,7 +4105,7 @@ type UnsubscribeChannelInfo struct {
 func (x *UnsubscribeChannelInfo) Reset() {
 	*x = UnsubscribeChannelInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[40]
+		mi := &file_query_coord_proto_msgTypes[42]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -3984,7 +4118,7 @@ func (x *UnsubscribeChannelInfo) String() string {
 func (*UnsubscribeChannelInfo) ProtoMessage() {}
 
 func (x *UnsubscribeChannelInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[40]
+	mi := &file_query_coord_proto_msgTypes[42]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3997,7 +4131,7 @@ func (x *UnsubscribeChannelInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeChannelInfo.ProtoReflect.Descriptor instead.
 func (*UnsubscribeChannelInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{40}
+	return file_query_coord_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *UnsubscribeChannelInfo) GetNodeID() int64 {
@@ -4028,7 +4162,7 @@ type SegmentChangeInfo struct {
 func (x *SegmentChangeInfo) Reset() {
 	*x = SegmentChangeInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[41]
+		mi := &file_query_coord_proto_msgTypes[43]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4041,7 +4175,7 @@ func (x *SegmentChangeInfo) String() string {
 func (*SegmentChangeInfo) ProtoMessage() {}
 
 func (x *SegmentChangeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[41]
+	mi := &file_query_coord_proto_msgTypes[43]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4054,7 +4188,7 @@ func (x *SegmentChangeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentChangeInfo.ProtoReflect.Descriptor instead.
 func (*SegmentChangeInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{41}
+	return file_query_coord_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *SegmentChangeInfo) GetOnlineNodeID() int64 {
@@ -4097,7 +4231,7 @@ type SealedSegmentsChangeInfo struct {
 func (x *SealedSegmentsChangeInfo) Reset() {
 	*x = SealedSegmentsChangeInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[42]
+		mi := &file_query_coord_proto_msgTypes[44]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4110,7 +4244,7 @@ func (x *SealedSegmentsChangeInfo) String() string {
 func (*SealedSegmentsChangeInfo) ProtoMessage() {}
 
 func (x *SealedSegmentsChangeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[42]
+	mi := &file_query_coord_proto_msgTypes[44]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4123,7 +4257,7 @@ func (x *SealedSegmentsChangeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SealedSegmentsChangeInfo.ProtoReflect.Descriptor instead.
 func (*SealedSegmentsChangeInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{42}
+	return file_query_coord_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SealedSegmentsChangeInfo) GetBase() *commonpb.MsgBase {
@@ -4153,7 +4287,7 @@ type GetDataDistributionRequest struct {
 func (x *GetDataDistributionRequest) Reset() {
 	*x = GetDataDistributionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[43]
+		mi := &file_query_coord_proto_msgTypes[45]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4166,7 +4300,7 @@ func (x *GetDataDistributionRequest) String() string {
 func (*GetDataDistributionRequest) ProtoMessage() {}
 
 func (x *GetDataDistributionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[43]
+	mi := &file_query_coord_proto_msgTypes[45]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4179,7 +4313,7 @@ func (x *GetDataDistributionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDataDistributionRequest.ProtoReflect.Descriptor instead.
 func (*GetDataDistributionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{43}
+	return file_query_coord_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetDataDistributionRequest) GetBase() *commonpb.MsgBase {
@@ -4221,7 +4355,7 @@ type GetDataDistributionResponse struct {
 func (x *GetDataDistributionResponse) Reset() {
 	*x = GetDataDistributionResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[44]
+		mi := &file_query_coord_proto_msgTypes[46]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4234,7 +4368,7 @@ func (x *GetDataDistributionResponse) String() string {
 func (*GetDataDistributionResponse) ProtoMessage() {}
 
 func (x *GetDataDistributionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[44]
+	mi := &file_query_coord_proto_msgTypes[46]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4247,7 +4381,7 @@ func (x *GetDataDistributionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDataDistributionResponse.ProtoReflect.Descriptor instead.
 func (*GetDataDistributionResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{44}
+	return file_query_coord_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetDataDistributionResponse) GetStatus() *commonpb.Status {
@@ -4325,7 +4459,7 @@ type LeaderView struct {
 func (x *LeaderView) Reset() {
 	*x = LeaderView{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[45]
+		mi := &file_query_coord_proto_msgTypes[47]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4338,7 +4472,7 @@ func (x *LeaderView) String() string {
 func (*LeaderView) ProtoMessage() {}
 
 func (x *LeaderView) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[45]
+	mi := &file_query_coord_proto_msgTypes[47]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4351,7 +4485,7 @@ func (x *LeaderView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaderView.ProtoReflect.Descriptor instead.
 func (*LeaderView) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{45}
+	return file_query_coord_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *LeaderView) GetCollection() int64 {
@@ -4428,7 +4562,7 @@ type LeaderViewStatus struct {
 func (x *LeaderViewStatus) Reset() {
 	*x = LeaderViewStatus{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[46]
+		mi := &file_query_coord_proto_msgTypes[48]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4441,7 +4575,7 @@ func (x *LeaderViewStatus) String() string {
 func (*LeaderViewStatus) ProtoMessage() {}
 
 func (x *LeaderViewStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[46]
+	mi := &file_query_coord_proto_msgTypes[48]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4454,7 +4588,7 @@ func (x *LeaderViewStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaderViewStatus.ProtoReflect.Descriptor instead.
 func (*LeaderViewStatus) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{46}
+	return file_query_coord_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *LeaderViewStatus) GetServiceable() bool {
@@ -4476,7 +4610,7 @@ type SegmentDist struct {
 func (x *SegmentDist) Reset() {
 	*x = SegmentDist{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[47]
+		mi := &file_query_coord_proto_msgTypes[49]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4489,7 +4623,7 @@ func (x *SegmentDist) String() string {
 func (*SegmentDist) ProtoMessage() {}
 
 func (x *SegmentDist) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[47]
+	mi := &file_query_coord_proto_msgTypes[49]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4502,7 +4636,7 @@ func (x *SegmentDist) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentDist.ProtoReflect.Descriptor instead.
 func (*SegmentDist) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{47}
+	return file_query_coord_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *SegmentDist) GetNodeID() int64 {
@@ -4540,7 +4674,7 @@ type SegmentVersionInfo struct {
 func (x *SegmentVersionInfo) Reset() {
 	*x = SegmentVersionInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[48]
+		mi := &file_query_coord_proto_msgTypes[50]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4553,7 +4687,7 @@ func (x *SegmentVersionInfo) String() string {
 func (*SegmentVersionInfo) ProtoMessage() {}
 
 func (x *SegmentVersionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[48]
+	mi := &file_query_coord_proto_msgTypes[50]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4566,7 +4700,7 @@ func (x *SegmentVersionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentVersionInfo.ProtoReflect.Descriptor instead.
 func (*SegmentVersionInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{48}
+	return file_query_coord_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *SegmentVersionInfo) GetID() int64 {
@@ -4659,7 +4793,7 @@ type ChannelVersionInfo struct {
 func (x *ChannelVersionInfo) Reset() {
 	*x = ChannelVersionInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[49]
+		mi := &file_query_coord_proto_msgTypes[51]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4672,7 +4806,7 @@ func (x *ChannelVersionInfo) String() string {
 func (*ChannelVersionInfo) ProtoMessage() {}
 
 func (x *ChannelVersionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[49]
+	mi := &file_query_coord_proto_msgTypes[51]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4685,7 +4819,7 @@ func (x *ChannelVersionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChannelVersionInfo.ProtoReflect.Descriptor instead.
 func (*ChannelVersionInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{49}
+	return file_query_coord_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ChannelVersionInfo) GetChannel() string {
@@ -4729,7 +4863,7 @@ type CollectionLoadInfo struct {
 func (x *CollectionLoadInfo) Reset() {
 	*x = CollectionLoadInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[50]
+		mi := &file_query_coord_proto_msgTypes[52]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4742,7 +4876,7 @@ func (x *CollectionLoadInfo) String() string {
 func (*CollectionLoadInfo) ProtoMessage() {}
 
 func (x *CollectionLoadInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[50]
+	mi := &file_query_coord_proto_msgTypes[52]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4755,7 +4889,7 @@ func (x *CollectionLoadInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionLoadInfo.ProtoReflect.Descriptor instead.
 func (*CollectionLoadInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{50}
+	return file_query_coord_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *CollectionLoadInfo) GetCollectionID() int64 {
@@ -4844,7 +4978,7 @@ type PartitionLoadInfo struct {
 func (x *PartitionLoadInfo) Reset() {
 	*x = PartitionLoadInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[51]
+		mi := &file_query_coord_proto_msgTypes[53]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4857,7 +4991,7 @@ func (x *PartitionLoadInfo) String() string {
 func (*PartitionLoadInfo) ProtoMessage() {}
 
 func (x *PartitionLoadInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[51]
+	mi := &file_query_coord_proto_msgTypes[53]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4870,7 +5004,7 @@ func (x *PartitionLoadInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionLoadInfo.ProtoReflect.Descriptor instead.
 func (*PartitionLoadInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{51}
+	return file_query_coord_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *PartitionLoadInfo) GetCollectionID() int64 {
@@ -4926,7 +5060,7 @@ type ChannelNodeInfo struct {
 func (x *ChannelNodeInfo) Reset() {
 	*x = ChannelNodeInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[52]
+		mi := &file_query_coord_proto_msgTypes[54]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4939,7 +5073,7 @@ func (x *ChannelNodeInfo) String() string {
 func (*ChannelNodeInfo) ProtoMessage() {}
 
 func (x *ChannelNodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[52]
+	mi := &file_query_coord_proto_msgTypes[54]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4952,7 +5086,7 @@ func (x *ChannelNodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChannelNodeInfo.ProtoReflect.Descriptor instead.
 func (*ChannelNodeInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{52}
+	return file_query_coord_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ChannelNodeInfo) GetRwNodes() []int64 {
@@ -4985,7 +5119,7 @@ type Replica struct {
 func (x *Replica) Reset() {
 	*x = Replica{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[53]
+		mi := &file_query_coord_proto_msgTypes[55]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -4998,7 +5132,7 @@ func (x *Replica) String() string {
 func (*Replica) ProtoMessage() {}
 
 func (x *Replica) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[53]
+	mi := &file_query_coord_proto_msgTypes[55]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5011,7 +5145,7 @@ func (x *Replica) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Replica.ProtoReflect.Descriptor instead.
 func (*Replica) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{53}
+	return file_query_coord_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *Replica) GetID() int64 {
@@ -5094,7 +5228,7 @@ type SyncAction struct {
 func (x *SyncAction) Reset() {
 	*x = SyncAction{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[54]
+		mi := &file_query_coord_proto_msgTypes[56]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5107,7 +5241,7 @@ func (x *SyncAction) String() string {
 func (*SyncAction) ProtoMessage() {}
 
 func (x *SyncAction) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[54]
+	mi := &file_query_coord_proto_msgTypes[56]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5120,7 +5254,7 @@ func (x *SyncAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncAction.ProtoReflect.Descriptor instead.
 func (*SyncAction) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{54}
+	return file_query_coord_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *SyncAction) GetType() SyncType {
@@ -5240,7 +5374,7 @@ type SyncDistributionRequest struct {
 func (x *SyncDistributionRequest) Reset() {
 	*x = SyncDistributionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[55]
+		mi := &file_query_coord_proto_msgTypes[57]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5253,7 +5387,7 @@ func (x *SyncDistributionRequest) String() string {
 func (*SyncDistributionRequest) ProtoMessage() {}
 
 func (x *SyncDistributionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[55]
+	mi := &file_query_coord_proto_msgTypes[57]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5266,7 +5400,7 @@ func (x *SyncDistributionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncDistributionRequest.ProtoReflect.Descriptor instead.
 func (*SyncDistributionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{55}
+	return file_query_coord_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *SyncDistributionRequest) GetBase() *commonpb.MsgBase {
@@ -5347,7 +5481,7 @@ type ResourceGroup struct {
 func (x *ResourceGroup) Reset() {
 	*x = ResourceGroup{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[56]
+		mi := &file_query_coord_proto_msgTypes[58]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5360,7 +5494,7 @@ func (x *ResourceGroup) String() string {
 func (*ResourceGroup) ProtoMessage() {}
 
 func (x *ResourceGroup) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[56]
+	mi := &file_query_coord_proto_msgTypes[58]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5373,7 +5507,7 @@ func (x *ResourceGroup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceGroup.ProtoReflect.Descriptor instead.
 func (*ResourceGroup) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{56}
+	return file_query_coord_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *ResourceGroup) GetName() string {
@@ -5421,7 +5555,7 @@ type TransferReplicaRequest struct {
 func (x *TransferReplicaRequest) Reset() {
 	*x = TransferReplicaRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[57]
+		mi := &file_query_coord_proto_msgTypes[59]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5434,7 +5568,7 @@ func (x *TransferReplicaRequest) String() string {
 func (*TransferReplicaRequest) ProtoMessage() {}
 
 func (x *TransferReplicaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[57]
+	mi := &file_query_coord_proto_msgTypes[59]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5447,7 +5581,7 @@ func (x *TransferReplicaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferReplicaRequest.ProtoReflect.Descriptor instead.
 func (*TransferReplicaRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{57}
+	return file_query_coord_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *TransferReplicaRequest) GetBase() *commonpb.MsgBase {
@@ -5497,7 +5631,7 @@ type DescribeResourceGroupRequest struct {
 func (x *DescribeResourceGroupRequest) Reset() {
 	*x = DescribeResourceGroupRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[58]
+		mi := &file_query_coord_proto_msgTypes[60]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5510,7 +5644,7 @@ func (x *DescribeResourceGroupRequest) String() string {
 func (*DescribeResourceGroupRequest) ProtoMessage() {}
 
 func (x *DescribeResourceGroupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[58]
+	mi := &file_query_coord_proto_msgTypes[60]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5523,7 +5657,7 @@ func (x *DescribeResourceGroupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DescribeResourceGroupRequest.ProtoReflect.Descriptor instead.
 func (*DescribeResourceGroupRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{58}
+	return file_query_coord_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *DescribeResourceGroupRequest) GetBase() *commonpb.MsgBase {
@@ -5552,7 +5686,7 @@ type DescribeResourceGroupResponse struct {
 func (x *DescribeResourceGroupResponse) Reset() {
 	*x = DescribeResourceGroupResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[59]
+		mi := &file_query_coord_proto_msgTypes[61]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5565,7 +5699,7 @@ func (x *DescribeResourceGroupResponse) String() string {
 func (*DescribeResourceGroupResponse) ProtoMessage() {}
 
 func (x *DescribeResourceGroupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[59]
+	mi := &file_query_coord_proto_msgTypes[61]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5578,7 +5712,7 @@ func (x *DescribeResourceGroupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DescribeResourceGroupResponse.ProtoReflect.Descriptor instead.
 func (*DescribeResourceGroupResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{59}
+	return file_query_coord_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *DescribeResourceGroupResponse) GetStatus() *commonpb.Status {
@@ -5618,7 +5752,7 @@ type ResourceGroupInfo struct {
 func (x *ResourceGroupInfo) Reset() {
 	*x = ResourceGroupInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[60]
+		mi := &file_query_coord_proto_msgTypes[62]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5631,7 +5765,7 @@ func (x *ResourceGroupInfo) String() string {
 func (*ResourceGroupInfo) ProtoMessage() {}
 
 func (x *ResourceGroupInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[60]
+	mi := &file_query_coord_proto_msgTypes[62]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5644,7 +5778,7 @@ func (x *ResourceGroupInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceGroupInfo.ProtoReflect.Descriptor instead.
 func (*ResourceGroupInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{60}
+	return file_query_coord_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ResourceGroupInfo) GetName() string {
@@ -5723,7 +5857,7 @@ type DeleteRequest struct {
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[61]
+		mi := &file_query_coord_proto_msgTypes[63]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5736,7 +5870,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[61]
+	mi := &file_query_coord_proto_msgTypes[63]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5749,7 +5883,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{61}
+	return file_query_coord_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *DeleteRequest) GetBase() *commonpb.MsgBase {
@@ -5833,7 +5967,7 @@ type DeleteBatchRequest struct {
 func (x *DeleteBatchRequest) Reset() {
 	*x = DeleteBatchRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[62]
+		mi := &file_query_coord_proto_msgTypes[64]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5846,7 +5980,7 @@ func (x *DeleteBatchRequest) String() string {
 func (*DeleteBatchRequest) ProtoMessage() {}
 
 func (x *DeleteBatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[62]
+	mi := &file_query_coord_proto_msgTypes[64]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5859,7 +5993,7 @@ func (x *DeleteBatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBatchRequest.ProtoReflect.Descriptor instead.
 func (*DeleteBatchRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{62}
+	return file_query_coord_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *DeleteBatchRequest) GetBase() *commonpb.MsgBase {
@@ -5933,7 +6067,7 @@ type DeleteBatchResponse struct {
 func (x *DeleteBatchResponse) Reset() {
 	*x = DeleteBatchResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[63]
+		mi := &file_query_coord_proto_msgTypes[65]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -5946,7 +6080,7 @@ func (x *DeleteBatchResponse) String() string {
 func (*DeleteBatchResponse) ProtoMessage() {}
 
 func (x *DeleteBatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[63]
+	mi := &file_query_coord_proto_msgTypes[65]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5959,7 +6093,7 @@ func (x *DeleteBatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteBatchResponse.ProtoReflect.Descriptor instead.
 func (*DeleteBatchResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{63}
+	return file_query_coord_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *DeleteBatchResponse) GetStatus() *commonpb.Status {
@@ -5995,7 +6129,7 @@ type ActivateCheckerRequest struct {
 func (x *ActivateCheckerRequest) Reset() {
 	*x = ActivateCheckerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[64]
+		mi := &file_query_coord_proto_msgTypes[66]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6008,7 +6142,7 @@ func (x *ActivateCheckerRequest) String() string {
 func (*ActivateCheckerRequest) ProtoMessage() {}
 
 func (x *ActivateCheckerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[64]
+	mi := &file_query_coord_proto_msgTypes[66]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6021,7 +6155,7 @@ func (x *ActivateCheckerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivateCheckerRequest.ProtoReflect.Descriptor instead.
 func (*ActivateCheckerRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{64}
+	return file_query_coord_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *ActivateCheckerRequest) GetBase() *commonpb.MsgBase {
@@ -6050,7 +6184,7 @@ type DeactivateCheckerRequest struct {
 func (x *DeactivateCheckerRequest) Reset() {
 	*x = DeactivateCheckerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[65]
+		mi := &file_query_coord_proto_msgTypes[67]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6063,7 +6197,7 @@ func (x *DeactivateCheckerRequest) String() string {
 func (*DeactivateCheckerRequest) ProtoMessage() {}
 
 func (x *DeactivateCheckerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[65]
+	mi := &file_query_coord_proto_msgTypes[67]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6076,7 +6210,7 @@ func (x *DeactivateCheckerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeactivateCheckerRequest.ProtoReflect.Descriptor instead.
 func (*DeactivateCheckerRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{65}
+	return file_query_coord_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *DeactivateCheckerRequest) GetBase() *commonpb.MsgBase {
@@ -6105,7 +6239,7 @@ type ListCheckersRequest struct {
 func (x *ListCheckersRequest) Reset() {
 	*x = ListCheckersRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[66]
+		mi := &file_query_coord_proto_msgTypes[68]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6118,7 +6252,7 @@ func (x *ListCheckersRequest) String() string {
 func (*ListCheckersRequest) ProtoMessage() {}
 
 func (x *ListCheckersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[66]
+	mi := &file_query_coord_proto_msgTypes[68]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6131,7 +6265,7 @@ func (x *ListCheckersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCheckersRequest.ProtoReflect.Descriptor instead.
 func (*ListCheckersRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{66}
+	return file_query_coord_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ListCheckersRequest) GetBase() *commonpb.MsgBase {
@@ -6160,7 +6294,7 @@ type ListCheckersResponse struct {
 func (x *ListCheckersResponse) Reset() {
 	*x = ListCheckersResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[67]
+		mi := &file_query_coord_proto_msgTypes[69]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6173,7 +6307,7 @@ func (x *ListCheckersResponse) String() string {
 func (*ListCheckersResponse) ProtoMessage() {}
 
 func (x *ListCheckersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[67]
+	mi := &file_query_coord_proto_msgTypes[69]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6186,7 +6320,7 @@ func (x *ListCheckersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCheckersResponse.ProtoReflect.Descriptor instead.
 func (*ListCheckersResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{67}
+	return file_query_coord_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *ListCheckersResponse) GetStatus() *commonpb.Status {
@@ -6217,7 +6351,7 @@ type CheckerInfo struct {
 func (x *CheckerInfo) Reset() {
 	*x = CheckerInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[68]
+		mi := &file_query_coord_proto_msgTypes[70]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6230,7 +6364,7 @@ func (x *CheckerInfo) String() string {
 func (*CheckerInfo) ProtoMessage() {}
 
 func (x *CheckerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[68]
+	mi := &file_query_coord_proto_msgTypes[70]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6243,7 +6377,7 @@ func (x *CheckerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckerInfo.ProtoReflect.Descriptor instead.
 func (*CheckerInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{68}
+	return file_query_coord_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *CheckerInfo) GetId() int32 {
@@ -6287,7 +6421,7 @@ type SegmentTarget struct {
 func (x *SegmentTarget) Reset() {
 	*x = SegmentTarget{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[69]
+		mi := &file_query_coord_proto_msgTypes[71]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6300,7 +6434,7 @@ func (x *SegmentTarget) String() string {
 func (*SegmentTarget) ProtoMessage() {}
 
 func (x *SegmentTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[69]
+	mi := &file_query_coord_proto_msgTypes[71]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6313,7 +6447,7 @@ func (x *SegmentTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentTarget.ProtoReflect.Descriptor instead.
 func (*SegmentTarget) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{69}
+	return file_query_coord_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *SegmentTarget) GetID() int64 {
@@ -6349,7 +6483,7 @@ type PartitionTarget struct {
 func (x *PartitionTarget) Reset() {
 	*x = PartitionTarget{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[70]
+		mi := &file_query_coord_proto_msgTypes[72]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6362,7 +6496,7 @@ func (x *PartitionTarget) String() string {
 func (*PartitionTarget) ProtoMessage() {}
 
 func (x *PartitionTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[70]
+	mi := &file_query_coord_proto_msgTypes[72]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6375,7 +6509,7 @@ func (x *PartitionTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionTarget.ProtoReflect.Descriptor instead.
 func (*PartitionTarget) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{70}
+	return file_query_coord_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *PartitionTarget) GetPartitionID() int64 {
@@ -6408,7 +6542,7 @@ type ChannelTarget struct {
 func (x *ChannelTarget) Reset() {
 	*x = ChannelTarget{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[71]
+		mi := &file_query_coord_proto_msgTypes[73]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6421,7 +6555,7 @@ func (x *ChannelTarget) String() string {
 func (*ChannelTarget) ProtoMessage() {}
 
 func (x *ChannelTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[71]
+	mi := &file_query_coord_proto_msgTypes[73]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6434,7 +6568,7 @@ func (x *ChannelTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChannelTarget.ProtoReflect.Descriptor instead.
 func (*ChannelTarget) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{71}
+	return file_query_coord_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *ChannelTarget) GetChannelName() string {
@@ -6492,7 +6626,7 @@ type CollectionTarget struct {
 func (x *CollectionTarget) Reset() {
 	*x = CollectionTarget{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[72]
+		mi := &file_query_coord_proto_msgTypes[74]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6505,7 +6639,7 @@ func (x *CollectionTarget) String() string {
 func (*CollectionTarget) ProtoMessage() {}
 
 func (x *CollectionTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[72]
+	mi := &file_query_coord_proto_msgTypes[74]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6518,7 +6652,7 @@ func (x *CollectionTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectionTarget.ProtoReflect.Descriptor instead.
 func (*CollectionTarget) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{72}
+	return file_query_coord_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *CollectionTarget) GetCollectionID() int64 {
@@ -6555,7 +6689,7 @@ type NodeInfo struct {
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[73]
+		mi := &file_query_coord_proto_msgTypes[75]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6568,7 +6702,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[73]
+	mi := &file_query_coord_proto_msgTypes[75]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6581,7 +6715,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{73}
+	return file_query_coord_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *NodeInfo) GetID() int64 {
@@ -6616,7 +6750,7 @@ type ListQueryNodeRequest struct {
 func (x *ListQueryNodeRequest) Reset() {
 	*x = ListQueryNodeRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[74]
+		mi := &file_query_coord_proto_msgTypes[76]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6629,7 +6763,7 @@ func (x *ListQueryNodeRequest) String() string {
 func (*ListQueryNodeRequest) ProtoMessage() {}
 
 func (x *ListQueryNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[74]
+	mi := &file_query_coord_proto_msgTypes[76]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6642,7 +6776,7 @@ func (x *ListQueryNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListQueryNodeRequest.ProtoReflect.Descriptor instead.
 func (*ListQueryNodeRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{74}
+	return file_query_coord_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *ListQueryNodeRequest) GetBase() *commonpb.MsgBase {
@@ -6664,7 +6798,7 @@ type ListQueryNodeResponse struct {
 func (x *ListQueryNodeResponse) Reset() {
 	*x = ListQueryNodeResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[75]
+		mi := &file_query_coord_proto_msgTypes[77]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6677,7 +6811,7 @@ func (x *ListQueryNodeResponse) String() string {
 func (*ListQueryNodeResponse) ProtoMessage() {}
 
 func (x *ListQueryNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[75]
+	mi := &file_query_coord_proto_msgTypes[77]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6690,7 +6824,7 @@ func (x *ListQueryNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListQueryNodeResponse.ProtoReflect.Descriptor instead.
 func (*ListQueryNodeResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{75}
+	return file_query_coord_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ListQueryNodeResponse) GetStatus() *commonpb.Status {
@@ -6719,7 +6853,7 @@ type GetQueryNodeDistributionRequest struct {
 func (x *GetQueryNodeDistributionRequest) Reset() {
 	*x = GetQueryNodeDistributionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[76]
+		mi := &file_query_coord_proto_msgTypes[78]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6732,7 +6866,7 @@ func (x *GetQueryNodeDistributionRequest) String() string {
 func (*GetQueryNodeDistributionRequest) ProtoMessage() {}
 
 func (x *GetQueryNodeDistributionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[76]
+	mi := &file_query_coord_proto_msgTypes[78]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6745,7 +6879,7 @@ func (x *GetQueryNodeDistributionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetQueryNodeDistributionRequest.ProtoReflect.Descriptor instead.
 func (*GetQueryNodeDistributionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{76}
+	return file_query_coord_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *GetQueryNodeDistributionRequest) GetBase() *commonpb.MsgBase {
@@ -6776,7 +6910,7 @@ type GetQueryNodeDistributionResponse struct {
 func (x *GetQueryNodeDistributionResponse) Reset() {
 	*x = GetQueryNodeDistributionResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[77]
+		mi := &file_query_coord_proto_msgTypes[79]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6789,7 +6923,7 @@ func (x *GetQueryNodeDistributionResponse) String() string {
 func (*GetQueryNodeDistributionResponse) ProtoMessage() {}
 
 func (x *GetQueryNodeDistributionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[77]
+	mi := &file_query_coord_proto_msgTypes[79]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6802,7 +6936,7 @@ func (x *GetQueryNodeDistributionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetQueryNodeDistributionResponse.ProtoReflect.Descriptor instead.
 func (*GetQueryNodeDistributionResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{77}
+	return file_query_coord_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *GetQueryNodeDistributionResponse) GetStatus() *commonpb.Status {
@@ -6844,7 +6978,7 @@ type SuspendBalanceRequest struct {
 func (x *SuspendBalanceRequest) Reset() {
 	*x = SuspendBalanceRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[78]
+		mi := &file_query_coord_proto_msgTypes[80]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6857,7 +6991,7 @@ func (x *SuspendBalanceRequest) String() string {
 func (*SuspendBalanceRequest) ProtoMessage() {}
 
 func (x *SuspendBalanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[78]
+	mi := &file_query_coord_proto_msgTypes[80]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6870,7 +7004,7 @@ func (x *SuspendBalanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuspendBalanceRequest.ProtoReflect.Descriptor instead.
 func (*SuspendBalanceRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{78}
+	return file_query_coord_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *SuspendBalanceRequest) GetBase() *commonpb.MsgBase {
@@ -6891,7 +7025,7 @@ type ResumeBalanceRequest struct {
 func (x *ResumeBalanceRequest) Reset() {
 	*x = ResumeBalanceRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[79]
+		mi := &file_query_coord_proto_msgTypes[81]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6904,7 +7038,7 @@ func (x *ResumeBalanceRequest) String() string {
 func (*ResumeBalanceRequest) ProtoMessage() {}
 
 func (x *ResumeBalanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[79]
+	mi := &file_query_coord_proto_msgTypes[81]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6917,7 +7051,7 @@ func (x *ResumeBalanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeBalanceRequest.ProtoReflect.Descriptor instead.
 func (*ResumeBalanceRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{79}
+	return file_query_coord_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *ResumeBalanceRequest) GetBase() *commonpb.MsgBase {
@@ -6938,7 +7072,7 @@ type CheckBalanceStatusRequest struct {
 func (x *CheckBalanceStatusRequest) Reset() {
 	*x = CheckBalanceStatusRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[80]
+		mi := &file_query_coord_proto_msgTypes[82]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6951,7 +7085,7 @@ func (x *CheckBalanceStatusRequest) String() string {
 func (*CheckBalanceStatusRequest) ProtoMessage() {}
 
 func (x *CheckBalanceStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[80]
+	mi := &file_query_coord_proto_msgTypes[82]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6964,7 +7098,7 @@ func (x *CheckBalanceStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckBalanceStatusRequest.ProtoReflect.Descriptor instead.
 func (*CheckBalanceStatusRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{80}
+	return file_query_coord_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *CheckBalanceStatusRequest) GetBase() *commonpb.MsgBase {
@@ -6986,7 +7120,7 @@ type CheckBalanceStatusResponse struct {
 func (x *CheckBalanceStatusResponse) Reset() {
 	*x = CheckBalanceStatusResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[81]
+		mi := &file_query_coord_proto_msgTypes[83]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -6999,7 +7133,7 @@ func (x *CheckBalanceStatusResponse) String() string {
 func (*CheckBalanceStatusResponse) ProtoMessage() {}
 
 func (x *CheckBalanceStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[81]
+	mi := &file_query_coord_proto_msgTypes[83]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7012,7 +7146,7 @@ func (x *CheckBalanceStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckBalanceStatusResponse.ProtoReflect.Descriptor instead.
 func (*CheckBalanceStatusResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{81}
+	return file_query_coord_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *CheckBalanceStatusResponse) GetStatus() *commonpb.Status {
@@ -7041,7 +7175,7 @@ type SuspendNodeRequest struct {
 func (x *SuspendNodeRequest) Reset() {
 	*x = SuspendNodeRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[82]
+		mi := &file_query_coord_proto_msgTypes[84]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7054,7 +7188,7 @@ func (x *SuspendNodeRequest) String() string {
 func (*SuspendNodeRequest) ProtoMessage() {}
 
 func (x *SuspendNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[82]
+	mi := &file_query_coord_proto_msgTypes[84]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7067,7 +7201,7 @@ func (x *SuspendNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuspendNodeRequest.ProtoReflect.Descriptor instead.
 func (*SuspendNodeRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{82}
+	return file_query_coord_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *SuspendNodeRequest) GetBase() *commonpb.MsgBase {
@@ -7096,7 +7230,7 @@ type ResumeNodeRequest struct {
 func (x *ResumeNodeRequest) Reset() {
 	*x = ResumeNodeRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[83]
+		mi := &file_query_coord_proto_msgTypes[85]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7109,7 +7243,7 @@ func (x *ResumeNodeRequest) String() string {
 func (*ResumeNodeRequest) ProtoMessage() {}
 
 func (x *ResumeNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[83]
+	mi := &file_query_coord_proto_msgTypes[85]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7122,7 +7256,7 @@ func (x *ResumeNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeNodeRequest.ProtoReflect.Descriptor instead.
 func (*ResumeNodeRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{83}
+	return file_query_coord_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ResumeNodeRequest) GetBase() *commonpb.MsgBase {
@@ -7156,7 +7290,7 @@ type TransferSegmentRequest struct {
 func (x *TransferSegmentRequest) Reset() {
 	*x = TransferSegmentRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[84]
+		mi := &file_query_coord_proto_msgTypes[86]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7169,7 +7303,7 @@ func (x *TransferSegmentRequest) String() string {
 func (*TransferSegmentRequest) ProtoMessage() {}
 
 func (x *TransferSegmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[84]
+	mi := &file_query_coord_proto_msgTypes[86]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7182,7 +7316,7 @@ func (x *TransferSegmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferSegmentRequest.ProtoReflect.Descriptor instead.
 func (*TransferSegmentRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{84}
+	return file_query_coord_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *TransferSegmentRequest) GetBase() *commonpb.MsgBase {
@@ -7251,7 +7385,7 @@ type TransferChannelRequest struct {
 func (x *TransferChannelRequest) Reset() {
 	*x = TransferChannelRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[85]
+		mi := &file_query_coord_proto_msgTypes[87]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7264,7 +7398,7 @@ func (x *TransferChannelRequest) String() string {
 func (*TransferChannelRequest) ProtoMessage() {}
 
 func (x *TransferChannelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[85]
+	mi := &file_query_coord_proto_msgTypes[87]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7277,7 +7411,7 @@ func (x *TransferChannelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransferChannelRequest.ProtoReflect.Descriptor instead.
 func (*TransferChannelRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{85}
+	return file_query_coord_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *TransferChannelRequest) GetBase() *commonpb.MsgBase {
@@ -7342,7 +7476,7 @@ type CheckQueryNodeDistributionRequest struct {
 func (x *CheckQueryNodeDistributionRequest) Reset() {
 	*x = CheckQueryNodeDistributionRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[86]
+		mi := &file_query_coord_proto_msgTypes[88]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7355,7 +7489,7 @@ func (x *CheckQueryNodeDistributionRequest) String() string {
 func (*CheckQueryNodeDistributionRequest) ProtoMessage() {}
 
 func (x *CheckQueryNodeDistributionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[86]
+	mi := &file_query_coord_proto_msgTypes[88]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7368,7 +7502,7 @@ func (x *CheckQueryNodeDistributionRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use CheckQueryNodeDistributionRequest.ProtoReflect.Descriptor instead.
 func (*CheckQueryNodeDistributionRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{86}
+	return file_query_coord_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *CheckQueryNodeDistributionRequest) GetBase() *commonpb.MsgBase {
@@ -7407,7 +7541,7 @@ type UpdateLoadConfigRequest struct {
 func (x *UpdateLoadConfigRequest) Reset() {
 	*x = UpdateLoadConfigRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[87]
+		mi := &file_query_coord_proto_msgTypes[89]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7420,7 +7554,7 @@ func (x *UpdateLoadConfigRequest) String() string {
 func (*UpdateLoadConfigRequest) ProtoMessage() {}
 
 func (x *UpdateLoadConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[87]
+	mi := &file_query_coord_proto_msgTypes[89]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7433,7 +7567,7 @@ func (x *UpdateLoadConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLoadConfigRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLoadConfigRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{87}
+	return file_query_coord_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *UpdateLoadConfigRequest) GetBase() *commonpb.MsgBase {
@@ -7485,7 +7619,7 @@ type UpdateSchemaRequest struct {
 func (x *UpdateSchemaRequest) Reset() {
 	*x = UpdateSchemaRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[88]
+		mi := &file_query_coord_proto_msgTypes[90]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7498,7 +7632,7 @@ func (x *UpdateSchemaRequest) String() string {
 func (*UpdateSchemaRequest) ProtoMessage() {}
 
 func (x *UpdateSchemaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[88]
+	mi := &file_query_coord_proto_msgTypes[90]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7511,7 +7645,7 @@ func (x *UpdateSchemaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSchemaRequest.ProtoReflect.Descriptor instead.
 func (*UpdateSchemaRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{88}
+	return file_query_coord_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *UpdateSchemaRequest) GetBase() *commonpb.MsgBase {
@@ -7560,7 +7694,7 @@ type RunAnalyzerRequest struct {
 func (x *RunAnalyzerRequest) Reset() {
 	*x = RunAnalyzerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[89]
+		mi := &file_query_coord_proto_msgTypes[91]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7573,7 +7707,7 @@ func (x *RunAnalyzerRequest) String() string {
 func (*RunAnalyzerRequest) ProtoMessage() {}
 
 func (x *RunAnalyzerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[89]
+	mi := &file_query_coord_proto_msgTypes[91]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7586,7 +7720,7 @@ func (x *RunAnalyzerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunAnalyzerRequest.ProtoReflect.Descriptor instead.
 func (*RunAnalyzerRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{89}
+	return file_query_coord_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *RunAnalyzerRequest) GetBase() *commonpb.MsgBase {
@@ -7658,7 +7792,7 @@ type AnalyzerInfo struct {
 func (x *AnalyzerInfo) Reset() {
 	*x = AnalyzerInfo{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[90]
+		mi := &file_query_coord_proto_msgTypes[92]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7671,7 +7805,7 @@ func (x *AnalyzerInfo) String() string {
 func (*AnalyzerInfo) ProtoMessage() {}
 
 func (x *AnalyzerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[90]
+	mi := &file_query_coord_proto_msgTypes[92]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7684,7 +7818,7 @@ func (x *AnalyzerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalyzerInfo.ProtoReflect.Descriptor instead.
 func (*AnalyzerInfo) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{90}
+	return file_query_coord_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *AnalyzerInfo) GetParams() string {
@@ -7720,7 +7854,7 @@ type ValidateAnalyzerRequest struct {
 func (x *ValidateAnalyzerRequest) Reset() {
 	*x = ValidateAnalyzerRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[91]
+		mi := &file_query_coord_proto_msgTypes[93]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7733,7 +7867,7 @@ func (x *ValidateAnalyzerRequest) String() string {
 func (*ValidateAnalyzerRequest) ProtoMessage() {}
 
 func (x *ValidateAnalyzerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[91]
+	mi := &file_query_coord_proto_msgTypes[93]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7746,7 +7880,7 @@ func (x *ValidateAnalyzerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateAnalyzerRequest.ProtoReflect.Descriptor instead.
 func (*ValidateAnalyzerRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{91}
+	return file_query_coord_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ValidateAnalyzerRequest) GetBase() *commonpb.MsgBase {
@@ -7776,7 +7910,7 @@ type HighlightOptions struct {
 func (x *HighlightOptions) Reset() {
 	*x = HighlightOptions{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[92]
+		mi := &file_query_coord_proto_msgTypes[94]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7789,7 +7923,7 @@ func (x *HighlightOptions) String() string {
 func (*HighlightOptions) ProtoMessage() {}
 
 func (x *HighlightOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[92]
+	mi := &file_query_coord_proto_msgTypes[94]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7802,7 +7936,7 @@ func (x *HighlightOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HighlightOptions.ProtoReflect.Descriptor instead.
 func (*HighlightOptions) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{92}
+	return file_query_coord_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *HighlightOptions) GetFragmentSize() int64 {
@@ -7845,7 +7979,7 @@ type HighlightTask struct {
 func (x *HighlightTask) Reset() {
 	*x = HighlightTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[93]
+		mi := &file_query_coord_proto_msgTypes[95]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7858,7 +7992,7 @@ func (x *HighlightTask) String() string {
 func (*HighlightTask) ProtoMessage() {}
 
 func (x *HighlightTask) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[93]
+	mi := &file_query_coord_proto_msgTypes[95]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7871,7 +8005,7 @@ func (x *HighlightTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HighlightTask.ProtoReflect.Descriptor instead.
 func (*HighlightTask) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{93}
+	return file_query_coord_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *HighlightTask) GetFieldName() string {
@@ -7937,7 +8071,7 @@ type GetHighlightRequest struct {
 func (x *GetHighlightRequest) Reset() {
 	*x = GetHighlightRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[94]
+		mi := &file_query_coord_proto_msgTypes[96]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -7950,7 +8084,7 @@ func (x *GetHighlightRequest) String() string {
 func (*GetHighlightRequest) ProtoMessage() {}
 
 func (x *GetHighlightRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[94]
+	mi := &file_query_coord_proto_msgTypes[96]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7963,7 +8097,7 @@ func (x *GetHighlightRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHighlightRequest.ProtoReflect.Descriptor instead.
 func (*GetHighlightRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{94}
+	return file_query_coord_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *GetHighlightRequest) GetBase() *commonpb.MsgBase {
@@ -8009,7 +8143,7 @@ type HighlightFragment struct {
 func (x *HighlightFragment) Reset() {
 	*x = HighlightFragment{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[95]
+		mi := &file_query_coord_proto_msgTypes[97]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8022,7 +8156,7 @@ func (x *HighlightFragment) String() string {
 func (*HighlightFragment) ProtoMessage() {}
 
 func (x *HighlightFragment) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[95]
+	mi := &file_query_coord_proto_msgTypes[97]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8035,7 +8169,7 @@ func (x *HighlightFragment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HighlightFragment.ProtoReflect.Descriptor instead.
 func (*HighlightFragment) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{95}
+	return file_query_coord_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *HighlightFragment) GetStartOffset() int64 {
@@ -8070,7 +8204,7 @@ type HighlightResult struct {
 func (x *HighlightResult) Reset() {
 	*x = HighlightResult{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[96]
+		mi := &file_query_coord_proto_msgTypes[98]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8083,7 +8217,7 @@ func (x *HighlightResult) String() string {
 func (*HighlightResult) ProtoMessage() {}
 
 func (x *HighlightResult) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[96]
+	mi := &file_query_coord_proto_msgTypes[98]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8096,7 +8230,7 @@ func (x *HighlightResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HighlightResult.ProtoReflect.Descriptor instead.
 func (*HighlightResult) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{96}
+	return file_query_coord_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *HighlightResult) GetFragments() []*HighlightFragment {
@@ -8118,7 +8252,7 @@ type GetHighlightResponse struct {
 func (x *GetHighlightResponse) Reset() {
 	*x = GetHighlightResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[97]
+		mi := &file_query_coord_proto_msgTypes[99]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8131,7 +8265,7 @@ func (x *GetHighlightResponse) String() string {
 func (*GetHighlightResponse) ProtoMessage() {}
 
 func (x *GetHighlightResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[97]
+	mi := &file_query_coord_proto_msgTypes[99]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8144,7 +8278,7 @@ func (x *GetHighlightResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHighlightResponse.ProtoReflect.Descriptor instead.
 func (*GetHighlightResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{97}
+	return file_query_coord_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *GetHighlightResponse) GetStatus() *commonpb.Status {
@@ -8172,7 +8306,7 @@ type ListLoadedSegmentsRequest struct {
 func (x *ListLoadedSegmentsRequest) Reset() {
 	*x = ListLoadedSegmentsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[98]
+		mi := &file_query_coord_proto_msgTypes[100]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8185,7 +8319,7 @@ func (x *ListLoadedSegmentsRequest) String() string {
 func (*ListLoadedSegmentsRequest) ProtoMessage() {}
 
 func (x *ListLoadedSegmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[98]
+	mi := &file_query_coord_proto_msgTypes[100]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8198,7 +8332,7 @@ func (x *ListLoadedSegmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLoadedSegmentsRequest.ProtoReflect.Descriptor instead.
 func (*ListLoadedSegmentsRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{98}
+	return file_query_coord_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *ListLoadedSegmentsRequest) GetBase() *commonpb.MsgBase {
@@ -8220,7 +8354,7 @@ type ListLoadedSegmentsResponse struct {
 func (x *ListLoadedSegmentsResponse) Reset() {
 	*x = ListLoadedSegmentsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[99]
+		mi := &file_query_coord_proto_msgTypes[101]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8233,7 +8367,7 @@ func (x *ListLoadedSegmentsResponse) String() string {
 func (*ListLoadedSegmentsResponse) ProtoMessage() {}
 
 func (x *ListLoadedSegmentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[99]
+	mi := &file_query_coord_proto_msgTypes[101]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8246,7 +8380,7 @@ func (x *ListLoadedSegmentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLoadedSegmentsResponse.ProtoReflect.Descriptor instead.
 func (*ListLoadedSegmentsResponse) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{99}
+	return file_query_coord_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *ListLoadedSegmentsResponse) GetStatus() *commonpb.Status {
@@ -8278,7 +8412,7 @@ type DropIndexRequest struct {
 func (x *DropIndexRequest) Reset() {
 	*x = DropIndexRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_query_coord_proto_msgTypes[100]
+		mi := &file_query_coord_proto_msgTypes[102]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -8291,7 +8425,7 @@ func (x *DropIndexRequest) String() string {
 func (*DropIndexRequest) ProtoMessage() {}
 
 func (x *DropIndexRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_query_coord_proto_msgTypes[100]
+	mi := &file_query_coord_proto_msgTypes[102]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8304,7 +8438,7 @@ func (x *DropIndexRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DropIndexRequest.ProtoReflect.Descriptor instead.
 func (*DropIndexRequest) Descriptor() ([]byte, []int) {
-	return file_query_coord_proto_rawDescGZIP(), []int{100}
+	return file_query_coord_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *DropIndexRequest) GetBase() *commonpb.MsgBase {
@@ -8354,7 +8488,27 @@ var file_query_coord_proto_rawDesc = []byte{
 	0x63, 0x68, 0x65, 0x6d, 0x61, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x1a, 0x09, 0x6d, 0x73, 0x67,
 	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x1a, 0x10, 0x64, 0x61, 0x74, 0x61, 0x5f, 0x63, 0x6f, 0x6f,
 	0x72, 0x64, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x1a, 0x11, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x5f,
-	0x63, 0x6f, 0x6f, 0x72, 0x64, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22, 0x84, 0x01, 0x0a, 0x16,
+	0x63, 0x6f, 0x6f, 0x72, 0x64, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22, 0xb6, 0x01, 0x0a, 0x1d,
+	0x43, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65, 0x50, 0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74,
+	0x63, 0x68, 0x53, 0x6c, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a,
+	0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61, 0x73, 0x65, 0x12,
+	0x27, 0x0a, 0x0f, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x5f, 0x70, 0x61, 0x72, 0x61,
+	0x6d, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x61, 0x6e, 0x61, 0x6c, 0x79, 0x7a,
+	0x65, 0x72, 0x50, 0x61, 0x72, 0x61, 0x6d, 0x73, 0x12, 0x1d, 0x0a, 0x0a, 0x71, 0x75, 0x65, 0x72,
+	0x79, 0x5f, 0x74, 0x65, 0x78, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x71, 0x75,
+	0x65, 0x72, 0x79, 0x54, 0x65, 0x78, 0x74, 0x12, 0x1b, 0x0a, 0x09, 0x64, 0x61, 0x74, 0x61, 0x5f,
+	0x74, 0x65, 0x78, 0x74, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x08, 0x64, 0x61, 0x74, 0x61,
+	0x54, 0x65, 0x78, 0x74, 0x22, 0x84, 0x01, 0x0a, 0x1e, 0x43, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65,
+	0x50, 0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53, 0x6c, 0x6f, 0x70, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x33, 0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75,
+	0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74,
+	0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x19, 0x0a, 0x08,
+	0x69, 0x73, 0x5f, 0x6d, 0x61, 0x74, 0x63, 0x68, 0x18, 0x02, 0x20, 0x03, 0x28, 0x08, 0x52, 0x07,
+	0x69, 0x73, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x12, 0x12, 0x0a, 0x04, 0x73, 0x6c, 0x6f, 0x70, 0x18,
+	0x03, 0x20, 0x03, 0x28, 0x03, 0x52, 0x04, 0x73, 0x6c, 0x6f, 0x70, 0x22, 0x84, 0x01, 0x0a, 0x16,
 	0x53, 0x68, 0x6f, 0x77, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01,
 	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
@@ -10030,7 +10184,7 @@ var file_query_coord_proto_rawDesc = []byte{
 	0x6e, 0x64, 0x10, 0x02, 0x12, 0x11, 0x0a, 0x0d, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x56, 0x65,
 	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x10, 0x03, 0x12, 0x18, 0x0a, 0x14, 0x55, 0x70, 0x64, 0x61, 0x74,
 	0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x73, 0x10,
-	0x04, 0x32, 0xc4, 0x1f, 0x0a, 0x0a, 0x51, 0x75, 0x65, 0x72, 0x79, 0x43, 0x6f, 0x6f, 0x72, 0x64,
+	0x04, 0x32, 0xc8, 0x20, 0x0a, 0x0a, 0x51, 0x75, 0x65, 0x72, 0x79, 0x43, 0x6f, 0x6f, 0x72, 0x64,
 	0x12, 0x70, 0x0a, 0x13, 0x53, 0x68, 0x6f, 0x77, 0x4c, 0x6f, 0x61, 0x64, 0x43, 0x6f, 0x6c, 0x6c,
 	0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
 	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x53, 0x68, 0x6f,
@@ -10282,195 +10436,212 @@ var file_query_coord_proto_rawDesc = []byte{
 	0x79, 0x2e, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a,
 	0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
 	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
-	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x32, 0x85, 0x17, 0x0a, 0x09, 0x51, 0x75, 0x65,
-	0x72, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6d,
-	0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x73, 0x12, 0x2e, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53,
-	0x74, 0x61, 0x74, 0x65, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x24, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74,
-	0x65, 0x73, 0x22, 0x00, 0x12, 0x6d, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x54,
-	0x69, 0x63, 0x6b, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x30, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e,
-	0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x69, 0x63, 0x6b, 0x43, 0x68,
-	0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x23, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
-	0x65, 0x22, 0x00, 0x12, 0x71, 0x0a, 0x14, 0x47, 0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73,
-	0x74, 0x69, 0x63, 0x73, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x32, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72,
-	0x6e, 0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63,
-	0x73, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
-	0x23, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x73, 0x70,
-	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5c, 0x0a, 0x0f, 0x57, 0x61, 0x74, 0x63, 0x68, 0x44,
-	0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x73, 0x12, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x57,
-	0x61, 0x74, 0x63, 0x68, 0x44, 0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x73, 0x52, 0x65,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x81, 0x01, 0x0a, 0x16, 0x43, 0x6f, 0x6d,
+	0x70, 0x75, 0x74, 0x65, 0x50, 0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53,
+	0x6c, 0x6f, 0x70, 0x12, 0x31, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x43, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65,
+	0x50, 0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53, 0x6c, 0x6f, 0x70, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x32, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x43, 0x6f, 0x6d, 0x70,
+	0x75, 0x74, 0x65, 0x50, 0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53, 0x6c,
+	0x6f, 0x70, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x32, 0x89, 0x18, 0x0a,
+	0x09, 0x51, 0x75, 0x65, 0x72, 0x79, 0x4e, 0x6f, 0x64, 0x65, 0x12, 0x6c, 0x0a, 0x12, 0x47, 0x65,
+	0x74, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x73,
+	0x12, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e,
+	0x65, 0x6e, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x43, 0x6f, 0x6d, 0x70, 0x6f, 0x6e, 0x65, 0x6e, 0x74,
+	0x53, 0x74, 0x61, 0x74, 0x65, 0x73, 0x22, 0x00, 0x12, 0x6d, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x54,
+	0x69, 0x6d, 0x65, 0x54, 0x69, 0x63, 0x6b, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x30,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e,
+	0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x54, 0x69,
+	0x63, 0x6b, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x23, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x71, 0x0a, 0x14, 0x47, 0x65, 0x74, 0x53, 0x74,
+	0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12,
+	0x32, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69,
+	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x69,
+	0x73, 0x74, 0x69, 0x63, 0x73, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x23, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67,
+	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5c, 0x0a, 0x0f, 0x57, 0x61,
+	0x74, 0x63, 0x68, 0x44, 0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x73, 0x12, 0x2a, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
+	0x72, 0x79, 0x2e, 0x57, 0x61, 0x74, 0x63, 0x68, 0x44, 0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65,
+	0x6c, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
+	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x5a, 0x0a, 0x0e, 0x55, 0x6e, 0x73, 0x75,
+	0x62, 0x44, 0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x29, 0x2e, 0x6d, 0x69, 0x6c,
+	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e,
+	0x55, 0x6e, 0x73, 0x75, 0x62, 0x44, 0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x52, 0x65,
 	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
 	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74,
-	0x75, 0x73, 0x22, 0x00, 0x12, 0x5a, 0x0a, 0x0e, 0x55, 0x6e, 0x73, 0x75, 0x62, 0x44, 0x6d, 0x43,
-	0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x12, 0x29, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x55, 0x6e, 0x73, 0x75,
-	0x62, 0x44, 0x6d, 0x43, 0x68, 0x61, 0x6e, 0x6e, 0x65, 0x6c, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00,
-	0x12, 0x56, 0x0a, 0x0c, 0x4c, 0x6f, 0x61, 0x64, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73,
-	0x12, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x4c, 0x6f, 0x61, 0x64, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e,
-	0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
-	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x11, 0x52, 0x65, 0x6c, 0x65,
-	0x61, 0x73, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2c, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
-	0x72, 0x79, 0x2e, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63,
-	0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
-	0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x5a, 0x0a, 0x0e, 0x4c, 0x6f,
-	0x61, 0x64, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x29, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72,
-	0x79, 0x2e, 0x4c, 0x6f, 0x61, 0x64, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74,
-	0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x11, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73,
-	0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x2c, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79,
-	0x2e, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f,
-	0x6e, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e,
-	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x5c, 0x0a, 0x0f, 0x52, 0x65, 0x6c, 0x65,
-	0x61, 0x73, 0x65, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x2a, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79,
-	0x2e, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74,
-	0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x69, 0x0a, 0x0e, 0x47, 0x65, 0x74, 0x53, 0x65, 0x67,
-	0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x29, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65,
-	0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x65, 0x67, 0x6d,
-	0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22,
-	0x00, 0x12, 0x64, 0x0a, 0x13, 0x53, 0x79, 0x6e, 0x63, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61,
-	0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x53, 0x79,
-	0x6e, 0x63, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74,
-	0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53,
-	0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x69, 0x0a, 0x0d, 0x47, 0x65, 0x74, 0x53, 0x74,
-	0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x12, 0x28, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65,
-	0x74, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x1a, 0x2c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x74,
-	0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x22, 0x00, 0x12, 0x53, 0x0a, 0x06, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x12, 0x21, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72,
-	0x79, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
-	0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69,
-	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65,
-	0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x12, 0x5b, 0x0a, 0x0e, 0x53, 0x65, 0x61, 0x72, 0x63,
-	0x68, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x53,
-	0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x24, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65,
-	0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x73, 0x75, 0x6c,
-	0x74, 0x73, 0x22, 0x00, 0x12, 0x53, 0x0a, 0x05, 0x51, 0x75, 0x65, 0x72, 0x79, 0x12, 0x20, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
-	0x72, 0x79, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
-	0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69,
-	0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65,
-	0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x12, 0x5b, 0x0a, 0x0b, 0x51, 0x75, 0x65,
-	0x72, 0x79, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x12, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x51, 0x75,
-	0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x26, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e,
-	0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c,
-	0x74, 0x73, 0x22, 0x00, 0x30, 0x01, 0x12, 0x5b, 0x0a, 0x0d, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53,
-	0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x51, 0x75, 0x65,
-	0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61,
-	0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74,
-	0x73, 0x22, 0x00, 0x12, 0x63, 0x0a, 0x13, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53, 0x74, 0x72, 0x65,
-	0x61, 0x6d, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x20, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e,
-	0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x26, 0x2e, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65,
-	0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73,
-	0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x30, 0x01, 0x12, 0x7b, 0x0a, 0x12, 0x53, 0x68, 0x6f, 0x77,
-	0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12, 0x30,
-	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e,
-	0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x68, 0x6f, 0x77, 0x43, 0x6f, 0x6e, 0x66, 0x69,
-	0x67, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x31, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x68, 0x6f, 0x77, 0x43, 0x6f, 0x6e,
-	0x66, 0x69, 0x67, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5f, 0x0a, 0x0a, 0x47, 0x65, 0x74, 0x4d, 0x65, 0x74, 0x72,
-	0x69, 0x63, 0x73, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x65, 0x74,
-	0x72, 0x69, 0x63, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
-	0x73, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x73, 0x52, 0x65, 0x73, 0x70,
-	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x78, 0x0a, 0x13, 0x47, 0x65, 0x74, 0x44, 0x61, 0x74,
-	0x61, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2e, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
-	0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69,
-	0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2f, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
-	0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69,
-	0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00,
-	0x12, 0x5e, 0x0a, 0x10, 0x53, 0x79, 0x6e, 0x63, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69, 0x62, 0x75,
-	0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x44, 0x69,
-	0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00,
-	0x12, 0x4a, 0x0a, 0x06, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x12, 0x21, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e,
-	0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e,
+	0x75, 0x73, 0x22, 0x00, 0x12, 0x56, 0x0a, 0x0c, 0x4c, 0x6f, 0x61, 0x64, 0x53, 0x65, 0x67, 0x6d,
+	0x65, 0x6e, 0x74, 0x73, 0x12, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x4c, 0x6f, 0x61, 0x64, 0x53, 0x65,
+	0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e,
 	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d,
-	0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x0b,
-	0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x61, 0x74, 0x63, 0x68, 0x12, 0x26, 0x2e, 0x6d, 0x69,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x11,
+	0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f,
+	0x6e, 0x12, 0x2c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x43, 0x6f,
+	0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63,
+	0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x5a,
+	0x0a, 0x0e, 0x4c, 0x6f, 0x61, 0x64, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73,
+	0x12, 0x29, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x4c, 0x6f, 0x61, 0x64, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74,
+	0x69, 0x6f, 0x6e, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x60, 0x0a, 0x11, 0x52, 0x65,
+	0x6c, 0x65, 0x61, 0x73, 0x65, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x12,
+	0x2c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71,
+	0x75, 0x65, 0x72, 0x79, 0x2e, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x50, 0x61, 0x72, 0x74,
+	0x69, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d,
+	0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x5c, 0x0a, 0x0f,
+	0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12,
+	0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71,
+	0x75, 0x65, 0x72, 0x79, 0x2e, 0x52, 0x65, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x53, 0x65, 0x67, 0x6d,
+	0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x69, 0x0a, 0x0e, 0x47, 0x65,
+	0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x29, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72,
+	0x79, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65, 0x74,
+	0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x64, 0x0a, 0x13, 0x53, 0x79, 0x6e, 0x63, 0x52, 0x65, 0x70,
+	0x6c, 0x69, 0x63, 0x61, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x2e, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72,
+	0x79, 0x2e, 0x53, 0x79, 0x6e, 0x63, 0x52, 0x65, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x53, 0x65, 0x67,
+	0x6d, 0x65, 0x6e, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d,
+	0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x69, 0x0a, 0x0d, 0x47,
+	0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x12, 0x28, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72,
+	0x79, 0x2e, 0x47, 0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2c, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x47,
+	0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x69, 0x73, 0x74, 0x69, 0x63, 0x73, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x53, 0x0a, 0x06, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68,
+	0x12, 0x21, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x65, 0x61, 0x72,
+	0x63, 0x68, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x12, 0x5b, 0x0a, 0x0e, 0x53,
+	0x65, 0x61, 0x72, 0x63, 0x68, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x21, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
+	0x72, 0x79, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x52,
+	0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x12, 0x53, 0x0a, 0x05, 0x51, 0x75, 0x65, 0x72,
+	0x79, 0x12, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72,
+	0x69, 0x65, 0x76, 0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x12, 0x5b, 0x0a,
+	0x0b, 0x51, 0x75, 0x65, 0x72, 0x79, 0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x12, 0x20, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72,
+	0x79, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x26,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e,
+	0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52,
+	0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x30, 0x01, 0x12, 0x5b, 0x0a, 0x0d, 0x51, 0x75,
+	0x65, 0x72, 0x79, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x20, 0x2e, 0x6d, 0x69,
 	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79,
-	0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x61, 0x74, 0x63, 0x68, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42,
-	0x61, 0x74, 0x63, 0x68, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x56,
-	0x0a, 0x0c, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61, 0x12, 0x27,
+	0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x26, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74,
+	0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76, 0x65, 0x52, 0x65,
+	0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x12, 0x63, 0x0a, 0x13, 0x51, 0x75, 0x65, 0x72, 0x79,
+	0x53, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x12, 0x20,
 	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75,
-	0x65, 0x72, 0x79, 0x2e, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x53, 0x63, 0x68, 0x65, 0x6d, 0x61,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74,
-	0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x61, 0x0a, 0x0b, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61,
-	0x6c, 0x79, 0x7a, 0x65, 0x72, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x52, 0x75, 0x6e, 0x41, 0x6e,
-	0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x28, 0x2e,
-	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c,
-	0x76, 0x75, 0x73, 0x2e, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52,
-	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x63, 0x0a, 0x0c, 0x47, 0x65, 0x74,
-	0x48, 0x69, 0x67, 0x68, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x12, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
-	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47,
-	0x65, 0x74, 0x48, 0x69, 0x67, 0x68, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x1a, 0x28, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x48, 0x69, 0x67, 0x68, 0x6c,
-	0x69, 0x67, 0x68, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x50,
-	0x0a, 0x09, 0x44, 0x72, 0x6f, 0x70, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x12, 0x24, 0x2e, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79,
-	0x2e, 0x44, 0x72, 0x6f, 0x70, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x65, 0x72, 0x79, 0x2e, 0x51, 0x75, 0x65, 0x72, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x1a, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x74, 0x72, 0x69, 0x65, 0x76,
+	0x65, 0x52, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x22, 0x00, 0x30, 0x01, 0x12, 0x7b, 0x0a, 0x12,
+	0x53, 0x68, 0x6f, 0x77, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f,
+	0x6e, 0x73, 0x12, 0x30, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x68, 0x6f, 0x77, 0x43,
+	0x6f, 0x6e, 0x66, 0x69, 0x67, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x1a, 0x31, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x53, 0x68, 0x6f,
+	0x77, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x73, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x5f, 0x0a, 0x0a, 0x47, 0x65, 0x74,
+	0x4d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x73, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65,
+	0x74, 0x4d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
+	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x73,
+	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x78, 0x0a, 0x13, 0x47, 0x65,
+	0x74, 0x44, 0x61, 0x74, 0x61, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f,
+	0x6e, 0x12, 0x2e, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x44, 0x69,
+	0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x1a, 0x2f, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x44, 0x61, 0x74, 0x61, 0x44, 0x69,
+	0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x00, 0x12, 0x5e, 0x0a, 0x10, 0x53, 0x79, 0x6e, 0x63, 0x44, 0x69, 0x73, 0x74,
+	0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x53, 0x79,
+	0x6e, 0x63, 0x44, 0x69, 0x73, 0x74, 0x72, 0x69, 0x62, 0x75, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74,
+	0x75, 0x73, 0x22, 0x00, 0x12, 0x4a, 0x0a, 0x06, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x12, 0x21,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75,
+	0x65, 0x72, 0x79, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
 	0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
 	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00,
-	0x12, 0x5e, 0x0a, 0x10, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c,
-	0x79, 0x7a, 0x65, 0x72, 0x12, 0x2b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61,
-	0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00,
-	0x42, 0x32, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f,
-	0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x71, 0x75, 0x65,
-	0x72, 0x79, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x12, 0x60, 0x0a, 0x0b, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x61, 0x74, 0x63, 0x68, 0x12,
+	0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71,
+	0x75, 0x65, 0x72, 0x79, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x42, 0x61, 0x74, 0x63, 0x68,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x44, 0x65, 0x6c,
+	0x65, 0x74, 0x65, 0x42, 0x61, 0x74, 0x63, 0x68, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x22, 0x00, 0x12, 0x56, 0x0a, 0x0c, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x53, 0x63, 0x68, 0x65,
+	0x6d, 0x61, 0x12, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x53, 0x63,
+	0x68, 0x65, 0x6d, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x22, 0x00, 0x12, 0x61, 0x0a, 0x0b, 0x52, 0x75,
+	0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x12, 0x26, 0x2e, 0x6d, 0x69, 0x6c, 0x76,
+	0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x52,
+	0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
+	0x74, 0x1a, 0x28, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x52, 0x75, 0x6e, 0x41, 0x6e, 0x61, 0x6c, 0x79,
+	0x7a, 0x65, 0x72, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x12, 0x63, 0x0a,
+	0x0c, 0x47, 0x65, 0x74, 0x48, 0x69, 0x67, 0x68, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x12, 0x27, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65,
+	0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x48, 0x69, 0x67, 0x68, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x28, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e,
+	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x47, 0x65, 0x74, 0x48,
+	0x69, 0x67, 0x68, 0x6c, 0x69, 0x67, 0x68, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x22, 0x00, 0x12, 0x50, 0x0a, 0x09, 0x44, 0x72, 0x6f, 0x70, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x12,
+	0x24, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71,
+	0x75, 0x65, 0x72, 0x79, 0x2e, 0x44, 0x72, 0x6f, 0x70, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74,
+	0x75, 0x73, 0x22, 0x00, 0x12, 0x5e, 0x0a, 0x10, 0x56, 0x61, 0x6c, 0x69, 0x64, 0x61, 0x74, 0x65,
+	0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x12, 0x2b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x56, 0x61,
+	0x6c, 0x69, 0x64, 0x61, 0x74, 0x65, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x7a, 0x65, 0x72, 0x52, 0x65,
+	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74,
+	0x75, 0x73, 0x22, 0x00, 0x12, 0x81, 0x01, 0x0a, 0x16, 0x43, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65,
+	0x50, 0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53, 0x6c, 0x6f, 0x70, 0x12,
+	0x31, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x71,
+	0x75, 0x65, 0x72, 0x79, 0x2e, 0x43, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65, 0x50, 0x68, 0x72, 0x61,
+	0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53, 0x6c, 0x6f, 0x70, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x1a, 0x32, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x2e, 0x71, 0x75, 0x65, 0x72, 0x79, 0x2e, 0x43, 0x6f, 0x6d, 0x70, 0x75, 0x74, 0x65, 0x50,
+	0x68, 0x72, 0x61, 0x73, 0x65, 0x4d, 0x61, 0x74, 0x63, 0x68, 0x53, 0x6c, 0x6f, 0x70, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x42, 0x32, 0x5a, 0x30, 0x67, 0x69, 0x74, 0x68,
+	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f,
+	0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x71, 0x75, 0x65, 0x72, 0x79, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -10486,7 +10657,7 @@ func file_query_coord_proto_rawDescGZIP() []byte {
 }
 
 var file_query_coord_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_query_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 122)
+var file_query_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 124)
 var file_query_coord_proto_goTypes = []interface{}{
 	(LoadScope)(0),                                 // 0: milvus.proto.query.LoadScope
 	(DataScope)(0),                                 // 1: milvus.proto.query.DataScope
@@ -10495,504 +10666,512 @@ var file_query_coord_proto_goTypes = []interface{}{
 	(LoadType)(0),                                  // 4: milvus.proto.query.LoadType
 	(LoadStatus)(0),                                // 5: milvus.proto.query.LoadStatus
 	(SyncType)(0),                                  // 6: milvus.proto.query.SyncType
-	(*ShowCollectionsRequest)(nil),                 // 7: milvus.proto.query.ShowCollectionsRequest
-	(*ShowCollectionsResponse)(nil),                // 8: milvus.proto.query.ShowCollectionsResponse
-	(*ShowPartitionsRequest)(nil),                  // 9: milvus.proto.query.ShowPartitionsRequest
-	(*ShowPartitionsResponse)(nil),                 // 10: milvus.proto.query.ShowPartitionsResponse
-	(*LoadCollectionRequest)(nil),                  // 11: milvus.proto.query.LoadCollectionRequest
-	(*ReleaseCollectionRequest)(nil),               // 12: milvus.proto.query.ReleaseCollectionRequest
-	(*GetStatisticsRequest)(nil),                   // 13: milvus.proto.query.GetStatisticsRequest
-	(*LoadPartitionsRequest)(nil),                  // 14: milvus.proto.query.LoadPartitionsRequest
-	(*ReleasePartitionsRequest)(nil),               // 15: milvus.proto.query.ReleasePartitionsRequest
-	(*GetPartitionStatesRequest)(nil),              // 16: milvus.proto.query.GetPartitionStatesRequest
-	(*GetPartitionStatesResponse)(nil),             // 17: milvus.proto.query.GetPartitionStatesResponse
-	(*GetSegmentInfoRequest)(nil),                  // 18: milvus.proto.query.GetSegmentInfoRequest
-	(*GetSegmentInfoResponse)(nil),                 // 19: milvus.proto.query.GetSegmentInfoResponse
-	(*GetShardLeadersRequest)(nil),                 // 20: milvus.proto.query.GetShardLeadersRequest
-	(*GetShardLeadersResponse)(nil),                // 21: milvus.proto.query.GetShardLeadersResponse
-	(*UpdateResourceGroupsRequest)(nil),            // 22: milvus.proto.query.UpdateResourceGroupsRequest
-	(*ShardLeadersList)(nil),                       // 23: milvus.proto.query.ShardLeadersList
-	(*SyncNewCreatedPartitionRequest)(nil),         // 24: milvus.proto.query.SyncNewCreatedPartitionRequest
-	(*LoadMetaInfo)(nil),                           // 25: milvus.proto.query.LoadMetaInfo
-	(*WatchDmChannelsRequest)(nil),                 // 26: milvus.proto.query.WatchDmChannelsRequest
-	(*UnsubDmChannelRequest)(nil),                  // 27: milvus.proto.query.UnsubDmChannelRequest
-	(*SegmentLoadInfo)(nil),                        // 28: milvus.proto.query.SegmentLoadInfo
-	(*FieldIndexInfo)(nil),                         // 29: milvus.proto.query.FieldIndexInfo
-	(*JsonStatsInfo)(nil),                          // 30: milvus.proto.query.JsonStatsInfo
-	(*LoadSegmentsRequest)(nil),                    // 31: milvus.proto.query.LoadSegmentsRequest
-	(*ReleaseSegmentsRequest)(nil),                 // 32: milvus.proto.query.ReleaseSegmentsRequest
-	(*SearchRequest)(nil),                          // 33: milvus.proto.query.SearchRequest
-	(*QueryRequest)(nil),                           // 34: milvus.proto.query.QueryRequest
-	(*SyncReplicaSegmentsRequest)(nil),             // 35: milvus.proto.query.SyncReplicaSegmentsRequest
-	(*ReplicaSegmentsInfo)(nil),                    // 36: milvus.proto.query.ReplicaSegmentsInfo
-	(*GetLoadInfoRequest)(nil),                     // 37: milvus.proto.query.GetLoadInfoRequest
-	(*GetLoadInfoResponse)(nil),                    // 38: milvus.proto.query.GetLoadInfoResponse
-	(*HandoffSegmentsRequest)(nil),                 // 39: milvus.proto.query.HandoffSegmentsRequest
-	(*LoadBalanceRequest)(nil),                     // 40: milvus.proto.query.LoadBalanceRequest
-	(*DmChannelWatchInfo)(nil),                     // 41: milvus.proto.query.DmChannelWatchInfo
-	(*QueryChannelInfo)(nil),                       // 42: milvus.proto.query.QueryChannelInfo
-	(*PartitionStates)(nil),                        // 43: milvus.proto.query.PartitionStates
-	(*SegmentInfo)(nil),                            // 44: milvus.proto.query.SegmentInfo
-	(*CollectionInfo)(nil),                         // 45: milvus.proto.query.CollectionInfo
-	(*UnsubscribeChannels)(nil),                    // 46: milvus.proto.query.UnsubscribeChannels
-	(*UnsubscribeChannelInfo)(nil),                 // 47: milvus.proto.query.UnsubscribeChannelInfo
-	(*SegmentChangeInfo)(nil),                      // 48: milvus.proto.query.SegmentChangeInfo
-	(*SealedSegmentsChangeInfo)(nil),               // 49: milvus.proto.query.SealedSegmentsChangeInfo
-	(*GetDataDistributionRequest)(nil),             // 50: milvus.proto.query.GetDataDistributionRequest
-	(*GetDataDistributionResponse)(nil),            // 51: milvus.proto.query.GetDataDistributionResponse
-	(*LeaderView)(nil),                             // 52: milvus.proto.query.LeaderView
-	(*LeaderViewStatus)(nil),                       // 53: milvus.proto.query.LeaderViewStatus
-	(*SegmentDist)(nil),                            // 54: milvus.proto.query.SegmentDist
-	(*SegmentVersionInfo)(nil),                     // 55: milvus.proto.query.SegmentVersionInfo
-	(*ChannelVersionInfo)(nil),                     // 56: milvus.proto.query.ChannelVersionInfo
-	(*CollectionLoadInfo)(nil),                     // 57: milvus.proto.query.CollectionLoadInfo
-	(*PartitionLoadInfo)(nil),                      // 58: milvus.proto.query.PartitionLoadInfo
-	(*ChannelNodeInfo)(nil),                        // 59: milvus.proto.query.ChannelNodeInfo
-	(*Replica)(nil),                                // 60: milvus.proto.query.Replica
-	(*SyncAction)(nil),                             // 61: milvus.proto.query.SyncAction
-	(*SyncDistributionRequest)(nil),                // 62: milvus.proto.query.SyncDistributionRequest
-	(*ResourceGroup)(nil),                          // 63: milvus.proto.query.ResourceGroup
-	(*TransferReplicaRequest)(nil),                 // 64: milvus.proto.query.TransferReplicaRequest
-	(*DescribeResourceGroupRequest)(nil),           // 65: milvus.proto.query.DescribeResourceGroupRequest
-	(*DescribeResourceGroupResponse)(nil),          // 66: milvus.proto.query.DescribeResourceGroupResponse
-	(*ResourceGroupInfo)(nil),                      // 67: milvus.proto.query.ResourceGroupInfo
-	(*DeleteRequest)(nil),                          // 68: milvus.proto.query.DeleteRequest
-	(*DeleteBatchRequest)(nil),                     // 69: milvus.proto.query.DeleteBatchRequest
-	(*DeleteBatchResponse)(nil),                    // 70: milvus.proto.query.DeleteBatchResponse
-	(*ActivateCheckerRequest)(nil),                 // 71: milvus.proto.query.ActivateCheckerRequest
-	(*DeactivateCheckerRequest)(nil),               // 72: milvus.proto.query.DeactivateCheckerRequest
-	(*ListCheckersRequest)(nil),                    // 73: milvus.proto.query.ListCheckersRequest
-	(*ListCheckersResponse)(nil),                   // 74: milvus.proto.query.ListCheckersResponse
-	(*CheckerInfo)(nil),                            // 75: milvus.proto.query.CheckerInfo
-	(*SegmentTarget)(nil),                          // 76: milvus.proto.query.SegmentTarget
-	(*PartitionTarget)(nil),                        // 77: milvus.proto.query.PartitionTarget
-	(*ChannelTarget)(nil),                          // 78: milvus.proto.query.ChannelTarget
-	(*CollectionTarget)(nil),                       // 79: milvus.proto.query.CollectionTarget
-	(*NodeInfo)(nil),                               // 80: milvus.proto.query.NodeInfo
-	(*ListQueryNodeRequest)(nil),                   // 81: milvus.proto.query.ListQueryNodeRequest
-	(*ListQueryNodeResponse)(nil),                  // 82: milvus.proto.query.ListQueryNodeResponse
-	(*GetQueryNodeDistributionRequest)(nil),        // 83: milvus.proto.query.GetQueryNodeDistributionRequest
-	(*GetQueryNodeDistributionResponse)(nil),       // 84: milvus.proto.query.GetQueryNodeDistributionResponse
-	(*SuspendBalanceRequest)(nil),                  // 85: milvus.proto.query.SuspendBalanceRequest
-	(*ResumeBalanceRequest)(nil),                   // 86: milvus.proto.query.ResumeBalanceRequest
-	(*CheckBalanceStatusRequest)(nil),              // 87: milvus.proto.query.CheckBalanceStatusRequest
-	(*CheckBalanceStatusResponse)(nil),             // 88: milvus.proto.query.CheckBalanceStatusResponse
-	(*SuspendNodeRequest)(nil),                     // 89: milvus.proto.query.SuspendNodeRequest
-	(*ResumeNodeRequest)(nil),                      // 90: milvus.proto.query.ResumeNodeRequest
-	(*TransferSegmentRequest)(nil),                 // 91: milvus.proto.query.TransferSegmentRequest
-	(*TransferChannelRequest)(nil),                 // 92: milvus.proto.query.TransferChannelRequest
-	(*CheckQueryNodeDistributionRequest)(nil),      // 93: milvus.proto.query.CheckQueryNodeDistributionRequest
-	(*UpdateLoadConfigRequest)(nil),                // 94: milvus.proto.query.UpdateLoadConfigRequest
-	(*UpdateSchemaRequest)(nil),                    // 95: milvus.proto.query.UpdateSchemaRequest
-	(*RunAnalyzerRequest)(nil),                     // 96: milvus.proto.query.RunAnalyzerRequest
-	(*AnalyzerInfo)(nil),                           // 97: milvus.proto.query.AnalyzerInfo
-	(*ValidateAnalyzerRequest)(nil),                // 98: milvus.proto.query.ValidateAnalyzerRequest
-	(*HighlightOptions)(nil),                       // 99: milvus.proto.query.HighlightOptions
-	(*HighlightTask)(nil),                          // 100: milvus.proto.query.HighlightTask
-	(*GetHighlightRequest)(nil),                    // 101: milvus.proto.query.GetHighlightRequest
-	(*HighlightFragment)(nil),                      // 102: milvus.proto.query.HighlightFragment
-	(*HighlightResult)(nil),                        // 103: milvus.proto.query.HighlightResult
-	(*GetHighlightResponse)(nil),                   // 104: milvus.proto.query.GetHighlightResponse
-	(*ListLoadedSegmentsRequest)(nil),              // 105: milvus.proto.query.ListLoadedSegmentsRequest
-	(*ListLoadedSegmentsResponse)(nil),             // 106: milvus.proto.query.ListLoadedSegmentsResponse
-	(*DropIndexRequest)(nil),                       // 107: milvus.proto.query.DropIndexRequest
-	nil,                                            // 108: milvus.proto.query.LoadCollectionRequest.FieldIndexIDEntry
-	nil,                                            // 109: milvus.proto.query.LoadPartitionsRequest.FieldIndexIDEntry
-	nil,                                            // 110: milvus.proto.query.UpdateResourceGroupsRequest.ResourceGroupsEntry
-	nil,                                            // 111: milvus.proto.query.WatchDmChannelsRequest.SegmentInfosEntry
-	nil,                                            // 112: milvus.proto.query.WatchDmChannelsRequest.SealedSegmentRowCountEntry
-	nil,                                            // 113: milvus.proto.query.SegmentLoadInfo.TextStatsLogsEntry
-	nil,                                            // 114: milvus.proto.query.SegmentLoadInfo.JsonKeyStatsLogsEntry
-	nil,                                            // 115: milvus.proto.query.GetDataDistributionRequest.CheckpointsEntry
-	nil,                                            // 116: milvus.proto.query.LeaderView.SegmentDistEntry
-	nil,                                            // 117: milvus.proto.query.LeaderView.GrowingSegmentsEntry
-	nil,                                            // 118: milvus.proto.query.LeaderView.PartitionStatsVersionsEntry
-	nil,                                            // 119: milvus.proto.query.SegmentVersionInfo.IndexInfoEntry
-	nil,                                            // 120: milvus.proto.query.SegmentVersionInfo.JsonStatsInfoEntry
-	nil,                                            // 121: milvus.proto.query.CollectionLoadInfo.FieldIndexIDEntry
-	nil,                                            // 122: milvus.proto.query.PartitionLoadInfo.FieldIndexIDEntry
-	nil,                                            // 123: milvus.proto.query.Replica.ChannelNodeInfosEntry
-	nil,                                            // 124: milvus.proto.query.SyncAction.PartitionStatsVersionsEntry
-	nil,                                            // 125: milvus.proto.query.SyncAction.SealedSegmentRowCountEntry
-	nil,                                            // 126: milvus.proto.query.ResourceGroupInfo.NumLoadedReplicaEntry
-	nil,                                            // 127: milvus.proto.query.ResourceGroupInfo.NumOutgoingNodeEntry
-	nil,                                            // 128: milvus.proto.query.ResourceGroupInfo.NumIncomingNodeEntry
-	(*commonpb.MsgBase)(nil),                       // 129: milvus.proto.common.MsgBase
-	(*commonpb.Status)(nil),                        // 130: milvus.proto.common.Status
-	(*schemapb.LongArray)(nil),                     // 131: milvus.proto.schema.LongArray
-	(*schemapb.CollectionSchema)(nil),              // 132: milvus.proto.schema.CollectionSchema
-	(commonpb.LoadPriority)(0),                     // 133: milvus.proto.common.LoadPriority
-	(*internalpb.GetStatisticsRequest)(nil),        // 134: milvus.proto.internal.GetStatisticsRequest
-	(*indexpb.IndexInfo)(nil),                      // 135: milvus.proto.index.IndexInfo
-	(*commonpb.KeyValuePair)(nil),                  // 136: milvus.proto.common.KeyValuePair
-	(*datapb.VchannelInfo)(nil),                    // 137: milvus.proto.data.VchannelInfo
-	(*datapb.SegmentInfo)(nil),                     // 138: milvus.proto.data.SegmentInfo
-	(*datapb.FieldBinlog)(nil),                     // 139: milvus.proto.data.FieldBinlog
-	(*msgpb.MsgPosition)(nil),                      // 140: milvus.proto.msg.MsgPosition
-	(datapb.SegmentLevel)(0),                       // 141: milvus.proto.data.SegmentLevel
-	(*internalpb.SearchRequest)(nil),               // 142: milvus.proto.internal.SearchRequest
-	(*internalpb.RetrieveRequest)(nil),             // 143: milvus.proto.internal.RetrieveRequest
-	(commonpb.SegmentState)(0),                     // 144: milvus.proto.common.SegmentState
-	(*rgpb.ResourceGroupConfig)(nil),               // 145: milvus.proto.rg.ResourceGroupConfig
-	(*commonpb.NodeInfo)(nil),                      // 146: milvus.proto.common.NodeInfo
-	(*schemapb.IDs)(nil),                           // 147: milvus.proto.schema.IDs
-	(*datapb.TextIndexStats)(nil),                  // 148: milvus.proto.data.TextIndexStats
-	(*datapb.JsonKeyStats)(nil),                    // 149: milvus.proto.data.JsonKeyStats
-	(*internalpb.ShowConfigurationsRequest)(nil),   // 150: milvus.proto.internal.ShowConfigurationsRequest
-	(*milvuspb.GetMetricsRequest)(nil),             // 151: milvus.proto.milvus.GetMetricsRequest
-	(*milvuspb.GetReplicasRequest)(nil),            // 152: milvus.proto.milvus.GetReplicasRequest
-	(*milvuspb.CheckHealthRequest)(nil),            // 153: milvus.proto.milvus.CheckHealthRequest
-	(*milvuspb.CreateResourceGroupRequest)(nil),    // 154: milvus.proto.milvus.CreateResourceGroupRequest
-	(*milvuspb.DropResourceGroupRequest)(nil),      // 155: milvus.proto.milvus.DropResourceGroupRequest
-	(*milvuspb.TransferNodeRequest)(nil),           // 156: milvus.proto.milvus.TransferNodeRequest
-	(*milvuspb.ListResourceGroupsRequest)(nil),     // 157: milvus.proto.milvus.ListResourceGroupsRequest
-	(*milvuspb.GetComponentStatesRequest)(nil),     // 158: milvus.proto.milvus.GetComponentStatesRequest
-	(*internalpb.GetTimeTickChannelRequest)(nil),   // 159: milvus.proto.internal.GetTimeTickChannelRequest
-	(*internalpb.GetStatisticsChannelRequest)(nil), // 160: milvus.proto.internal.GetStatisticsChannelRequest
-	(*internalpb.ShowConfigurationsResponse)(nil),  // 161: milvus.proto.internal.ShowConfigurationsResponse
-	(*milvuspb.GetMetricsResponse)(nil),            // 162: milvus.proto.milvus.GetMetricsResponse
-	(*milvuspb.GetReplicasResponse)(nil),           // 163: milvus.proto.milvus.GetReplicasResponse
-	(*milvuspb.CheckHealthResponse)(nil),           // 164: milvus.proto.milvus.CheckHealthResponse
-	(*milvuspb.ListResourceGroupsResponse)(nil),    // 165: milvus.proto.milvus.ListResourceGroupsResponse
-	(*milvuspb.RunAnalyzerResponse)(nil),           // 166: milvus.proto.milvus.RunAnalyzerResponse
-	(*milvuspb.ComponentStates)(nil),               // 167: milvus.proto.milvus.ComponentStates
-	(*milvuspb.StringResponse)(nil),                // 168: milvus.proto.milvus.StringResponse
-	(*internalpb.GetStatisticsResponse)(nil),       // 169: milvus.proto.internal.GetStatisticsResponse
-	(*internalpb.SearchResults)(nil),               // 170: milvus.proto.internal.SearchResults
-	(*internalpb.RetrieveResults)(nil),             // 171: milvus.proto.internal.RetrieveResults
+	(*ComputePhraseMatchSlopRequest)(nil),          // 7: milvus.proto.query.ComputePhraseMatchSlopRequest
+	(*ComputePhraseMatchSlopResponse)(nil),         // 8: milvus.proto.query.ComputePhraseMatchSlopResponse
+	(*ShowCollectionsRequest)(nil),                 // 9: milvus.proto.query.ShowCollectionsRequest
+	(*ShowCollectionsResponse)(nil),                // 10: milvus.proto.query.ShowCollectionsResponse
+	(*ShowPartitionsRequest)(nil),                  // 11: milvus.proto.query.ShowPartitionsRequest
+	(*ShowPartitionsResponse)(nil),                 // 12: milvus.proto.query.ShowPartitionsResponse
+	(*LoadCollectionRequest)(nil),                  // 13: milvus.proto.query.LoadCollectionRequest
+	(*ReleaseCollectionRequest)(nil),               // 14: milvus.proto.query.ReleaseCollectionRequest
+	(*GetStatisticsRequest)(nil),                   // 15: milvus.proto.query.GetStatisticsRequest
+	(*LoadPartitionsRequest)(nil),                  // 16: milvus.proto.query.LoadPartitionsRequest
+	(*ReleasePartitionsRequest)(nil),               // 17: milvus.proto.query.ReleasePartitionsRequest
+	(*GetPartitionStatesRequest)(nil),              // 18: milvus.proto.query.GetPartitionStatesRequest
+	(*GetPartitionStatesResponse)(nil),             // 19: milvus.proto.query.GetPartitionStatesResponse
+	(*GetSegmentInfoRequest)(nil),                  // 20: milvus.proto.query.GetSegmentInfoRequest
+	(*GetSegmentInfoResponse)(nil),                 // 21: milvus.proto.query.GetSegmentInfoResponse
+	(*GetShardLeadersRequest)(nil),                 // 22: milvus.proto.query.GetShardLeadersRequest
+	(*GetShardLeadersResponse)(nil),                // 23: milvus.proto.query.GetShardLeadersResponse
+	(*UpdateResourceGroupsRequest)(nil),            // 24: milvus.proto.query.UpdateResourceGroupsRequest
+	(*ShardLeadersList)(nil),                       // 25: milvus.proto.query.ShardLeadersList
+	(*SyncNewCreatedPartitionRequest)(nil),         // 26: milvus.proto.query.SyncNewCreatedPartitionRequest
+	(*LoadMetaInfo)(nil),                           // 27: milvus.proto.query.LoadMetaInfo
+	(*WatchDmChannelsRequest)(nil),                 // 28: milvus.proto.query.WatchDmChannelsRequest
+	(*UnsubDmChannelRequest)(nil),                  // 29: milvus.proto.query.UnsubDmChannelRequest
+	(*SegmentLoadInfo)(nil),                        // 30: milvus.proto.query.SegmentLoadInfo
+	(*FieldIndexInfo)(nil),                         // 31: milvus.proto.query.FieldIndexInfo
+	(*JsonStatsInfo)(nil),                          // 32: milvus.proto.query.JsonStatsInfo
+	(*LoadSegmentsRequest)(nil),                    // 33: milvus.proto.query.LoadSegmentsRequest
+	(*ReleaseSegmentsRequest)(nil),                 // 34: milvus.proto.query.ReleaseSegmentsRequest
+	(*SearchRequest)(nil),                          // 35: milvus.proto.query.SearchRequest
+	(*QueryRequest)(nil),                           // 36: milvus.proto.query.QueryRequest
+	(*SyncReplicaSegmentsRequest)(nil),             // 37: milvus.proto.query.SyncReplicaSegmentsRequest
+	(*ReplicaSegmentsInfo)(nil),                    // 38: milvus.proto.query.ReplicaSegmentsInfo
+	(*GetLoadInfoRequest)(nil),                     // 39: milvus.proto.query.GetLoadInfoRequest
+	(*GetLoadInfoResponse)(nil),                    // 40: milvus.proto.query.GetLoadInfoResponse
+	(*HandoffSegmentsRequest)(nil),                 // 41: milvus.proto.query.HandoffSegmentsRequest
+	(*LoadBalanceRequest)(nil),                     // 42: milvus.proto.query.LoadBalanceRequest
+	(*DmChannelWatchInfo)(nil),                     // 43: milvus.proto.query.DmChannelWatchInfo
+	(*QueryChannelInfo)(nil),                       // 44: milvus.proto.query.QueryChannelInfo
+	(*PartitionStates)(nil),                        // 45: milvus.proto.query.PartitionStates
+	(*SegmentInfo)(nil),                            // 46: milvus.proto.query.SegmentInfo
+	(*CollectionInfo)(nil),                         // 47: milvus.proto.query.CollectionInfo
+	(*UnsubscribeChannels)(nil),                    // 48: milvus.proto.query.UnsubscribeChannels
+	(*UnsubscribeChannelInfo)(nil),                 // 49: milvus.proto.query.UnsubscribeChannelInfo
+	(*SegmentChangeInfo)(nil),                      // 50: milvus.proto.query.SegmentChangeInfo
+	(*SealedSegmentsChangeInfo)(nil),               // 51: milvus.proto.query.SealedSegmentsChangeInfo
+	(*GetDataDistributionRequest)(nil),             // 52: milvus.proto.query.GetDataDistributionRequest
+	(*GetDataDistributionResponse)(nil),            // 53: milvus.proto.query.GetDataDistributionResponse
+	(*LeaderView)(nil),                             // 54: milvus.proto.query.LeaderView
+	(*LeaderViewStatus)(nil),                       // 55: milvus.proto.query.LeaderViewStatus
+	(*SegmentDist)(nil),                            // 56: milvus.proto.query.SegmentDist
+	(*SegmentVersionInfo)(nil),                     // 57: milvus.proto.query.SegmentVersionInfo
+	(*ChannelVersionInfo)(nil),                     // 58: milvus.proto.query.ChannelVersionInfo
+	(*CollectionLoadInfo)(nil),                     // 59: milvus.proto.query.CollectionLoadInfo
+	(*PartitionLoadInfo)(nil),                      // 60: milvus.proto.query.PartitionLoadInfo
+	(*ChannelNodeInfo)(nil),                        // 61: milvus.proto.query.ChannelNodeInfo
+	(*Replica)(nil),                                // 62: milvus.proto.query.Replica
+	(*SyncAction)(nil),                             // 63: milvus.proto.query.SyncAction
+	(*SyncDistributionRequest)(nil),                // 64: milvus.proto.query.SyncDistributionRequest
+	(*ResourceGroup)(nil),                          // 65: milvus.proto.query.ResourceGroup
+	(*TransferReplicaRequest)(nil),                 // 66: milvus.proto.query.TransferReplicaRequest
+	(*DescribeResourceGroupRequest)(nil),           // 67: milvus.proto.query.DescribeResourceGroupRequest
+	(*DescribeResourceGroupResponse)(nil),          // 68: milvus.proto.query.DescribeResourceGroupResponse
+	(*ResourceGroupInfo)(nil),                      // 69: milvus.proto.query.ResourceGroupInfo
+	(*DeleteRequest)(nil),                          // 70: milvus.proto.query.DeleteRequest
+	(*DeleteBatchRequest)(nil),                     // 71: milvus.proto.query.DeleteBatchRequest
+	(*DeleteBatchResponse)(nil),                    // 72: milvus.proto.query.DeleteBatchResponse
+	(*ActivateCheckerRequest)(nil),                 // 73: milvus.proto.query.ActivateCheckerRequest
+	(*DeactivateCheckerRequest)(nil),               // 74: milvus.proto.query.DeactivateCheckerRequest
+	(*ListCheckersRequest)(nil),                    // 75: milvus.proto.query.ListCheckersRequest
+	(*ListCheckersResponse)(nil),                   // 76: milvus.proto.query.ListCheckersResponse
+	(*CheckerInfo)(nil),                            // 77: milvus.proto.query.CheckerInfo
+	(*SegmentTarget)(nil),                          // 78: milvus.proto.query.SegmentTarget
+	(*PartitionTarget)(nil),                        // 79: milvus.proto.query.PartitionTarget
+	(*ChannelTarget)(nil),                          // 80: milvus.proto.query.ChannelTarget
+	(*CollectionTarget)(nil),                       // 81: milvus.proto.query.CollectionTarget
+	(*NodeInfo)(nil),                               // 82: milvus.proto.query.NodeInfo
+	(*ListQueryNodeRequest)(nil),                   // 83: milvus.proto.query.ListQueryNodeRequest
+	(*ListQueryNodeResponse)(nil),                  // 84: milvus.proto.query.ListQueryNodeResponse
+	(*GetQueryNodeDistributionRequest)(nil),        // 85: milvus.proto.query.GetQueryNodeDistributionRequest
+	(*GetQueryNodeDistributionResponse)(nil),       // 86: milvus.proto.query.GetQueryNodeDistributionResponse
+	(*SuspendBalanceRequest)(nil),                  // 87: milvus.proto.query.SuspendBalanceRequest
+	(*ResumeBalanceRequest)(nil),                   // 88: milvus.proto.query.ResumeBalanceRequest
+	(*CheckBalanceStatusRequest)(nil),              // 89: milvus.proto.query.CheckBalanceStatusRequest
+	(*CheckBalanceStatusResponse)(nil),             // 90: milvus.proto.query.CheckBalanceStatusResponse
+	(*SuspendNodeRequest)(nil),                     // 91: milvus.proto.query.SuspendNodeRequest
+	(*ResumeNodeRequest)(nil),                      // 92: milvus.proto.query.ResumeNodeRequest
+	(*TransferSegmentRequest)(nil),                 // 93: milvus.proto.query.TransferSegmentRequest
+	(*TransferChannelRequest)(nil),                 // 94: milvus.proto.query.TransferChannelRequest
+	(*CheckQueryNodeDistributionRequest)(nil),      // 95: milvus.proto.query.CheckQueryNodeDistributionRequest
+	(*UpdateLoadConfigRequest)(nil),                // 96: milvus.proto.query.UpdateLoadConfigRequest
+	(*UpdateSchemaRequest)(nil),                    // 97: milvus.proto.query.UpdateSchemaRequest
+	(*RunAnalyzerRequest)(nil),                     // 98: milvus.proto.query.RunAnalyzerRequest
+	(*AnalyzerInfo)(nil),                           // 99: milvus.proto.query.AnalyzerInfo
+	(*ValidateAnalyzerRequest)(nil),                // 100: milvus.proto.query.ValidateAnalyzerRequest
+	(*HighlightOptions)(nil),                       // 101: milvus.proto.query.HighlightOptions
+	(*HighlightTask)(nil),                          // 102: milvus.proto.query.HighlightTask
+	(*GetHighlightRequest)(nil),                    // 103: milvus.proto.query.GetHighlightRequest
+	(*HighlightFragment)(nil),                      // 104: milvus.proto.query.HighlightFragment
+	(*HighlightResult)(nil),                        // 105: milvus.proto.query.HighlightResult
+	(*GetHighlightResponse)(nil),                   // 106: milvus.proto.query.GetHighlightResponse
+	(*ListLoadedSegmentsRequest)(nil),              // 107: milvus.proto.query.ListLoadedSegmentsRequest
+	(*ListLoadedSegmentsResponse)(nil),             // 108: milvus.proto.query.ListLoadedSegmentsResponse
+	(*DropIndexRequest)(nil),                       // 109: milvus.proto.query.DropIndexRequest
+	nil,                                            // 110: milvus.proto.query.LoadCollectionRequest.FieldIndexIDEntry
+	nil,                                            // 111: milvus.proto.query.LoadPartitionsRequest.FieldIndexIDEntry
+	nil,                                            // 112: milvus.proto.query.UpdateResourceGroupsRequest.ResourceGroupsEntry
+	nil,                                            // 113: milvus.proto.query.WatchDmChannelsRequest.SegmentInfosEntry
+	nil,                                            // 114: milvus.proto.query.WatchDmChannelsRequest.SealedSegmentRowCountEntry
+	nil,                                            // 115: milvus.proto.query.SegmentLoadInfo.TextStatsLogsEntry
+	nil,                                            // 116: milvus.proto.query.SegmentLoadInfo.JsonKeyStatsLogsEntry
+	nil,                                            // 117: milvus.proto.query.GetDataDistributionRequest.CheckpointsEntry
+	nil,                                            // 118: milvus.proto.query.LeaderView.SegmentDistEntry
+	nil,                                            // 119: milvus.proto.query.LeaderView.GrowingSegmentsEntry
+	nil,                                            // 120: milvus.proto.query.LeaderView.PartitionStatsVersionsEntry
+	nil,                                            // 121: milvus.proto.query.SegmentVersionInfo.IndexInfoEntry
+	nil,                                            // 122: milvus.proto.query.SegmentVersionInfo.JsonStatsInfoEntry
+	nil,                                            // 123: milvus.proto.query.CollectionLoadInfo.FieldIndexIDEntry
+	nil,                                            // 124: milvus.proto.query.PartitionLoadInfo.FieldIndexIDEntry
+	nil,                                            // 125: milvus.proto.query.Replica.ChannelNodeInfosEntry
+	nil,                                            // 126: milvus.proto.query.SyncAction.PartitionStatsVersionsEntry
+	nil,                                            // 127: milvus.proto.query.SyncAction.SealedSegmentRowCountEntry
+	nil,                                            // 128: milvus.proto.query.ResourceGroupInfo.NumLoadedReplicaEntry
+	nil,                                            // 129: milvus.proto.query.ResourceGroupInfo.NumOutgoingNodeEntry
+	nil,                                            // 130: milvus.proto.query.ResourceGroupInfo.NumIncomingNodeEntry
+	(*commonpb.MsgBase)(nil),                       // 131: milvus.proto.common.MsgBase
+	(*commonpb.Status)(nil),                        // 132: milvus.proto.common.Status
+	(*schemapb.LongArray)(nil),                     // 133: milvus.proto.schema.LongArray
+	(*schemapb.CollectionSchema)(nil),              // 134: milvus.proto.schema.CollectionSchema
+	(commonpb.LoadPriority)(0),                     // 135: milvus.proto.common.LoadPriority
+	(*internalpb.GetStatisticsRequest)(nil),        // 136: milvus.proto.internal.GetStatisticsRequest
+	(*indexpb.IndexInfo)(nil),                      // 137: milvus.proto.index.IndexInfo
+	(*commonpb.KeyValuePair)(nil),                  // 138: milvus.proto.common.KeyValuePair
+	(*datapb.VchannelInfo)(nil),                    // 139: milvus.proto.data.VchannelInfo
+	(*datapb.SegmentInfo)(nil),                     // 140: milvus.proto.data.SegmentInfo
+	(*datapb.FieldBinlog)(nil),                     // 141: milvus.proto.data.FieldBinlog
+	(*msgpb.MsgPosition)(nil),                      // 142: milvus.proto.msg.MsgPosition
+	(datapb.SegmentLevel)(0),                       // 143: milvus.proto.data.SegmentLevel
+	(*internalpb.SearchRequest)(nil),               // 144: milvus.proto.internal.SearchRequest
+	(*internalpb.RetrieveRequest)(nil),             // 145: milvus.proto.internal.RetrieveRequest
+	(commonpb.SegmentState)(0),                     // 146: milvus.proto.common.SegmentState
+	(*rgpb.ResourceGroupConfig)(nil),               // 147: milvus.proto.rg.ResourceGroupConfig
+	(*commonpb.NodeInfo)(nil),                      // 148: milvus.proto.common.NodeInfo
+	(*schemapb.IDs)(nil),                           // 149: milvus.proto.schema.IDs
+	(*datapb.TextIndexStats)(nil),                  // 150: milvus.proto.data.TextIndexStats
+	(*datapb.JsonKeyStats)(nil),                    // 151: milvus.proto.data.JsonKeyStats
+	(*internalpb.ShowConfigurationsRequest)(nil),   // 152: milvus.proto.internal.ShowConfigurationsRequest
+	(*milvuspb.GetMetricsRequest)(nil),             // 153: milvus.proto.milvus.GetMetricsRequest
+	(*milvuspb.GetReplicasRequest)(nil),            // 154: milvus.proto.milvus.GetReplicasRequest
+	(*milvuspb.CheckHealthRequest)(nil),            // 155: milvus.proto.milvus.CheckHealthRequest
+	(*milvuspb.CreateResourceGroupRequest)(nil),    // 156: milvus.proto.milvus.CreateResourceGroupRequest
+	(*milvuspb.DropResourceGroupRequest)(nil),      // 157: milvus.proto.milvus.DropResourceGroupRequest
+	(*milvuspb.TransferNodeRequest)(nil),           // 158: milvus.proto.milvus.TransferNodeRequest
+	(*milvuspb.ListResourceGroupsRequest)(nil),     // 159: milvus.proto.milvus.ListResourceGroupsRequest
+	(*milvuspb.GetComponentStatesRequest)(nil),     // 160: milvus.proto.milvus.GetComponentStatesRequest
+	(*internalpb.GetTimeTickChannelRequest)(nil),   // 161: milvus.proto.internal.GetTimeTickChannelRequest
+	(*internalpb.GetStatisticsChannelRequest)(nil), // 162: milvus.proto.internal.GetStatisticsChannelRequest
+	(*internalpb.ShowConfigurationsResponse)(nil),  // 163: milvus.proto.internal.ShowConfigurationsResponse
+	(*milvuspb.GetMetricsResponse)(nil),            // 164: milvus.proto.milvus.GetMetricsResponse
+	(*milvuspb.GetReplicasResponse)(nil),           // 165: milvus.proto.milvus.GetReplicasResponse
+	(*milvuspb.CheckHealthResponse)(nil),           // 166: milvus.proto.milvus.CheckHealthResponse
+	(*milvuspb.ListResourceGroupsResponse)(nil),    // 167: milvus.proto.milvus.ListResourceGroupsResponse
+	(*milvuspb.RunAnalyzerResponse)(nil),           // 168: milvus.proto.milvus.RunAnalyzerResponse
+	(*milvuspb.ComponentStates)(nil),               // 169: milvus.proto.milvus.ComponentStates
+	(*milvuspb.StringResponse)(nil),                // 170: milvus.proto.milvus.StringResponse
+	(*internalpb.GetStatisticsResponse)(nil),       // 171: milvus.proto.internal.GetStatisticsResponse
+	(*internalpb.SearchResults)(nil),               // 172: milvus.proto.internal.SearchResults
+	(*internalpb.RetrieveResults)(nil),             // 173: milvus.proto.internal.RetrieveResults
 }
 var file_query_coord_proto_depIdxs = []int32{
-	129, // 0: milvus.proto.query.ShowCollectionsRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 1: milvus.proto.query.ShowCollectionsResponse.status:type_name -> milvus.proto.common.Status
-	131, // 2: milvus.proto.query.ShowCollectionsResponse.load_fields:type_name -> milvus.proto.schema.LongArray
-	129, // 3: milvus.proto.query.ShowPartitionsRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 4: milvus.proto.query.ShowPartitionsResponse.status:type_name -> milvus.proto.common.Status
-	129, // 5: milvus.proto.query.LoadCollectionRequest.base:type_name -> milvus.proto.common.MsgBase
-	132, // 6: milvus.proto.query.LoadCollectionRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	108, // 7: milvus.proto.query.LoadCollectionRequest.field_indexID:type_name -> milvus.proto.query.LoadCollectionRequest.FieldIndexIDEntry
-	133, // 8: milvus.proto.query.LoadCollectionRequest.priority:type_name -> milvus.proto.common.LoadPriority
-	129, // 9: milvus.proto.query.ReleaseCollectionRequest.base:type_name -> milvus.proto.common.MsgBase
-	134, // 10: milvus.proto.query.GetStatisticsRequest.req:type_name -> milvus.proto.internal.GetStatisticsRequest
-	1,   // 11: milvus.proto.query.GetStatisticsRequest.scope:type_name -> milvus.proto.query.DataScope
-	129, // 12: milvus.proto.query.LoadPartitionsRequest.base:type_name -> milvus.proto.common.MsgBase
-	132, // 13: milvus.proto.query.LoadPartitionsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	109, // 14: milvus.proto.query.LoadPartitionsRequest.field_indexID:type_name -> milvus.proto.query.LoadPartitionsRequest.FieldIndexIDEntry
-	135, // 15: milvus.proto.query.LoadPartitionsRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
-	133, // 16: milvus.proto.query.LoadPartitionsRequest.priority:type_name -> milvus.proto.common.LoadPriority
-	129, // 17: milvus.proto.query.ReleasePartitionsRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 18: milvus.proto.query.GetPartitionStatesRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 19: milvus.proto.query.GetPartitionStatesResponse.status:type_name -> milvus.proto.common.Status
-	43,  // 20: milvus.proto.query.GetPartitionStatesResponse.partition_descriptions:type_name -> milvus.proto.query.PartitionStates
-	129, // 21: milvus.proto.query.GetSegmentInfoRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 22: milvus.proto.query.GetSegmentInfoResponse.status:type_name -> milvus.proto.common.Status
-	44,  // 23: milvus.proto.query.GetSegmentInfoResponse.infos:type_name -> milvus.proto.query.SegmentInfo
-	129, // 24: milvus.proto.query.GetShardLeadersRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 25: milvus.proto.query.GetShardLeadersResponse.status:type_name -> milvus.proto.common.Status
-	23,  // 26: milvus.proto.query.GetShardLeadersResponse.shards:type_name -> milvus.proto.query.ShardLeadersList
-	129, // 27: milvus.proto.query.UpdateResourceGroupsRequest.base:type_name -> milvus.proto.common.MsgBase
-	110, // 28: milvus.proto.query.UpdateResourceGroupsRequest.resource_groups:type_name -> milvus.proto.query.UpdateResourceGroupsRequest.ResourceGroupsEntry
-	129, // 29: milvus.proto.query.SyncNewCreatedPartitionRequest.base:type_name -> milvus.proto.common.MsgBase
-	4,   // 30: milvus.proto.query.LoadMetaInfo.load_type:type_name -> milvus.proto.query.LoadType
-	136, // 31: milvus.proto.query.LoadMetaInfo.db_properties:type_name -> milvus.proto.common.KeyValuePair
-	129, // 32: milvus.proto.query.WatchDmChannelsRequest.base:type_name -> milvus.proto.common.MsgBase
-	137, // 33: milvus.proto.query.WatchDmChannelsRequest.infos:type_name -> milvus.proto.data.VchannelInfo
-	132, // 34: milvus.proto.query.WatchDmChannelsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	138, // 35: milvus.proto.query.WatchDmChannelsRequest.exclude_infos:type_name -> milvus.proto.data.SegmentInfo
-	25,  // 36: milvus.proto.query.WatchDmChannelsRequest.load_meta:type_name -> milvus.proto.query.LoadMetaInfo
-	111, // 37: milvus.proto.query.WatchDmChannelsRequest.segment_infos:type_name -> milvus.proto.query.WatchDmChannelsRequest.SegmentInfosEntry
-	135, // 38: milvus.proto.query.WatchDmChannelsRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
-	112, // 39: milvus.proto.query.WatchDmChannelsRequest.sealed_segment_row_count:type_name -> milvus.proto.query.WatchDmChannelsRequest.SealedSegmentRowCountEntry
-	129, // 40: milvus.proto.query.UnsubDmChannelRequest.base:type_name -> milvus.proto.common.MsgBase
-	139, // 41: milvus.proto.query.SegmentLoadInfo.binlog_paths:type_name -> milvus.proto.data.FieldBinlog
-	139, // 42: milvus.proto.query.SegmentLoadInfo.statslogs:type_name -> milvus.proto.data.FieldBinlog
-	139, // 43: milvus.proto.query.SegmentLoadInfo.deltalogs:type_name -> milvus.proto.data.FieldBinlog
-	29,  // 44: milvus.proto.query.SegmentLoadInfo.index_infos:type_name -> milvus.proto.query.FieldIndexInfo
-	140, // 45: milvus.proto.query.SegmentLoadInfo.start_position:type_name -> milvus.proto.msg.MsgPosition
-	140, // 46: milvus.proto.query.SegmentLoadInfo.delta_position:type_name -> milvus.proto.msg.MsgPosition
-	141, // 47: milvus.proto.query.SegmentLoadInfo.level:type_name -> milvus.proto.data.SegmentLevel
-	113, // 48: milvus.proto.query.SegmentLoadInfo.textStatsLogs:type_name -> milvus.proto.query.SegmentLoadInfo.TextStatsLogsEntry
-	139, // 49: milvus.proto.query.SegmentLoadInfo.bm25logs:type_name -> milvus.proto.data.FieldBinlog
-	114, // 50: milvus.proto.query.SegmentLoadInfo.jsonKeyStatsLogs:type_name -> milvus.proto.query.SegmentLoadInfo.JsonKeyStatsLogsEntry
-	133, // 51: milvus.proto.query.SegmentLoadInfo.priority:type_name -> milvus.proto.common.LoadPriority
-	136, // 52: milvus.proto.query.FieldIndexInfo.index_params:type_name -> milvus.proto.common.KeyValuePair
-	129, // 53: milvus.proto.query.LoadSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	28,  // 54: milvus.proto.query.LoadSegmentsRequest.infos:type_name -> milvus.proto.query.SegmentLoadInfo
-	132, // 55: milvus.proto.query.LoadSegmentsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	25,  // 56: milvus.proto.query.LoadSegmentsRequest.load_meta:type_name -> milvus.proto.query.LoadMetaInfo
-	140, // 57: milvus.proto.query.LoadSegmentsRequest.delta_positions:type_name -> milvus.proto.msg.MsgPosition
-	0,   // 58: milvus.proto.query.LoadSegmentsRequest.load_scope:type_name -> milvus.proto.query.LoadScope
-	135, // 59: milvus.proto.query.LoadSegmentsRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
-	129, // 60: milvus.proto.query.ReleaseSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	1,   // 61: milvus.proto.query.ReleaseSegmentsRequest.scope:type_name -> milvus.proto.query.DataScope
-	140, // 62: milvus.proto.query.ReleaseSegmentsRequest.checkpoint:type_name -> milvus.proto.msg.MsgPosition
-	142, // 63: milvus.proto.query.SearchRequest.req:type_name -> milvus.proto.internal.SearchRequest
-	1,   // 64: milvus.proto.query.SearchRequest.scope:type_name -> milvus.proto.query.DataScope
-	143, // 65: milvus.proto.query.QueryRequest.req:type_name -> milvus.proto.internal.RetrieveRequest
-	1,   // 66: milvus.proto.query.QueryRequest.scope:type_name -> milvus.proto.query.DataScope
-	129, // 67: milvus.proto.query.SyncReplicaSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	36,  // 68: milvus.proto.query.SyncReplicaSegmentsRequest.replica_segments:type_name -> milvus.proto.query.ReplicaSegmentsInfo
-	129, // 69: milvus.proto.query.GetLoadInfoRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 70: milvus.proto.query.GetLoadInfoResponse.status:type_name -> milvus.proto.common.Status
-	132, // 71: milvus.proto.query.GetLoadInfoResponse.schema:type_name -> milvus.proto.schema.CollectionSchema
-	4,   // 72: milvus.proto.query.GetLoadInfoResponse.load_type:type_name -> milvus.proto.query.LoadType
-	129, // 73: milvus.proto.query.HandoffSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	44,  // 74: milvus.proto.query.HandoffSegmentsRequest.segmentInfos:type_name -> milvus.proto.query.SegmentInfo
-	129, // 75: milvus.proto.query.LoadBalanceRequest.base:type_name -> milvus.proto.common.MsgBase
-	3,   // 76: milvus.proto.query.LoadBalanceRequest.balance_reason:type_name -> milvus.proto.query.TriggerCondition
-	44,  // 77: milvus.proto.query.QueryChannelInfo.global_sealed_segments:type_name -> milvus.proto.query.SegmentInfo
-	140, // 78: milvus.proto.query.QueryChannelInfo.seek_position:type_name -> milvus.proto.msg.MsgPosition
-	2,   // 79: milvus.proto.query.PartitionStates.state:type_name -> milvus.proto.query.PartitionState
-	144, // 80: milvus.proto.query.SegmentInfo.segment_state:type_name -> milvus.proto.common.SegmentState
-	29,  // 81: milvus.proto.query.SegmentInfo.index_infos:type_name -> milvus.proto.query.FieldIndexInfo
-	141, // 82: milvus.proto.query.SegmentInfo.level:type_name -> milvus.proto.data.SegmentLevel
-	43,  // 83: milvus.proto.query.CollectionInfo.partition_states:type_name -> milvus.proto.query.PartitionStates
-	4,   // 84: milvus.proto.query.CollectionInfo.load_type:type_name -> milvus.proto.query.LoadType
-	132, // 85: milvus.proto.query.CollectionInfo.schema:type_name -> milvus.proto.schema.CollectionSchema
-	46,  // 86: milvus.proto.query.UnsubscribeChannelInfo.collection_channels:type_name -> milvus.proto.query.UnsubscribeChannels
-	44,  // 87: milvus.proto.query.SegmentChangeInfo.online_segments:type_name -> milvus.proto.query.SegmentInfo
-	44,  // 88: milvus.proto.query.SegmentChangeInfo.offline_segments:type_name -> milvus.proto.query.SegmentInfo
-	129, // 89: milvus.proto.query.SealedSegmentsChangeInfo.base:type_name -> milvus.proto.common.MsgBase
-	48,  // 90: milvus.proto.query.SealedSegmentsChangeInfo.infos:type_name -> milvus.proto.query.SegmentChangeInfo
-	129, // 91: milvus.proto.query.GetDataDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
-	115, // 92: milvus.proto.query.GetDataDistributionRequest.checkpoints:type_name -> milvus.proto.query.GetDataDistributionRequest.CheckpointsEntry
-	130, // 93: milvus.proto.query.GetDataDistributionResponse.status:type_name -> milvus.proto.common.Status
-	55,  // 94: milvus.proto.query.GetDataDistributionResponse.segments:type_name -> milvus.proto.query.SegmentVersionInfo
-	56,  // 95: milvus.proto.query.GetDataDistributionResponse.channels:type_name -> milvus.proto.query.ChannelVersionInfo
-	52,  // 96: milvus.proto.query.GetDataDistributionResponse.leader_views:type_name -> milvus.proto.query.LeaderView
-	116, // 97: milvus.proto.query.LeaderView.segment_dist:type_name -> milvus.proto.query.LeaderView.SegmentDistEntry
-	117, // 98: milvus.proto.query.LeaderView.growing_segments:type_name -> milvus.proto.query.LeaderView.GrowingSegmentsEntry
-	118, // 99: milvus.proto.query.LeaderView.partition_stats_versions:type_name -> milvus.proto.query.LeaderView.PartitionStatsVersionsEntry
-	53,  // 100: milvus.proto.query.LeaderView.status:type_name -> milvus.proto.query.LeaderViewStatus
-	119, // 101: milvus.proto.query.SegmentVersionInfo.index_info:type_name -> milvus.proto.query.SegmentVersionInfo.IndexInfoEntry
-	141, // 102: milvus.proto.query.SegmentVersionInfo.level:type_name -> milvus.proto.data.SegmentLevel
-	120, // 103: milvus.proto.query.SegmentVersionInfo.json_stats_info:type_name -> milvus.proto.query.SegmentVersionInfo.JsonStatsInfoEntry
-	5,   // 104: milvus.proto.query.CollectionLoadInfo.status:type_name -> milvus.proto.query.LoadStatus
-	121, // 105: milvus.proto.query.CollectionLoadInfo.field_indexID:type_name -> milvus.proto.query.CollectionLoadInfo.FieldIndexIDEntry
-	4,   // 106: milvus.proto.query.CollectionLoadInfo.load_type:type_name -> milvus.proto.query.LoadType
-	5,   // 107: milvus.proto.query.PartitionLoadInfo.status:type_name -> milvus.proto.query.LoadStatus
-	122, // 108: milvus.proto.query.PartitionLoadInfo.field_indexID:type_name -> milvus.proto.query.PartitionLoadInfo.FieldIndexIDEntry
-	123, // 109: milvus.proto.query.Replica.channel_node_infos:type_name -> milvus.proto.query.Replica.ChannelNodeInfosEntry
-	6,   // 110: milvus.proto.query.SyncAction.type:type_name -> milvus.proto.query.SyncType
-	28,  // 111: milvus.proto.query.SyncAction.info:type_name -> milvus.proto.query.SegmentLoadInfo
-	140, // 112: milvus.proto.query.SyncAction.checkpoint:type_name -> milvus.proto.msg.MsgPosition
-	124, // 113: milvus.proto.query.SyncAction.partition_stats_versions:type_name -> milvus.proto.query.SyncAction.PartitionStatsVersionsEntry
-	140, // 114: milvus.proto.query.SyncAction.deleteCP:type_name -> milvus.proto.msg.MsgPosition
-	125, // 115: milvus.proto.query.SyncAction.sealed_segment_row_count:type_name -> milvus.proto.query.SyncAction.SealedSegmentRowCountEntry
-	129, // 116: milvus.proto.query.SyncDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
-	61,  // 117: milvus.proto.query.SyncDistributionRequest.actions:type_name -> milvus.proto.query.SyncAction
-	132, // 118: milvus.proto.query.SyncDistributionRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	25,  // 119: milvus.proto.query.SyncDistributionRequest.load_meta:type_name -> milvus.proto.query.LoadMetaInfo
-	135, // 120: milvus.proto.query.SyncDistributionRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
-	145, // 121: milvus.proto.query.ResourceGroup.config:type_name -> milvus.proto.rg.ResourceGroupConfig
-	129, // 122: milvus.proto.query.TransferReplicaRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 123: milvus.proto.query.DescribeResourceGroupRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 124: milvus.proto.query.DescribeResourceGroupResponse.status:type_name -> milvus.proto.common.Status
-	67,  // 125: milvus.proto.query.DescribeResourceGroupResponse.resource_group:type_name -> milvus.proto.query.ResourceGroupInfo
-	126, // 126: milvus.proto.query.ResourceGroupInfo.num_loaded_replica:type_name -> milvus.proto.query.ResourceGroupInfo.NumLoadedReplicaEntry
-	127, // 127: milvus.proto.query.ResourceGroupInfo.num_outgoing_node:type_name -> milvus.proto.query.ResourceGroupInfo.NumOutgoingNodeEntry
-	128, // 128: milvus.proto.query.ResourceGroupInfo.num_incoming_node:type_name -> milvus.proto.query.ResourceGroupInfo.NumIncomingNodeEntry
-	145, // 129: milvus.proto.query.ResourceGroupInfo.config:type_name -> milvus.proto.rg.ResourceGroupConfig
-	146, // 130: milvus.proto.query.ResourceGroupInfo.nodes:type_name -> milvus.proto.common.NodeInfo
-	129, // 131: milvus.proto.query.DeleteRequest.base:type_name -> milvus.proto.common.MsgBase
-	147, // 132: milvus.proto.query.DeleteRequest.primary_keys:type_name -> milvus.proto.schema.IDs
-	1,   // 133: milvus.proto.query.DeleteRequest.scope:type_name -> milvus.proto.query.DataScope
-	129, // 134: milvus.proto.query.DeleteBatchRequest.base:type_name -> milvus.proto.common.MsgBase
-	147, // 135: milvus.proto.query.DeleteBatchRequest.primary_keys:type_name -> milvus.proto.schema.IDs
-	1,   // 136: milvus.proto.query.DeleteBatchRequest.scope:type_name -> milvus.proto.query.DataScope
-	130, // 137: milvus.proto.query.DeleteBatchResponse.status:type_name -> milvus.proto.common.Status
-	129, // 138: milvus.proto.query.ActivateCheckerRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 139: milvus.proto.query.DeactivateCheckerRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 140: milvus.proto.query.ListCheckersRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 141: milvus.proto.query.ListCheckersResponse.status:type_name -> milvus.proto.common.Status
-	75,  // 142: milvus.proto.query.ListCheckersResponse.checkerInfos:type_name -> milvus.proto.query.CheckerInfo
-	141, // 143: milvus.proto.query.SegmentTarget.level:type_name -> milvus.proto.data.SegmentLevel
-	76,  // 144: milvus.proto.query.PartitionTarget.segments:type_name -> milvus.proto.query.SegmentTarget
-	77,  // 145: milvus.proto.query.ChannelTarget.partition_targets:type_name -> milvus.proto.query.PartitionTarget
-	140, // 146: milvus.proto.query.ChannelTarget.seek_position:type_name -> milvus.proto.msg.MsgPosition
-	140, // 147: milvus.proto.query.ChannelTarget.delete_checkpoint:type_name -> milvus.proto.msg.MsgPosition
-	78,  // 148: milvus.proto.query.CollectionTarget.Channel_targets:type_name -> milvus.proto.query.ChannelTarget
-	129, // 149: milvus.proto.query.ListQueryNodeRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 150: milvus.proto.query.ListQueryNodeResponse.status:type_name -> milvus.proto.common.Status
-	80,  // 151: milvus.proto.query.ListQueryNodeResponse.nodeInfos:type_name -> milvus.proto.query.NodeInfo
-	129, // 152: milvus.proto.query.GetQueryNodeDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 153: milvus.proto.query.GetQueryNodeDistributionResponse.status:type_name -> milvus.proto.common.Status
-	129, // 154: milvus.proto.query.SuspendBalanceRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 155: milvus.proto.query.ResumeBalanceRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 156: milvus.proto.query.CheckBalanceStatusRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 157: milvus.proto.query.CheckBalanceStatusResponse.status:type_name -> milvus.proto.common.Status
-	129, // 158: milvus.proto.query.SuspendNodeRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 159: milvus.proto.query.ResumeNodeRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 160: milvus.proto.query.TransferSegmentRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 161: milvus.proto.query.TransferChannelRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 162: milvus.proto.query.CheckQueryNodeDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 163: milvus.proto.query.UpdateLoadConfigRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 164: milvus.proto.query.UpdateSchemaRequest.base:type_name -> milvus.proto.common.MsgBase
-	132, // 165: milvus.proto.query.UpdateSchemaRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
-	129, // 166: milvus.proto.query.RunAnalyzerRequest.base:type_name -> milvus.proto.common.MsgBase
-	129, // 167: milvus.proto.query.ValidateAnalyzerRequest.base:type_name -> milvus.proto.common.MsgBase
-	97,  // 168: milvus.proto.query.ValidateAnalyzerRequest.analyzer_infos:type_name -> milvus.proto.query.AnalyzerInfo
-	99,  // 169: milvus.proto.query.HighlightTask.options:type_name -> milvus.proto.query.HighlightOptions
-	129, // 170: milvus.proto.query.GetHighlightRequest.base:type_name -> milvus.proto.common.MsgBase
-	100, // 171: milvus.proto.query.GetHighlightRequest.tasks:type_name -> milvus.proto.query.HighlightTask
-	102, // 172: milvus.proto.query.HighlightResult.fragments:type_name -> milvus.proto.query.HighlightFragment
-	130, // 173: milvus.proto.query.GetHighlightResponse.status:type_name -> milvus.proto.common.Status
-	103, // 174: milvus.proto.query.GetHighlightResponse.results:type_name -> milvus.proto.query.HighlightResult
-	129, // 175: milvus.proto.query.ListLoadedSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
-	130, // 176: milvus.proto.query.ListLoadedSegmentsResponse.status:type_name -> milvus.proto.common.Status
-	129, // 177: milvus.proto.query.DropIndexRequest.base:type_name -> milvus.proto.common.MsgBase
-	145, // 178: milvus.proto.query.UpdateResourceGroupsRequest.ResourceGroupsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
-	138, // 179: milvus.proto.query.WatchDmChannelsRequest.SegmentInfosEntry.value:type_name -> milvus.proto.data.SegmentInfo
-	148, // 180: milvus.proto.query.SegmentLoadInfo.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	149, // 181: milvus.proto.query.SegmentLoadInfo.JsonKeyStatsLogsEntry.value:type_name -> milvus.proto.data.JsonKeyStats
-	140, // 182: milvus.proto.query.GetDataDistributionRequest.CheckpointsEntry.value:type_name -> milvus.proto.msg.MsgPosition
-	54,  // 183: milvus.proto.query.LeaderView.SegmentDistEntry.value:type_name -> milvus.proto.query.SegmentDist
-	140, // 184: milvus.proto.query.LeaderView.GrowingSegmentsEntry.value:type_name -> milvus.proto.msg.MsgPosition
-	29,  // 185: milvus.proto.query.SegmentVersionInfo.IndexInfoEntry.value:type_name -> milvus.proto.query.FieldIndexInfo
-	30,  // 186: milvus.proto.query.SegmentVersionInfo.JsonStatsInfoEntry.value:type_name -> milvus.proto.query.JsonStatsInfo
-	59,  // 187: milvus.proto.query.Replica.ChannelNodeInfosEntry.value:type_name -> milvus.proto.query.ChannelNodeInfo
-	7,   // 188: milvus.proto.query.QueryCoord.ShowLoadCollections:input_type -> milvus.proto.query.ShowCollectionsRequest
-	9,   // 189: milvus.proto.query.QueryCoord.ShowLoadPartitions:input_type -> milvus.proto.query.ShowPartitionsRequest
-	14,  // 190: milvus.proto.query.QueryCoord.LoadPartitions:input_type -> milvus.proto.query.LoadPartitionsRequest
-	15,  // 191: milvus.proto.query.QueryCoord.ReleasePartitions:input_type -> milvus.proto.query.ReleasePartitionsRequest
-	11,  // 192: milvus.proto.query.QueryCoord.LoadCollection:input_type -> milvus.proto.query.LoadCollectionRequest
-	12,  // 193: milvus.proto.query.QueryCoord.ReleaseCollection:input_type -> milvus.proto.query.ReleaseCollectionRequest
-	24,  // 194: milvus.proto.query.QueryCoord.SyncNewCreatedPartition:input_type -> milvus.proto.query.SyncNewCreatedPartitionRequest
-	16,  // 195: milvus.proto.query.QueryCoord.GetPartitionStates:input_type -> milvus.proto.query.GetPartitionStatesRequest
-	18,  // 196: milvus.proto.query.QueryCoord.GetLoadSegmentInfo:input_type -> milvus.proto.query.GetSegmentInfoRequest
-	40,  // 197: milvus.proto.query.QueryCoord.LoadBalance:input_type -> milvus.proto.query.LoadBalanceRequest
-	150, // 198: milvus.proto.query.QueryCoord.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
-	151, // 199: milvus.proto.query.QueryCoord.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	152, // 200: milvus.proto.query.QueryCoord.GetReplicas:input_type -> milvus.proto.milvus.GetReplicasRequest
-	20,  // 201: milvus.proto.query.QueryCoord.GetShardLeaders:input_type -> milvus.proto.query.GetShardLeadersRequest
-	153, // 202: milvus.proto.query.QueryCoord.CheckHealth:input_type -> milvus.proto.milvus.CheckHealthRequest
-	154, // 203: milvus.proto.query.QueryCoord.CreateResourceGroup:input_type -> milvus.proto.milvus.CreateResourceGroupRequest
-	22,  // 204: milvus.proto.query.QueryCoord.UpdateResourceGroups:input_type -> milvus.proto.query.UpdateResourceGroupsRequest
-	155, // 205: milvus.proto.query.QueryCoord.DropResourceGroup:input_type -> milvus.proto.milvus.DropResourceGroupRequest
-	156, // 206: milvus.proto.query.QueryCoord.TransferNode:input_type -> milvus.proto.milvus.TransferNodeRequest
-	64,  // 207: milvus.proto.query.QueryCoord.TransferReplica:input_type -> milvus.proto.query.TransferReplicaRequest
-	157, // 208: milvus.proto.query.QueryCoord.ListResourceGroups:input_type -> milvus.proto.milvus.ListResourceGroupsRequest
-	65,  // 209: milvus.proto.query.QueryCoord.DescribeResourceGroup:input_type -> milvus.proto.query.DescribeResourceGroupRequest
-	105, // 210: milvus.proto.query.QueryCoord.ListLoadedSegments:input_type -> milvus.proto.query.ListLoadedSegmentsRequest
-	73,  // 211: milvus.proto.query.QueryCoord.ListCheckers:input_type -> milvus.proto.query.ListCheckersRequest
-	71,  // 212: milvus.proto.query.QueryCoord.ActivateChecker:input_type -> milvus.proto.query.ActivateCheckerRequest
-	72,  // 213: milvus.proto.query.QueryCoord.DeactivateChecker:input_type -> milvus.proto.query.DeactivateCheckerRequest
-	81,  // 214: milvus.proto.query.QueryCoord.ListQueryNode:input_type -> milvus.proto.query.ListQueryNodeRequest
-	83,  // 215: milvus.proto.query.QueryCoord.GetQueryNodeDistribution:input_type -> milvus.proto.query.GetQueryNodeDistributionRequest
-	85,  // 216: milvus.proto.query.QueryCoord.SuspendBalance:input_type -> milvus.proto.query.SuspendBalanceRequest
-	86,  // 217: milvus.proto.query.QueryCoord.ResumeBalance:input_type -> milvus.proto.query.ResumeBalanceRequest
-	87,  // 218: milvus.proto.query.QueryCoord.CheckBalanceStatus:input_type -> milvus.proto.query.CheckBalanceStatusRequest
-	89,  // 219: milvus.proto.query.QueryCoord.SuspendNode:input_type -> milvus.proto.query.SuspendNodeRequest
-	90,  // 220: milvus.proto.query.QueryCoord.ResumeNode:input_type -> milvus.proto.query.ResumeNodeRequest
-	91,  // 221: milvus.proto.query.QueryCoord.TransferSegment:input_type -> milvus.proto.query.TransferSegmentRequest
-	92,  // 222: milvus.proto.query.QueryCoord.TransferChannel:input_type -> milvus.proto.query.TransferChannelRequest
-	93,  // 223: milvus.proto.query.QueryCoord.CheckQueryNodeDistribution:input_type -> milvus.proto.query.CheckQueryNodeDistributionRequest
-	94,  // 224: milvus.proto.query.QueryCoord.UpdateLoadConfig:input_type -> milvus.proto.query.UpdateLoadConfigRequest
-	96,  // 225: milvus.proto.query.QueryCoord.RunAnalyzer:input_type -> milvus.proto.query.RunAnalyzerRequest
-	98,  // 226: milvus.proto.query.QueryCoord.ValidateAnalyzer:input_type -> milvus.proto.query.ValidateAnalyzerRequest
-	158, // 227: milvus.proto.query.QueryNode.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
-	159, // 228: milvus.proto.query.QueryNode.GetTimeTickChannel:input_type -> milvus.proto.internal.GetTimeTickChannelRequest
-	160, // 229: milvus.proto.query.QueryNode.GetStatisticsChannel:input_type -> milvus.proto.internal.GetStatisticsChannelRequest
-	26,  // 230: milvus.proto.query.QueryNode.WatchDmChannels:input_type -> milvus.proto.query.WatchDmChannelsRequest
-	27,  // 231: milvus.proto.query.QueryNode.UnsubDmChannel:input_type -> milvus.proto.query.UnsubDmChannelRequest
-	31,  // 232: milvus.proto.query.QueryNode.LoadSegments:input_type -> milvus.proto.query.LoadSegmentsRequest
-	12,  // 233: milvus.proto.query.QueryNode.ReleaseCollection:input_type -> milvus.proto.query.ReleaseCollectionRequest
-	14,  // 234: milvus.proto.query.QueryNode.LoadPartitions:input_type -> milvus.proto.query.LoadPartitionsRequest
-	15,  // 235: milvus.proto.query.QueryNode.ReleasePartitions:input_type -> milvus.proto.query.ReleasePartitionsRequest
-	32,  // 236: milvus.proto.query.QueryNode.ReleaseSegments:input_type -> milvus.proto.query.ReleaseSegmentsRequest
-	18,  // 237: milvus.proto.query.QueryNode.GetSegmentInfo:input_type -> milvus.proto.query.GetSegmentInfoRequest
-	35,  // 238: milvus.proto.query.QueryNode.SyncReplicaSegments:input_type -> milvus.proto.query.SyncReplicaSegmentsRequest
-	13,  // 239: milvus.proto.query.QueryNode.GetStatistics:input_type -> milvus.proto.query.GetStatisticsRequest
-	33,  // 240: milvus.proto.query.QueryNode.Search:input_type -> milvus.proto.query.SearchRequest
-	33,  // 241: milvus.proto.query.QueryNode.SearchSegments:input_type -> milvus.proto.query.SearchRequest
-	34,  // 242: milvus.proto.query.QueryNode.Query:input_type -> milvus.proto.query.QueryRequest
-	34,  // 243: milvus.proto.query.QueryNode.QueryStream:input_type -> milvus.proto.query.QueryRequest
-	34,  // 244: milvus.proto.query.QueryNode.QuerySegments:input_type -> milvus.proto.query.QueryRequest
-	34,  // 245: milvus.proto.query.QueryNode.QueryStreamSegments:input_type -> milvus.proto.query.QueryRequest
-	150, // 246: milvus.proto.query.QueryNode.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
-	151, // 247: milvus.proto.query.QueryNode.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	50,  // 248: milvus.proto.query.QueryNode.GetDataDistribution:input_type -> milvus.proto.query.GetDataDistributionRequest
-	62,  // 249: milvus.proto.query.QueryNode.SyncDistribution:input_type -> milvus.proto.query.SyncDistributionRequest
-	68,  // 250: milvus.proto.query.QueryNode.Delete:input_type -> milvus.proto.query.DeleteRequest
-	69,  // 251: milvus.proto.query.QueryNode.DeleteBatch:input_type -> milvus.proto.query.DeleteBatchRequest
-	95,  // 252: milvus.proto.query.QueryNode.UpdateSchema:input_type -> milvus.proto.query.UpdateSchemaRequest
-	96,  // 253: milvus.proto.query.QueryNode.RunAnalyzer:input_type -> milvus.proto.query.RunAnalyzerRequest
-	101, // 254: milvus.proto.query.QueryNode.GetHighlight:input_type -> milvus.proto.query.GetHighlightRequest
-	107, // 255: milvus.proto.query.QueryNode.DropIndex:input_type -> milvus.proto.query.DropIndexRequest
-	98,  // 256: milvus.proto.query.QueryNode.ValidateAnalyzer:input_type -> milvus.proto.query.ValidateAnalyzerRequest
-	8,   // 257: milvus.proto.query.QueryCoord.ShowLoadCollections:output_type -> milvus.proto.query.ShowCollectionsResponse
-	10,  // 258: milvus.proto.query.QueryCoord.ShowLoadPartitions:output_type -> milvus.proto.query.ShowPartitionsResponse
-	130, // 259: milvus.proto.query.QueryCoord.LoadPartitions:output_type -> milvus.proto.common.Status
-	130, // 260: milvus.proto.query.QueryCoord.ReleasePartitions:output_type -> milvus.proto.common.Status
-	130, // 261: milvus.proto.query.QueryCoord.LoadCollection:output_type -> milvus.proto.common.Status
-	130, // 262: milvus.proto.query.QueryCoord.ReleaseCollection:output_type -> milvus.proto.common.Status
-	130, // 263: milvus.proto.query.QueryCoord.SyncNewCreatedPartition:output_type -> milvus.proto.common.Status
-	17,  // 264: milvus.proto.query.QueryCoord.GetPartitionStates:output_type -> milvus.proto.query.GetPartitionStatesResponse
-	19,  // 265: milvus.proto.query.QueryCoord.GetLoadSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
-	130, // 266: milvus.proto.query.QueryCoord.LoadBalance:output_type -> milvus.proto.common.Status
-	161, // 267: milvus.proto.query.QueryCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	162, // 268: milvus.proto.query.QueryCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	163, // 269: milvus.proto.query.QueryCoord.GetReplicas:output_type -> milvus.proto.milvus.GetReplicasResponse
-	21,  // 270: milvus.proto.query.QueryCoord.GetShardLeaders:output_type -> milvus.proto.query.GetShardLeadersResponse
-	164, // 271: milvus.proto.query.QueryCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
-	130, // 272: milvus.proto.query.QueryCoord.CreateResourceGroup:output_type -> milvus.proto.common.Status
-	130, // 273: milvus.proto.query.QueryCoord.UpdateResourceGroups:output_type -> milvus.proto.common.Status
-	130, // 274: milvus.proto.query.QueryCoord.DropResourceGroup:output_type -> milvus.proto.common.Status
-	130, // 275: milvus.proto.query.QueryCoord.TransferNode:output_type -> milvus.proto.common.Status
-	130, // 276: milvus.proto.query.QueryCoord.TransferReplica:output_type -> milvus.proto.common.Status
-	165, // 277: milvus.proto.query.QueryCoord.ListResourceGroups:output_type -> milvus.proto.milvus.ListResourceGroupsResponse
-	66,  // 278: milvus.proto.query.QueryCoord.DescribeResourceGroup:output_type -> milvus.proto.query.DescribeResourceGroupResponse
-	106, // 279: milvus.proto.query.QueryCoord.ListLoadedSegments:output_type -> milvus.proto.query.ListLoadedSegmentsResponse
-	74,  // 280: milvus.proto.query.QueryCoord.ListCheckers:output_type -> milvus.proto.query.ListCheckersResponse
-	130, // 281: milvus.proto.query.QueryCoord.ActivateChecker:output_type -> milvus.proto.common.Status
-	130, // 282: milvus.proto.query.QueryCoord.DeactivateChecker:output_type -> milvus.proto.common.Status
-	82,  // 283: milvus.proto.query.QueryCoord.ListQueryNode:output_type -> milvus.proto.query.ListQueryNodeResponse
-	84,  // 284: milvus.proto.query.QueryCoord.GetQueryNodeDistribution:output_type -> milvus.proto.query.GetQueryNodeDistributionResponse
-	130, // 285: milvus.proto.query.QueryCoord.SuspendBalance:output_type -> milvus.proto.common.Status
-	130, // 286: milvus.proto.query.QueryCoord.ResumeBalance:output_type -> milvus.proto.common.Status
-	88,  // 287: milvus.proto.query.QueryCoord.CheckBalanceStatus:output_type -> milvus.proto.query.CheckBalanceStatusResponse
-	130, // 288: milvus.proto.query.QueryCoord.SuspendNode:output_type -> milvus.proto.common.Status
-	130, // 289: milvus.proto.query.QueryCoord.ResumeNode:output_type -> milvus.proto.common.Status
-	130, // 290: milvus.proto.query.QueryCoord.TransferSegment:output_type -> milvus.proto.common.Status
-	130, // 291: milvus.proto.query.QueryCoord.TransferChannel:output_type -> milvus.proto.common.Status
-	130, // 292: milvus.proto.query.QueryCoord.CheckQueryNodeDistribution:output_type -> milvus.proto.common.Status
-	130, // 293: milvus.proto.query.QueryCoord.UpdateLoadConfig:output_type -> milvus.proto.common.Status
-	166, // 294: milvus.proto.query.QueryCoord.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
-	130, // 295: milvus.proto.query.QueryCoord.ValidateAnalyzer:output_type -> milvus.proto.common.Status
-	167, // 296: milvus.proto.query.QueryNode.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
-	168, // 297: milvus.proto.query.QueryNode.GetTimeTickChannel:output_type -> milvus.proto.milvus.StringResponse
-	168, // 298: milvus.proto.query.QueryNode.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
-	130, // 299: milvus.proto.query.QueryNode.WatchDmChannels:output_type -> milvus.proto.common.Status
-	130, // 300: milvus.proto.query.QueryNode.UnsubDmChannel:output_type -> milvus.proto.common.Status
-	130, // 301: milvus.proto.query.QueryNode.LoadSegments:output_type -> milvus.proto.common.Status
-	130, // 302: milvus.proto.query.QueryNode.ReleaseCollection:output_type -> milvus.proto.common.Status
-	130, // 303: milvus.proto.query.QueryNode.LoadPartitions:output_type -> milvus.proto.common.Status
-	130, // 304: milvus.proto.query.QueryNode.ReleasePartitions:output_type -> milvus.proto.common.Status
-	130, // 305: milvus.proto.query.QueryNode.ReleaseSegments:output_type -> milvus.proto.common.Status
-	19,  // 306: milvus.proto.query.QueryNode.GetSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
-	130, // 307: milvus.proto.query.QueryNode.SyncReplicaSegments:output_type -> milvus.proto.common.Status
-	169, // 308: milvus.proto.query.QueryNode.GetStatistics:output_type -> milvus.proto.internal.GetStatisticsResponse
-	170, // 309: milvus.proto.query.QueryNode.Search:output_type -> milvus.proto.internal.SearchResults
-	170, // 310: milvus.proto.query.QueryNode.SearchSegments:output_type -> milvus.proto.internal.SearchResults
-	171, // 311: milvus.proto.query.QueryNode.Query:output_type -> milvus.proto.internal.RetrieveResults
-	171, // 312: milvus.proto.query.QueryNode.QueryStream:output_type -> milvus.proto.internal.RetrieveResults
-	171, // 313: milvus.proto.query.QueryNode.QuerySegments:output_type -> milvus.proto.internal.RetrieveResults
-	171, // 314: milvus.proto.query.QueryNode.QueryStreamSegments:output_type -> milvus.proto.internal.RetrieveResults
-	161, // 315: milvus.proto.query.QueryNode.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	162, // 316: milvus.proto.query.QueryNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	51,  // 317: milvus.proto.query.QueryNode.GetDataDistribution:output_type -> milvus.proto.query.GetDataDistributionResponse
-	130, // 318: milvus.proto.query.QueryNode.SyncDistribution:output_type -> milvus.proto.common.Status
-	130, // 319: milvus.proto.query.QueryNode.Delete:output_type -> milvus.proto.common.Status
-	70,  // 320: milvus.proto.query.QueryNode.DeleteBatch:output_type -> milvus.proto.query.DeleteBatchResponse
-	130, // 321: milvus.proto.query.QueryNode.UpdateSchema:output_type -> milvus.proto.common.Status
-	166, // 322: milvus.proto.query.QueryNode.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
-	104, // 323: milvus.proto.query.QueryNode.GetHighlight:output_type -> milvus.proto.query.GetHighlightResponse
-	130, // 324: milvus.proto.query.QueryNode.DropIndex:output_type -> milvus.proto.common.Status
-	130, // 325: milvus.proto.query.QueryNode.ValidateAnalyzer:output_type -> milvus.proto.common.Status
-	257, // [257:326] is the sub-list for method output_type
-	188, // [188:257] is the sub-list for method input_type
-	188, // [188:188] is the sub-list for extension type_name
-	188, // [188:188] is the sub-list for extension extendee
-	0,   // [0:188] is the sub-list for field type_name
+	131, // 0: milvus.proto.query.ComputePhraseMatchSlopRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 1: milvus.proto.query.ComputePhraseMatchSlopResponse.status:type_name -> milvus.proto.common.Status
+	131, // 2: milvus.proto.query.ShowCollectionsRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 3: milvus.proto.query.ShowCollectionsResponse.status:type_name -> milvus.proto.common.Status
+	133, // 4: milvus.proto.query.ShowCollectionsResponse.load_fields:type_name -> milvus.proto.schema.LongArray
+	131, // 5: milvus.proto.query.ShowPartitionsRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 6: milvus.proto.query.ShowPartitionsResponse.status:type_name -> milvus.proto.common.Status
+	131, // 7: milvus.proto.query.LoadCollectionRequest.base:type_name -> milvus.proto.common.MsgBase
+	134, // 8: milvus.proto.query.LoadCollectionRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	110, // 9: milvus.proto.query.LoadCollectionRequest.field_indexID:type_name -> milvus.proto.query.LoadCollectionRequest.FieldIndexIDEntry
+	135, // 10: milvus.proto.query.LoadCollectionRequest.priority:type_name -> milvus.proto.common.LoadPriority
+	131, // 11: milvus.proto.query.ReleaseCollectionRequest.base:type_name -> milvus.proto.common.MsgBase
+	136, // 12: milvus.proto.query.GetStatisticsRequest.req:type_name -> milvus.proto.internal.GetStatisticsRequest
+	1,   // 13: milvus.proto.query.GetStatisticsRequest.scope:type_name -> milvus.proto.query.DataScope
+	131, // 14: milvus.proto.query.LoadPartitionsRequest.base:type_name -> milvus.proto.common.MsgBase
+	134, // 15: milvus.proto.query.LoadPartitionsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	111, // 16: milvus.proto.query.LoadPartitionsRequest.field_indexID:type_name -> milvus.proto.query.LoadPartitionsRequest.FieldIndexIDEntry
+	137, // 17: milvus.proto.query.LoadPartitionsRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
+	135, // 18: milvus.proto.query.LoadPartitionsRequest.priority:type_name -> milvus.proto.common.LoadPriority
+	131, // 19: milvus.proto.query.ReleasePartitionsRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 20: milvus.proto.query.GetPartitionStatesRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 21: milvus.proto.query.GetPartitionStatesResponse.status:type_name -> milvus.proto.common.Status
+	45,  // 22: milvus.proto.query.GetPartitionStatesResponse.partition_descriptions:type_name -> milvus.proto.query.PartitionStates
+	131, // 23: milvus.proto.query.GetSegmentInfoRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 24: milvus.proto.query.GetSegmentInfoResponse.status:type_name -> milvus.proto.common.Status
+	46,  // 25: milvus.proto.query.GetSegmentInfoResponse.infos:type_name -> milvus.proto.query.SegmentInfo
+	131, // 26: milvus.proto.query.GetShardLeadersRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 27: milvus.proto.query.GetShardLeadersResponse.status:type_name -> milvus.proto.common.Status
+	25,  // 28: milvus.proto.query.GetShardLeadersResponse.shards:type_name -> milvus.proto.query.ShardLeadersList
+	131, // 29: milvus.proto.query.UpdateResourceGroupsRequest.base:type_name -> milvus.proto.common.MsgBase
+	112, // 30: milvus.proto.query.UpdateResourceGroupsRequest.resource_groups:type_name -> milvus.proto.query.UpdateResourceGroupsRequest.ResourceGroupsEntry
+	131, // 31: milvus.proto.query.SyncNewCreatedPartitionRequest.base:type_name -> milvus.proto.common.MsgBase
+	4,   // 32: milvus.proto.query.LoadMetaInfo.load_type:type_name -> milvus.proto.query.LoadType
+	138, // 33: milvus.proto.query.LoadMetaInfo.db_properties:type_name -> milvus.proto.common.KeyValuePair
+	131, // 34: milvus.proto.query.WatchDmChannelsRequest.base:type_name -> milvus.proto.common.MsgBase
+	139, // 35: milvus.proto.query.WatchDmChannelsRequest.infos:type_name -> milvus.proto.data.VchannelInfo
+	134, // 36: milvus.proto.query.WatchDmChannelsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	140, // 37: milvus.proto.query.WatchDmChannelsRequest.exclude_infos:type_name -> milvus.proto.data.SegmentInfo
+	27,  // 38: milvus.proto.query.WatchDmChannelsRequest.load_meta:type_name -> milvus.proto.query.LoadMetaInfo
+	113, // 39: milvus.proto.query.WatchDmChannelsRequest.segment_infos:type_name -> milvus.proto.query.WatchDmChannelsRequest.SegmentInfosEntry
+	137, // 40: milvus.proto.query.WatchDmChannelsRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
+	114, // 41: milvus.proto.query.WatchDmChannelsRequest.sealed_segment_row_count:type_name -> milvus.proto.query.WatchDmChannelsRequest.SealedSegmentRowCountEntry
+	131, // 42: milvus.proto.query.UnsubDmChannelRequest.base:type_name -> milvus.proto.common.MsgBase
+	141, // 43: milvus.proto.query.SegmentLoadInfo.binlog_paths:type_name -> milvus.proto.data.FieldBinlog
+	141, // 44: milvus.proto.query.SegmentLoadInfo.statslogs:type_name -> milvus.proto.data.FieldBinlog
+	141, // 45: milvus.proto.query.SegmentLoadInfo.deltalogs:type_name -> milvus.proto.data.FieldBinlog
+	31,  // 46: milvus.proto.query.SegmentLoadInfo.index_infos:type_name -> milvus.proto.query.FieldIndexInfo
+	142, // 47: milvus.proto.query.SegmentLoadInfo.start_position:type_name -> milvus.proto.msg.MsgPosition
+	142, // 48: milvus.proto.query.SegmentLoadInfo.delta_position:type_name -> milvus.proto.msg.MsgPosition
+	143, // 49: milvus.proto.query.SegmentLoadInfo.level:type_name -> milvus.proto.data.SegmentLevel
+	115, // 50: milvus.proto.query.SegmentLoadInfo.textStatsLogs:type_name -> milvus.proto.query.SegmentLoadInfo.TextStatsLogsEntry
+	141, // 51: milvus.proto.query.SegmentLoadInfo.bm25logs:type_name -> milvus.proto.data.FieldBinlog
+	116, // 52: milvus.proto.query.SegmentLoadInfo.jsonKeyStatsLogs:type_name -> milvus.proto.query.SegmentLoadInfo.JsonKeyStatsLogsEntry
+	135, // 53: milvus.proto.query.SegmentLoadInfo.priority:type_name -> milvus.proto.common.LoadPriority
+	138, // 54: milvus.proto.query.FieldIndexInfo.index_params:type_name -> milvus.proto.common.KeyValuePair
+	131, // 55: milvus.proto.query.LoadSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	30,  // 56: milvus.proto.query.LoadSegmentsRequest.infos:type_name -> milvus.proto.query.SegmentLoadInfo
+	134, // 57: milvus.proto.query.LoadSegmentsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	27,  // 58: milvus.proto.query.LoadSegmentsRequest.load_meta:type_name -> milvus.proto.query.LoadMetaInfo
+	142, // 59: milvus.proto.query.LoadSegmentsRequest.delta_positions:type_name -> milvus.proto.msg.MsgPosition
+	0,   // 60: milvus.proto.query.LoadSegmentsRequest.load_scope:type_name -> milvus.proto.query.LoadScope
+	137, // 61: milvus.proto.query.LoadSegmentsRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
+	131, // 62: milvus.proto.query.ReleaseSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	1,   // 63: milvus.proto.query.ReleaseSegmentsRequest.scope:type_name -> milvus.proto.query.DataScope
+	142, // 64: milvus.proto.query.ReleaseSegmentsRequest.checkpoint:type_name -> milvus.proto.msg.MsgPosition
+	144, // 65: milvus.proto.query.SearchRequest.req:type_name -> milvus.proto.internal.SearchRequest
+	1,   // 66: milvus.proto.query.SearchRequest.scope:type_name -> milvus.proto.query.DataScope
+	145, // 67: milvus.proto.query.QueryRequest.req:type_name -> milvus.proto.internal.RetrieveRequest
+	1,   // 68: milvus.proto.query.QueryRequest.scope:type_name -> milvus.proto.query.DataScope
+	131, // 69: milvus.proto.query.SyncReplicaSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	38,  // 70: milvus.proto.query.SyncReplicaSegmentsRequest.replica_segments:type_name -> milvus.proto.query.ReplicaSegmentsInfo
+	131, // 71: milvus.proto.query.GetLoadInfoRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 72: milvus.proto.query.GetLoadInfoResponse.status:type_name -> milvus.proto.common.Status
+	134, // 73: milvus.proto.query.GetLoadInfoResponse.schema:type_name -> milvus.proto.schema.CollectionSchema
+	4,   // 74: milvus.proto.query.GetLoadInfoResponse.load_type:type_name -> milvus.proto.query.LoadType
+	131, // 75: milvus.proto.query.HandoffSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	46,  // 76: milvus.proto.query.HandoffSegmentsRequest.segmentInfos:type_name -> milvus.proto.query.SegmentInfo
+	131, // 77: milvus.proto.query.LoadBalanceRequest.base:type_name -> milvus.proto.common.MsgBase
+	3,   // 78: milvus.proto.query.LoadBalanceRequest.balance_reason:type_name -> milvus.proto.query.TriggerCondition
+	46,  // 79: milvus.proto.query.QueryChannelInfo.global_sealed_segments:type_name -> milvus.proto.query.SegmentInfo
+	142, // 80: milvus.proto.query.QueryChannelInfo.seek_position:type_name -> milvus.proto.msg.MsgPosition
+	2,   // 81: milvus.proto.query.PartitionStates.state:type_name -> milvus.proto.query.PartitionState
+	146, // 82: milvus.proto.query.SegmentInfo.segment_state:type_name -> milvus.proto.common.SegmentState
+	31,  // 83: milvus.proto.query.SegmentInfo.index_infos:type_name -> milvus.proto.query.FieldIndexInfo
+	143, // 84: milvus.proto.query.SegmentInfo.level:type_name -> milvus.proto.data.SegmentLevel
+	45,  // 85: milvus.proto.query.CollectionInfo.partition_states:type_name -> milvus.proto.query.PartitionStates
+	4,   // 86: milvus.proto.query.CollectionInfo.load_type:type_name -> milvus.proto.query.LoadType
+	134, // 87: milvus.proto.query.CollectionInfo.schema:type_name -> milvus.proto.schema.CollectionSchema
+	48,  // 88: milvus.proto.query.UnsubscribeChannelInfo.collection_channels:type_name -> milvus.proto.query.UnsubscribeChannels
+	46,  // 89: milvus.proto.query.SegmentChangeInfo.online_segments:type_name -> milvus.proto.query.SegmentInfo
+	46,  // 90: milvus.proto.query.SegmentChangeInfo.offline_segments:type_name -> milvus.proto.query.SegmentInfo
+	131, // 91: milvus.proto.query.SealedSegmentsChangeInfo.base:type_name -> milvus.proto.common.MsgBase
+	50,  // 92: milvus.proto.query.SealedSegmentsChangeInfo.infos:type_name -> milvus.proto.query.SegmentChangeInfo
+	131, // 93: milvus.proto.query.GetDataDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
+	117, // 94: milvus.proto.query.GetDataDistributionRequest.checkpoints:type_name -> milvus.proto.query.GetDataDistributionRequest.CheckpointsEntry
+	132, // 95: milvus.proto.query.GetDataDistributionResponse.status:type_name -> milvus.proto.common.Status
+	57,  // 96: milvus.proto.query.GetDataDistributionResponse.segments:type_name -> milvus.proto.query.SegmentVersionInfo
+	58,  // 97: milvus.proto.query.GetDataDistributionResponse.channels:type_name -> milvus.proto.query.ChannelVersionInfo
+	54,  // 98: milvus.proto.query.GetDataDistributionResponse.leader_views:type_name -> milvus.proto.query.LeaderView
+	118, // 99: milvus.proto.query.LeaderView.segment_dist:type_name -> milvus.proto.query.LeaderView.SegmentDistEntry
+	119, // 100: milvus.proto.query.LeaderView.growing_segments:type_name -> milvus.proto.query.LeaderView.GrowingSegmentsEntry
+	120, // 101: milvus.proto.query.LeaderView.partition_stats_versions:type_name -> milvus.proto.query.LeaderView.PartitionStatsVersionsEntry
+	55,  // 102: milvus.proto.query.LeaderView.status:type_name -> milvus.proto.query.LeaderViewStatus
+	121, // 103: milvus.proto.query.SegmentVersionInfo.index_info:type_name -> milvus.proto.query.SegmentVersionInfo.IndexInfoEntry
+	143, // 104: milvus.proto.query.SegmentVersionInfo.level:type_name -> milvus.proto.data.SegmentLevel
+	122, // 105: milvus.proto.query.SegmentVersionInfo.json_stats_info:type_name -> milvus.proto.query.SegmentVersionInfo.JsonStatsInfoEntry
+	5,   // 106: milvus.proto.query.CollectionLoadInfo.status:type_name -> milvus.proto.query.LoadStatus
+	123, // 107: milvus.proto.query.CollectionLoadInfo.field_indexID:type_name -> milvus.proto.query.CollectionLoadInfo.FieldIndexIDEntry
+	4,   // 108: milvus.proto.query.CollectionLoadInfo.load_type:type_name -> milvus.proto.query.LoadType
+	5,   // 109: milvus.proto.query.PartitionLoadInfo.status:type_name -> milvus.proto.query.LoadStatus
+	124, // 110: milvus.proto.query.PartitionLoadInfo.field_indexID:type_name -> milvus.proto.query.PartitionLoadInfo.FieldIndexIDEntry
+	125, // 111: milvus.proto.query.Replica.channel_node_infos:type_name -> milvus.proto.query.Replica.ChannelNodeInfosEntry
+	6,   // 112: milvus.proto.query.SyncAction.type:type_name -> milvus.proto.query.SyncType
+	30,  // 113: milvus.proto.query.SyncAction.info:type_name -> milvus.proto.query.SegmentLoadInfo
+	142, // 114: milvus.proto.query.SyncAction.checkpoint:type_name -> milvus.proto.msg.MsgPosition
+	126, // 115: milvus.proto.query.SyncAction.partition_stats_versions:type_name -> milvus.proto.query.SyncAction.PartitionStatsVersionsEntry
+	142, // 116: milvus.proto.query.SyncAction.deleteCP:type_name -> milvus.proto.msg.MsgPosition
+	127, // 117: milvus.proto.query.SyncAction.sealed_segment_row_count:type_name -> milvus.proto.query.SyncAction.SealedSegmentRowCountEntry
+	131, // 118: milvus.proto.query.SyncDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
+	63,  // 119: milvus.proto.query.SyncDistributionRequest.actions:type_name -> milvus.proto.query.SyncAction
+	134, // 120: milvus.proto.query.SyncDistributionRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	27,  // 121: milvus.proto.query.SyncDistributionRequest.load_meta:type_name -> milvus.proto.query.LoadMetaInfo
+	137, // 122: milvus.proto.query.SyncDistributionRequest.index_info_list:type_name -> milvus.proto.index.IndexInfo
+	147, // 123: milvus.proto.query.ResourceGroup.config:type_name -> milvus.proto.rg.ResourceGroupConfig
+	131, // 124: milvus.proto.query.TransferReplicaRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 125: milvus.proto.query.DescribeResourceGroupRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 126: milvus.proto.query.DescribeResourceGroupResponse.status:type_name -> milvus.proto.common.Status
+	69,  // 127: milvus.proto.query.DescribeResourceGroupResponse.resource_group:type_name -> milvus.proto.query.ResourceGroupInfo
+	128, // 128: milvus.proto.query.ResourceGroupInfo.num_loaded_replica:type_name -> milvus.proto.query.ResourceGroupInfo.NumLoadedReplicaEntry
+	129, // 129: milvus.proto.query.ResourceGroupInfo.num_outgoing_node:type_name -> milvus.proto.query.ResourceGroupInfo.NumOutgoingNodeEntry
+	130, // 130: milvus.proto.query.ResourceGroupInfo.num_incoming_node:type_name -> milvus.proto.query.ResourceGroupInfo.NumIncomingNodeEntry
+	147, // 131: milvus.proto.query.ResourceGroupInfo.config:type_name -> milvus.proto.rg.ResourceGroupConfig
+	148, // 132: milvus.proto.query.ResourceGroupInfo.nodes:type_name -> milvus.proto.common.NodeInfo
+	131, // 133: milvus.proto.query.DeleteRequest.base:type_name -> milvus.proto.common.MsgBase
+	149, // 134: milvus.proto.query.DeleteRequest.primary_keys:type_name -> milvus.proto.schema.IDs
+	1,   // 135: milvus.proto.query.DeleteRequest.scope:type_name -> milvus.proto.query.DataScope
+	131, // 136: milvus.proto.query.DeleteBatchRequest.base:type_name -> milvus.proto.common.MsgBase
+	149, // 137: milvus.proto.query.DeleteBatchRequest.primary_keys:type_name -> milvus.proto.schema.IDs
+	1,   // 138: milvus.proto.query.DeleteBatchRequest.scope:type_name -> milvus.proto.query.DataScope
+	132, // 139: milvus.proto.query.DeleteBatchResponse.status:type_name -> milvus.proto.common.Status
+	131, // 140: milvus.proto.query.ActivateCheckerRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 141: milvus.proto.query.DeactivateCheckerRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 142: milvus.proto.query.ListCheckersRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 143: milvus.proto.query.ListCheckersResponse.status:type_name -> milvus.proto.common.Status
+	77,  // 144: milvus.proto.query.ListCheckersResponse.checkerInfos:type_name -> milvus.proto.query.CheckerInfo
+	143, // 145: milvus.proto.query.SegmentTarget.level:type_name -> milvus.proto.data.SegmentLevel
+	78,  // 146: milvus.proto.query.PartitionTarget.segments:type_name -> milvus.proto.query.SegmentTarget
+	79,  // 147: milvus.proto.query.ChannelTarget.partition_targets:type_name -> milvus.proto.query.PartitionTarget
+	142, // 148: milvus.proto.query.ChannelTarget.seek_position:type_name -> milvus.proto.msg.MsgPosition
+	142, // 149: milvus.proto.query.ChannelTarget.delete_checkpoint:type_name -> milvus.proto.msg.MsgPosition
+	80,  // 150: milvus.proto.query.CollectionTarget.Channel_targets:type_name -> milvus.proto.query.ChannelTarget
+	131, // 151: milvus.proto.query.ListQueryNodeRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 152: milvus.proto.query.ListQueryNodeResponse.status:type_name -> milvus.proto.common.Status
+	82,  // 153: milvus.proto.query.ListQueryNodeResponse.nodeInfos:type_name -> milvus.proto.query.NodeInfo
+	131, // 154: milvus.proto.query.GetQueryNodeDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 155: milvus.proto.query.GetQueryNodeDistributionResponse.status:type_name -> milvus.proto.common.Status
+	131, // 156: milvus.proto.query.SuspendBalanceRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 157: milvus.proto.query.ResumeBalanceRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 158: milvus.proto.query.CheckBalanceStatusRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 159: milvus.proto.query.CheckBalanceStatusResponse.status:type_name -> milvus.proto.common.Status
+	131, // 160: milvus.proto.query.SuspendNodeRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 161: milvus.proto.query.ResumeNodeRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 162: milvus.proto.query.TransferSegmentRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 163: milvus.proto.query.TransferChannelRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 164: milvus.proto.query.CheckQueryNodeDistributionRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 165: milvus.proto.query.UpdateLoadConfigRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 166: milvus.proto.query.UpdateSchemaRequest.base:type_name -> milvus.proto.common.MsgBase
+	134, // 167: milvus.proto.query.UpdateSchemaRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
+	131, // 168: milvus.proto.query.RunAnalyzerRequest.base:type_name -> milvus.proto.common.MsgBase
+	131, // 169: milvus.proto.query.ValidateAnalyzerRequest.base:type_name -> milvus.proto.common.MsgBase
+	99,  // 170: milvus.proto.query.ValidateAnalyzerRequest.analyzer_infos:type_name -> milvus.proto.query.AnalyzerInfo
+	101, // 171: milvus.proto.query.HighlightTask.options:type_name -> milvus.proto.query.HighlightOptions
+	131, // 172: milvus.proto.query.GetHighlightRequest.base:type_name -> milvus.proto.common.MsgBase
+	102, // 173: milvus.proto.query.GetHighlightRequest.tasks:type_name -> milvus.proto.query.HighlightTask
+	104, // 174: milvus.proto.query.HighlightResult.fragments:type_name -> milvus.proto.query.HighlightFragment
+	132, // 175: milvus.proto.query.GetHighlightResponse.status:type_name -> milvus.proto.common.Status
+	105, // 176: milvus.proto.query.GetHighlightResponse.results:type_name -> milvus.proto.query.HighlightResult
+	131, // 177: milvus.proto.query.ListLoadedSegmentsRequest.base:type_name -> milvus.proto.common.MsgBase
+	132, // 178: milvus.proto.query.ListLoadedSegmentsResponse.status:type_name -> milvus.proto.common.Status
+	131, // 179: milvus.proto.query.DropIndexRequest.base:type_name -> milvus.proto.common.MsgBase
+	147, // 180: milvus.proto.query.UpdateResourceGroupsRequest.ResourceGroupsEntry.value:type_name -> milvus.proto.rg.ResourceGroupConfig
+	140, // 181: milvus.proto.query.WatchDmChannelsRequest.SegmentInfosEntry.value:type_name -> milvus.proto.data.SegmentInfo
+	150, // 182: milvus.proto.query.SegmentLoadInfo.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	151, // 183: milvus.proto.query.SegmentLoadInfo.JsonKeyStatsLogsEntry.value:type_name -> milvus.proto.data.JsonKeyStats
+	142, // 184: milvus.proto.query.GetDataDistributionRequest.CheckpointsEntry.value:type_name -> milvus.proto.msg.MsgPosition
+	56,  // 185: milvus.proto.query.LeaderView.SegmentDistEntry.value:type_name -> milvus.proto.query.SegmentDist
+	142, // 186: milvus.proto.query.LeaderView.GrowingSegmentsEntry.value:type_name -> milvus.proto.msg.MsgPosition
+	31,  // 187: milvus.proto.query.SegmentVersionInfo.IndexInfoEntry.value:type_name -> milvus.proto.query.FieldIndexInfo
+	32,  // 188: milvus.proto.query.SegmentVersionInfo.JsonStatsInfoEntry.value:type_name -> milvus.proto.query.JsonStatsInfo
+	61,  // 189: milvus.proto.query.Replica.ChannelNodeInfosEntry.value:type_name -> milvus.proto.query.ChannelNodeInfo
+	9,   // 190: milvus.proto.query.QueryCoord.ShowLoadCollections:input_type -> milvus.proto.query.ShowCollectionsRequest
+	11,  // 191: milvus.proto.query.QueryCoord.ShowLoadPartitions:input_type -> milvus.proto.query.ShowPartitionsRequest
+	16,  // 192: milvus.proto.query.QueryCoord.LoadPartitions:input_type -> milvus.proto.query.LoadPartitionsRequest
+	17,  // 193: milvus.proto.query.QueryCoord.ReleasePartitions:input_type -> milvus.proto.query.ReleasePartitionsRequest
+	13,  // 194: milvus.proto.query.QueryCoord.LoadCollection:input_type -> milvus.proto.query.LoadCollectionRequest
+	14,  // 195: milvus.proto.query.QueryCoord.ReleaseCollection:input_type -> milvus.proto.query.ReleaseCollectionRequest
+	26,  // 196: milvus.proto.query.QueryCoord.SyncNewCreatedPartition:input_type -> milvus.proto.query.SyncNewCreatedPartitionRequest
+	18,  // 197: milvus.proto.query.QueryCoord.GetPartitionStates:input_type -> milvus.proto.query.GetPartitionStatesRequest
+	20,  // 198: milvus.proto.query.QueryCoord.GetLoadSegmentInfo:input_type -> milvus.proto.query.GetSegmentInfoRequest
+	42,  // 199: milvus.proto.query.QueryCoord.LoadBalance:input_type -> milvus.proto.query.LoadBalanceRequest
+	152, // 200: milvus.proto.query.QueryCoord.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
+	153, // 201: milvus.proto.query.QueryCoord.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	154, // 202: milvus.proto.query.QueryCoord.GetReplicas:input_type -> milvus.proto.milvus.GetReplicasRequest
+	22,  // 203: milvus.proto.query.QueryCoord.GetShardLeaders:input_type -> milvus.proto.query.GetShardLeadersRequest
+	155, // 204: milvus.proto.query.QueryCoord.CheckHealth:input_type -> milvus.proto.milvus.CheckHealthRequest
+	156, // 205: milvus.proto.query.QueryCoord.CreateResourceGroup:input_type -> milvus.proto.milvus.CreateResourceGroupRequest
+	24,  // 206: milvus.proto.query.QueryCoord.UpdateResourceGroups:input_type -> milvus.proto.query.UpdateResourceGroupsRequest
+	157, // 207: milvus.proto.query.QueryCoord.DropResourceGroup:input_type -> milvus.proto.milvus.DropResourceGroupRequest
+	158, // 208: milvus.proto.query.QueryCoord.TransferNode:input_type -> milvus.proto.milvus.TransferNodeRequest
+	66,  // 209: milvus.proto.query.QueryCoord.TransferReplica:input_type -> milvus.proto.query.TransferReplicaRequest
+	159, // 210: milvus.proto.query.QueryCoord.ListResourceGroups:input_type -> milvus.proto.milvus.ListResourceGroupsRequest
+	67,  // 211: milvus.proto.query.QueryCoord.DescribeResourceGroup:input_type -> milvus.proto.query.DescribeResourceGroupRequest
+	107, // 212: milvus.proto.query.QueryCoord.ListLoadedSegments:input_type -> milvus.proto.query.ListLoadedSegmentsRequest
+	75,  // 213: milvus.proto.query.QueryCoord.ListCheckers:input_type -> milvus.proto.query.ListCheckersRequest
+	73,  // 214: milvus.proto.query.QueryCoord.ActivateChecker:input_type -> milvus.proto.query.ActivateCheckerRequest
+	74,  // 215: milvus.proto.query.QueryCoord.DeactivateChecker:input_type -> milvus.proto.query.DeactivateCheckerRequest
+	83,  // 216: milvus.proto.query.QueryCoord.ListQueryNode:input_type -> milvus.proto.query.ListQueryNodeRequest
+	85,  // 217: milvus.proto.query.QueryCoord.GetQueryNodeDistribution:input_type -> milvus.proto.query.GetQueryNodeDistributionRequest
+	87,  // 218: milvus.proto.query.QueryCoord.SuspendBalance:input_type -> milvus.proto.query.SuspendBalanceRequest
+	88,  // 219: milvus.proto.query.QueryCoord.ResumeBalance:input_type -> milvus.proto.query.ResumeBalanceRequest
+	89,  // 220: milvus.proto.query.QueryCoord.CheckBalanceStatus:input_type -> milvus.proto.query.CheckBalanceStatusRequest
+	91,  // 221: milvus.proto.query.QueryCoord.SuspendNode:input_type -> milvus.proto.query.SuspendNodeRequest
+	92,  // 222: milvus.proto.query.QueryCoord.ResumeNode:input_type -> milvus.proto.query.ResumeNodeRequest
+	93,  // 223: milvus.proto.query.QueryCoord.TransferSegment:input_type -> milvus.proto.query.TransferSegmentRequest
+	94,  // 224: milvus.proto.query.QueryCoord.TransferChannel:input_type -> milvus.proto.query.TransferChannelRequest
+	95,  // 225: milvus.proto.query.QueryCoord.CheckQueryNodeDistribution:input_type -> milvus.proto.query.CheckQueryNodeDistributionRequest
+	96,  // 226: milvus.proto.query.QueryCoord.UpdateLoadConfig:input_type -> milvus.proto.query.UpdateLoadConfigRequest
+	98,  // 227: milvus.proto.query.QueryCoord.RunAnalyzer:input_type -> milvus.proto.query.RunAnalyzerRequest
+	100, // 228: milvus.proto.query.QueryCoord.ValidateAnalyzer:input_type -> milvus.proto.query.ValidateAnalyzerRequest
+	7,   // 229: milvus.proto.query.QueryCoord.ComputePhraseMatchSlop:input_type -> milvus.proto.query.ComputePhraseMatchSlopRequest
+	160, // 230: milvus.proto.query.QueryNode.GetComponentStates:input_type -> milvus.proto.milvus.GetComponentStatesRequest
+	161, // 231: milvus.proto.query.QueryNode.GetTimeTickChannel:input_type -> milvus.proto.internal.GetTimeTickChannelRequest
+	162, // 232: milvus.proto.query.QueryNode.GetStatisticsChannel:input_type -> milvus.proto.internal.GetStatisticsChannelRequest
+	28,  // 233: milvus.proto.query.QueryNode.WatchDmChannels:input_type -> milvus.proto.query.WatchDmChannelsRequest
+	29,  // 234: milvus.proto.query.QueryNode.UnsubDmChannel:input_type -> milvus.proto.query.UnsubDmChannelRequest
+	33,  // 235: milvus.proto.query.QueryNode.LoadSegments:input_type -> milvus.proto.query.LoadSegmentsRequest
+	14,  // 236: milvus.proto.query.QueryNode.ReleaseCollection:input_type -> milvus.proto.query.ReleaseCollectionRequest
+	16,  // 237: milvus.proto.query.QueryNode.LoadPartitions:input_type -> milvus.proto.query.LoadPartitionsRequest
+	17,  // 238: milvus.proto.query.QueryNode.ReleasePartitions:input_type -> milvus.proto.query.ReleasePartitionsRequest
+	34,  // 239: milvus.proto.query.QueryNode.ReleaseSegments:input_type -> milvus.proto.query.ReleaseSegmentsRequest
+	20,  // 240: milvus.proto.query.QueryNode.GetSegmentInfo:input_type -> milvus.proto.query.GetSegmentInfoRequest
+	37,  // 241: milvus.proto.query.QueryNode.SyncReplicaSegments:input_type -> milvus.proto.query.SyncReplicaSegmentsRequest
+	15,  // 242: milvus.proto.query.QueryNode.GetStatistics:input_type -> milvus.proto.query.GetStatisticsRequest
+	35,  // 243: milvus.proto.query.QueryNode.Search:input_type -> milvus.proto.query.SearchRequest
+	35,  // 244: milvus.proto.query.QueryNode.SearchSegments:input_type -> milvus.proto.query.SearchRequest
+	36,  // 245: milvus.proto.query.QueryNode.Query:input_type -> milvus.proto.query.QueryRequest
+	36,  // 246: milvus.proto.query.QueryNode.QueryStream:input_type -> milvus.proto.query.QueryRequest
+	36,  // 247: milvus.proto.query.QueryNode.QuerySegments:input_type -> milvus.proto.query.QueryRequest
+	36,  // 248: milvus.proto.query.QueryNode.QueryStreamSegments:input_type -> milvus.proto.query.QueryRequest
+	152, // 249: milvus.proto.query.QueryNode.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
+	153, // 250: milvus.proto.query.QueryNode.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	52,  // 251: milvus.proto.query.QueryNode.GetDataDistribution:input_type -> milvus.proto.query.GetDataDistributionRequest
+	64,  // 252: milvus.proto.query.QueryNode.SyncDistribution:input_type -> milvus.proto.query.SyncDistributionRequest
+	70,  // 253: milvus.proto.query.QueryNode.Delete:input_type -> milvus.proto.query.DeleteRequest
+	71,  // 254: milvus.proto.query.QueryNode.DeleteBatch:input_type -> milvus.proto.query.DeleteBatchRequest
+	97,  // 255: milvus.proto.query.QueryNode.UpdateSchema:input_type -> milvus.proto.query.UpdateSchemaRequest
+	98,  // 256: milvus.proto.query.QueryNode.RunAnalyzer:input_type -> milvus.proto.query.RunAnalyzerRequest
+	103, // 257: milvus.proto.query.QueryNode.GetHighlight:input_type -> milvus.proto.query.GetHighlightRequest
+	109, // 258: milvus.proto.query.QueryNode.DropIndex:input_type -> milvus.proto.query.DropIndexRequest
+	100, // 259: milvus.proto.query.QueryNode.ValidateAnalyzer:input_type -> milvus.proto.query.ValidateAnalyzerRequest
+	7,   // 260: milvus.proto.query.QueryNode.ComputePhraseMatchSlop:input_type -> milvus.proto.query.ComputePhraseMatchSlopRequest
+	10,  // 261: milvus.proto.query.QueryCoord.ShowLoadCollections:output_type -> milvus.proto.query.ShowCollectionsResponse
+	12,  // 262: milvus.proto.query.QueryCoord.ShowLoadPartitions:output_type -> milvus.proto.query.ShowPartitionsResponse
+	132, // 263: milvus.proto.query.QueryCoord.LoadPartitions:output_type -> milvus.proto.common.Status
+	132, // 264: milvus.proto.query.QueryCoord.ReleasePartitions:output_type -> milvus.proto.common.Status
+	132, // 265: milvus.proto.query.QueryCoord.LoadCollection:output_type -> milvus.proto.common.Status
+	132, // 266: milvus.proto.query.QueryCoord.ReleaseCollection:output_type -> milvus.proto.common.Status
+	132, // 267: milvus.proto.query.QueryCoord.SyncNewCreatedPartition:output_type -> milvus.proto.common.Status
+	19,  // 268: milvus.proto.query.QueryCoord.GetPartitionStates:output_type -> milvus.proto.query.GetPartitionStatesResponse
+	21,  // 269: milvus.proto.query.QueryCoord.GetLoadSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
+	132, // 270: milvus.proto.query.QueryCoord.LoadBalance:output_type -> milvus.proto.common.Status
+	163, // 271: milvus.proto.query.QueryCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	164, // 272: milvus.proto.query.QueryCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	165, // 273: milvus.proto.query.QueryCoord.GetReplicas:output_type -> milvus.proto.milvus.GetReplicasResponse
+	23,  // 274: milvus.proto.query.QueryCoord.GetShardLeaders:output_type -> milvus.proto.query.GetShardLeadersResponse
+	166, // 275: milvus.proto.query.QueryCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
+	132, // 276: milvus.proto.query.QueryCoord.CreateResourceGroup:output_type -> milvus.proto.common.Status
+	132, // 277: milvus.proto.query.QueryCoord.UpdateResourceGroups:output_type -> milvus.proto.common.Status
+	132, // 278: milvus.proto.query.QueryCoord.DropResourceGroup:output_type -> milvus.proto.common.Status
+	132, // 279: milvus.proto.query.QueryCoord.TransferNode:output_type -> milvus.proto.common.Status
+	132, // 280: milvus.proto.query.QueryCoord.TransferReplica:output_type -> milvus.proto.common.Status
+	167, // 281: milvus.proto.query.QueryCoord.ListResourceGroups:output_type -> milvus.proto.milvus.ListResourceGroupsResponse
+	68,  // 282: milvus.proto.query.QueryCoord.DescribeResourceGroup:output_type -> milvus.proto.query.DescribeResourceGroupResponse
+	108, // 283: milvus.proto.query.QueryCoord.ListLoadedSegments:output_type -> milvus.proto.query.ListLoadedSegmentsResponse
+	76,  // 284: milvus.proto.query.QueryCoord.ListCheckers:output_type -> milvus.proto.query.ListCheckersResponse
+	132, // 285: milvus.proto.query.QueryCoord.ActivateChecker:output_type -> milvus.proto.common.Status
+	132, // 286: milvus.proto.query.QueryCoord.DeactivateChecker:output_type -> milvus.proto.common.Status
+	84,  // 287: milvus.proto.query.QueryCoord.ListQueryNode:output_type -> milvus.proto.query.ListQueryNodeResponse
+	86,  // 288: milvus.proto.query.QueryCoord.GetQueryNodeDistribution:output_type -> milvus.proto.query.GetQueryNodeDistributionResponse
+	132, // 289: milvus.proto.query.QueryCoord.SuspendBalance:output_type -> milvus.proto.common.Status
+	132, // 290: milvus.proto.query.QueryCoord.ResumeBalance:output_type -> milvus.proto.common.Status
+	90,  // 291: milvus.proto.query.QueryCoord.CheckBalanceStatus:output_type -> milvus.proto.query.CheckBalanceStatusResponse
+	132, // 292: milvus.proto.query.QueryCoord.SuspendNode:output_type -> milvus.proto.common.Status
+	132, // 293: milvus.proto.query.QueryCoord.ResumeNode:output_type -> milvus.proto.common.Status
+	132, // 294: milvus.proto.query.QueryCoord.TransferSegment:output_type -> milvus.proto.common.Status
+	132, // 295: milvus.proto.query.QueryCoord.TransferChannel:output_type -> milvus.proto.common.Status
+	132, // 296: milvus.proto.query.QueryCoord.CheckQueryNodeDistribution:output_type -> milvus.proto.common.Status
+	132, // 297: milvus.proto.query.QueryCoord.UpdateLoadConfig:output_type -> milvus.proto.common.Status
+	168, // 298: milvus.proto.query.QueryCoord.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
+	132, // 299: milvus.proto.query.QueryCoord.ValidateAnalyzer:output_type -> milvus.proto.common.Status
+	8,   // 300: milvus.proto.query.QueryCoord.ComputePhraseMatchSlop:output_type -> milvus.proto.query.ComputePhraseMatchSlopResponse
+	169, // 301: milvus.proto.query.QueryNode.GetComponentStates:output_type -> milvus.proto.milvus.ComponentStates
+	170, // 302: milvus.proto.query.QueryNode.GetTimeTickChannel:output_type -> milvus.proto.milvus.StringResponse
+	170, // 303: milvus.proto.query.QueryNode.GetStatisticsChannel:output_type -> milvus.proto.milvus.StringResponse
+	132, // 304: milvus.proto.query.QueryNode.WatchDmChannels:output_type -> milvus.proto.common.Status
+	132, // 305: milvus.proto.query.QueryNode.UnsubDmChannel:output_type -> milvus.proto.common.Status
+	132, // 306: milvus.proto.query.QueryNode.LoadSegments:output_type -> milvus.proto.common.Status
+	132, // 307: milvus.proto.query.QueryNode.ReleaseCollection:output_type -> milvus.proto.common.Status
+	132, // 308: milvus.proto.query.QueryNode.LoadPartitions:output_type -> milvus.proto.common.Status
+	132, // 309: milvus.proto.query.QueryNode.ReleasePartitions:output_type -> milvus.proto.common.Status
+	132, // 310: milvus.proto.query.QueryNode.ReleaseSegments:output_type -> milvus.proto.common.Status
+	21,  // 311: milvus.proto.query.QueryNode.GetSegmentInfo:output_type -> milvus.proto.query.GetSegmentInfoResponse
+	132, // 312: milvus.proto.query.QueryNode.SyncReplicaSegments:output_type -> milvus.proto.common.Status
+	171, // 313: milvus.proto.query.QueryNode.GetStatistics:output_type -> milvus.proto.internal.GetStatisticsResponse
+	172, // 314: milvus.proto.query.QueryNode.Search:output_type -> milvus.proto.internal.SearchResults
+	172, // 315: milvus.proto.query.QueryNode.SearchSegments:output_type -> milvus.proto.internal.SearchResults
+	173, // 316: milvus.proto.query.QueryNode.Query:output_type -> milvus.proto.internal.RetrieveResults
+	173, // 317: milvus.proto.query.QueryNode.QueryStream:output_type -> milvus.proto.internal.RetrieveResults
+	173, // 318: milvus.proto.query.QueryNode.QuerySegments:output_type -> milvus.proto.internal.RetrieveResults
+	173, // 319: milvus.proto.query.QueryNode.QueryStreamSegments:output_type -> milvus.proto.internal.RetrieveResults
+	163, // 320: milvus.proto.query.QueryNode.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	164, // 321: milvus.proto.query.QueryNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	53,  // 322: milvus.proto.query.QueryNode.GetDataDistribution:output_type -> milvus.proto.query.GetDataDistributionResponse
+	132, // 323: milvus.proto.query.QueryNode.SyncDistribution:output_type -> milvus.proto.common.Status
+	132, // 324: milvus.proto.query.QueryNode.Delete:output_type -> milvus.proto.common.Status
+	72,  // 325: milvus.proto.query.QueryNode.DeleteBatch:output_type -> milvus.proto.query.DeleteBatchResponse
+	132, // 326: milvus.proto.query.QueryNode.UpdateSchema:output_type -> milvus.proto.common.Status
+	168, // 327: milvus.proto.query.QueryNode.RunAnalyzer:output_type -> milvus.proto.milvus.RunAnalyzerResponse
+	106, // 328: milvus.proto.query.QueryNode.GetHighlight:output_type -> milvus.proto.query.GetHighlightResponse
+	132, // 329: milvus.proto.query.QueryNode.DropIndex:output_type -> milvus.proto.common.Status
+	132, // 330: milvus.proto.query.QueryNode.ValidateAnalyzer:output_type -> milvus.proto.common.Status
+	8,   // 331: milvus.proto.query.QueryNode.ComputePhraseMatchSlop:output_type -> milvus.proto.query.ComputePhraseMatchSlopResponse
+	261, // [261:332] is the sub-list for method output_type
+	190, // [190:261] is the sub-list for method input_type
+	190, // [190:190] is the sub-list for extension type_name
+	190, // [190:190] is the sub-list for extension extendee
+	0,   // [0:190] is the sub-list for field type_name
 }
 
 func init() { file_query_coord_proto_init() }
@@ -11002,7 +11181,7 @@ func file_query_coord_proto_init() {
 	}
 	if !protoimpl.UnsafeEnabled {
 		file_query_coord_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ShowCollectionsRequest); i {
+			switch v := v.(*ComputePhraseMatchSlopRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11014,7 +11193,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ShowCollectionsResponse); i {
+			switch v := v.(*ComputePhraseMatchSlopResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11026,7 +11205,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ShowPartitionsRequest); i {
+			switch v := v.(*ShowCollectionsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11038,7 +11217,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ShowPartitionsResponse); i {
+			switch v := v.(*ShowCollectionsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11050,7 +11229,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadCollectionRequest); i {
+			switch v := v.(*ShowPartitionsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11062,7 +11241,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ReleaseCollectionRequest); i {
+			switch v := v.(*ShowPartitionsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11074,7 +11253,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetStatisticsRequest); i {
+			switch v := v.(*LoadCollectionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11086,7 +11265,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadPartitionsRequest); i {
+			switch v := v.(*ReleaseCollectionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11098,7 +11277,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ReleasePartitionsRequest); i {
+			switch v := v.(*GetStatisticsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11110,7 +11289,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetPartitionStatesRequest); i {
+			switch v := v.(*LoadPartitionsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11122,7 +11301,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetPartitionStatesResponse); i {
+			switch v := v.(*ReleasePartitionsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11134,7 +11313,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetSegmentInfoRequest); i {
+			switch v := v.(*GetPartitionStatesRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11146,7 +11325,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetSegmentInfoResponse); i {
+			switch v := v.(*GetPartitionStatesResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11158,7 +11337,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetShardLeadersRequest); i {
+			switch v := v.(*GetSegmentInfoRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11170,7 +11349,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetShardLeadersResponse); i {
+			switch v := v.(*GetSegmentInfoResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11182,7 +11361,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateResourceGroupsRequest); i {
+			switch v := v.(*GetShardLeadersRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11194,7 +11373,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ShardLeadersList); i {
+			switch v := v.(*GetShardLeadersResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11206,7 +11385,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SyncNewCreatedPartitionRequest); i {
+			switch v := v.(*UpdateResourceGroupsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11218,7 +11397,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadMetaInfo); i {
+			switch v := v.(*ShardLeadersList); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11230,7 +11409,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*WatchDmChannelsRequest); i {
+			switch v := v.(*SyncNewCreatedPartitionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11242,7 +11421,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UnsubDmChannelRequest); i {
+			switch v := v.(*LoadMetaInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11254,7 +11433,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentLoadInfo); i {
+			switch v := v.(*WatchDmChannelsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11266,7 +11445,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*FieldIndexInfo); i {
+			switch v := v.(*UnsubDmChannelRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11278,7 +11457,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*JsonStatsInfo); i {
+			switch v := v.(*SegmentLoadInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11290,7 +11469,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadSegmentsRequest); i {
+			switch v := v.(*FieldIndexInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11302,7 +11481,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[25].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ReleaseSegmentsRequest); i {
+			switch v := v.(*JsonStatsInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11314,7 +11493,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[26].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SearchRequest); i {
+			switch v := v.(*LoadSegmentsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11326,7 +11505,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QueryRequest); i {
+			switch v := v.(*ReleaseSegmentsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11338,7 +11517,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[28].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SyncReplicaSegmentsRequest); i {
+			switch v := v.(*SearchRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11350,7 +11529,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[29].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ReplicaSegmentsInfo); i {
+			switch v := v.(*QueryRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11362,7 +11541,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[30].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetLoadInfoRequest); i {
+			switch v := v.(*SyncReplicaSegmentsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11374,7 +11553,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[31].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetLoadInfoResponse); i {
+			switch v := v.(*ReplicaSegmentsInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11386,7 +11565,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[32].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HandoffSegmentsRequest); i {
+			switch v := v.(*GetLoadInfoRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11398,7 +11577,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[33].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LoadBalanceRequest); i {
+			switch v := v.(*GetLoadInfoResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11410,7 +11589,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[34].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DmChannelWatchInfo); i {
+			switch v := v.(*HandoffSegmentsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11422,7 +11601,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[35].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*QueryChannelInfo); i {
+			switch v := v.(*LoadBalanceRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11434,7 +11613,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[36].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionStates); i {
+			switch v := v.(*DmChannelWatchInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11446,7 +11625,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[37].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentInfo); i {
+			switch v := v.(*QueryChannelInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11458,7 +11637,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[38].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionInfo); i {
+			switch v := v.(*PartitionStates); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11470,7 +11649,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[39].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UnsubscribeChannels); i {
+			switch v := v.(*SegmentInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11482,7 +11661,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[40].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UnsubscribeChannelInfo); i {
+			switch v := v.(*CollectionInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11494,7 +11673,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[41].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentChangeInfo); i {
+			switch v := v.(*UnsubscribeChannels); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11506,7 +11685,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[42].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SealedSegmentsChangeInfo); i {
+			switch v := v.(*UnsubscribeChannelInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11518,7 +11697,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[43].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetDataDistributionRequest); i {
+			switch v := v.(*SegmentChangeInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11530,7 +11709,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[44].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetDataDistributionResponse); i {
+			switch v := v.(*SealedSegmentsChangeInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11542,7 +11721,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[45].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LeaderView); i {
+			switch v := v.(*GetDataDistributionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11554,7 +11733,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[46].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*LeaderViewStatus); i {
+			switch v := v.(*GetDataDistributionResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11566,7 +11745,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[47].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentDist); i {
+			switch v := v.(*LeaderView); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11578,7 +11757,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[48].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentVersionInfo); i {
+			switch v := v.(*LeaderViewStatus); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11590,7 +11769,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[49].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ChannelVersionInfo); i {
+			switch v := v.(*SegmentDist); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11602,7 +11781,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[50].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionLoadInfo); i {
+			switch v := v.(*SegmentVersionInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11614,7 +11793,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[51].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionLoadInfo); i {
+			switch v := v.(*ChannelVersionInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11626,7 +11805,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[52].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ChannelNodeInfo); i {
+			switch v := v.(*CollectionLoadInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11638,7 +11817,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[53].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Replica); i {
+			switch v := v.(*PartitionLoadInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11650,7 +11829,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[54].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SyncAction); i {
+			switch v := v.(*ChannelNodeInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11662,7 +11841,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[55].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SyncDistributionRequest); i {
+			switch v := v.(*Replica); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11674,7 +11853,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[56].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ResourceGroup); i {
+			switch v := v.(*SyncAction); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11686,7 +11865,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[57].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TransferReplicaRequest); i {
+			switch v := v.(*SyncDistributionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11698,7 +11877,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[58].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DescribeResourceGroupRequest); i {
+			switch v := v.(*ResourceGroup); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11710,7 +11889,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[59].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DescribeResourceGroupResponse); i {
+			switch v := v.(*TransferReplicaRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11722,7 +11901,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[60].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ResourceGroupInfo); i {
+			switch v := v.(*DescribeResourceGroupRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11734,7 +11913,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[61].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteRequest); i {
+			switch v := v.(*DescribeResourceGroupResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11746,7 +11925,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[62].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteBatchRequest); i {
+			switch v := v.(*ResourceGroupInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11758,7 +11937,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[63].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeleteBatchResponse); i {
+			switch v := v.(*DeleteRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11770,7 +11949,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[64].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ActivateCheckerRequest); i {
+			switch v := v.(*DeleteBatchRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11782,7 +11961,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[65].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeactivateCheckerRequest); i {
+			switch v := v.(*DeleteBatchResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11794,7 +11973,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[66].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListCheckersRequest); i {
+			switch v := v.(*ActivateCheckerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11806,7 +11985,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[67].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListCheckersResponse); i {
+			switch v := v.(*DeactivateCheckerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11818,7 +11997,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[68].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CheckerInfo); i {
+			switch v := v.(*ListCheckersRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11830,7 +12009,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[69].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SegmentTarget); i {
+			switch v := v.(*ListCheckersResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11842,7 +12021,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[70].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PartitionTarget); i {
+			switch v := v.(*CheckerInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11854,7 +12033,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[71].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ChannelTarget); i {
+			switch v := v.(*SegmentTarget); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11866,7 +12045,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[72].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CollectionTarget); i {
+			switch v := v.(*PartitionTarget); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11878,7 +12057,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[73].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*NodeInfo); i {
+			switch v := v.(*ChannelTarget); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11890,7 +12069,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[74].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListQueryNodeRequest); i {
+			switch v := v.(*CollectionTarget); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11902,7 +12081,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[75].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListQueryNodeResponse); i {
+			switch v := v.(*NodeInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11914,7 +12093,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[76].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetQueryNodeDistributionRequest); i {
+			switch v := v.(*ListQueryNodeRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11926,7 +12105,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[77].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetQueryNodeDistributionResponse); i {
+			switch v := v.(*ListQueryNodeResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11938,7 +12117,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[78].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SuspendBalanceRequest); i {
+			switch v := v.(*GetQueryNodeDistributionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11950,7 +12129,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[79].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ResumeBalanceRequest); i {
+			switch v := v.(*GetQueryNodeDistributionResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11962,7 +12141,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[80].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CheckBalanceStatusRequest); i {
+			switch v := v.(*SuspendBalanceRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11974,7 +12153,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[81].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CheckBalanceStatusResponse); i {
+			switch v := v.(*ResumeBalanceRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11986,7 +12165,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[82].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SuspendNodeRequest); i {
+			switch v := v.(*CheckBalanceStatusRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -11998,7 +12177,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[83].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ResumeNodeRequest); i {
+			switch v := v.(*CheckBalanceStatusResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12010,7 +12189,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[84].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TransferSegmentRequest); i {
+			switch v := v.(*SuspendNodeRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12022,7 +12201,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[85].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TransferChannelRequest); i {
+			switch v := v.(*ResumeNodeRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12034,7 +12213,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[86].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CheckQueryNodeDistributionRequest); i {
+			switch v := v.(*TransferSegmentRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12046,7 +12225,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[87].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateLoadConfigRequest); i {
+			switch v := v.(*TransferChannelRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12058,7 +12237,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[88].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UpdateSchemaRequest); i {
+			switch v := v.(*CheckQueryNodeDistributionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12070,7 +12249,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[89].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RunAnalyzerRequest); i {
+			switch v := v.(*UpdateLoadConfigRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12082,7 +12261,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[90].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*AnalyzerInfo); i {
+			switch v := v.(*UpdateSchemaRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12094,7 +12273,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[91].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ValidateAnalyzerRequest); i {
+			switch v := v.(*RunAnalyzerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12106,7 +12285,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[92].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HighlightOptions); i {
+			switch v := v.(*AnalyzerInfo); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12118,7 +12297,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[93].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HighlightTask); i {
+			switch v := v.(*ValidateAnalyzerRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12130,7 +12309,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[94].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetHighlightRequest); i {
+			switch v := v.(*HighlightOptions); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12142,7 +12321,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[95].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HighlightFragment); i {
+			switch v := v.(*HighlightTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12154,7 +12333,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[96].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HighlightResult); i {
+			switch v := v.(*GetHighlightRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12166,7 +12345,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[97].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetHighlightResponse); i {
+			switch v := v.(*HighlightFragment); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12178,7 +12357,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[98].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListLoadedSegmentsRequest); i {
+			switch v := v.(*HighlightResult); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12190,7 +12369,7 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[99].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ListLoadedSegmentsResponse); i {
+			switch v := v.(*GetHighlightResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -12202,6 +12381,30 @@ func file_query_coord_proto_init() {
 			}
 		}
 		file_query_coord_proto_msgTypes[100].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListLoadedSegmentsRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_query_coord_proto_msgTypes[101].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ListLoadedSegmentsResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_query_coord_proto_msgTypes[102].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*DropIndexRequest); i {
 			case 0:
 				return &v.state
@@ -12220,7 +12423,7 @@ func file_query_coord_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_query_coord_proto_rawDesc,
 			NumEnums:      7,
-			NumMessages:   122,
+			NumMessages:   124,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

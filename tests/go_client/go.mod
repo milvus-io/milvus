@@ -17,6 +17,8 @@ require (
 
 replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
 
+replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/SpadeA-Tang/milvus-proto/go-api/v2 v2.0.0-20251127094749-397b138d82ab
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect

@@ -1660,6 +1660,12 @@ func (coord *MixCoordMock) RunAnalyzer(ctx context.Context, req *querypb.RunAnal
 	}, nil
 }
 
+func (coord *MixCoordMock) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	return &querypb.ComputePhraseMatchSlopResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
 }

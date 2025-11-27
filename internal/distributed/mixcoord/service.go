@@ -941,6 +941,10 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 	return s.mixCoord.ValidateAnalyzer(ctx, req)
 }
 
+func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	return s.mixCoord.ComputePhraseMatchSlop(ctx, req)
+}
+
 // AddFileResource add file resource
 func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	return s.mixCoord.AddFileResource(ctx, req)

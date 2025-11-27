@@ -1948,3 +1948,14 @@ func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 		return client.ValidateAnalyzer(ctx, req)
 	})
 }
+
+func (c *Client) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ComputePhraseMatchSlopResponse, error) {
+		return client.ComputePhraseMatchSlop(ctx, req)
+	})
+}

@@ -1177,3 +1177,8 @@ func (s *Server) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicat
 func (s *Server) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
 	return s.proxy.CreateReplicateStream(stream)
 }
+
+// ComputePhraseMatchSlop computes the minimum slop required for phrase matching.
+func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
+	return s.proxy.ComputePhraseMatchSlop(ctx, req)
+}

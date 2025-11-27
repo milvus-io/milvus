@@ -102,6 +102,7 @@ service QueryCoord {
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+  rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
 
 service QueryNode {
@@ -178,9 +179,23 @@ service QueryNode {
     
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
     rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+    rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
+
+message ComputePhraseMatchSlopRequest {
+    common.MsgBase base = 1;
+    string analyzer_params = 2;
+    string query_text = 3;
+    repeated string data_text = 4;
+}
+
+message ComputePhraseMatchSlopResponse {
+    common.Status status = 1;
+    repeated bool is_match = 2;
+    repeated int64 slop = 3;
+}
 
 message ShowCollectionsRequest {
     common.MsgBase base = 1;

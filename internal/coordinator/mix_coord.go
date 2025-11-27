@@ -1217,6 +1217,10 @@ func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
 }
 
+func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
+}
+
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
 	return s.datacoordServer.FlushAll(ctx, req)
 }
