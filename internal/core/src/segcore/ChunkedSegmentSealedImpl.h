@@ -40,6 +40,7 @@
 #include "folly/concurrency/ConcurrentHashMap.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "pb/common.pb.h"
 #include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
@@ -393,7 +394,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  private:
     void
-    load_system_field_internal(FieldId field_id, FieldDataInfo& data);
+    load_system_field_internal(
+        FieldId field_id,
+        FieldDataInfo& data,
+        milvus::proto::common::LoadPriority load_priority);
 
     template <typename PK>
     void

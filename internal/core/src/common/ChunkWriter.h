@@ -242,13 +242,17 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
-             const std::string& file_path = "");
+             const std::string& file_path = "",
+             proto::common::LoadPriority load_priority =
+                 proto::common::LoadPriority::HIGH);
 
 std::unordered_map<FieldId, std::shared_ptr<Chunk>>
 create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<FieldMeta>& field_metas,
                    const std::vector<arrow::ArrayVector>& array_vec,
-                   const std::string& file_path = "");
+                   const std::string& file_path = "",
+                   proto::common::LoadPriority load_priority =
+                       proto::common::LoadPriority::HIGH);
 
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);

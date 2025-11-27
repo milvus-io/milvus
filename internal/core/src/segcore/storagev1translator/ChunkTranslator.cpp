@@ -201,7 +201,8 @@ ChunkTranslator::get_cells(
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_, array_vec, filepath.string());
+            chunk = create_chunk(
+                field_meta_, array_vec, filepath.string(), load_priority_);
         }
         cells.emplace_back(cid, std::move(chunk));
     }
