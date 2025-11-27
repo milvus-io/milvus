@@ -163,13 +163,8 @@ func (r *FFIPackedReader) Close() error {
 		r.recordReader = nil
 	}
 
-	if r.cPackedReader != 0 {
-		status := C.CloseFFIReader(r.cPackedReader)
-		r.cPackedReader = 0
-		return ConsumeCStatusIntoError(&status)
-	}
-
-	return nil
+	status := C.CloseFFIReader(r.cPackedReader)
+	return ConsumeCStatusIntoError(&status)
 }
 
 // Schema returns the schema of the reader
