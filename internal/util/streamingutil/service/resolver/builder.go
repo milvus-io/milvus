@@ -33,20 +33,9 @@ func NewChannelAssignmentBuilder(w types.AssignmentDiscoverWatcher) Builder {
 
 // NewSessionBuilder creates a new resolver builder.
 // Multiple sessions are allowed, use the role as prefix.
-func NewSessionBuilder(c *clientv3.Client, role string, version string) Builder {
-	b := newBuilder(SessionResolverScheme,
-		discoverer.NewSessionDiscoverer(c, role, false, version),
-		log.With(log.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme), zap.String("role", role), zap.Bool("exclusive", false)))
-	return b
-}
-
-// NewSessionExclusiveBuilder creates a new resolver builder with exclusive.
-// Only one session is allowed, not use the prefix, only use the role directly.
-func NewSessionExclusiveBuilder(c *clientv3.Client, role string, version string) Builder {
-	b := newBuilder(
-		SessionResolverScheme,
-		discoverer.NewSessionDiscoverer(c, role, true, version),
-		log.With(log.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme), zap.String("role", role), zap.Bool("exclusive", true)))
+func NewSessionBuilder(c *clientv3.Client, sessionDiscovererOptions ...discoverer.SessionDiscovererOption) Builder {
+	sd := discoverer.NewSessionDiscoverer(c, sessionDiscovererOptions...)
+	b := newBuilder(SessionResolverScheme, sd, sd.Logger().With(log.FieldComponent("grpc-resolver"), zap.String("scheme", SessionResolverScheme)))
 	return b
 }
 

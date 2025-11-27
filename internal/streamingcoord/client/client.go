@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
@@ -33,6 +34,9 @@ var _ Client = (*clientImpl)(nil)
 type AssignmentService interface {
 	// AssignmentDiscover is used to watches the assignment discovery.
 	types.AssignmentDiscoverWatcher
+
+	// GetLatestStreamingVersion returns the latest version of the streaming service.
+	GetLatestStreamingVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
 
 	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
 	UpdateReplicateConfiguration(ctx context.Context, config *commonpb.ReplicateConfiguration) error
@@ -78,7 +82,7 @@ type Client interface {
 func NewClient(etcdCli *clientv3.Client) Client {
 	// StreamingCoord is deployed on DataCoord node.
 	role := sessionutil.GetSessionPrefixByRole(typeutil.MixCoordRole)
-	rb := resolver.NewSessionExclusiveBuilder(etcdCli, role, ">=2.6.0-dev")
+	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDPrefix(role), discoverer.OptSDExclusive(), discoverer.OptSDVersionRange(">=2.6.0-dev"))
 	dialTimeout := paramtable.Get().StreamingCoordGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {

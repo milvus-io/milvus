@@ -46,6 +46,7 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 	return h.Send(&streamingpb.AssignmentDiscoverResponse{
 		Response: &streamingpb.AssignmentDiscoverResponse_FullAssignment{
 			FullAssignment: &streamingpb.FullStreamingNodeAssignmentWithVersion{
+				StreamingVersion: param.StreamingVersion,
 				Version: &streamingpb.VersionPair{
 					Global: param.Version.Global,
 					Local:  param.Version.Local,

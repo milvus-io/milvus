@@ -40,6 +40,8 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		// TODO: optimize the pool size, use the streaming api but not goroutines.
 		appendExecutionPool:   conc.NewPool[struct{}](0),
 		dispatchExecutionPool: conc.NewPool[struct{}](0),
+
+		forwardService: newForwardService(streamingCoordClient),
 	}
 	w.SetLogger(log.With(log.FieldComponent("wal-accesser")))
 	return w
@@ -59,6 +61,8 @@ type walAccesserImpl struct {
 	producers             map[string]*producer.ResumableProducer
 	appendExecutionPool   *conc.Pool[struct{}]
 	dispatchExecutionPool *conc.Pool[struct{}]
+
+	forwardService *forwardServiceImpl
 }
 
 func (w *walAccesserImpl) Replicate() ReplicateService {

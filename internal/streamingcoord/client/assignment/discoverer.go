@@ -163,9 +163,10 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 				}
 			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
-				Version:     newIncomingVersion,
-				Assignments: newIncomingAssignments,
-				CChannel:    resp.FullAssignment.Cchannel,
+				StreamingVersion: resp.FullAssignment.StreamingVersion,
+				Version:          newIncomingVersion,
+				Assignments:      newIncomingAssignments,
+				CChannel:         resp.FullAssignment.Cchannel,
 				ReplicateConfigHelper: replicateutil.MustNewConfigHelper(
 					c.clusterID,
 					resp.FullAssignment.ReplicateConfiguration),
