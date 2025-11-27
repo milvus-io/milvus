@@ -436,12 +436,16 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // Get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
         row_group_lists.reserve(insert_files.size());
+        std::vector<std::shared_ptr<milvus_storage::FileRowGroupReader>>
+            file_readers;
+        file_readers.reserve(insert_files.size());
         for (const auto& file : insert_files) {
             auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
                 fs,
                 file,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties());
+            file_readers.emplace_back(reader);
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
             std::vector<int64_t> all_row_groups(row_group_num);
@@ -461,7 +465,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
 
         auto load_future = pool.Submit([&]() {
-            return LoadWithStrategy(insert_files,
+            return LoadWithStrategy(file_readers,
+                                    insert_files,
                                     column_group_info.arrow_reader_channel,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),

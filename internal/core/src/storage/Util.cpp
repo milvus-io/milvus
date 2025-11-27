@@ -1327,14 +1327,18 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
             parallel_degree);
         auto load_future = pool.Submit([&]() {
-            return LoadWithStrategy(std::vector<std::string>{column_group_file},
-                                    field_data_info.arrow_reader_channel,
-                                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                    std::move(strategy),
-                                    row_group_lists,
-                                    fs,
-                                    nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH);
+            return LoadWithStrategy(
+                std::vector<
+                    std::shared_ptr<milvus_storage::FileRowGroupReader>>{
+                    reader},
+                std::vector<std::string>{column_group_file},
+                field_data_info.arrow_reader_channel,
+                DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                std::move(strategy),
+                row_group_lists,
+                fs,
+                nullptr,
+                milvus::proto::common::LoadPriority::HIGH);
         });
         // read field data from channel
         std::shared_ptr<milvus::ArrowDataWrapper> r;

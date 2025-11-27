@@ -23,6 +23,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "milvus-storage/common/metadata.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/GroupChunk.h"
@@ -112,6 +113,8 @@ class GroupChunkTranslator
     bool use_mmap_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
+    std::vector<std::shared_ptr<milvus_storage::FileRowGroupReader>>
+        file_readers_;
 };
 
 }  // namespace milvus::segcore::storagev2translator

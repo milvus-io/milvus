@@ -90,21 +90,16 @@ GroupChunkTranslator::GroupChunkTranslator(
 
     // Get row group metadata from files
     row_group_meta_list_.reserve(insert_files_.size());
+    file_readers_.reserve(insert_files_.size());
     for (const auto& file : insert_files_) {
         auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
             fs,
             file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             storage::GetReaderProperties());
-        row_group_meta_list_.push_back(
+        file_readers_.emplace_back(reader);
+        row_group_meta_list_.emplace_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
-        auto status = reader->Close();
-        AssertInfo(status.ok(),
-                   "[StorageV2] translator {} failed to close file reader when "
-                   "get row group "
-                   "metadata from file {} with error {}",
-                   key_,
-                   file + " with error: " + status.ToString());
     }
 
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
@@ -247,7 +242,8 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                   .GetArrowFileSystem();
 
     auto load_future = pool.Submit([&]() {
-        return LoadWithStrategy(insert_files_,
+        return LoadWithStrategy(file_readers_,
+                                insert_files_,
                                 channel,
                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                 std::move(strategy),
