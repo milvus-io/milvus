@@ -38,6 +38,7 @@ func NewAsyncTextIOCore(cfg *Config, ws zapcore.WriteSyncer, enab zapcore.LevelE
 		Size:          cfg.AsyncWriteBufferSize,
 		FlushInterval: cfg.AsyncWriteFlushInterval,
 	}
+	nonDroppableLevel, _ := zapcore.ParseLevel(cfg.AsyncWriteNonDroppableLevel)
 	asyncTextIOCore := &asyncTextIOCore{
 		LevelEnabler:        enab,
 		notifier:            syncutil.NewAsyncTaskNotifier[struct{}](),
@@ -45,6 +46,7 @@ func NewAsyncTextIOCore(cfg *Config, ws zapcore.WriteSyncer, enab zapcore.LevelE
 		bws:                 bws,
 		pending:             make(chan *entryItem, cfg.AsyncWritePendingLength),
 		writeDroppedTimeout: cfg.AsyncWriteDroppedTimeout,
+		nonDroppableLevel:   nonDroppableLevel,
 		stopTimeout:         cfg.AsyncWriteStopTimeout,
 		maxBytesPerLog:      cfg.AsyncWriteMaxBytesPerLog,
 	}
@@ -61,6 +63,7 @@ type asyncTextIOCore struct {
 	bws                 *zapcore.BufferedWriteSyncer
 	pending             chan *entryItem // the incoming new write requests
 	writeDroppedTimeout time.Duration
+	nonDroppableLevel   zapcore.Level
 	stopTimeout         time.Duration
 	maxBytesPerLog      int
 }
@@ -121,11 +124,15 @@ func (s *asyncTextIOCore) Write(ent zapcore.Entry, fields []zapcore.Field) error
 	if length == 0 {
 		return nil
 	}
+	var writeDroppedTimeout <-chan time.Time
+	if ent.Level < s.nonDroppableLevel {
+		writeDroppedTimeout = time.After(s.writeDroppedTimeout)
+	}
 	select {
 	case s.pending <- entry:
 		metrics.LoggingPendingWriteLength.Inc()
 		metrics.LoggingPendingWriteBytes.Add(float64(length))
-	case <-time.After(s.writeDroppedTimeout):
+	case <-writeDroppedTimeout:
 		metrics.LoggingDroppedWrites.Inc()
 		// drop the entry if the write is dropped due to timeout
 		buf.Free()

@@ -81,6 +81,9 @@ type Config struct {
 	// AsyncWriteDroppedTimeout is the timeout to drop the write request if the buffer is full
 	AsyncWriteDroppedTimeout time.Duration `toml:"async-write-dropped-timeout" json:"async-write-dropped-timeout"`
 
+	// AsyncWriteNonDroppableLevel is the level that will not be dropped when the buffer is full
+	AsyncWriteNonDroppableLevel string `toml:"async-write-non-droppable-level" json:"async-write-non-droppable-level"`
+
 	// AsyncWriteStopTimeout is the timeout to stop the async write
 	AsyncWriteStopTimeout time.Duration `toml:"async-write-stop-timeout" json:"async-write-stop-timeout"`
 
@@ -140,14 +143,17 @@ func (cfg *Config) initialize() {
 	if cfg.AsyncWriteDroppedTimeout <= 0 {
 		cfg.AsyncWriteDroppedTimeout = 100 * time.Millisecond
 	}
+	if _, err := zapcore.ParseLevel(cfg.AsyncWriteNonDroppableLevel); cfg.AsyncWriteNonDroppableLevel == "" || err != nil {
+		cfg.AsyncWriteNonDroppableLevel = zapcore.ErrorLevel.String()
+	}
 	if cfg.AsyncWriteStopTimeout <= 0 {
 		cfg.AsyncWriteStopTimeout = 1 * time.Second
 	}
 	if cfg.AsyncWritePendingLength <= 0 {
-		cfg.AsyncWritePendingLength = 128
+		cfg.AsyncWritePendingLength = 1024
 	}
 	if cfg.AsyncWriteBufferSize <= 0 {
-		cfg.AsyncWriteBufferSize = 256 * 1024
+		cfg.AsyncWriteBufferSize = 1024 * 1024
 	}
 	if cfg.AsyncWriteMaxBytesPerLog <= 0 {
 		cfg.AsyncWriteMaxBytesPerLog = 1024 * 1024

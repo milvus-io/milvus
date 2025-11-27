@@ -1504,21 +1504,22 @@ func (t *holmesConfig) init(base *BaseTable) {
 }
 
 type logConfig struct {
-	Level                    ParamItem `refreshable:"false"`
-	RootPath                 ParamItem `refreshable:"false"`
-	MaxSize                  ParamItem `refreshable:"false"`
-	MaxAge                   ParamItem `refreshable:"false"`
-	MaxBackups               ParamItem `refreshable:"false"`
-	Format                   ParamItem `refreshable:"false"`
-	Stdout                   ParamItem `refreshable:"false"`
-	GrpcLogLevel             ParamItem `refreshable:"false"`
-	AsyncWriteEnable         ParamItem `refreshable:"false"`
-	AsyncWriteFlushInterval  ParamItem `refreshable:"false"`
-	AsyncWriteDroppedTimeout ParamItem `refreshable:"false"`
-	AsyncWriteStopTimeout    ParamItem `refreshable:"false"`
-	AsyncWritePendingLength  ParamItem `refreshable:"false"`
-	AsyncWriteBufferSize     ParamItem `refreshable:"false"`
-	AsyncWriteMaxBytesPerLog ParamItem `refreshable:"false"`
+	Level                       ParamItem `refreshable:"false"`
+	RootPath                    ParamItem `refreshable:"false"`
+	MaxSize                     ParamItem `refreshable:"false"`
+	MaxAge                      ParamItem `refreshable:"false"`
+	MaxBackups                  ParamItem `refreshable:"false"`
+	Format                      ParamItem `refreshable:"false"`
+	Stdout                      ParamItem `refreshable:"false"`
+	GrpcLogLevel                ParamItem `refreshable:"false"`
+	AsyncWriteEnable            ParamItem `refreshable:"false"`
+	AsyncWriteFlushInterval     ParamItem `refreshable:"false"`
+	AsyncWriteDroppedTimeout    ParamItem `refreshable:"false"`
+	AsyncWriteNonDroppableLevel ParamItem `refreshable:"false"`
+	AsyncWriteStopTimeout       ParamItem `refreshable:"false"`
+	AsyncWritePendingLength     ParamItem `refreshable:"false"`
+	AsyncWriteBufferSize        ParamItem `refreshable:"false"`
+	AsyncWriteMaxBytesPerLog    ParamItem `refreshable:"false"`
 }
 
 func (l *logConfig) init(base *BaseTable) {
@@ -1628,6 +1629,17 @@ the new incoming write operation will be dropped if it exceeds the timeout.`,
 	}
 	l.AsyncWriteDroppedTimeout.Init(base.mgr)
 
+	l.AsyncWriteNonDroppableLevel = ParamItem{
+		Key:          "log.asyncWrite.nonDroppableLevel",
+		DefaultValue: "error",
+		Version:      "2.6.7",
+		Doc: `The level that will not be dropped when the buffer is full.
+Once the level is greater or equal to the non-droppable level, 
+the write operation will not be dropped because the buffer is full`,
+		Export: false,
+	}
+	l.AsyncWriteNonDroppableLevel.Init(base.mgr)
+
 	l.AsyncWriteStopTimeout = ParamItem{
 		Key:          "log.asyncWrite.stopTimeout",
 		DefaultValue: "1s",
@@ -1642,7 +1654,7 @@ to the underlying file system until reaching the timeout.`,
 
 	l.AsyncWritePendingLength = ParamItem{
 		Key:          "log.asyncWrite.pendingLength",
-		DefaultValue: "128",
+		DefaultValue: "1024",
 		Version:      "2.6.7",
 		Doc: `The maximum number of pending write operation.
 Once the underlying buffered writer is blocked or too slow, 
@@ -1654,7 +1666,7 @@ The larger the pending length, the more memory is used, the less logging writes 
 
 	l.AsyncWriteBufferSize = ParamItem{
 		Key:          "log.asyncWrite.bufferSize",
-		DefaultValue: "256k",
+		DefaultValue: "1m",
 		Version:      "2.6.7",
 		Doc: `The buffer size of the underlying bufio writer. 
 The larger the buffer size, the more memory is used, 
