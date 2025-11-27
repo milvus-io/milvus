@@ -228,7 +228,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	)
 
 	// get segment's replica first, then get shard leader by replica
-	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node())
+	replica := ex.meta.ReplicaManager.Get(ctx, task.ReplicaID())
 	if replica == nil {
 		msg := "node doesn't belong to any replica"
 		err := merr.WrapErrNodeNotAvailable(action.Node())
@@ -331,7 +331,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 
 		if ex.meta.CollectionManager.Exist(ctx, task.CollectionID()) {
 			// get segment's replica first, then get shard leader by replica
-			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node())
+			replica := ex.meta.ReplicaManager.Get(ctx, task.ReplicaID())
 			if replica == nil {
 				msg := "node doesn't belong to any replica, try to send release to worker"
 				err := merr.WrapErrNodeNotAvailable(action.Node())
@@ -577,7 +577,7 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 		ex.removeTask(task, step)
 	}()
 
-	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node())
+	replica := ex.meta.ReplicaManager.Get(ctx, task.ReplicaID())
 	if replica == nil {
 		err = merr.WrapErrNodeNotAvailable(action.Node())
 		log.Warn("node doesn't belong to any replica", zap.Error(err))
