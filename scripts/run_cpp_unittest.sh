@@ -35,6 +35,12 @@ if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CORE_INSTALL_PREFIX}/lib
 fi
 
+# to silence false-positive when compiled with llvm
+# see https://github.com/google/sanitizers/wiki/AddressSanitizerContainerOverflow#false-positives
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  export ASAN_OPTIONS="detect_container_overflow=0"
+fi
+
 # run unittest
 arg="$1"
 filter_value="${arg#*=}"

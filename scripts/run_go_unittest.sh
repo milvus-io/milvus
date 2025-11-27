@@ -58,6 +58,12 @@ usage:
   esac
 done
 
+# to silence false-positive when compiled with llvm
+# see https://github.com/google/sanitizers/wiki/AddressSanitizerContainerOverflow#false-positives
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  export ASAN_OPTIONS="detect_container_overflow=0"
+fi
+
 function test_proxy()
 {
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/proxy/..." -failfast -count=1 -ldflags="-r ${RPATH}"
