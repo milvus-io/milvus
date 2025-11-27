@@ -57,7 +57,8 @@ class BsonInvertedIndex {
 
     void
     LoadIndex(const std::vector<std::string>& index_files,
-              milvus::proto::common::LoadPriority priority);
+              milvus::proto::common::LoadPriority priority,
+              bool load_in_mmap);
 
     IndexStatsPtr
     UploadIndex();
