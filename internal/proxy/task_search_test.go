@@ -4760,6 +4760,7 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 			testutils.GenerateScalarFieldData(dType, fieldName, int(nq*topk)),
 			testutils.GenerateScalarFieldData(schemapb.DataType_Int64, testInt64Field, int(nq*topk)),
 		},
+		AllSearchCount: nq * topk,
 	}
 	resultData.FieldsData[0].FieldId = fieldId
 	sliceBlob, _ := proto.Marshal(resultData)

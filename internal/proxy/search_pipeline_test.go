@@ -394,7 +394,7 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 
 	pipeline, err := newPipeline(searchPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
+	pipeline.AddNodes(task, endNode)
 
 	sr := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
 	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{sr}, segcore.StorageCost{ScannedRemoteBytes: 100, ScannedTotalBytes: 250})
@@ -415,6 +415,7 @@ func (s *SearchPipelineSuite) TestSearchPipeline() {
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
 	s.Equal(int64(100), storageCost.ScannedRemoteBytes)
 	s.Equal(int64(250), storageCost.ScannedTotalBytes)
+	s.Equal(int64(2*10), results.GetResults().AllSearchCount)
 	fmt.Println(results)
 }
 
@@ -462,7 +463,7 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 
 	pipeline, err := newPipeline(searchWithRequeryPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
+	pipeline.AddNodes(task, endNode)
 
 	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{
 		genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false),
@@ -484,6 +485,7 @@ func (s *SearchPipelineSuite) TestSearchPipelineWithRequery() {
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
 	s.Equal(int64(200), storageCost.ScannedRemoteBytes)
 	s.Equal(int64(400), storageCost.ScannedTotalBytes)
+	s.Equal(int64(2*10), results.GetResults().AllSearchCount)
 }
 
 func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
@@ -535,7 +537,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 
 	pipeline, err := newPipeline(searchWithRerankPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
+	pipeline.AddNodes(task, endNode)
 
 	searchResults := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
 	results, _, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults}, segcore.StorageCost{})
@@ -555,6 +557,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 	s.Len(results.Results.FieldsData, 1) // One output field
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+	s.Equal(int64(2*10), results.GetResults().AllSearchCount)
 }
 
 func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
@@ -619,7 +622,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 
 	pipeline, err := newPipeline(searchWithRerankRequeryPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
+	pipeline.AddNodes(task, endNode)
 
 	searchResults := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, false)
 	results, storageCost, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{searchResults}, segcore.StorageCost{})
@@ -641,6 +644,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
 	s.Equal(int64(0), storageCost.ScannedRemoteBytes)
 	s.Equal(int64(0), storageCost.ScannedTotalBytes)
+	s.Equal(int64(2*10), results.GetResults().AllSearchCount)
 }
 
 func (s *SearchPipelineSuite) TestHybridSearchPipe() {
@@ -653,7 +657,7 @@ func (s *SearchPipelineSuite) TestHybridSearchPipe() {
 
 	pipeline, err := newPipeline(hybridSearchPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
+	pipeline.AddNodes(task, endNode)
 
 	f1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	f2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
@@ -672,6 +676,7 @@ func (s *SearchPipelineSuite) TestHybridSearchPipe() {
 	s.Len(results.Results.Scores, 20) // 2 queries * 10 topk
 	s.Equal(int64(900), storageCost.ScannedRemoteBytes)
 	s.Equal(int64(2000), storageCost.ScannedTotalBytes)
+	s.Equal(int64(2*2*10), results.GetResults().AllSearchCount)
 }
 
 func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
@@ -699,7 +704,7 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 		translatedOutputFields: []string{"intField", "floatField", "structArrayField", "structVectorField"},
 	}
 
-	op, err := newFilterFieldOperator(task, nil)
+	op, err := newEndOperator(task, nil)
 	s.NoError(err)
 
 	// Create mock search results with fields including struct array fields
@@ -714,7 +719,7 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 		},
 	}
 
-	results, err := op.run(context.Background(), s.span, searchResults)
+	results, err := op.run(context.Background(), s.span, searchResults, []*milvuspb.SearchResults{{Results: &schemapb.SearchResultData{AllSearchCount: 0}}})
 	s.NoError(err)
 	s.NotNil(results)
 
@@ -766,8 +771,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 
 	pipeline, err := newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
-
+	pipeline.AddNodes(task, endNode)
 	d1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	d2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	results, _, err := pipeline.Run(context.Background(), s.span, []*internalpb.SearchResults{d1, d2}, segcore.StorageCost{})
@@ -787,6 +791,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	s.Len(results.Results.FieldsData, 1) // One output field
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+	s.Equal(int64(2*2*10), results.GetResults().AllSearchCount)
 }
 
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
@@ -808,7 +813,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 
 	pipeline, err := newPipeline(hybridSearchWithRequeryPipe, task)
 	s.NoError(err)
-	pipeline.AddNodes(task, filterFieldNode)
+	pipeline.AddNodes(task, endNode)
 
 	d1 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
 	d2 := genTestSearchResultData(2, 10, schemapb.DataType_Int64, "intField", 101, true)
@@ -829,6 +834,7 @@ func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 	s.Len(results.Results.FieldsData, 1) // One output field
 	s.Equal("intField", results.Results.FieldsData[0].FieldName)
 	s.Equal(int64(101), results.Results.FieldsData[0].FieldId)
+	s.Equal(int64(2*2*10), results.GetResults().AllSearchCount)
 }
 
 func getHybridSearchTask(collName string, data [][]string, outputFields []string) *searchTask {
