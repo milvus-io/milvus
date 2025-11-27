@@ -23,7 +23,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -32,8 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 )
 
 type FlushAllSuite struct {
