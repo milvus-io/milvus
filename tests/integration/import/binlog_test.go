@@ -62,7 +62,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	defer cancel()
 	c := s.Cluster
 
-	collectionName := "TestBinlogImport_A_" + funcutil.GenRandomStr()
+	collectionName := "TestBinlogImport_A_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchemaOfVecDataTypeWithStruct(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -297,7 +297,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		return num
 	})
 
-	collectionName := "TestBinlogImport_B_" + funcutil.GenRandomStr()
+	collectionName := "TestBinlogImport_B_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -482,7 +482,7 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	c := s.Cluster
 	ctx := c.GetContext()
 
-	collectionName := "TestBinlogImport_InvalidInput_" + funcutil.GenRandomStr()
+	collectionName := "TestBinlogImport_InvalidInput_" + funcutil.RandomString(8)
 	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
