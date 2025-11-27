@@ -96,28 +96,28 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 Linux systems (Recommend Ubuntu 20.04 or later):
 
 ```text
-go: >= 1.21
-cmake: >= 3.18
+go: >= 1.22
+cmake: >= 3.25
 gcc: 12
-conan: 1.61
+conan: 1.64.1
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 
 ```text
-go: >= 1.21
-cmake: >= 3.18
+go: >= 1.22
+cmake: >= 3.25
 llvm: >= 15
-conan: 1.61
+conan: 1.64.1
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 
 ```text
-go: >= 1.21 (Arch=ARM64)
-cmake: >= 3.18
+go: >= 1.22 (Arch=ARM64)
+cmake: >= 3.25
 llvm: >= 15
-conan: 1.61
+conan: 1.64.1
 ```
 
 #### Installing Dependencies
@@ -159,7 +159,13 @@ Install Conan
 pip install conan==1.64.1
 ```
 
-Note: Conan version 2.x is not currently supported, please use version 1.61.
+Note: Conan version 2.x is not currently supported, please use version 1.64.1.
+
+If you encounter build issues after upgrading Milvus or switching branches, try clearing the Conan cache:
+
+```shell
+conan remove "*" -f
+```
 
 #### Go
 
@@ -438,7 +444,19 @@ A: Python 3.12 has removed the imp module, please downgrade to 3.11 for now.
 
 Q: Conan: Unrecognized arguments: — install-folder conan
 
-A: The version is not correct. Please change to 1.61 for now.
+A: The version is not correct. Please use Conan version 1.64.1.
+
+---
+
+Q: Conan build fails with errors about missing dependencies (e.g., libiberty)
+
+A: This usually happens when you have an outdated Conan cache. Clear it with:
+
+```bash
+conan remove "*" -f
+```
+
+Then run `make` again.
 
 ---
 
