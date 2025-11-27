@@ -98,6 +98,8 @@ extraConfigFiles:
         scalarField: true
         scalarIndex: true
         growingMmapEnabled: true
+    queryCoord:
+      checkNodeInReplicaInterval: 3
 metrics:
   serviceMonitor:
     enabled: true
