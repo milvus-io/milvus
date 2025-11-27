@@ -71,7 +71,7 @@ func (s *FlushAllSuite) TestFlushAll() {
 	const (
 		dim         = 8
 		rowNum      = 100
-		dbCnt       = 1
+		dbCnt       = 10
 		colCntPerDB = 10
 	)
 

@@ -182,7 +182,7 @@ func (mp *MilvusProcess) initCmd() {
 
 	// Set up environment variables
 	mp.cmd.Env = append(mp.cmd.Env, os.Environ()...)
-	mp.env["LOG_LEVEL"] = "debug"
+	mp.env["LOG_LEVEL"] = "info"
 	mp.env[sessionutil.MilvusNodeIDForTesting] = strconv.FormatInt(mp.nodeID, 10)
 	mp.env["MQ_TYPE"] = "pulsar"
 	mp.env["ETCD_ROOTPATH"] = mp.rootPath
