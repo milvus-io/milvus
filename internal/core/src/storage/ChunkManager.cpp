@@ -31,9 +31,11 @@
 #include "storage/MinioChunkManager.h"
 #include "storage/AliyunSTSClient.h"
 #include "storage/TencentCloudSTSClient.h"
+#include "storage/VolcengineSTSClient.h"
 #include "storage/AliyunCredentialsProvider.h"
 #include "storage/TencentCloudCredentialsProvider.h"
 #include "storage/HuaweiCloudCredentialsProvider.h"
+#include "storage/VolcengineCredentialsProvider.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
@@ -278,6 +280,43 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
 
     LOG_INFO(
         "init HuaweiCloudChunkManager with "
+        "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
+        storage_config.address,
+        storage_config.bucket_name,
+        storage_config.root_path,
+        storage_config.useSSL);
+}
+
+VolcengineChunkManager::VolcengineChunkManager(
+    const StorageConfig& storage_config) {
+    default_bucket_name_ = storage_config.bucket_name;
+    remote_root_path_ = storage_config.root_path;
+    InitSDKAPIDefault(storage_config.log_level);
+    Aws::Client::ClientConfiguration config = generateConfig(storage_config);
+    StorageConfig mutable_config = storage_config;
+    mutable_config.useVirtualHost = true;
+    if (storage_config.useIAM) {
+        auto volcengine_provider = Aws::MakeShared<
+            Aws::Auth::VolcengineSTSAssumeRoleWebIdentityCredentialsProvider>(
+            "VolcengineSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto volcengine_credentials = volcengine_provider->GetAWSCredentials();
+        AssertInfo(!volcengine_credentials.GetAWSAccessKeyId().empty(),
+                   "if use iam, access key id should not be empty");
+        AssertInfo(!volcengine_credentials.GetAWSSecretKey().empty(),
+                   "if use iam, secret key should not be empty");
+        AssertInfo(!volcengine_credentials.GetSessionToken().empty(),
+                   "if use iam, token should not be empty");
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            volcengine_provider,
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            mutable_config.useVirtualHost);
+    } else {
+        BuildAccessKeyClient(mutable_config, config);
+    }
+    PreCheck(storage_config);
+    LOG_INFO(
+        "init VolcengineChunkManager with "
         "parameter[endpoint={}][bucket_name={}][root_path={}][use_secure={}]",
         storage_config.address,
         storage_config.bucket_name,

@@ -41,6 +41,7 @@ require (
 	github.com/tikv/client-go/v2 v2.0.4
 	github.com/twpayne/go-geom v1.6.1
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
+	github.com/volcengine/volcengine-go-sdk v1.1.42
 	github.com/x448/float16 v0.8.4
 	github.com/zilliztech/woodpecker v0.1.12
 	go.etcd.io/etcd/api/v3 v3.5.5
@@ -196,6 +197,7 @@ require (
 	github.com/twmb/murmur3 v1.1.3 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.1 // indirect
+	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect

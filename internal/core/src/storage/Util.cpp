@@ -85,6 +85,7 @@ enum class CloudProviderType : int8_t {
     TENCENTCLOUD = 5,
     GCPNATIVE = 6,
     HUAWEICLOUD = 7,
+    VOLCENGINE = 8,
 };
 
 std::map<std::string, CloudProviderType> CloudProviderType_Map = {
@@ -94,7 +95,8 @@ std::map<std::string, CloudProviderType> CloudProviderType_Map = {
     {"azure", CloudProviderType::AZURE},
     {"tencent", CloudProviderType::TENCENTCLOUD},
     {"gcpnative", CloudProviderType::GCPNATIVE},
-    {"huawei", CloudProviderType::HUAWEICLOUD}};
+    {"huawei", CloudProviderType::HUAWEICLOUD},
+    {"volcengine", CloudProviderType::VOLCENGINE}};
 
 std::map<std::string, int> ReadAheadPolicy_Map = {
     {"normal", MADV_NORMAL},
@@ -990,6 +992,10 @@ CreateChunkManager(const StorageConfig& storage_config) {
                 }
                 case CloudProviderType::TENCENTCLOUD: {
                     return std::make_shared<TencentCloudChunkManager>(
+                        storage_config);
+                }
+                case CloudProviderType::VOLCENGINE: {
+                    return std::make_shared<VolcengineChunkManager>(
                         storage_config);
                 }
                 case CloudProviderType::HUAWEICLOUD: {
