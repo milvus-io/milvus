@@ -33,6 +33,7 @@ const (
 	PartitionStatsInfoPrefix           = MetaPrefix + "/partition-stats"
 	PartitionStatsCurrentVersionPrefix = MetaPrefix + "/current-partition-stats-version"
 	StatsTaskPrefix                    = MetaPrefix + "/stats-task"
+	UpdateExternalCollectionTaskPrefix = MetaPrefix + "/update-external-collection-task"
 	FileResourceMetaPrefix             = MetaPrefix + "/file_resource"
 
 	NonRemoveFlagTomestone = "non-removed"
