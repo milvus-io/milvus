@@ -717,9 +717,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                     }
                 }
             };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 

@@ -503,9 +503,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 }
             }
         };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -704,9 +702,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             }
             return false;
         };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1041,9 +1037,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
             res_view[row_offset] = tmp_elements.empty();
         };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1372,9 +1366,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             }
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1579,9 +1571,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             res_view[row_offset] =
                 exist_elements_index.size() == elements.size();
         };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1885,9 +1875,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 }
             }
         };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 

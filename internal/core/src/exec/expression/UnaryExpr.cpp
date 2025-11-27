@@ -1260,9 +1260,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                         ms);
                 });
 
-            if (!index->CanSkipShared(pointer, target_types)) {
-                index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-            }
+            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         }
 
         // for NotEqual: flip the result
