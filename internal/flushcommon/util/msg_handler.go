@@ -31,7 +31,7 @@ type MsgHandler interface {
 
 	HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error
 
-	HandleFlushAll(flushAllMsg message.ImmutableFlushAllMessageV2) error
+	HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error
 
 	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 

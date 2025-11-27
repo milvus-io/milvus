@@ -18,6 +18,15 @@ import (
 
 var defaultCollectionNotFoundTolerance = 10
 
+var broadcastToAllMessageType = map[message.MessageType]struct{}{
+	message.MessageTypeFlushAll: {},
+}
+
+func IsBroadcastToAllMessage(msg message.MessageType) bool {
+	_, ok := broadcastToAllMessageType[msg]
+	return ok
+}
+
 // getRecoveryInfos gets the recovery info of the vchannels from datacoord
 func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []string) (map[string]*datapb.GetChannelRecoveryInfoResponse, message.MessageID, error) {
 	futures := make([]*conc.Future[interface{}], 0, len(vchannel))

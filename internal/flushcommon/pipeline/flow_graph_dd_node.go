@@ -281,7 +281,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Int32("msgType", int32(msg.Type())),
 				zap.Uint64("timetick", flushAllMsg.FlushAllMessage.TimeTick()),
 			)
-			ddn.msgHandler.HandleFlushAll(flushAllMsg.FlushAllMessage)
+			ddn.msgHandler.HandleFlushAll(ddn.vChannelName, flushAllMsg.FlushAllMessage)
 		case commonpb.MsgType_AddCollectionField:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 			logger := log.With(

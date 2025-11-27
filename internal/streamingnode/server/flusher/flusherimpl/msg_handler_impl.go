@@ -108,8 +108,7 @@ func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFl
 	return nil
 }
 
-func (impl *msgHandlerImpl) HandleFlushAll(flushAllMsg message.ImmutableFlushAllMessageV2) error {
-	vchannel := flushAllMsg.VChannel()
+func (impl *msgHandlerImpl) HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error {
 	if err := impl.wbMgr.SealAllSegments(context.Background(), vchannel); err != nil {
 		return errors.Wrap(err, "failed to seal all segments")
 	}

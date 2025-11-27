@@ -162,17 +162,17 @@ func (_c *MockMsgHandler_HandleFlush_Call) RunAndReturn(run func(message.Immutab
 	return _c
 }
 
-// HandleFlushAll provides a mock function with given fields: flushAllMsg
-func (_m *MockMsgHandler) HandleFlushAll(flushAllMsg message.ImmutableFlushAllMessageV2) error {
-	ret := _m.Called(flushAllMsg)
+// HandleFlushAll provides a mock function with given fields: vchannel, flushAllMsg
+func (_m *MockMsgHandler) HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error {
+	ret := _m.Called(vchannel, flushAllMsg)
 
 	if len(ret) == 0 {
 		panic("no return value specified for HandleFlushAll")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableFlushAllMessageV2) error); ok {
-		r0 = rf(flushAllMsg)
+	if rf, ok := ret.Get(0).(func(string, message.ImmutableFlushAllMessageV2) error); ok {
+		r0 = rf(vchannel, flushAllMsg)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -186,14 +186,15 @@ type MockMsgHandler_HandleFlushAll_Call struct {
 }
 
 // HandleFlushAll is a helper method to define mock.On call
+//   - vchannel string
 //   - flushAllMsg message.ImmutableFlushAllMessageV2
-func (_e *MockMsgHandler_Expecter) HandleFlushAll(flushAllMsg interface{}) *MockMsgHandler_HandleFlushAll_Call {
-	return &MockMsgHandler_HandleFlushAll_Call{Call: _e.mock.On("HandleFlushAll", flushAllMsg)}
+func (_e *MockMsgHandler_Expecter) HandleFlushAll(vchannel interface{}, flushAllMsg interface{}) *MockMsgHandler_HandleFlushAll_Call {
+	return &MockMsgHandler_HandleFlushAll_Call{Call: _e.mock.On("HandleFlushAll", vchannel, flushAllMsg)}
 }
 
-func (_c *MockMsgHandler_HandleFlushAll_Call) Run(run func(flushAllMsg message.ImmutableFlushAllMessageV2)) *MockMsgHandler_HandleFlushAll_Call {
+func (_c *MockMsgHandler_HandleFlushAll_Call) Run(run func(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2)) *MockMsgHandler_HandleFlushAll_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableFlushAllMessageV2))
+		run(args[0].(string), args[1].(message.ImmutableFlushAllMessageV2))
 	})
 	return _c
 }
@@ -203,7 +204,7 @@ func (_c *MockMsgHandler_HandleFlushAll_Call) Return(_a0 error) *MockMsgHandler_
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleFlushAll_Call) RunAndReturn(run func(message.ImmutableFlushAllMessageV2) error) *MockMsgHandler_HandleFlushAll_Call {
+func (_c *MockMsgHandler_HandleFlushAll_Call) RunAndReturn(run func(string, message.ImmutableFlushAllMessageV2) error) *MockMsgHandler_HandleFlushAll_Call {
 	_c.Call.Return(run)
 	return _c
 }

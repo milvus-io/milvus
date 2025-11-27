@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -232,10 +231,16 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			Status: merr.Status(err),
 		}, nil
 	}
-	flushAllTss := lo.MapValues(res.AppendResults, func(result *types.AppendResult, vchannel string) uint64 {
-		return result.TimeTick
-	})
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Any("flushAllTss", flushAllTss))
+	flushAllTss := make(map[string]uint64, len(res.AppendResults))
+	for appendChannel, result := range res.AppendResults {
+		channel := appendChannel
+		if appendChannel == controlChannel {
+			// convert control channel to physical channel in flush all response
+			channel = funcutil.ToPhysicalChannel(appendChannel)
+		}
+		flushAllTss[channel] = result.TimeTick
+	}
+	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllTss", flushAllTss))
 	return &datapb.FlushAllResponse{
 		Status:      merr.Success(),
 		FlushAllTss: flushAllTss,
@@ -1495,8 +1500,7 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 
 // GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
-	log := log.Ctx(ctx).With(zap.Any("flushAllTss", req.GetFlushAllTss())).
-		WithRateGroup("dc.GetFlushAllState", 1, 60)
+	log := log.Ctx(ctx).WithRateGroup("dc.GetFlushAllState", 1, 60)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushAllStateResponse{
 			Status: merr.Status(err),
@@ -1559,7 +1563,7 @@ OUTER:
 	}
 
 	if allFlushed {
-		log.Info("GetFlushAllState all flushed")
+		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()))
 	}
 
 	resp.Flushed = allFlushed
