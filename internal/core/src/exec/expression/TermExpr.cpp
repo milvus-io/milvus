@@ -35,7 +35,11 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         result = ExecPkTermImpl();
         return;
     }
-    switch (expr_->column_.data_type_) {
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecVisitorImpl<bool>(context);
             break;
@@ -973,13 +977,25 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 skip_index_func,
-                                                 input,
-                                                 res,
-                                                 valid_res,
-                                                 arg_set_);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering
+            processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             arg_set_);
+        } else {
+            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
+                                                     skip_index_func,
+                                                     input,
+                                                     res,
+                                                     valid_res,
+                                                     arg_set_);
+        }
     } else {
+        AssertInfo(!expr_->column_.element_level_,
+                   "Element-level filtering is not supported without offsets");
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
     }

@@ -45,6 +45,16 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		Topks:      make([]int64, 0),
 	}
 
+	// Check if any input has ElementIndices, if so, initialize for output
+	for _, data := range searchResultData {
+		if data.ElementIndices != nil {
+			ret.ElementIndices = &schemapb.LongArray{
+				Data: make([]int64, 0),
+			}
+			break
+		}
+	}
+
 	resultOffsets := make([][]int64, len(searchResultData))
 	for i := 0; i < len(searchResultData); i++ {
 		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
@@ -76,6 +86,9 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
 				typeutil.AppendPKs(ret.Ids, id)
 				ret.Scores = append(ret.Scores, score)
+				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+				}
 				idSet[id] = struct{}{}
 				j++
 			} else {
@@ -125,6 +138,16 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		Scores:     make([]float32, 0),
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0),
+	}
+
+	// Check if any input has ElementIndices, if so, initialize for output
+	for _, data := range searchResultData {
+		if data.ElementIndices != nil {
+			ret.ElementIndices = &schemapb.LongArray{
+				Data: make([]int64, 0),
+			}
+			break
+		}
 	}
 
 	resultOffsets := make([][]int64, len(searchResultData))
@@ -180,6 +203,9 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
 					typeutil.AppendPKs(ret.Ids, id)
 					ret.Scores = append(ret.Scores, score)
+					if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
+						ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+					}
 					gpFieldBuilder.Add(groupByVal)
 					groupByValueMap[groupByVal] += 1
 					idSet[id] = struct{}{}

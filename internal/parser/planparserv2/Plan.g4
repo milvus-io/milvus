@@ -3,53 +3,55 @@ grammar Plan;
 expr:
   Identifier (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? op2=(LT | LE | GT | GE | EQ | NE) ISO compare_string=StringLiteral # TimestamptzCompareForward
 	| ISO compare_string=StringLiteral op2=(LT | LE | GT | GE | EQ | NE) Identifier (op1=(ADD | SUB) INTERVAL interval_string=StringLiteral)? # TimestamptzCompareReverse
-	| IntegerConstant											                     # Integer
-	| FloatingConstant										                     # Floating
-	| BooleanConstant										                     # Boolean
-	| StringLiteral											                     # String
-	| (Identifier|Meta)           			      							     # Identifier
-	| JSONIdentifier                                                             # JSONIdentifier
-	| LBRACE Identifier RBRACE                                                   # TemplateVariable
-	| '(' expr ')'											                     # Parens
-	| '[' expr (',' expr)* ','? ']'                                              # Array
-	| EmptyArray                                                                 # EmptyArray
-	| EXISTS expr                                                                # Exists
-	| expr LIKE StringLiteral                                                    # Like
-	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'         # TextMatch
-	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			 # PhraseMatch
-	| RANDOMSAMPLE'(' expr ')'						     						 # RandomSample
-	| expr POW expr											                     # Power
-	| op = (ADD | SUB | BNOT | NOT) expr					                     # Unary
-//	| '(' typeName ')' expr									                     # Cast
-	| expr op = (MUL | DIV | MOD) expr						                     # MulDivMod
-	| expr op = (ADD | SUB) expr							                     # AddSub
-	| expr op = (SHL | SHR) expr							                     # Shift
-	| expr op = NOT? IN expr                                                     # Term
-	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
-	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
-	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
-	| STEuqals'('Identifier','StringLiteral')'				                     # STEuqals	
-	| STTouches'('Identifier','StringLiteral')'				             		 # STTouches
-	| STOverlaps'('Identifier','StringLiteral')'						 		 # STOverlaps
-	| STCrosses'('Identifier','StringLiteral')'									 # STCrosses
-	| STContains'('Identifier','StringLiteral')'						 		 # STContains
-	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
-	| STWithin'('Identifier','StringLiteral')'									 # STWithin
-	| STDWithin'('Identifier','StringLiteral',' expr')'                          # STDWithin
-	| STIsValid'('Identifier')'                                  			 	 # STIsValid
-	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
-	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
-	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
-	| expr op1 = (GT | GE) (Identifier | JSONIdentifier) op2 = (GT | GE) expr    # ReverseRange
-	| expr op = (LT | LE | GT | GE) expr					                     # Relational
-	| expr op = (EQ | NE) expr								                     # Equality
-	| expr BAND expr										                     # BitAnd
-	| expr BXOR expr										                     # BitXor
-	| expr BOR expr											                     # BitOr
-	| expr AND expr											                     # LogicalAnd
-	| expr OR expr											                     # LogicalOr
-	| (Identifier | JSONIdentifier) ISNULL                                                          # IsNull
-	| (Identifier | JSONIdentifier) ISNOTNULL                                                       # IsNotNull;
+	| IntegerConstant											                                            # Integer
+	| FloatingConstant										                                                # Floating
+	| BooleanConstant										                                                # Boolean
+	| StringLiteral											                                                # String
+	| (Identifier|Meta)           			      							                                # Identifier
+	| JSONIdentifier                                                                                        # JSONIdentifier
+	| StructSubFieldIdentifier                                                                              # StructSubField
+	| LBRACE Identifier RBRACE                                                                              # TemplateVariable
+	| '(' expr ')'											                                                # Parens
+	| '[' expr (',' expr)* ','? ']'                                                                         # Array
+	| EmptyArray                                                                                            # EmptyArray
+	| EXISTS expr                                                                                           # Exists
+	| expr LIKE StringLiteral                                                                               # Like
+	| TEXTMATCH'('Identifier',' StringLiteral (',' textMatchOption)? ')'                                    # TextMatch
+	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
+	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
+	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
+	| expr POW expr											                                                # Power
+	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
+//	| '(' typeName ')' expr									                                                # Cast
+	| expr op = (MUL | DIV | MOD) expr						                                                # MulDivMod
+	| expr op = (ADD | SUB) expr							                                                # AddSub
+	| expr op = (SHL | SHR) expr							                                                # Shift
+	| expr op = NOT? IN expr                                                                                # Term
+	| (JSONContains | ArrayContains)'('expr',' expr')'                                                      # JSONContains
+	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                                                # JSONContainsAll
+	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                                                # JSONContainsAny
+	| STEuqals'('Identifier','StringLiteral')'				                                                # STEuqals	
+	| STTouches'('Identifier','StringLiteral')'				             		                            # STTouches
+	| STOverlaps'('Identifier','StringLiteral')'						 		                            # STOverlaps
+	| STCrosses'('Identifier','StringLiteral')'									                            # STCrosses
+	| STContains'('Identifier','StringLiteral')'						 		                            # STContains
+	| STIntersects'('Identifier','StringLiteral')'								                            # STIntersects
+	| STWithin'('Identifier','StringLiteral')'									                            # STWithin
+	| STDWithin'('Identifier','StringLiteral',' expr')'                                                     # STDWithin
+	| STIsValid'('Identifier')'                                  			 	                            # STIsValid
+	| ArrayLength'('(Identifier | JSONIdentifier)')'                                                        # ArrayLength
+	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
+	| expr op1 = (LT | LE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (LT | LE) expr	# Range
+	| expr op1 = (GT | GE) (Identifier | JSONIdentifier | StructSubFieldIdentifier) op2 = (GT | GE) expr    # ReverseRange
+	| expr op = (LT | LE | GT | GE) expr					                                                # Relational
+	| expr op = (EQ | NE) expr								                                                # Equality
+	| expr BAND expr										                                                # BitAnd
+	| expr BXOR expr										                                                # BitXor
+	| expr BOR expr											                                                # BitOr
+	| expr AND expr											                                                # LogicalAnd
+	| expr OR expr											                                                # LogicalOr
+	| (Identifier | JSONIdentifier) ISNULL                                                                  # IsNull
+	| (Identifier | JSONIdentifier) ISNOTNULL                                                               # IsNotNull;
 
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
@@ -115,6 +117,7 @@ ArrayContains: 'array_contains' | 'ARRAY_CONTAINS';
 ArrayContainsAll: 'array_contains_all' | 'ARRAY_CONTAINS_ALL';
 ArrayContainsAny: 'array_contains_any' | 'ARRAY_CONTAINS_ANY';
 ArrayLength: 'array_length' | 'ARRAY_LENGTH';
+ElementFilter: 'element_filter' | 'ELEMENT_FILTER';
 
 STEuqals:'st_equals' | 'ST_EQUALS';
 STTouches:'st_touches' | 'ST_TOUCHES';
@@ -143,6 +146,7 @@ Meta: '$meta';
 
 StringLiteral: EncodingPrefix? ('"' DoubleSCharSequence? '"' | '\'' SingleSCharSequence? '\'');
 JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | DecimalConstant) ']')+;
+StructSubFieldIdentifier: '$[' Identifier ']';
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

@@ -32,6 +32,8 @@
 #include "exec/operator/VectorSearchNode.h"
 #include "exec/operator/RandomSampleNode.h"
 #include "exec/operator/GroupByNode.h"
+#include "exec/operator/ElementFilterNode.h"
+#include "exec/operator/ElementFilterBitsNode.h"
 #include "exec/Task.h"
 #include "plan/PlanNode.h"
 
@@ -104,6 +106,19 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
             tracer::AddEvent("create_operator: RescoresNode");
             operators.push_back(
                 std::make_unique<PhyRescoresNode>(id, ctx.get(), rescoresnode));
+        } else if (auto node =
+                       std::dynamic_pointer_cast<const plan::ElementFilterNode>(
+                           plannode)) {
+            tracer::AddEvent("create_operator: ElementFilterNode");
+            operators.push_back(
+                std::make_unique<PhyElementFilterNode>(id, ctx.get(), node));
+        } else if (auto node = std::dynamic_pointer_cast<
+                       const plan::ElementFilterBitsNode>(plannode)) {
+            tracer::AddEvent("create_operator: ElementFilterBitsNode");
+            operators.push_back(std::make_unique<PhyElementFilterBitsNode>(
+                id, ctx.get(), node));
+        } else {
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown plan node type");
         }
         // TODO: add more operators
     }

@@ -63,162 +63,201 @@ MergeExprWithNamespace(const SchemaPtr schema,
     return and_expr;
 }
 
+SearchInfo
+ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
+    SearchInfo search_info;
+    auto& query_info_proto = anns_proto.query_info();
+    auto field_id = FieldId(anns_proto.field_id());
+    search_info.field_id_ = field_id;
+
+    search_info.metric_type_ = query_info_proto.metric_type();
+    search_info.topk_ = query_info_proto.topk();
+    search_info.round_decimal_ = query_info_proto.round_decimal();
+    search_info.search_params_ =
+        nlohmann::json::parse(query_info_proto.search_params());
+    search_info.materialized_view_involved =
+        query_info_proto.materialized_view_involved();
+    // currently, iterative filter does not support range search
+    if (!search_info.search_params_.contains(RADIUS)) {
+        if (query_info_proto.hints() != "") {
+            if (query_info_proto.hints() == "disable") {
+                search_info.iterative_filter_execution = false;
+            } else if (query_info_proto.hints() == ITERATIVE_FILTER) {
+                search_info.iterative_filter_execution = true;
+            } else {
+                // check if hints is valid
+                ThrowInfo(ConfigInvalid,
+                          "hints: {} not supported",
+                          query_info_proto.hints());
+            }
+        } else if (search_info.search_params_.contains(HINTS)) {
+            if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
+                search_info.iterative_filter_execution = true;
+            } else {
+                // check if hints is valid
+                ThrowInfo(ConfigInvalid,
+                          "hints: {} not supported",
+                          search_info.search_params_[HINTS]);
+            }
+        }
+    }
+
+    if (query_info_proto.bm25_avgdl() > 0) {
+        search_info.search_params_[knowhere::meta::BM25_AVGDL] =
+            query_info_proto.bm25_avgdl();
+    }
+
+    if (query_info_proto.group_by_field_id() > 0) {
+        auto group_by_field_id = FieldId(query_info_proto.group_by_field_id());
+        search_info.group_by_field_id_ = group_by_field_id;
+        search_info.group_size_ = query_info_proto.group_size() > 0
+                                      ? query_info_proto.group_size()
+                                      : 1;
+        search_info.strict_group_size_ = query_info_proto.strict_group_size();
+        // Always set json_path to distinguish between unset and empty string
+        // Empty string means accessing the entire JSON object
+        search_info.json_path_ = query_info_proto.json_path();
+        if (query_info_proto.json_type() !=
+            milvus::proto::schema::DataType::None) {
+            search_info.json_type_ =
+                static_cast<milvus::DataType>(query_info_proto.json_type());
+        }
+        search_info.strict_cast_ = query_info_proto.strict_cast();
+    }
+
+    if (query_info_proto.has_search_iterator_v2_info()) {
+        auto& iterator_v2_info_proto =
+            query_info_proto.search_iterator_v2_info();
+        search_info.iterator_v2_info_ = SearchIteratorV2Info{
+            .token = iterator_v2_info_proto.token(),
+            .batch_size = iterator_v2_info_proto.batch_size(),
+        };
+        if (iterator_v2_info_proto.has_last_bound()) {
+            search_info.iterator_v2_info_->last_bound =
+                iterator_v2_info_proto.last_bound();
+        }
+    }
+
+    return search_info;
+}
+
 std::unique_ptr<VectorPlanNode>
 ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     Assert(plan_node_proto.has_vector_anns());
     auto& anns_proto = plan_node_proto.vector_anns();
 
-    auto expr_parser = [&]() -> plan::PlanNodePtr {
-        auto expr = ParseExprs(anns_proto.predicates());
-        if (plan_node_proto.has_namespace_()) {
-            expr = MergeExprWithNamespace(
-                schema, expr, plan_node_proto.namespace_());
-        }
-        return std::make_shared<plan::FilterBitsNode>(
-            milvus::plan::GetNextPlanNodeId(), expr);
-    };
-
-    auto search_info_parser = [&]() -> SearchInfo {
-        SearchInfo search_info;
-        auto& query_info_proto = anns_proto.query_info();
-        auto field_id = FieldId(anns_proto.field_id());
-        search_info.field_id_ = field_id;
-
-        search_info.metric_type_ = query_info_proto.metric_type();
-        search_info.topk_ = query_info_proto.topk();
-        search_info.round_decimal_ = query_info_proto.round_decimal();
-        search_info.search_params_ =
-            nlohmann::json::parse(query_info_proto.search_params());
-        search_info.materialized_view_involved =
-            query_info_proto.materialized_view_involved();
-        // currently, iterative filter does not support range search
-        if (!search_info.search_params_.contains(RADIUS)) {
-            if (query_info_proto.hints() != "") {
-                if (query_info_proto.hints() == "disable") {
-                    search_info.iterative_filter_execution = false;
-                } else if (query_info_proto.hints() == ITERATIVE_FILTER) {
-                    search_info.iterative_filter_execution = true;
-                } else {
-                    // check if hints is valid
-                    ThrowInfo(ConfigInvalid,
-                              "hints: {} not supported",
-                              query_info_proto.hints());
-                }
-            } else if (search_info.search_params_.contains(HINTS)) {
-                if (search_info.search_params_[HINTS] == ITERATIVE_FILTER) {
-                    search_info.iterative_filter_execution = true;
-                } else {
-                    // check if hints is valid
-                    ThrowInfo(ConfigInvalid,
-                              "hints: {} not supported",
-                              search_info.search_params_[HINTS]);
-                }
-            }
-        }
-
-        if (query_info_proto.bm25_avgdl() > 0) {
-            search_info.search_params_[knowhere::meta::BM25_AVGDL] =
-                query_info_proto.bm25_avgdl();
-        }
-
-        if (query_info_proto.group_by_field_id() > 0) {
-            auto group_by_field_id =
-                FieldId(query_info_proto.group_by_field_id());
-            search_info.group_by_field_id_ = group_by_field_id;
-            search_info.group_size_ = query_info_proto.group_size() > 0
-                                          ? query_info_proto.group_size()
-                                          : 1;
-            search_info.strict_group_size_ =
-                query_info_proto.strict_group_size();
-            // Always set json_path to distinguish between unset and empty string
-            // Empty string means accessing the entire JSON object
-            search_info.json_path_ = query_info_proto.json_path();
-            if (query_info_proto.json_type() !=
-                milvus::proto::schema::DataType::None) {
-                search_info.json_type_ =
-                    static_cast<milvus::DataType>(query_info_proto.json_type());
-            }
-            search_info.strict_cast_ = query_info_proto.strict_cast();
-        }
-
-        if (query_info_proto.has_search_iterator_v2_info()) {
-            auto& iterator_v2_info_proto =
-                query_info_proto.search_iterator_v2_info();
-            search_info.iterator_v2_info_ = SearchIteratorV2Info{
-                .token = iterator_v2_info_proto.token(),
-                .batch_size = iterator_v2_info_proto.batch_size(),
-            };
-            if (iterator_v2_info_proto.has_last_bound()) {
-                search_info.iterator_v2_info_->last_bound =
-                    iterator_v2_info_proto.last_bound();
-            }
-        }
-
-        return search_info;
-    };
-
+    // Parse search information from proto
     auto plan_node = std::make_unique<VectorPlanNode>();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
-    plan_node->search_info_ = std::move(search_info_parser());
+    plan_node->search_info_ = ParseSearchInfo(anns_proto);
 
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
 
-    // mvcc node -> vector search node -> iterative filter node
-    auto iterative_filter_plan = [&]() {
-        plannode = std::make_shared<milvus::plan::MvccNode>(
-            milvus::plan::GetNextPlanNodeId());
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-        plannode = std::make_shared<milvus::plan::VectorSearchNode>(
-            milvus::plan::GetNextPlanNodeId(), sources);
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-
-        auto expr = ParseExprs(anns_proto.predicates());
-        if (plan_node_proto.has_namespace_()) {
-            expr = MergeExprWithNamespace(
-                schema, expr, plan_node_proto.namespace_());
-        }
-        plannode = std::make_shared<plan::FilterNode>(
-            milvus::plan::GetNextPlanNodeId(), expr, sources);
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-    };
-
-    // pre filter node -> mvcc node -> vector search node
-    auto pre_filter_plan = [&]() {
-        plannode = std::move(expr_parser());
-        if (plan_node->search_info_.materialized_view_involved) {
-            const auto expr_info = plannode->GatherInfo();
-            knowhere::MaterializedViewSearchInfo materialized_view_search_info;
-            for (const auto& [expr_field_id, vals] :
-                 expr_info.field_id_to_values) {
-                materialized_view_search_info
-                    .field_id_to_touched_categories_cnt[expr_field_id] =
-                    vals.size();
-            }
-            materialized_view_search_info.is_pure_and = expr_info.is_pure_and;
-            materialized_view_search_info.has_not = expr_info.has_not;
-
-            plan_node->search_info_
-                .search_params_[knowhere::meta::MATERIALIZED_VIEW_SEARCH_INFO] =
-                materialized_view_search_info;
-        }
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-        plannode = std::make_shared<milvus::plan::MvccNode>(
-            milvus::plan::GetNextPlanNodeId(), sources);
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-
-        plannode = std::make_shared<milvus::plan::VectorSearchNode>(
-            milvus::plan::GetNextPlanNodeId(), sources);
-        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
-    };
-
+    // Build plan node chain based on predicate and filter execution strategy
     if (anns_proto.has_predicates()) {
-        // currently limit iterative filter scope to search only
-        if (plan_node->search_info_.iterative_filter_execution &&
-            plan_node->search_info_.group_by_field_id_ == std::nullopt) {
-            iterative_filter_plan();
+        auto* predicate_proto = &anns_proto.predicates();
+        bool is_element_level = predicate_proto->expr_case() ==
+                                proto::plan::Expr::kElementFilterExpr;
+
+        // Parse expressions based on filter type (similar to RandomSampleExpr pattern)
+        expr::TypedExprPtr element_expr = nullptr;
+        expr::TypedExprPtr doc_expr = nullptr;
+        std::string struct_name;
+
+        if (is_element_level) {
+            // Element-level query: extract both element_expr and optional doc-level predicate
+            auto& element_filter_expr = predicate_proto->element_filter_expr();
+            element_expr = ParseExprs(element_filter_expr.element_expr());
+            struct_name = element_filter_expr.struct_name();
+
+            if (element_filter_expr.has_predicate()) {
+                doc_expr = ParseExprs(element_filter_expr.predicate());
+                if (plan_node_proto.has_namespace_()) {
+                    doc_expr = MergeExprWithNamespace(
+                        schema, doc_expr, plan_node_proto.namespace_());
+                }
+            }
         } else {
-            pre_filter_plan();
+            // Document-level query: only doc expr
+            doc_expr = ParseExprs(anns_proto.predicates());
+            if (plan_node_proto.has_namespace_()) {
+                doc_expr = MergeExprWithNamespace(
+                    schema, doc_expr, plan_node_proto.namespace_());
+            }
+        }
+
+        bool is_iterative =
+            plan_node->search_info_.iterative_filter_execution &&
+            plan_node->search_info_.group_by_field_id_ == std::nullopt;
+        if (is_iterative) {
+            plannode = std::make_shared<milvus::plan::MvccNode>(
+                milvus::plan::GetNextPlanNodeId());
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+            plannode = std::make_shared<milvus::plan::VectorSearchNode>(
+                milvus::plan::GetNextPlanNodeId(), sources);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+            // Add element-level filter if needed
+            if (is_element_level) {
+                plannode = std::make_shared<plan::ElementFilterNode>(
+                    milvus::plan::GetNextPlanNodeId(),
+                    element_expr,
+                    struct_name,
+                    sources);
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+            }
+
+            // Add doc-level filter if present
+            if (doc_expr) {
+                plannode = std::make_shared<plan::FilterNode>(
+                    milvus::plan::GetNextPlanNodeId(), doc_expr, sources);
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+            }
+        } else {
+            if (doc_expr) {
+                plannode = std::make_shared<plan::FilterBitsNode>(
+                    milvus::plan::GetNextPlanNodeId(), doc_expr);
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+                if (!is_element_level &&
+                    plan_node->search_info_.materialized_view_involved) {
+                    const auto expr_info = plannode->GatherInfo();
+                    knowhere::MaterializedViewSearchInfo
+                        materialized_view_search_info;
+                    for (const auto& [expr_field_id, vals] :
+                         expr_info.field_id_to_values) {
+                        materialized_view_search_info
+                            .field_id_to_touched_categories_cnt[expr_field_id] =
+                            vals.size();
+                    }
+                    materialized_view_search_info.is_pure_and =
+                        expr_info.is_pure_and;
+                    materialized_view_search_info.has_not = expr_info.has_not;
+
+                    plan_node->search_info_.search_params_
+                        [knowhere::meta::MATERIALIZED_VIEW_SEARCH_INFO] =
+                        materialized_view_search_info;
+                }
+            }
+
+            plannode = std::make_shared<milvus::plan::MvccNode>(
+                milvus::plan::GetNextPlanNodeId(), sources);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+            if (is_element_level) {
+                plannode = std::make_shared<plan::ElementFilterBitsNode>(
+                    milvus::plan::GetNextPlanNodeId(),
+                    element_expr,
+                    struct_name,
+                    sources);
+                sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+            }
+
+            plannode = std::make_shared<milvus::plan::VectorSearchNode>(
+                milvus::plan::GetNextPlanNodeId(), sources);
+            sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
         }
     } else {
         // no filter, force set iterative filter hint to false, go with normal vector search path
@@ -400,8 +439,16 @@ expr::TypedExprPtr
 ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (column_info.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() ==
+               static_cast<DataType>(column_info.data_type()));
+    } else {
+        Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    }
     std::vector<::milvus::proto::plan::GenericValue> extra_values;
     for (auto val : expr_pb.extra_values()) {
         extra_values.emplace_back(val);
@@ -417,8 +464,16 @@ expr::TypedExprPtr
 ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (column_info.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() ==
+               static_cast<DataType>(column_info.data_type()));
+    } else {
+        Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    }
     return std::make_shared<milvus::expr::NullExpr>(
         expr::ColumnInfo(column_info), expr_pb.op());
 }
@@ -428,8 +483,15 @@ ProtoParser::ParseBinaryRangeExprs(
     const proto::plan::BinaryRangeExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == (DataType)columnInfo.data_type());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
     return std::make_shared<expr::BinaryRangeFilterExpr>(
         columnInfo,
         expr_pb.lower_value(),
@@ -443,14 +505,32 @@ ProtoParser::ParseTimestamptzArithCompareExprs(
     const proto::plan::TimestamptzArithCompareExpr& expr_pb) {
     auto& columnInfo = expr_pb.timestamptz_column();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == (DataType)columnInfo.data_type());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
     return std::make_shared<expr::TimestamptzArithCompareExpr>(
         columnInfo,
         expr_pb.arith_op(),
         expr_pb.interval(),
         expr_pb.compare_op(),
         expr_pb.compare_value());
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseElementFilterExprs(
+    const proto::plan::ElementFilterExpr& expr_pb) {
+    // ElementFilterExpr is not a regular expression that can be evaluated directly.
+    // It should be handled at the PlanNode level (in PlanNodeFromProto).
+    // This method should never be called.
+    ThrowInfo(ExprInvalid,
+              "ParseElementFilterExprs should not be called directly. "
+              "ElementFilterExpr must be handled at PlanNode level.");
 }
 
 expr::TypedExprPtr
@@ -480,15 +560,31 @@ expr::TypedExprPtr
 ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     auto& left_column_info = expr_pb.left_column_info();
     auto left_field_id = FieldId(left_column_info.field_id());
-    auto left_data_type = schema->operator[](left_field_id).get_data_type();
-    Assert(left_data_type ==
-           static_cast<DataType>(left_column_info.data_type()));
+    auto& left_field = schema->operator[](left_field_id);
+    auto left_data_type = left_field.get_data_type();
+
+    if (left_column_info.is_element_level()) {
+        Assert(left_data_type == DataType::ARRAY);
+        Assert(left_field.get_element_type() ==
+               static_cast<DataType>(left_column_info.data_type()));
+    } else {
+        Assert(left_data_type ==
+               static_cast<DataType>(left_column_info.data_type()));
+    }
 
     auto& right_column_info = expr_pb.right_column_info();
     auto right_field_id = FieldId(right_column_info.field_id());
-    auto right_data_type = schema->operator[](right_field_id).get_data_type();
-    Assert(right_data_type ==
-           static_cast<DataType>(right_column_info.data_type()));
+    auto& right_field = schema->operator[](right_field_id);
+    auto right_data_type = right_field.get_data_type();
+
+    if (right_column_info.is_element_level()) {
+        Assert(right_data_type == DataType::ARRAY);
+        Assert(right_field.get_element_type() ==
+               static_cast<DataType>(right_column_info.data_type()));
+    } else {
+        Assert(right_data_type ==
+               static_cast<DataType>(right_column_info.data_type()));
+    }
 
     return std::make_shared<expr::CompareExpr>(left_field_id,
                                                right_field_id,
@@ -501,8 +597,15 @@ expr::TypedExprPtr
 ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == (DataType)columnInfo.data_type());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
     std::vector<::milvus::proto::plan::GenericValue> values;
     for (size_t i = 0; i < expr_pb.values_size(); i++) {
         values.emplace_back(expr_pb.values(i));
@@ -532,8 +635,16 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
     const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (column_info.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() ==
+               static_cast<DataType>(column_info.data_type()));
+    } else {
+        Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    }
     return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
         column_info,
         expr_pb.op(),
@@ -546,8 +657,16 @@ expr::TypedExprPtr
 ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
     auto& column_info = expr_pb.info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (column_info.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() ==
+               static_cast<DataType>(column_info.data_type()));
+    } else {
+        Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    }
     return std::make_shared<expr::ExistsExpr>(column_info);
 }
 
@@ -556,8 +675,15 @@ ProtoParser::ParseJsonContainsExprs(
     const proto::plan::JSONContainsExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == (DataType)columnInfo.data_type());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
     std::vector<::milvus::proto::plan::GenericValue> values;
     for (size_t i = 0; i < expr_pb.elements_size(); i++) {
         values.emplace_back(expr_pb.elements(i));
@@ -584,8 +710,15 @@ ProtoParser::ParseGISFunctionFilterExprs(
     const proto::plan::GISFunctionFilterExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema->operator[](field_id).get_data_type();
-    Assert(data_type == (DataType)columnInfo.data_type());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+
+    if (columnInfo.is_element_level()) {
+        Assert(data_type == DataType::ARRAY);
+        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+    } else {
+        Assert(data_type == (DataType)columnInfo.data_type());
+    }
 
     auto expr = std::make_shared<expr::GISFunctionFilterExpr>(
         columnInfo, expr_pb.op(), expr_pb.wkt_string(), expr_pb.distance());
@@ -670,6 +803,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             result = ParseTimestamptzArithCompareExprs(
                 expr_pb.timestamptz_arith_compare_expr());
             break;
+        }
+        case ppe::kElementFilterExpr: {
+            ThrowInfo(ExprInvalid,
+                      "ElementFilterExpr should be handled at PlanNode level, "
+                      "not in ParseExprs");
         }
         default: {
             std::string s;

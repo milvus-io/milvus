@@ -150,6 +150,18 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				gpFieldBuilder.Add(groupByVal)
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
+
+				// Handle ElementIndices if present
+				if subData.ElementIndices != nil {
+					if ret.Results.ElementIndices == nil {
+						ret.Results.ElementIndices = &schemapb.LongArray{
+							Data: make([]int64, 0, limit),
+						}
+					}
+					elemIdx := subData.ElementIndices.GetData()[innerIdx]
+					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, elemIdx)
+				}
+
 				dataCount += 1
 			}
 		}
@@ -308,6 +320,18 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 				}
 				typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 				ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
+
+				// Handle ElementIndices if present
+				if subResData.ElementIndices != nil {
+					if ret.Results.ElementIndices == nil {
+						ret.Results.ElementIndices = &schemapb.LongArray{
+							Data: make([]int64, 0, limit),
+						}
+					}
+					elemIdx := subResData.ElementIndices.GetData()[groupEntity.resultIdx]
+					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, elemIdx)
+				}
+
 				gpFieldBuilder.Add(groupVal)
 			}
 		}
@@ -436,6 +460,18 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				}
 				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)
+
+				// Handle ElementIndices if present
+				if subSearchResultData[subSearchIdx].ElementIndices != nil {
+					if ret.Results.ElementIndices == nil {
+						ret.Results.ElementIndices = &schemapb.LongArray{
+							Data: make([]int64, 0, limit),
+						}
+					}
+					elemIdx := subSearchResultData[subSearchIdx].ElementIndices.GetData()[resultDataIdx]
+					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, elemIdx)
+				}
+
 				cursors[subSearchIdx]++
 			}
 			if realTopK != -1 && realTopK != j {

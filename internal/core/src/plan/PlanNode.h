@@ -183,6 +183,126 @@ class FilterBitsNode : public PlanNode {
     const expr::TypedExprPtr filter_;
 };
 
+class ElementFilterNode : public PlanNode {
+ public:
+    ElementFilterNode(const PlanNodeId& id,
+                      expr::TypedExprPtr element_filter,
+                      std::string struct_name,
+                      std::vector<PlanNodePtr> sources)
+        : PlanNode(id),
+          sources_{std::move(sources)},
+          element_filter_(std::move(element_filter)),
+          struct_name_(std::move(struct_name)) {
+        AssertInfo(
+            element_filter_->type() == DataType::BOOL,
+            fmt::format(
+                "Element filter expression must be of type BOOLEAN, Got {}",
+                element_filter_->type()));
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::NONE;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    const expr::TypedExprPtr&
+    element_filter() const {
+        return element_filter_;
+    }
+
+    const std::string&
+    struct_name() const {
+        return struct_name_;
+    }
+
+    std::string_view
+    name() const override {
+        return "ElementFilter";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format(
+            "ElementFilterNode:\n\t[struct_name:{}, element_filter:{}]",
+            struct_name_,
+            element_filter_->ToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+    const expr::TypedExprPtr element_filter_;
+    const std::string struct_name_;
+};
+
+class ElementFilterBitsNode : public PlanNode {
+ public:
+    ElementFilterBitsNode(
+        const PlanNodeId& id,
+        expr::TypedExprPtr element_filter,
+        std::string struct_name,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id),
+          sources_{std::move(sources)},
+          element_filter_(std::move(element_filter)),
+          struct_name_(std::move(struct_name)) {
+        AssertInfo(
+            element_filter_->type() == DataType::BOOL,
+            fmt::format(
+                "Element filter expression must be of type BOOLEAN, Got {}",
+                element_filter_->type()));
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    const expr::TypedExprPtr&
+    element_filter() const {
+        return element_filter_;
+    }
+
+    const std::string&
+    struct_name() const {
+        return struct_name_;
+    }
+
+    std::string_view
+    name() const override {
+        return "ElementFilterBits";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format(
+            "ElementFilterBitsNode:\n\t[struct_name:{}, element_filter:{}]",
+            struct_name_,
+            element_filter_->ToString());
+    }
+
+    expr::ExprInfo
+    GatherInfo() const override {
+        expr::ExprInfo info;
+        element_filter_->GatherInfo(info);
+        return info;
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+    const expr::TypedExprPtr element_filter_;
+    const std::string struct_name_;
+};
+
 class MvccNode : public PlanNode {
  public:
     MvccNode(const PlanNodeId& id,
