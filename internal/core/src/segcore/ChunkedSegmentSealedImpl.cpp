@@ -400,11 +400,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
-    LOG_INFO(
-        "[StorageV2] segment {} loads manifest cg index {} with field ids "
-        "{} ",
-        this->get_segment_id(),
-        index);
+    LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
+             this->get_segment_id(),
+             index);
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
