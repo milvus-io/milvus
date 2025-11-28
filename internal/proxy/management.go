@@ -91,13 +91,20 @@ func RegisterMgrRoute(proxy *Proxy) {
 
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
+	params := []*commonpb.KeyValuePair{
+		{Key: "duration", Value: pauseSeconds},
+	}
+	if req.URL.Query().Has("collection_id") {
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "collection_id",
+			Value: req.URL.Query().Get("collection_id"),
+		})
+	}
 
 	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: pauseSeconds},
-		},
+		Params:  params,
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -114,9 +121,18 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
+	params := []*commonpb.KeyValuePair{}
+	if req.URL.Query().Has("collection_id") {
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "collection_id",
+			Value: req.URL.Query().Get("collection_id"),
+		})
+	}
+
 	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Resume,
+		Params:  params,
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

@@ -1804,13 +1804,23 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 			status.Reason = fmt.Sprintf("pause duration not valid, %s", err.Error())
 			return status, nil
 		}
-		if err := s.garbageCollector.Pause(ctx, time.Duration(pauseSeconds)*time.Second); err != nil {
+
+		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
+		if err != nil {
+			return merr.Status(err), nil
+		}
+
+		if err := s.garbageCollector.Pause(ctx, collectionID, time.Duration(pauseSeconds)*time.Second); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil
 		}
 	case datapb.GcCommand_Resume:
-		if err := s.garbageCollector.Resume(ctx); err != nil {
+		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if err := s.garbageCollector.Resume(ctx, collectionID); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil

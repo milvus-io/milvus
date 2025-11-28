@@ -1629,10 +1629,10 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, time.Second)
+		err := gc.Pause(ctx, -1, time.Second)
 		s.NoError(err)
 
-		err = gc.Resume(ctx)
+		err = gc.Resume(ctx, -1)
 		s.Error(err)
 	})
 
@@ -1650,12 +1650,12 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, time.Minute)
+		err := gc.Pause(ctx, -1, time.Minute)
 		s.NoError(err)
 
 		s.NotZero(gc.pauseUntil.Load())
 
-		err = gc.Resume(ctx)
+		err = gc.Resume(ctx, -1)
 		s.NoError(err)
 
 		s.Zero(gc.pauseUntil.Load())
@@ -1675,13 +1675,13 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, time.Minute)
+		err := gc.Pause(ctx, -1, time.Minute)
 		s.NoError(err)
 
 		until := gc.pauseUntil.Load()
 		s.NotZero(until)
 
-		err = gc.Pause(ctx, time.Second)
+		err = gc.Pause(ctx, -1, time.Second)
 		s.NoError(err)
 
 		second := gc.pauseUntil.Load()
@@ -1701,15 +1701,51 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 		defer cancel()
-		err := gc.Pause(ctx, time.Minute)
+		err := gc.Pause(ctx, -1, time.Minute)
 		s.Error(err)
 
 		s.Zero(gc.pauseUntil.Load())
 
-		err = gc.Resume(ctx)
+		err = gc.Resume(ctx, -1)
 		s.Error(err)
 
 		s.Zero(gc.pauseUntil.Load())
+	})
+
+	s.Run("pause_collection", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.Pause(ctx, 100, time.Minute)
+		s.NoError(err)
+
+		until, has := gc.pausedCollection.Get(100)
+		s.True(has)
+		s.NotZero(until)
+
+		err = gc.Pause(ctx, 100, time.Second)
+		s.NoError(err)
+
+		second, has := gc.pausedCollection.Get(100)
+		s.True(has)
+
+		s.Equal(until, second)
+
+		err = gc.Resume(ctx, 100)
+		s.NoError(err)
+
+		_, has = gc.pausedCollection.Get(100)
+		s.False(has)
 	})
 }
 

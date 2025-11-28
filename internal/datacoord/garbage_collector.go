@@ -69,19 +69,21 @@ type garbageCollector struct {
 	meta    *meta
 	handler Handler
 
-	startOnce  sync.Once
-	stopOnce   sync.Once
-	wg         sync.WaitGroup
-	cmdCh      chan gcCmd
-	pauseUntil atomic.Time
+	startOnce        sync.Once
+	stopOnce         sync.Once
+	wg               sync.WaitGroup
+	cmdCh            chan gcCmd
+	pauseUntil       atomic.Time
+	pausedCollection *typeutil.ConcurrentMap[int64, time.Time]
 
 	systemMetricsListener *hardware.SystemMetricsListener
 }
 
 type gcCmd struct {
-	cmdType  datapb.GcCommand
-	duration time.Duration
-	done     chan struct{}
+	cmdType      datapb.GcCommand
+	duration     time.Duration
+	collectionID int64
+	done         chan struct{}
 }
 
 // newSystemMetricsListener creates a system metrics listener for garbage collector.
@@ -128,6 +130,7 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		option:                opt,
 		cmdCh:                 make(chan gcCmd),
 		systemMetricsListener: newSystemMetricsListener(&opt),
+		pausedCollection:      typeutil.NewConcurrentMap[int64, time.Time](),
 	}
 }
 
@@ -168,7 +171,7 @@ func (gc *garbageCollector) GetStatus() GcStatus {
 	}
 }
 
-func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
+func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, pauseDuration time.Duration) error {
 	if !gc.option.enabled {
 		log.Info("garbage collection not enabled")
 		return nil
@@ -176,9 +179,10 @@ func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Durati
 	done := make(chan struct{})
 	select {
 	case gc.cmdCh <- gcCmd{
-		cmdType:  datapb.GcCommand_Pause,
-		duration: pauseDuration,
-		done:     done,
+		cmdType:      datapb.GcCommand_Pause,
+		duration:     pauseDuration,
+		collectionID: collectionID,
+		done:         done,
 	}:
 		<-done
 		return nil
@@ -187,7 +191,7 @@ func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Durati
 	}
 }
 
-func (gc *garbageCollector) Resume(ctx context.Context) error {
+func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64) error {
 	if !gc.option.enabled {
 		log.Warn("garbage collection not enabled, cannot resume")
 		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
@@ -195,8 +199,9 @@ func (gc *garbageCollector) Resume(ctx context.Context) error {
 	done := make(chan struct{})
 	select {
 	case gc.cmdCh <- gcCmd{
-		cmdType: datapb.GcCommand_Resume,
-		done:    done,
+		cmdType:      datapb.GcCommand_Resume,
+		done:         done,
+		collectionID: collectionID,
 	}:
 		<-done
 		return nil
@@ -247,16 +252,30 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 			switch cmd.cmdType {
 			case datapb.GcCommand_Pause:
 				pauseUntil := time.Now().Add(cmd.duration)
-				if pauseUntil.After(gc.pauseUntil.Load()) {
-					log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
-					gc.pauseUntil.Store(pauseUntil)
+				if cmd.collectionID <= 0 { // legacy pause all
+					if pauseUntil.After(gc.pauseUntil.Load()) {
+						log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
+						gc.pauseUntil.Store(pauseUntil)
+					} else {
+						log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
+					}
 				} else {
-					log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
+					curr, has := gc.pausedCollection.Get(cmd.collectionID)
+					if has && curr.After(pauseUntil) {
+						log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", curr))
+					} else {
+						log.Info("collection garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Int64("collectionID", cmd.collectionID))
+						gc.pausedCollection.Insert(cmd.collectionID, pauseUntil)
+					}
 				}
 			case datapb.GcCommand_Resume:
 				// reset to zero value
-				gc.pauseUntil.Store(time.Time{})
-				log.Info("garbage collection resumed")
+				if cmd.collectionID <= 0 {
+					gc.pauseUntil.Store(time.Time{})
+				} else {
+					gc.pausedCollection.GetAndRemove(cmd.collectionID)
+				}
+				log.Info("garbage collection resumed", zap.Int64("collectionID", cmd.collectionID))
 			}
 			close(cmd.done)
 		case <-gc.ctx.Done():
@@ -287,6 +306,11 @@ func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name s
 			logger.Info("garbage collector recycle task done", zap.Duration("timeCost", time.Since(start)))
 		}
 	}
+}
+
+func (gc *garbageCollector) collectionGCPaused(collectionID int64) bool {
+	pauseUntil, has := gc.pausedCollection.Get(collectionID)
+	return has && time.Now().Before(pauseUntil)
 }
 
 // close stop the garbage collector.
@@ -533,6 +557,11 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		if ctx.Err() != nil {
 			// process canceled, stop.
 			return
+		}
+
+		if gc.collectionGCPaused(segment.GetCollectionID()) {
+			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+			continue
 		}
 
 		log := log.With(zap.Int64("segmentID", segmentID))
