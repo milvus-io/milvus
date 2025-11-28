@@ -500,7 +500,7 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 			return &datapb.FlushAllResponse{Status: successStatus}, nil
 		}).Build()
 
-		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default"})
+		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
 
 		// Assert: Verify results
 		assert.NoError(t, err)

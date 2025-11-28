@@ -2207,9 +2207,7 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		server := &Server{}
 		server.stateCode.Store(commonpb.StateCode_Abnormal)
 
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345,
-		}
+		req := &milvuspb.GetFlushAllStateRequest{}
 		resp, err := server.GetFlushAllState(context.Background(), req)
 
 		assert.NoError(t, err)
@@ -2223,9 +2221,7 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(nil, errors.New("list databases error")).Build()
 		defer mockListDatabases.UnPatch()
 
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345,
-		}
+		req := &milvuspb.GetFlushAllStateRequest{}
 
 		resp, err := server.GetFlushAllState(context.Background(), req)
 
@@ -2233,7 +2229,7 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
-	t.Run("check all databases", func(t *testing.T) {
+	t.Run("all flushed", func(t *testing.T) {
 		server := createTestGetFlushAllStateServer()
 
 		// Mock ListDatabases
@@ -2286,71 +2282,19 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		server.meta.channelCPs.checkpoints["channel2"] = &msgpb.MsgPosition{Timestamp: 15000}
 
 		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345, // No specific targets, check all databases
+			FlushAllTss: map[string]uint64{
+				"channel1": 15000,
+				"channel2": 15000,
+			},
 		}
 
 		resp, err := server.GetFlushAllState(context.Background(), req)
 
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, 2, len(resp.GetFlushStates()))
-
-		// Check both databases are present
-		dbNames := make(map[string]bool)
-		for _, flushState := range resp.GetFlushStates() {
-			dbNames[flushState.GetDbName()] = true
-		}
-		assert.True(t, dbNames["db1"])
-		assert.True(t, dbNames["db2"])
-		assert.True(t, resp.GetFlushed()) // Overall flushed
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.True(t, resp.GetFlushed())
 	})
 
-	t.Run("channel checkpoint not found", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"test-db"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionIds:   []int64{100},
-			CollectionNames: []string{"collection1"},
-		}, nil).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"channel1"},
-		}, nil).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// No channel checkpoint set - should be considered not flushed
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345,
-			DbName:     "test-db",
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, 1, len(resp.GetFlushStates()))
-
-		flushState := resp.GetFlushStates()[0]
-		assert.Equal(t, "test-db", flushState.GetDbName())
-		assert.Equal(t, 1, len(flushState.GetCollectionFlushStates()))
-		assert.False(t, flushState.GetCollectionFlushStates()["collection1"]) // Not flushed
-		assert.False(t, resp.GetFlushed())                                    // Overall not flushed
-	})
-
-	t.Run("channel checkpoint timestamp too low", func(t *testing.T) {
+	t.Run("not flushed, channel checkpoint too old", func(t *testing.T) {
 		server := createTestGetFlushAllStateServer()
 
 		// Mock ListDatabases
@@ -2379,218 +2323,15 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 10000}
 
 		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345,
-			DbName:     "test-db",
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, 1, len(resp.GetFlushStates()))
-
-		flushState := resp.GetFlushStates()[0]
-		assert.Equal(t, "test-db", flushState.GetDbName())
-		assert.Equal(t, 1, len(flushState.GetCollectionFlushStates()))
-		assert.False(t, flushState.GetCollectionFlushStates()["collection1"]) // Not flushed
-		assert.False(t, resp.GetFlushed())                                    // Overall not flushed
-	})
-
-	t.Run("specific database flushed successfully", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases (called even when DbName is specified)
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"test-db"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections for specific database
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionIds:   []int64{100, 101},
-			CollectionNames: []string{"collection1", "collection2"},
-		}, nil).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			if collectionID == 100 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel1"},
-				}, nil
-			}
-			if collectionID == 101 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel2"},
-				}, nil
-			}
-			return nil, errors.New("collection not found")
-		}).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoints - both flushed (timestamps higher than FlushAllTs)
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
-		server.meta.channelCPs.checkpoints["channel2"] = &msgpb.MsgPosition{Timestamp: 16000}
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345,
-			DbName:     "test-db",
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, 1, len(resp.GetFlushStates()))
-
-		flushState := resp.GetFlushStates()[0]
-		assert.Equal(t, "test-db", flushState.GetDbName())
-		assert.Equal(t, 2, len(flushState.GetCollectionFlushStates()))
-		assert.True(t, flushState.GetCollectionFlushStates()["collection1"]) // Flushed
-		assert.True(t, flushState.GetCollectionFlushStates()["collection2"]) // Flushed
-		assert.True(t, resp.GetFlushed())                                    // Overall flushed
-	})
-
-	t.Run("check with flush targets successfully", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases (called even when FlushTargets are specified)
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"test-db"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections for specific database
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
-			Status:          merr.Success(),
-			CollectionIds:   []int64{100, 101},
-			CollectionNames: []string{"target-collection", "other-collection"},
-		}, nil).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			if collectionID == 100 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel1"},
-				}, nil
-			}
-			if collectionID == 101 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel2"},
-				}, nil
-			}
-			return nil, errors.New("collection not found")
-		}).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoints - target collection flushed, other not checked
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
-		server.meta.channelCPs.checkpoints["channel2"] = &msgpb.MsgPosition{Timestamp: 10000} // Won't be checked due to filtering
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345,
-			FlushTargets: []*milvuspb.FlushAllTarget{
-				{
-					DbName:          "test-db",
-					CollectionNames: []string{"target-collection"},
-				},
+			FlushAllTss: map[string]uint64{
+				"channel1": 15000,
 			},
 		}
 
 		resp, err := server.GetFlushAllState(context.Background(), req)
 
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, 1, len(resp.GetFlushStates()))
-
-		flushState := resp.GetFlushStates()[0]
-		assert.Equal(t, "test-db", flushState.GetDbName())
-		assert.Equal(t, 1, len(flushState.GetCollectionFlushStates()))             // Only target collection checked
-		assert.True(t, flushState.GetCollectionFlushStates()["target-collection"]) // Flushed
-		assert.True(t, resp.GetFlushed())                                          // Overall flushed (only checking target collection)
-	})
-
-	t.Run("mixed flush states - partial success", func(t *testing.T) {
-		server := createTestGetFlushAllStateServer()
-
-		// Mock ListDatabases
-		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
-			Status:  merr.Success(),
-			DbNames: []string{"db1", "db2"},
-		}, nil).Build()
-		defer mockListDatabases.UnPatch()
-
-		// Mock ShowCollections for different databases
-		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).To(func(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
-			if dbName == "db1" {
-				return &milvuspb.ShowCollectionsResponse{
-					Status:          merr.Success(),
-					CollectionIds:   []int64{100},
-					CollectionNames: []string{"collection1"},
-				}, nil
-			}
-			if dbName == "db2" {
-				return &milvuspb.ShowCollectionsResponse{
-					Status:          merr.Success(),
-					CollectionIds:   []int64{200},
-					CollectionNames: []string{"collection2"},
-				}, nil
-			}
-			return nil, errors.New("unknown db")
-		}).Build()
-		defer mockShowCollections.UnPatch()
-
-		// Mock DescribeCollectionInternal
-		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).To(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			if collectionID == 100 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel1"},
-				}, nil
-			}
-			if collectionID == 200 {
-				return &milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: []string{"channel2"},
-				}, nil
-			}
-			return nil, errors.New("collection not found")
-		}).Build()
-		defer mockDescribeCollection.UnPatch()
-
-		// Setup channel checkpoints - db1 flushed, db2 not flushed
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000} // Flushed
-		server.meta.channelCPs.checkpoints["channel2"] = &msgpb.MsgPosition{Timestamp: 10000} // Not flushed
-
-		req := &milvuspb.GetFlushAllStateRequest{
-			FlushAllTs: 12345, // Check all databases
-		}
-
-		resp, err := server.GetFlushAllState(context.Background(), req)
-
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, 2, len(resp.GetFlushStates()))
-
-		// Verify mixed flush states
-		stateMap := make(map[string]*milvuspb.FlushAllState)
-		for _, state := range resp.GetFlushStates() {
-			stateMap[state.GetDbName()] = state
-		}
-
-		assert.Contains(t, stateMap, "db1")
-		assert.Contains(t, stateMap, "db2")
-		assert.True(t, stateMap["db1"].GetCollectionFlushStates()["collection1"])  // db1 flushed
-		assert.False(t, stateMap["db2"].GetCollectionFlushStates()["collection2"]) // db2 not flushed
-		assert.False(t, resp.GetFlushed())                                         // Overall not flushed due to db2
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.False(t, resp.GetFlushed())
 	})
 }
 
