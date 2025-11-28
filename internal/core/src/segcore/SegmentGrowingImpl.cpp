@@ -1166,9 +1166,9 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
     }
 }
 
-std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const IdArray& id_array,
-                               Timestamp timestamp) const {
+void
+SegmentGrowingImpl::search_ids(BitsetType& bitset,
+                               const IdArray& id_array) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -1177,20 +1177,11 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    std::vector<SegOffset> res_offsets;
-    res_offsets.reserve(pks.size());
+    BitsetTypeView bitset_view(bitset);
     for (auto& pk : pks) {
-        auto segOffsets = insert_record_.search_pk(pk, timestamp);
-        for (auto offset : segOffsets) {
-            res_offsets.push_back(offset);
-        }
+        insert_record_.search_pk_range(
+            pk, proto::plan::OpType::Equal, bitset_view);
     }
-    return std::move(res_offsets);
-}
-
-std::string
-SegmentGrowingImpl::debug() const {
-    return "Growing\n";
 }
 
 int64_t

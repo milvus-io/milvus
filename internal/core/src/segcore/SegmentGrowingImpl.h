@@ -68,9 +68,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
 
-    std::string
-    debug() const override;
-
     int64_t
     get_segment_id() const override {
         return id_;
@@ -375,8 +372,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
-    std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const override;
+    void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
 
     bool
     HasIndex(FieldId field_id) const {
@@ -455,13 +452,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool
     is_mmap_field(FieldId id) const override {
         return false;
-    }
-
-    std::vector<SegOffset>
-    search_pk(milvus::OpContext* op_ctx,
-              const PkType& pk,
-              Timestamp timestamp) const override {
-        return insert_record_.search_pk(pk, timestamp);
     }
 
     void

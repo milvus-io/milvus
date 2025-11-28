@@ -337,9 +337,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual bool
     HasIndex(FieldId field_id) const = 0;
 
-    virtual std::string
-    debug() const = 0;
-
     int64_t
     get_real_count() const override;
 
@@ -432,12 +429,14 @@ class SegmentInternalInterface : public SegmentInterface {
     /**
      * search offset by possible pk values and mvcc timestamp
      *
+     * @param bitset The final bitset after id array filtering,
+     *  `false` means that the entity will be filtered out.
      * @param id_array possible pk values
-     * @param timestamp mvcc timestamp 
-     * @return all the hit entries in vector of offsets
+     * this interface is used for internal expression calculation,
+     * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
-    virtual std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
+    virtual void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
 
     /**
      * Apply timestamp filtering on bitset, the query can't see an entity whose
@@ -575,16 +574,19 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
 
-    virtual std::vector<SegOffset>
-    search_pk(milvus::OpContext* op_ctx,
-              const PkType& pk,
-              Timestamp timestamp) const = 0;
-
     virtual void
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
              const PkType& pk,
              BitsetTypeView& bitset) const = 0;
+
+    virtual void
+    pk_binary_range(milvus::OpContext* op_ctx,
+                    const PkType& lower_pk,
+                    bool lower_inclusive,
+                    const PkType& upper_pk,
+                    bool upper_inclusive,
+                    BitsetTypeView& bitset) const = 0;
 
     virtual GEOSContextHandle_t
     get_ctx() const {

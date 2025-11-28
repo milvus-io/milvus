@@ -156,6 +156,67 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
     }
 }
 
+// Convert internal DataType to proto schema DataType
+inline proto::schema::DataType
+ToProtoDataType(DataType data_type) {
+    switch (data_type) {
+        case DataType::NONE:
+            return proto::schema::DataType::None;
+        case DataType::BOOL:
+            return proto::schema::DataType::Bool;
+        case DataType::INT8:
+            return proto::schema::DataType::Int8;
+        case DataType::INT16:
+            return proto::schema::DataType::Int16;
+        case DataType::INT32:
+            return proto::schema::DataType::Int32;
+        case DataType::INT64:
+            return proto::schema::DataType::Int64;
+
+        case DataType::FLOAT:
+            return proto::schema::DataType::Float;
+        case DataType::DOUBLE:
+            return proto::schema::DataType::Double;
+
+        case DataType::STRING:
+            return proto::schema::DataType::String;
+        case DataType::VARCHAR:
+            return proto::schema::DataType::VarChar;
+        case DataType::ARRAY:
+            return proto::schema::DataType::Array;
+        case DataType::JSON:
+            return proto::schema::DataType::JSON;
+        case DataType::TEXT:
+            return proto::schema::DataType::Text;
+        case DataType::TIMESTAMPTZ:
+            return proto::schema::DataType::Timestamptz;
+
+        case DataType::VECTOR_BINARY:
+            return proto::schema::DataType::BinaryVector;
+        case DataType::VECTOR_FLOAT:
+            return proto::schema::DataType::FloatVector;
+        case DataType::VECTOR_FLOAT16:
+            return proto::schema::DataType::Float16Vector;
+        case DataType::VECTOR_BFLOAT16:
+            return proto::schema::DataType::BFloat16Vector;
+        case DataType::VECTOR_SPARSE_U32_F32:
+            return proto::schema::DataType::SparseFloatVector;
+        case DataType::VECTOR_INT8:
+            return proto::schema::DataType::Int8Vector;
+        case DataType::VECTOR_ARRAY:
+            return proto::schema::DataType::ArrayOfVector;
+
+        // Internal-only or unsupported mappings
+        case DataType::ROW:
+        default:
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "failed to convert to proto data type, invalid type {}",
+                    data_type));
+    }
+}
+
 inline std::shared_ptr<arrow::DataType>
 GetArrowDataType(DataType data_type, int dim = 1) {
     switch (data_type) {
