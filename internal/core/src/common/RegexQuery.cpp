@@ -16,6 +16,41 @@
 namespace milvus {
 
 bool
+is_simple_pattern(const std::string& pattern) {
+    // A pattern is simple if it only contains % and _ wildcards
+    // and has no escape sequences (backslashes)
+    for (size_t i = 0; i < pattern.size(); i++) {
+        char c = pattern[i];
+        // If there's a backslash, it's not simple (has escape sequences)
+        if (c == '\\') {
+            return false;
+        }
+        // fnmatch special characters that would need escaping
+        // If the pattern contains these, fall back to regex
+        if (c == '[' || c == ']' || c == '*' || c == '?') {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string
+translate_pattern_match_to_fnmatch(const std::string& pattern) {
+    std::string r;
+    r.reserve(pattern.size());
+    for (char c : pattern) {
+        if (c == '%') {
+            r += '*';
+        } else if (c == '_') {
+            r += '?';
+        } else {
+            r += c;
+        }
+    }
+    return r;
+}
+
+bool
 is_special(char c) {
     // initial special_bytes_bitmap only once.
     static std::once_flag _initialized;

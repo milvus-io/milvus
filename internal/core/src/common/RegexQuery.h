@@ -15,12 +15,21 @@
 #include <regex>
 #include <boost/regex.hpp>
 #include <utility>
+#include <fnmatch.h>
 
 #include "common/EasyAssert.h"
 
 namespace milvus {
 bool
 is_special(char c);
+
+// Check if the pattern is simple (only contains % and _ wildcards, no escape sequences)
+bool
+is_simple_pattern(const std::string& pattern);
+
+// Translate SQL LIKE pattern (% and _) to fnmatch pattern (* and ?)
+std::string
+translate_pattern_match_to_fnmatch(const std::string& pattern);
 
 std::string
 translate_pattern_match_to_regex(const std::string& pattern);
@@ -48,10 +57,19 @@ struct RegexMatcher {
     }
 
     explicit RegexMatcher(const std::string& pattern) {
-        r_ = boost::regex(pattern);
+        use_fnmatch_ = is_simple_pattern(pattern);
+        if (use_fnmatch_) {
+            fnmatch_pattern_ = translate_pattern_match_to_fnmatch(pattern);
+        } else {
+            regex_pattern_ = translate_pattern_match_to_regex(pattern);
+            r_ = boost::regex(regex_pattern_);
+        }
     }
 
  private:
+    bool use_fnmatch_ = false;
+    std::string fnmatch_pattern_;
+    std::string regex_pattern_;
     // avoid to construct the regex everytime.
     boost::regex r_;
 };
@@ -59,6 +77,10 @@ struct RegexMatcher {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string& operand) {
+    if (use_fnmatch_) {
+        // fnmatch returns 0 on match, FNM_NOMATCH on no match
+        return fnmatch(fnmatch_pattern_.c_str(), operand.c_str(), 0) == 0;
+    }
     // corner case:
     // . don't match \n, but .* match \n.
     // For example,
@@ -71,6 +93,11 @@ RegexMatcher::operator()(const std::string& operand) {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
+    if (use_fnmatch_) {
+        // fnmatch requires null-terminated string, so convert string_view to string
+        std::string str(operand);
+        return fnmatch(fnmatch_pattern_.c_str(), str.c_str(), 0) == 0;
+    }
     return boost::regex_match(operand.begin(), operand.end(), r_);
 }
 
