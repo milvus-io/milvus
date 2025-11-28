@@ -71,6 +71,30 @@ type Config struct {
 	//
 	// Values configured here are per-second. See zapcore.NewSampler for details.
 	Sampling *zap.SamplingConfig `toml:"sampling" json:"sampling"`
+
+	// AsyncWriteEnable enables async write for the logger.
+	AsyncWriteEnable bool `toml:"async-write-enable" json:"async-write-enable"`
+
+	// AsyncWriteFlushInterval is the interval to flush the logs
+	AsyncWriteFlushInterval time.Duration `toml:"async-write-flush-interval" json:"async-write-flush-interval"`
+
+	// AsyncWriteDroppedTimeout is the timeout to drop the write request if the buffer is full
+	AsyncWriteDroppedTimeout time.Duration `toml:"async-write-dropped-timeout" json:"async-write-dropped-timeout"`
+
+	// AsyncWriteNonDroppableLevel is the level that will not be dropped when the buffer is full
+	AsyncWriteNonDroppableLevel string `toml:"async-write-non-droppable-level" json:"async-write-non-droppable-level"`
+
+	// AsyncWriteStopTimeout is the timeout to stop the async write
+	AsyncWriteStopTimeout time.Duration `toml:"async-write-stop-timeout" json:"async-write-stop-timeout"`
+
+	// AsyncWritePendingLength is the maximum number of pending write requests, the exceeded log operation will be dropped
+	AsyncWritePendingLength int `toml:"async-write-pending-length" json:"async-write-pending-length"`
+
+	// AsyncWriteBufferSize is the size of the write buffer
+	AsyncWriteBufferSize int `toml:"async-write-buffer-size" json:"async-write-buffer-size"`
+
+	// AsyncWriteMaxBytesPerLog is the max bytes per log
+	AsyncWriteMaxBytesPerLog int `toml:"async-write-max-bytes-per-log" json:"async-write-max-bytes-per-log"`
 }
 
 // ZapProperties records some information about zap.
@@ -109,4 +133,29 @@ func (cfg *Config) buildOptions(errSink zapcore.WriteSyncer) []zap.Option {
 		}))
 	}
 	return opts
+}
+
+// initialize initializes the config.
+func (cfg *Config) initialize() {
+	if cfg.AsyncWriteFlushInterval <= 0 {
+		cfg.AsyncWriteFlushInterval = 10 * time.Second
+	}
+	if cfg.AsyncWriteDroppedTimeout <= 0 {
+		cfg.AsyncWriteDroppedTimeout = 100 * time.Millisecond
+	}
+	if _, err := zapcore.ParseLevel(cfg.AsyncWriteNonDroppableLevel); cfg.AsyncWriteNonDroppableLevel == "" || err != nil {
+		cfg.AsyncWriteNonDroppableLevel = zapcore.ErrorLevel.String()
+	}
+	if cfg.AsyncWriteStopTimeout <= 0 {
+		cfg.AsyncWriteStopTimeout = 1 * time.Second
+	}
+	if cfg.AsyncWritePendingLength <= 0 {
+		cfg.AsyncWritePendingLength = 1024
+	}
+	if cfg.AsyncWriteBufferSize <= 0 {
+		cfg.AsyncWriteBufferSize = 1024 * 1024
+	}
+	if cfg.AsyncWriteMaxBytesPerLog <= 0 {
+		cfg.AsyncWriteMaxBytesPerLog = 1024 * 1024
+	}
 }

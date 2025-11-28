@@ -1,5 +1,10 @@
 package typeutil
 
+import (
+	"fmt"
+	"strconv"
+)
+
 // Version is a interface for version comparison.
 type Version interface {
 	// GT returns true if v > v2.
@@ -7,6 +12,9 @@ type Version interface {
 
 	// EQ returns true if v == v2.
 	EQ(Version) bool
+
+	// String returns the string representation of the version.
+	String() string
 }
 
 // VersionInt64 is a int64 type version.
@@ -18,6 +26,10 @@ func (v VersionInt64) GT(v2 Version) bool {
 
 func (v VersionInt64) EQ(v2 Version) bool {
 	return v == mustCastVersionInt64(v2)
+}
+
+func (v VersionInt64) String() string {
+	return strconv.FormatInt(int64(v), 10)
 }
 
 func mustCastVersionInt64(v2 Version) VersionInt64 {
@@ -44,6 +56,10 @@ func (v VersionInt64Pair) GT(v2 Version) bool {
 func (v VersionInt64Pair) EQ(v2 Version) bool {
 	vPair := mustCastVersionInt64Pair(v2)
 	return v.Global == vPair.Global && v.Local == vPair.Local
+}
+
+func (v VersionInt64Pair) String() string {
+	return fmt.Sprintf("%d/%d", v.Global, v.Local)
 }
 
 func mustCastVersionInt64Pair(v2 Version) VersionInt64Pair {
