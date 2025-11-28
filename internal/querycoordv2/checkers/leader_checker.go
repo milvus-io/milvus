@@ -92,9 +92,13 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.ReplicaManager.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
-			nodes := replica.GetRWNodes()
+			// note: should enable sync segment distribution to ro node, to avoid balance channel from ro node stucks
+			nodes := replica.GetNodes()
 			if streamingutil.IsStreamingServiceEnabled() {
-				nodes = replica.GetRWSQNodes()
+				sqNodes := make([]int64, len(replica.GetROSQNodes())+len(replica.GetRWSQNodes()))
+				sqNodes = append(sqNodes, replica.GetROSQNodes()...)
+				sqNodes = append(sqNodes, replica.GetRWSQNodes()...)
+				nodes = sqNodes
 			}
 			for _, node := range nodes {
 				delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))

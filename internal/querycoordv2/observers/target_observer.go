@@ -398,7 +398,7 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {
 	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(ctx, collectionID)
 	log := log.Ctx(ctx).WithRateGroup(
-		fmt.Sprintf("qcv2.TargetObserver-%d", collectionID),
+		fmt.Sprintf("qcv2.TargetObserver-shouldUpdateCurrentTarget-%d", collectionID),
 		10,
 		60,
 	).With(
@@ -417,9 +417,23 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
 	collReadyDelegatorList := make([]*meta.DmChannel, 0)
 	for channel := range channelNames {
-		chReadyDelegatorList := lo.Filter(ob.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel)), func(ch *meta.DmChannel, _ int) bool {
-			return (newVersion == ch.View.TargetVersion && ch.IsServiceable()) ||
-				utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, ch.View, meta.NextTarget) == nil
+		delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel))
+		chReadyDelegatorList := lo.Filter(delegatorList, func(ch *meta.DmChannel, _ int) bool {
+			err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, ch.View, meta.NextTarget)
+			dataReadyForNextTarget := err == nil
+			if !dataReadyForNextTarget {
+				log.Info("check delegator",
+					zap.Int64("collectionID", collectionID),
+					zap.String("channelName", channel),
+					zap.Int64("targetVersion", ch.View.TargetVersion),
+					zap.Int64("newTargetVersion", newVersion),
+					zap.Bool("isServiceable", ch.IsServiceable()),
+					zap.Int64("nodeID", ch.Node),
+					zap.Int64("version", ch.Version),
+					zap.Error(err),
+				)
+			}
+			return (newVersion == ch.View.TargetVersion && ch.IsServiceable()) || dataReadyForNextTarget
 		})
 
 		// to avoid stuck here in dynamic increase replica case, we just check available delegator number

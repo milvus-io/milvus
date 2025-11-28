@@ -383,6 +383,10 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// if channel is not subscribed yet, skip load segments
 		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
 		if leader == nil {
+			log.Info("no shard leader for replica to load segment",
+				zap.String("shard", shard),
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetID()))
 			continue
 		}
 
