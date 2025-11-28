@@ -528,6 +528,7 @@ func (s *Server) initServiceDiscovery() error {
 			log.Warn("DataCoord failed to add datanode", zap.Error(err))
 			return err
 		}
+		s.dnSessionWatcher = sessionutil.EmptySessionWatcher()
 	} else {
 		err := s.rewatchDataNodes(sessions)
 		if err != nil {

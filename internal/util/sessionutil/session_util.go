@@ -806,6 +806,20 @@ func (w *sessionWatcher) Stop() {
 	w.wg.Wait()
 }
 
+// EmptySessionWatcher returns a place holder for IndexNodeBinding mode datacoord
+func EmptySessionWatcher() SessionWatcher {
+	return emptySessionWatcher{}
+}
+
+// emptySessionWatcher is a place holder for IndexNodeBinding mode datacoord
+type emptySessionWatcher struct{}
+
+func (emptySessionWatcher) EventChannel() <-chan *SessionEvent {
+	return nil
+}
+
+func (emptySessionWatcher) Stop() {}
+
 // WatchServices watches the service's up and down in etcd, and sends event to
 // eventChannel.
 // prefix is a parameter to know which service to watch and can be obtained in
