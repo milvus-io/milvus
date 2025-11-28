@@ -23,12 +23,14 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
 
@@ -90,20 +92,22 @@ func (p *ServiceParam) WoodpeckerEnable() bool {
 // --- etcd ---
 type EtcdConfig struct {
 	// --- ETCD ---
-	Endpoints         ParamItem          `refreshable:"false"`
-	RootPath          ParamItem          `refreshable:"false"`
-	MetaSubPath       ParamItem          `refreshable:"false"`
-	KvSubPath         ParamItem          `refreshable:"false"`
-	MetaRootPath      CompositeParamItem `refreshable:"false"`
-	KvRootPath        CompositeParamItem `refreshable:"false"`
-	EtcdLogLevel      ParamItem          `refreshable:"false"`
-	EtcdLogPath       ParamItem          `refreshable:"false"`
-	EtcdUseSSL        ParamItem          `refreshable:"false"`
-	EtcdTLSCert       ParamItem          `refreshable:"false"`
-	EtcdTLSKey        ParamItem          `refreshable:"false"`
-	EtcdTLSCACert     ParamItem          `refreshable:"false"`
-	EtcdTLSMinVersion ParamItem          `refreshable:"false"`
-	RequestTimeout    ParamItem          `refreshable:"false"`
+	Endpoints            ParamItem          `refreshable:"false"`
+	RootPath             ParamItem          `refreshable:"false"`
+	MetaSubPath          ParamItem          `refreshable:"false"`
+	KvSubPath            ParamItem          `refreshable:"false"`
+	MetaRootPath         CompositeParamItem `refreshable:"false"`
+	KvRootPath           CompositeParamItem `refreshable:"false"`
+	EtcdLogLevel         ParamItem          `refreshable:"false"`
+	EtcdLogPath          ParamItem          `refreshable:"false"`
+	EtcdUseSSL           ParamItem          `refreshable:"false"`
+	EtcdTLSCert          ParamItem          `refreshable:"false"`
+	EtcdTLSKey           ParamItem          `refreshable:"false"`
+	EtcdTLSCACert        ParamItem          `refreshable:"false"`
+	EtcdTLSMinVersion    ParamItem          `refreshable:"false"`
+	RequestTimeout       ParamItem          `refreshable:"false"`
+	DialKeepAliveTime    ParamItem          `refreshable:"false"`
+	DialKeepAliveTimeout ParamItem          `refreshable:"false"`
 
 	// --- Embed ETCD ---
 	UseEmbedEtcd ParamItem `refreshable:"false"`
@@ -286,6 +290,24 @@ We recommend using version 1.2 and above.`,
 	}
 	p.RequestTimeout.Init(base.mgr)
 
+	p.DialKeepAliveTime = ParamItem{
+		Key:          "etcd.dialKeepAliveTime",
+		DefaultValue: "3000",
+		Version:      "2.6.6",
+		Doc:          `Interval in milliseconds for gRPC dial keepalive pings sent to etcd endpoints.`,
+		Export:       true,
+	}
+	p.DialKeepAliveTime.Init(base.mgr)
+
+	p.DialKeepAliveTimeout = ParamItem{
+		Key:          "etcd.dialKeepAliveTimeout",
+		DefaultValue: "2000",
+		Version:      "2.6.6",
+		Doc:          `Timeout in milliseconds waiting for keepalive responses before marking the connection as unhealthy.`,
+		Export:       true,
+	}
+	p.DialKeepAliveTimeout.Init(base.mgr)
+
 	p.EtcdEnableAuth = ParamItem{
 		Key:          "etcd.auth.enabled",
 		DefaultValue: "false",
@@ -318,17 +340,31 @@ We recommend using version 1.2 and above.`,
 
 func (p *EtcdConfig) GetAll() map[string]string {
 	return map[string]string{
-		"etcd.endpoints":         p.Endpoints.GetValue(),
-		"etcd.metaRootPath":      p.MetaRootPath.GetValue(),
-		"etcd.ssl.enabled":       p.EtcdUseSSL.GetValue(),
-		"etcd.ssl.tlsCert":       p.EtcdTLSCert.GetValue(),
-		"etcd.ssl.tlsKey":        p.EtcdTLSKey.GetValue(),
-		"etcd.ssl.tlsCACert":     p.EtcdTLSCACert.GetValue(),
-		"etcd.ssl.tlsMinVersion": p.EtcdTLSMinVersion.GetValue(),
-		"etcd.requestTimeout":    p.RequestTimeout.GetValue(),
-		"etcd.auth.enabled":      p.EtcdEnableAuth.GetValue(),
-		"etcd.auth.userName":     p.EtcdAuthUserName.GetValue(),
-		"etcd.auth.password":     p.EtcdAuthPassword.GetValue(),
+		"etcd.endpoints":            p.Endpoints.GetValue(),
+		"etcd.metaRootPath":         p.MetaRootPath.GetValue(),
+		"etcd.ssl.enabled":          p.EtcdUseSSL.GetValue(),
+		"etcd.ssl.tlsCert":          p.EtcdTLSCert.GetValue(),
+		"etcd.ssl.tlsKey":           p.EtcdTLSKey.GetValue(),
+		"etcd.ssl.tlsCACert":        p.EtcdTLSCACert.GetValue(),
+		"etcd.ssl.tlsMinVersion":    p.EtcdTLSMinVersion.GetValue(),
+		"etcd.requestTimeout":       p.RequestTimeout.GetValue(),
+		"etcd.dialKeepAliveTime":    p.DialKeepAliveTime.GetValue(),
+		"etcd.dialKeepAliveTimeout": p.DialKeepAliveTimeout.GetValue(),
+		"etcd.auth.enabled":         p.EtcdEnableAuth.GetValue(),
+		"etcd.auth.userName":        p.EtcdAuthUserName.GetValue(),
+		"etcd.auth.password":        p.EtcdAuthPassword.GetValue(),
+	}
+}
+
+func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {
+	dialKeepAliveTime := p.DialKeepAliveTime.GetAsDuration(time.Millisecond)
+	dialKeepAliveTimeout := p.DialKeepAliveTimeout.GetAsDuration(time.Millisecond)
+
+	if dialKeepAliveTime <= 0 && dialKeepAliveTimeout <= 0 {
+		return nil
+	}
+	return []etcd.ClientOption{
+		etcd.WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout),
 	}
 }
 
@@ -700,6 +736,7 @@ type WoodpeckerConfig struct {
 	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
 	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
 	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
+	RetentionTTL                   ParamItem `refreshable:"true"`
 
 	// storage
 	StorageType ParamItem `refreshable:"false"`
@@ -896,6 +933,16 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.ReaderMaxFetchThreads.Init(base.mgr)
 
+	p.RetentionTTL = ParamItem{
+		Key:          "woodpecker.logstore.retentionPolicy.ttl",
+		Version:      "2.6.0",
+		DefaultValue: "72h",
+		FallbackKeys: []string{"streaming.walTruncate.retentionInterval"},
+		Doc:          "Time to live for truncated segments in seconds, default is 72h",
+		Export:       true,
+	}
+	p.RetentionTTL.Init(base.mgr)
+
 	p.StorageType = ParamItem{
 		Key:          "woodpecker.storage.type",
 		Version:      "2.6.0",
@@ -1083,8 +1130,7 @@ set this option to non-zero will create a subscription seek to latest position t
 If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
 so admin of pulsar should give enough retention time to avoid the wal message lost.
 If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
-Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
-The retention policy of pulsar can set shorter to save the storage space in this case.`,
+If this option is zero or negative, it will be ignored and the default value (100m) will be used.`,
 		Export: true,
 	}
 	p.BacklogAutoClearBytes.Init(base.mgr)

@@ -31,9 +31,6 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of collection interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
@@ -50,7 +47,6 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         method: create collection with invalid collection
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -67,7 +63,6 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         method: create collection with over max collection name length
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -85,7 +80,6 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         method: release collection with invalid collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         
@@ -102,7 +96,6 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         method: release collection with nonexistent name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         
@@ -119,7 +112,6 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         method: create collection with over max collection name length
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         
@@ -128,13 +120,11 @@ class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1100, ct.err_msg: f"the length of a collection name must be less than 255 characters"}
         await async_client.release_collection(collection_name, check_task=CheckTasks.err_res, check_items=error)
 
+
 class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
     """ Test case of collection interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
@@ -145,16 +135,15 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
     
     @pytest.mark.tags(CaseLabel.L0)
     async def test_async_milvus_client_release_collection_default(self):
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
         # 1. create collection
         collection_name = cf.gen_unique_str(prefix)
         await async_client.create_collection(collection_name, default_dim)
-        collections = self.list_collections(client)[0]
+        collections, _ = await async_client.list_collections()
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
+        desc, _ = await async_client.describe_collection(collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
@@ -162,13 +151,13 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
         # 2. create partition
         partition_name = cf.gen_unique_str(partition_prefix)
         await async_client.create_partition(collection_name, partition_name)
-        partitions = self.list_partitions(client, collection_name)[0]
+        partitions, _ = await async_client.list_partitions(collection_name)
         assert partition_name in partitions
         # 3. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
+        await async_client.insert(collection_name, rows)
         tasks = []
         # 4. search
         vectors_to_search = rng.random((1, default_dim))
@@ -216,9 +205,10 @@ class TestAsyncMilvusClientCollectionValid(TestMilvusClientV2Base):
                                               "pk_name": default_primary_key_field_name})
 
         # 12. drop action
-        if self.has_partition(client, collection_name, partition_name)[0]:
+        has_partition, _ = await async_client.has_partition(collection_name, partition_name)
+        if has_partition:
             await async_client.release_partitions(collection_name, partition_name)
             await async_client.drop_partition(collection_name, partition_name)
-            partitions = self.list_partitions(client, collection_name)[0]
+            partitions, _ = await async_client.list_partitions(collection_name)
             assert partition_name not in partitions
         await async_client.drop_collection(collection_name)

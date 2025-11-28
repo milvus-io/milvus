@@ -79,6 +79,8 @@ type Server struct {
 	tikvCli             *txnkv.Client
 	address             string
 	session             sessionutil.SessionInterface
+	sessionWatcher      sessionutil.SessionWatcher
+	sessionWatcherMu    sync.Mutex
 	kv                  kv.MetaKv
 	idAllocator         func() (int64, error)
 	metricsCacheManager *metricsinfo.MetricsCacheManager
@@ -589,12 +591,19 @@ func (s *Server) Stop() error {
 		s.cluster.Stop()
 	}
 
+	s.sessionWatcherMu.Lock()
+	if s.sessionWatcher != nil {
+		s.sessionWatcher.Stop()
+	}
+	s.sessionWatcherMu.Unlock()
+
+	s.cancel()
+	s.wg.Wait()
+
 	if s.session != nil {
 		s.session.Stop()
 	}
 
-	s.cancel()
-	s.wg.Wait()
 	log.Info("QueryCoord stop successfully")
 	return nil
 }
@@ -634,14 +643,16 @@ func (s *Server) watchNodes(revision int64) {
 	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 
-	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, s.rewatchNodes)
+	s.sessionWatcherMu.Lock()
+	s.sessionWatcher = s.session.WatchServices(typeutil.QueryNodeRole, revision+1, s.rewatchNodes)
+	s.sessionWatcherMu.Unlock()
 	for {
 		select {
 		case <-s.ctx.Done():
 			log.Info("stop watching nodes, QueryCoord stopped")
 			return
 
-		case event, ok := <-eventChan:
+		case event, ok := <-s.sessionWatcher.EventChannel():
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
 				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))

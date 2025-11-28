@@ -89,6 +89,7 @@ GroupChunkTranslator::GroupChunkTranslator(
                   .GetArrowFileSystem();
 
     // Get row group metadata from files
+    row_group_meta_list_.reserve(insert_files_.size());
     for (const auto& file : insert_files_) {
         auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
             fs,
@@ -110,10 +111,15 @@ GroupChunkTranslator::GroupChunkTranslator(
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
     file_row_group_prefix_sum_.push_back(
         0);  // Base case: 0 row groups before first file
+    size_t total_row_groups = 0;
     for (const auto& file_metas : row_group_meta_list_) {
+        total_row_groups += file_metas.size();
         file_row_group_prefix_sum_.push_back(file_row_group_prefix_sum_.back() +
                                              file_metas.size());
     }
+
+    meta_.num_rows_until_chunk_.reserve(total_row_groups + 1);
+    meta_.chunk_memory_size_.reserve(total_row_groups);
 
     meta_.num_rows_until_chunk_.push_back(0);
     for (const auto& row_group_meta : row_group_meta_list_) {

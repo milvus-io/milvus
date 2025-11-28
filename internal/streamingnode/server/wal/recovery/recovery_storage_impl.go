@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
@@ -55,12 +56,7 @@ func RecoverRecoveryStorage(
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("state", recoveryStorageStateWorking)))
-	rs.truncator = newSamplingTruncator(
-		snapshot.Checkpoint.Clone(),
-		recoveryStreamBuilder.RWWALImpls(),
-		rs.metrics,
-	)
-	rs.truncator.SetLogger(rs.Logger())
+	rs.truncator = recoveryStreamBuilder.RWWALImpls()
 	go rs.backgroundTask()
 	return rs, snapshot, nil
 }
@@ -98,7 +94,7 @@ type recoveryStorageImpl struct {
 	// used to trigger the recovery persist operation.
 	persistNotifier        chan struct{}
 	gracefulClosed         bool
-	truncator              *samplingTruncator
+	truncator              walimpls.WALImpls
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *RecoverySnapshot
 }
@@ -163,8 +159,6 @@ func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.Im
 func (r *recoveryStorageImpl) Close() {
 	r.backgroundTaskNotifier.Cancel()
 	r.backgroundTaskNotifier.BlockUntilFinish()
-	// Stop the truncator.
-	r.truncator.Close()
 	r.metrics.Close()
 }
 

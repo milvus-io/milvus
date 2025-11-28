@@ -38,7 +38,7 @@ func TestShardManager(t *testing.T) {
 	w.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1000,
-	}, nil)
+	}, nil).Maybe()
 	f := syncutil.NewFuture[wal.WAL]()
 	f.Set(w)
 

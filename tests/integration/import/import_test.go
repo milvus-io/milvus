@@ -81,7 +81,7 @@ func (s *BulkInsertSuite) run() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert" + funcutil.RandomString(8)
 
 	var schema *schemapb.CollectionSchema
 	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: false}
@@ -288,7 +288,7 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 60*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchema(collectionName, dim, true,
 		&schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},

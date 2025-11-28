@@ -53,6 +53,8 @@ etcd:
     # We recommend using version 1.2 and above.
     tlsMinVersion: 1.3
   requestTimeout: 10000 # Etcd operation timeout in milliseconds
+  dialKeepAliveTime: 3000 # Interval in milliseconds for gRPC dial keepalive pings sent to etcd endpoints.
+  dialKeepAliveTimeout: 2000 # Timeout in milliseconds waiting for keepalive responses before marking the connection as unhealthy.
   use:
     embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
   data:
@@ -211,6 +213,8 @@ woodpecker:
     segmentReadPolicy:
       maxBatchSize: 16M # Maximum size of a batch in bytes.
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
+    retentionPolicy:
+      ttl: 72h # Time to live for truncated segments in seconds, default is 72h
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
@@ -242,8 +246,7 @@ pulsar:
   # If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
   # so admin of pulsar should give enough retention time to avoid the wal message lost.
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
-  # Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
-  # The retention policy of pulsar can set shorter to save the storage space in this case.
+  # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
 
 # If you want to enable kafka, needs to comment the pulsar configs
@@ -988,7 +991,7 @@ common:
     internaltlsEnabled: false
     tlsMode: 0
   session:
-    ttl: 30 # ttl value when session granting a lease to register service
+    ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
   locks:
     metrics:
@@ -1364,19 +1367,6 @@ streaming:
     # When the wal is on-closing, the recovery module will try to persist the recovery info for wal to make next recovery operation more fast.
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
-  walTruncate:
-    # The interval of sampling wal checkpoint when truncate, 30m by default.
-    # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
-    # More samples, more frequent truncate, more memory usage.
-    sampleInterval: 30m
-    # The retention interval of wal truncate, 72h by default.
-    # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
-    # Greater the interval, more wal storage usage, more redundant data in wal.
-    # Because current query path doesn't promise the read operation not happen before the truncate point,
-    # retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
-    # If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
-    # because the wal truncate operation is implemented by pulsar consumer.
-    retentionInterval: 72h
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

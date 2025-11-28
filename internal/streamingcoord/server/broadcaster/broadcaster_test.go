@@ -9,7 +9,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -266,4 +268,83 @@ func createNewWaitAckBroadcastTaskFromMessage(
 		AckedVchannelBitmap: bitmap,
 		AckedCheckpoints:    acks,
 	}
+}
+
+func TestRecoverBroadcastTaskFromProto(t *testing.T) {
+	task := createNewBroadcastTask(8, []string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c1"))
+	b, err := proto.Marshal(task)
+	require.NoError(t, err)
+
+	task = unmarshalTask(t, b, 3)
+	assert.Equal(t, task.AckedVchannelBitmap, []byte{0x00, 0x00, 0x00})
+	assert.Len(t, task.AckedCheckpoints, 3)
+	assert.Nil(t, task.AckedCheckpoints[0])
+	assert.Nil(t, task.AckedCheckpoints[1])
+	assert.Nil(t, task.AckedCheckpoints[2])
+
+	cp := &streamingpb.AckedCheckpoint{
+		MessageId:              walimplstest.NewTestMessageID(1).IntoProto(),
+		LastConfirmedMessageId: walimplstest.NewTestMessageID(1).IntoProto(),
+		TimeTick:               1,
+	}
+
+	task.AckedCheckpoints[2] = cp
+	task.AckedVchannelBitmap[2] = 0x01
+	b, err = proto.Marshal(task)
+	require.NoError(t, err)
+	task = unmarshalTask(t, b, 3)
+	assert.Equal(t, task.AckedVchannelBitmap, []byte{0x00, 0x00, 0x01})
+	assert.Len(t, task.AckedCheckpoints, 3)
+	assert.Nil(t, task.AckedCheckpoints[0])
+	assert.Nil(t, task.AckedCheckpoints[1])
+	assert.NotNil(t, task.AckedCheckpoints[2])
+
+	task.AckedCheckpoints[2] = nil
+	task.AckedVchannelBitmap[2] = 0x0
+	task.AckedCheckpoints[0] = cp
+	task.AckedVchannelBitmap[0] = 0x01
+	b, err = proto.Marshal(task)
+	require.NoError(t, err)
+	task = unmarshalTask(t, b, 3)
+	assert.Equal(t, task.AckedVchannelBitmap, []byte{0x01, 0x00, 0x00})
+	assert.Len(t, task.AckedCheckpoints, 3)
+	assert.NotNil(t, task.AckedCheckpoints[0])
+	assert.Nil(t, task.AckedCheckpoints[1])
+	assert.Nil(t, task.AckedCheckpoints[2])
+
+	task.AckedCheckpoints[0] = nil
+	task.AckedVchannelBitmap[0] = 0x0
+	task.AckedCheckpoints[1] = cp
+	task.AckedVchannelBitmap[1] = 0x01
+	b, err = proto.Marshal(task)
+	require.NoError(t, err)
+	task = unmarshalTask(t, b, 3)
+	assert.Equal(t, task.AckedVchannelBitmap, []byte{0x00, 0x01, 0x00})
+	assert.Len(t, task.AckedCheckpoints, 3)
+	assert.Nil(t, task.AckedCheckpoints[0])
+	assert.NotNil(t, task.AckedCheckpoints[1])
+	assert.Nil(t, task.AckedCheckpoints[2])
+
+	task.AckedVchannelBitmap = []byte{0x01, 0x01, 0x01}
+	task.AckedCheckpoints = []*streamingpb.AckedCheckpoint{
+		cp,
+		cp,
+		cp,
+	}
+	b, err = proto.Marshal(task)
+	require.NoError(t, err)
+	task = unmarshalTask(t, b, 3)
+	assert.Equal(t, task.AckedVchannelBitmap, []byte{0x01, 0x01, 0x01})
+	assert.Len(t, task.AckedCheckpoints, 3)
+	assert.NotNil(t, task.AckedCheckpoints[0])
+	assert.NotNil(t, task.AckedCheckpoints[1])
+	assert.NotNil(t, task.AckedCheckpoints[2])
+}
+
+func unmarshalTask(t *testing.T, b []byte, vchannelCount int) *streamingpb.BroadcastTask {
+	task := &streamingpb.BroadcastTask{}
+	err := proto.Unmarshal(b, task)
+	require.NoError(t, err)
+	fixAckInfoFromProto(task, vchannelCount)
+	return task
 }

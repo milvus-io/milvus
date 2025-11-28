@@ -173,7 +173,6 @@ class TestcaseBase(Base):
         log.info(f"server version: {server_version}")
         return res
 
-
     def get_tokens_by_analyzer(self, text, analyzer_params):
         if cf.param_info.param_uri:
             uri = cf.param_info.param_uri

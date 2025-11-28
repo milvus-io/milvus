@@ -285,6 +285,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         // warmup will be disabled only when all columns are not in load list
         bool merged_in_load_list = false;
         std::vector<FieldId> milvus_field_ids;
+        milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
             merged_in_load_list = merged_in_load_list ||
@@ -1583,8 +1584,8 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     google::protobuf::RepeatedPtrField<T>* dst) {
     column->BulkArrayAt(
         op_ctx,
-        [dst](ScalarFieldProto&& array, size_t i) {
-            dst->at(i) = std::move(array);
+        [dst](const ArrayView& view, size_t i) {
+            view.output_data(dst->at(i));
         },
         seg_offsets,
         count);

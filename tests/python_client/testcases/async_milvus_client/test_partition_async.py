@@ -31,9 +31,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
     """ Test case of partition interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
@@ -50,7 +47,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: create partition with invalid collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -68,7 +64,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: create partition with collection name over max length 255
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -88,7 +83,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: create partition with nonexistent collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -108,14 +102,13 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: create partition with invalid partition name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         await async_client.create_collection(collection_name, default_dim)
-        self.describe_collection(client, collection_name,
+        desc, _ = await async_client.describe_collection(collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
@@ -134,7 +127,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: create partition with partition name over max length 255
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -160,7 +152,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: create partition with wrong partition name format list
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -183,7 +174,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: drop partition with invalid collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -201,7 +191,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: drop partition with collection name over max length 255
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -221,7 +210,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: drop partition with nonexistent collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -241,7 +229,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: drop partition with invalid partition name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -262,7 +249,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: drop partition with wrong partition name format list
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -285,7 +271,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions with invalid collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         
@@ -303,7 +288,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions with nonexistent collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         
@@ -322,7 +306,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions with collection name over max length 255
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -343,7 +326,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions with invalid partition name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -364,7 +346,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions with nonexistent partition name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
         
@@ -386,7 +367,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions with partition name over max length 255
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -409,7 +389,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: load partitions after drop index
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -436,7 +415,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with invalid collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -454,7 +432,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with collection name over max length 255
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -474,7 +451,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with nonexistent collection name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -494,7 +470,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with invalid partition name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -515,7 +490,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with invalid partition name list
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -537,7 +511,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with partition name list empty
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -559,7 +532,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with partition name lists not all exists
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -583,7 +555,6 @@ class TestAsyncMilvusClientPartitionInvalid(TestMilvusClientV2Base):
         method: release partitions with nonexistent partition name
         expected: raise exception
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
@@ -608,9 +579,6 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
     """ Test case of partition interface """
 
     def teardown_method(self, method):
-        self.init_async_milvus_client()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.async_milvus_client_wrap.close())
         super().teardown_method(method)
 
     """
@@ -626,16 +594,15 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
         method: 1. create collection, partition 2. insert to partition 3. search and query 4. drop partition, collection
         expected: run successfully
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
         # 1. create collection
         collection_name = cf.gen_unique_str(prefix)
         await async_client.create_collection(collection_name, default_dim)
-        collections = self.list_collections(client)[0]
+        collections, _ = await async_client.list_collections()
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
+        desc, _ = await async_client.describe_collection(collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
@@ -643,13 +610,13 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
         # 2. create partition
         partition_name = cf.gen_unique_str(partition_prefix)
         await async_client.create_partition(collection_name, partition_name)
-        partitions = self.list_partitions(client, collection_name)[0]
+        partitions, _ = await async_client.list_partitions(collection_name)
         assert partition_name in partitions
         # 3. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows, partition_name=partition_name)
+        await async_client.insert(collection_name, rows, partition_name=partition_name)
         tasks = []
         # 4. search
         vectors_to_search = rng.random((1, default_dim))
@@ -672,15 +639,15 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
         res = await asyncio.gather(*tasks)
         
         # 6. drop action
-        if self.has_partition(client, collection_name, partition_name)[0]:
+        has_partition, _ = await async_client.has_partition(collection_name, partition_name)
+        if has_partition:
             await async_client.release_partitions(collection_name, partition_name)
             await async_client.drop_partition(collection_name, partition_name)
-            partitions = self.list_partitions(client, collection_name)[0]
+            partitions, _ = await async_client.list_partitions(collection_name)
             assert partition_name not in partitions
         await async_client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="blocked by pymilvus issue #2796")
     async def test_async_milvus_client_load_release_partitions(self):
         """
         target: test load and release partitions normal case
@@ -692,16 +659,15 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
                 4. drop partition, collection
         expected: run successfully
         """
-        client = self._client()
         self.init_async_milvus_client()
         async_client = self.async_milvus_client_wrap
 
         # 1. create collection
         collection_name = cf.gen_unique_str(prefix)
         await async_client.create_collection(collection_name, default_dim)
-        collections = self.list_collections(client)[0]
+        collections, _ = await async_client.list_collections()
         assert collection_name in collections
-        self.describe_collection(client, collection_name,
+        desc, _ = await async_client.describe_collection(collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
@@ -711,20 +677,20 @@ class TestAsyncMilvusClientPartitionValid(TestMilvusClientV2Base):
         await async_client.create_partition(collection_name, partition_name_1)
         partition_name_2 = cf.gen_unique_str(partition_prefix)
         await async_client.create_partition(collection_name, partition_name_2)
-        partitions = self.list_partitions(client, collection_name)[0]
+        partitions, _ = await async_client.list_partitions(collection_name)
         assert partition_name_1 in partitions
         assert partition_name_2 in partitions
         # 3. insert
         rng = np.random.default_rng(seed=19530)
         rows_default = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        self.insert(client, collection_name, rows_default)
+        await async_client.insert(collection_name, rows_default)
         rows_1 = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb, 2 * default_nb)]
-        self.insert(client, collection_name, rows_1, partition_name=partition_name_1)
+        await async_client.insert(collection_name, rows_1, partition_name=partition_name_1)
         rows_2 = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(2 * default_nb, 3 * default_nb)]
-        self.insert(client, collection_name, rows_2, partition_name=partition_name_2)
+        await async_client.insert(collection_name, rows_2, partition_name=partition_name_2)
         tasks = []
         # 4. search and query
         vectors_to_search = rng.random((1, default_dim))
