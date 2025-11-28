@@ -111,7 +111,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         """
         # step 1: create collection with all datatype schema
         client = self._client()
-        schema = cf.gen_all_datatype_collection_schema(dim=default_dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=default_dim, enable_struct_array_field=False)
         index_params = self.prepare_index_params(client)[0]
         text_sparse_emb_field_name = "text_sparse_emb"
 
@@ -141,7 +141,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         
         vector_field_type = [DataType.FLOAT16_VECTOR,
                             DataType.BFLOAT16_VECTOR, 
-                            DataType.INT8_VECTOR]
+                            DataType.INT8_VECTOR,
+                            DataType.FLOAT_VECTOR]
         # fields to be updated
         update_fields_name = []
         scalar_update_name = []
@@ -163,6 +164,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         expected = [{field: new_rows[i][field] for field in scalar_update_name}
                     for i in range(default_nb)]
 
+        expected = cf.convert_timestamptz(expected, ct.default_timestamptz_field_name, "UTC")
         result = self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
                 check_task=CheckTasks.check_query_results,
                 output_fields=scalar_update_name,
@@ -201,7 +203,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         
         # Create schema with all data types
-        schema = cf.gen_all_datatype_collection_schema(dim=dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=False)
 
         # Create index parameters
         index_params = client.prepare_index_params()
@@ -231,7 +233,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         primary_key_field_name = schema.fields[0].name
         for i in range(len(schema.fields)):
             update_field_name = schema.fields[i if i != 0 else 1].name
-            new_row = cf.gen_partial_row_data_by_schema(nb=nb, schema=schema, 
+            new_row = cf.gen_row_data_by_schema(nb=nb, schema=schema, 
                                                         desired_field_names=[primary_key_field_name, update_field_name])
             client.upsert(collection_name, new_row, partial_update=True)
 
@@ -446,7 +448,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, rows, partial_update=True)
         
         # step 3: Partial Update the nullable field with null
-        new_row = cf.gen_partial_row_data_by_schema(
+        new_row = cf.gen_row_data_by_schema(
             nb=default_nb, 
             schema=schema, 
             desired_field_names=[default_primary_key_field_name, default_int32_field_name], 

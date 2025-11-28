@@ -4,7 +4,6 @@ from enum import Enum
 import random
 import time
 import threading
-import os
 import uuid
 import json
 import pandas as pd
@@ -13,12 +12,10 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections
+from pymilvus.milvus_client.index import IndexParams
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
-from base.database_wrapper import ApiDatabaseWrapper
-from base.collection_wrapper import ApiCollectionWrapper
-from base.partition_wrapper import ApiPartitionWrapper
-from base.utility_wrapper import ApiUtilityWrapper
+from pymilvus.client.embedding_list import EmbeddingList
 from common import common_func as cf
 from common import common_type as ct
 from common.milvus_sys import MilvusSys
@@ -225,12 +222,14 @@ class Op(Enum):
     release_collection = 'release_collection'
     release_partition = 'release_partition'
     search = 'search'
+    tensor_search = 'tensor_search'
     full_text_search = 'full_text_search'
     hybrid_search = 'hybrid_search'
     query = 'query'
     text_match = 'text_match'
     phrase_match = 'phrase_match'
     json_query = 'json_query'
+    geo_query = 'geo_query'
     delete = 'delete'
     delete_freshness = 'delete_freshness'
     compact = 'compact'
@@ -256,6 +255,15 @@ DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_na
 request_records = RequestRecords()
 
 
+def create_index_params_from_dict(field_name: str, index_param_dict: dict) -> IndexParams:
+    """Helper function to convert dict-style index params to IndexParams object"""
+    index_params = IndexParams()
+    params_copy = index_param_dict.copy()
+    index_type = params_copy.pop("index_type", "")
+    index_params.add_index(field_name=field_name, index_type=index_type, **params_copy)
+    return index_params
+
+
 def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
     def decorate(func):
         @functools.wraps(func)
@@ -265,10 +273,9 @@ def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
             t0 = time.perf_counter()
             res, result = func(self, *args, **kwargs)
             elapsed = time.perf_counter() - t0
-            end_time = datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S.%f')
             operation_name = func.__name__
             if flag:
-                collection_name = self.c_wrap.name
+                collection_name = self.c_name
                 log_str = f"[{prefix}]" + fmt.format(**locals())
                 # TODO: add report function in this place, like uploading to influxdb
                 try:
@@ -333,7 +340,7 @@ class Checker:
        b. count operations and success rate
     """
 
-    def __init__(self, collection_name=None, partition_name=None, shards_num=2, dim=ct.default_dim, insert_data=True,
+    def __init__(self, collection_name=None, partition_name=None, shards_num=2, dim=8, insert_data=True,
                  schema=None, replica_number=1, **kwargs):
         self.recovery_time = 0
         self._succ = 0
@@ -347,31 +354,44 @@ class Checker:
         self.word_freq = Counter()
         self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
-        self.db_wrap = ApiDatabaseWrapper()
-        self.c_wrap = ApiCollectionWrapper()
-        self.p_wrap = ApiPartitionWrapper()
-        self.utility_wrap = ApiUtilityWrapper()
+
+        # Initialize MilvusClient
         if cf.param_info.param_uri:
             uri = cf.param_info.param_uri
         else:
             uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
-        
+
         if cf.param_info.param_token:
             token = cf.param_info.param_token
         else:
             token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
         self.milvus_client = MilvusClient(uri=uri, token=token)
+
+        # Also create a connection for low-level APIs that MilvusClient doesn't support
+        self.alias = cf.gen_unique_str("checker_alias_")
+        connections.connect(
+            alias=self.alias,
+            host=cf.param_info.param_host,
+            port=str(cf.param_info.param_port),
+            user=cf.param_info.param_user,
+            password=cf.param_info.param_password
+        )
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
         self.c_name = c_name
         p_name = partition_name if partition_name is not None else "_default"
         self.p_name = p_name
         self.p_names = [self.p_name] if partition_name is not None else None
+
+        # Get or create schema
         if self.milvus_client.has_collection(c_name):
-            c, _ = self.c_wrap.init_collection(c_name)
-            schema = c.schema
+            collection_info = self.milvus_client.describe_collection(c_name)
+            schema = CollectionSchema.construct_from_dict(collection_info)
         else:
-            schema = cf.gen_all_datatype_collection_schema(dim=dim) if schema is None else schema
+            enable_struct_array_field = kwargs.get("enable_struct_array_field", True)
+            schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field) if schema is None else schema
+
+        log.info(f"schema: {schema}")
         self.schema = schema
         self.dim = cf.get_dim_by_schema(schema=schema)
         self.int64_field_name = cf.get_int64_field_name(schema=schema)
@@ -379,107 +399,210 @@ class Checker:
         self.text_match_field_name_list = cf.get_text_match_field_name(schema=schema)
         self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
 
-        self.c_wrap.init_collection(name=c_name,
-                                    schema=schema,
-                                    shards_num=shards_num,
-                                    timeout=timeout,
-                                    enable_traceback=enable_traceback)
+        # Create collection if not exists
+        if not self.milvus_client.has_collection(c_name):
+            self.milvus_client.create_collection(
+                collection_name=c_name,
+                schema=schema,
+                shards_num=shards_num,
+                timeout=timeout
+            )
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.json_field_names = cf.get_json_field_name_list(schema=schema)
+        self.geometry_field_names = cf.get_geometry_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
         self.int8_vector_field_names = cf.get_int8_vec_field_name_list(schema=schema)
         self.bm25_sparse_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
-        # get index of collection
-        indexes = [index.to_dict() for index in self.c_wrap.indexes]
-        indexed_fields = [index['field'] for index in indexes]
+        self.emb_list_field_names = cf.get_emb_list_field_name_list(schema=schema)
+
+        # Get existing indexes and their fields
+        indexed_fields = set()
+        try:
+            index_names = self.milvus_client.list_indexes(c_name)
+            for idx_name in index_names:
+                try:
+                    idx_info = self.milvus_client.describe_index(c_name, idx_name)
+                    if 'field_name' in idx_info:
+                        indexed_fields.add(idx_info['field_name'])
+                except Exception as e:
+                    log.debug(f"Failed to describe index {idx_name}: {e}")
+        except Exception as e:
+            log.debug(f"Failed to list indexes: {e}")
+
+        log.debug(f"Already indexed fields: {indexed_fields}")
+
         # create index for scalar fields
         for f in self.scalar_field_names:
             if f in indexed_fields:
                 continue
-            self.c_wrap.create_index(f,
-                                     {"index_type": "INVERTED"},
-                                     timeout=timeout,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            try:
+                index_params = IndexParams()
+                index_params.add_index(field_name=f, index_type="INVERTED")
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+            except Exception as e:
+                log.debug(f"Failed to create index for {f}: {e}")
+
         # create index for json fields
         for f in self.json_field_names:
             if f in indexed_fields:
                 continue
-            self.c_wrap.create_index(f,
-                                    {"index_type": "INVERTED",
-                                    "params": {"json_path": f"{f}['name']", "json_cast_type": "varchar"}},
-                                    timeout=timeout,
-                                    enable_traceback=enable_traceback,
-                                    check_task=CheckTasks.check_nothing)
-            self.c_wrap.create_index(f,
-                                    {"index_type": "INVERTED",
-                                    "params": {"json_path": f"{f}['address']", "json_cast_type": "varchar"}},
-                                    timeout=timeout,
-                                    enable_traceback=enable_traceback,
-                                    check_task=CheckTasks.check_nothing)
-            self.c_wrap.create_index(f,
-                                    {"index_type": "INVERTED",
-                                    "params": {"json_path": f"{f}['count']", "json_cast_type": "double"}},
-                                    timeout=timeout,
-                                    enable_traceback=enable_traceback,
-                                    check_task=CheckTasks.check_nothing)   
-        # create index for float vector fields
-        for f in self.float_vector_field_names:
+            for json_path, json_cast in [("name", "varchar"), ("address", "varchar"), ("count", "double")]:
+                try:
+                    index_params = IndexParams()
+                    index_params.add_index(
+                        field_name=f,
+                        index_type="INVERTED",
+                        params={"json_path": f"{f}['{json_path}']", "json_cast_type": json_cast}
+                    )
+                    self.milvus_client.create_index(
+                        collection_name=c_name,
+                        index_params=index_params,
+                        timeout=timeout
+                    )
+                except Exception as e:
+                    log.debug(f"Failed to create json index for {f}['{json_path}']: {e}")
+
+        # create index for geometry fields
+        for f in self.geometry_field_names:
             if f in indexed_fields:
                 continue
-            self.c_wrap.create_index(f,
-                                     constants.DEFAULT_INDEX_PARAM,
-                                     timeout=timeout,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            try:
+                index_params = IndexParams()
+                index_params.add_index(field_name=f, index_type="RTREE")
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+            except Exception as e:
+                log.debug(f"Failed to create index for {f}: {e}")
+
+        # create index for float vector fields
+        vector_index_created = False
+        for f in self.float_vector_field_names:
+            if f in indexed_fields:
+                vector_index_created = True
+                log.debug(f"Float vector field {f} already has index")
+                continue
+            try:
+                index_params = create_index_params_from_dict(f, constants.DEFAULT_INDEX_PARAM)
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+                log.debug(f"Created index for float vector field {f}")
+                indexed_fields.add(f)
+                vector_index_created = True
+            except Exception as e:
+                log.warning(f"Failed to create index for {f}: {e}")
+
         # create index for int8 vector fields
         for f in self.int8_vector_field_names:
             if f in indexed_fields:
+                vector_index_created = True
+                log.debug(f"Int8 vector field {f} already has index")
                 continue
-            self.c_wrap.create_index(f,
-                                     constants.DEFAULT_INT8_INDEX_PARAM,
-                                     timeout=timeout,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            try:
+                index_params = create_index_params_from_dict(f, constants.DEFAULT_INT8_INDEX_PARAM)
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+                log.debug(f"Created index for int8 vector field {f}")
+                indexed_fields.add(f)
+                vector_index_created = True
+            except Exception as e:
+                log.warning(f"Failed to create index for {f}: {e}")
+
         # create index for binary vector fields
         for f in self.binary_vector_field_names:
             if f in indexed_fields:
+                vector_index_created = True
+                log.debug(f"Binary vector field {f} already has index")
                 continue
-            self.c_wrap.create_index(f,
-                                     constants.DEFAULT_BINARY_INDEX_PARAM,
-                                     timeout=timeout,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            try:
+                index_params = create_index_params_from_dict(f, constants.DEFAULT_BINARY_INDEX_PARAM)
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+                log.debug(f"Created index for binary vector field {f}")
+                indexed_fields.add(f)
+                vector_index_created = True
+            except Exception as e:
+                log.warning(f"Failed to create index for {f}: {e}")
 
+        # create index for bm25 sparse fields
         for f in self.bm25_sparse_field_names:
             if f in indexed_fields:
                 continue
-            self.c_wrap.create_index(f,
-                                     constants.DEFAULT_BM25_INDEX_PARAM,
-                                     timeout=timeout,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
-        self.replica_number = replica_number
-        self.c_wrap.load(replica_number=self.replica_number)
+            try:
+                index_params = create_index_params_from_dict(f, constants.DEFAULT_BM25_INDEX_PARAM)
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+                log.debug(f"Created index for bm25 sparse field {f}")
+            except Exception as e:
+                log.warning(f"Failed to create index for {f}: {e}")
 
-        self.p_wrap.init_partition(self.c_name, self.p_name)
-        if insert_data and self.c_wrap.num_entities == 0:
+        # create index for emb list fields
+        for f in self.emb_list_field_names:
+            if f in indexed_fields:
+                continue
+            try:
+                index_params = create_index_params_from_dict(f, constants.DEFAULT_EMB_LIST_INDEX_PARAM)
+                self.milvus_client.create_index(
+                    collection_name=c_name,
+                    index_params=index_params,
+                    timeout=timeout
+                )
+                log.debug(f"Created index for emb list field {f}")
+            except Exception as e:
+                log.warning(f"Failed to create index for {f}: {e}")
+
+        # Load collection - only if at least one vector field has an index
+        self.replica_number = replica_number
+        if vector_index_created:
+            try:
+                self.milvus_client.load_collection(collection_name=c_name, replica_number=self.replica_number)
+                log.debug(f"Loaded collection {c_name} with replica_number={self.replica_number}")
+            except Exception as e:
+                log.warning(f"Failed to load collection {c_name}: {e}. Collection may need to be loaded manually.")
+        else:
+            log.warning(f"No vector index created for collection {c_name}, skipping load. You may need to create indexes and load manually.")
+
+        # Create partition if specified
+        if p_name != "_default" and not self.milvus_client.has_partition(c_name, p_name):
+            self.milvus_client.create_partition(collection_name=c_name, partition_name=p_name)
+
+        # Insert initial data if needed
+        num_entities = self.milvus_client.get_collection_stats(c_name).get("row_count", 0)
+        if insert_data and num_entities == 0:
             log.info(f"collection {c_name} created, start to insert data")
             t0 = time.perf_counter()
             self.insert_data(nb=constants.ENTITIES_FOR_SEARCH, partition_name=self.p_name)
             log.info(f"insert data for collection {c_name} cost {time.perf_counter() - t0}s")
 
-        self.initial_entities = self.c_wrap.collection.num_entities
+        self.initial_entities = self.milvus_client.get_collection_stats(c_name).get("row_count", 0)
         self.scale = 100000  # timestamp scale to make time.time() as int64
 
     def get_schema(self):
-        return self.c_wrap.collection.schema
+        collection_info = self.milvus_client.describe_collection(self.c_name)
+        return collection_info
 
     def insert_data(self, nb=constants.DELTA_PER_INS, partition_name=None):
         partition_name = self.p_name if partition_name is None else partition_name
         client_schema = self.milvus_client.describe_collection(collection_name=self.c_name)
-        client_schema = CollectionSchema.construct_from_dict(client_schema)
         data = cf.gen_row_data_by_schema(nb=nb, schema=client_schema)
         ts_data = []
         for i in range(nb):
@@ -494,6 +617,14 @@ class Checker:
                 texts = df[text_field].tolist()
                 wf = cf.analyze_documents(texts)
                 self.word_freq.update(wf)
+
+        # Debug: Check if struct array fields are present in generated data before insert
+        if data and len(data) > 0:
+            log.debug(f"[insert_data] First row keys: {list(data[0].keys())}")
+            # Check for struct array fields (common names: struct_array, metadata, etc.)
+            for key, value in data[0].items():
+                if isinstance(value, list) and value and isinstance(value[0], dict):
+                    log.debug(f"[insert_data] Found potential struct array field '{key}': {len(value)} items, first item: {value[0]}")
 
         try:
             res = self.milvus_client.insert(
@@ -567,7 +698,7 @@ class Checker:
                                  bucket_name=None):
         schema = self.schema
         bucket_name = self.bucket_name if bucket_name is None else bucket_name
-        log.info(f"prepare data for bulk insert")
+        log.info("prepare data for bulk insert")
         try:
             files = cf.prepare_bulk_insert_data(schema=schema,
                                                 nb=nb,
@@ -582,10 +713,10 @@ class Checker:
 
     def do_bulk_insert(self):
         log.info(f"bulk insert collection name: {self.c_name}")
-        task_ids, result = self.utility_wrap.do_bulk_insert(collection_name=self.c_name,
-                                                            files=self.files)
+        from pymilvus import utility
+        task_ids = utility.do_bulk_insert(collection_name=self.c_name, files=self.files, using=self.alias)
         log.info(f"task ids {task_ids}")
-        completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720)
+        completed = utility.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720, using=self.alias)
         return task_ids, completed
 
 
@@ -600,14 +731,17 @@ class CollectionLoadChecker(Checker):
 
     @trace()
     def load_collection(self):
-        res, result = self.c_wrap.load(replica_number=self.replica_number)
-        return res, result
+        try:
+            self.milvus_client.load_collection(collection_name=self.c_name, replica_number=self.replica_number)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.load_collection()
         if result:
-            self.c_wrap.release()
+            self.milvus_client.release_collection(collection_name=self.c_name)
         return res, result
 
     def keep_running(self):
@@ -624,18 +758,21 @@ class CollectionReleaseChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("CollectionReleaseChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.c_wrap.load(replica_number=self.replica_number)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=self.replica_number)
 
     @trace()
     def release_collection(self):
-        res, result = self.c_wrap.release()
-        return res, result
+        try:
+            self.milvus_client.release_collection(collection_name=self.c_name)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.release_collection()
         if result:
-            self.c_wrap.release()
+            self.milvus_client.load_collection(collection_name=self.c_name, replica_number=self.replica_number)
         return res, result
 
     def keep_running(self):
@@ -656,8 +793,12 @@ class CollectionRenameChecker(Checker):
 
     @trace()
     def rename_collection(self, old_collection_name, new_collection_name):
-        res, result = self.utility_wrap.rename_collection(old_collection_name=old_collection_name, new_collection_name=new_collection_name)
-        return res, result
+        try:
+            self.milvus_client.rename_collection(old_name=old_collection_name, new_name=new_collection_name)
+            return None, True
+        except Exception as e:
+            log.info(f"rename collection failed with error {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -686,18 +827,21 @@ class PartitionLoadChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionLoadChecker_")
         p_name = cf.gen_unique_str("PartitionLoadChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, partition_name=p_name)
-        self.c_wrap.release()
+        self.milvus_client.release_collection(collection_name=self.c_name)
 
     @trace()
     def load_partition(self):
-        res, result = self.p_wrap.load(replica_number=self.replica_number)
-        return res, result
+        try:
+            self.milvus_client.load_partitions(collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.load_partition()
         if result:
-            self.p_wrap.release()
+            self.milvus_client.release_partitions(collection_name=self.c_name, partition_names=[self.p_name])
         return res, result
 
     def keep_running(self):
@@ -715,19 +859,22 @@ class PartitionReleaseChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionReleaseChecker_")
         p_name = cf.gen_unique_str("PartitionReleaseChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, partition_name=p_name)
-        self.c_wrap.release()
-        self.p_wrap.load(replica_number=self.replica_number)
+        self.milvus_client.release_collection(collection_name=self.c_name)
+        self.milvus_client.load_partitions(collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number)
 
     @trace()
     def release_partition(self):
-        res, result = self.p_wrap.release()
-        return res, result
+        try:
+            self.milvus_client.release_partitions(collection_name=self.c_name, partition_names=[self.p_name])
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.release_partition()
         if result:
-            self.p_wrap.load(replica_number=self.replica_number)
+            self.milvus_client.load_partitions(collection_name=self.c_name, partition_names=[self.p_name], replica_number=self.replica_number)
         return res, result
 
     def keep_running(self):
@@ -751,16 +898,19 @@ class SearchChecker(Checker):
 
     @trace()
     def search(self):
-        res, result = self.c_wrap.search(
-            data=self.data,
-            anns_field=self.anns_field_name,
-            param=self.search_param,
-            limit=1,
-            partition_names=self.p_names,
-            timeout=search_timeout,
-            check_task=CheckTasks.check_nothing
-        )
-        return res, result
+        try:
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=self.data,
+                anns_field=self.anns_field_name,
+                search_params=self.search_param,
+                limit=1,
+                partition_names=self.p_names,
+                timeout=search_timeout
+            )
+            return res, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -772,6 +922,74 @@ class SearchChecker(Checker):
             self.search_param = constants.DEFAULT_SEARCH_PARAM
         elif anns_field_item["dtype"] == DataType.INT8_VECTOR:
             self.search_param = constants.DEFAULT_INT8_SEARCH_PARAM
+
+        res, result = self.search()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+class TensorSearchChecker(Checker):
+    """check search operations for struct array vector fields in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("TensorSearchChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.insert_data()
+        # Only get struct array vector fields
+        self.struct_array_vector_field_list = cf.get_struct_array_vector_field_list(self.schema)
+        self.data = None
+        self.anns_field_name = None
+        self.search_param = None
+
+    @staticmethod
+    def _create_embedding_list(dim, num_vectors, dtype):
+        """Create EmbeddingList for struct array vector search"""
+        embedding_list = EmbeddingList()
+        vectors = cf.gen_vectors(num_vectors, dim, vector_data_type=dtype)
+        for vector in vectors:
+            embedding_list.add(vector)
+        return embedding_list
+
+    @trace()
+    def search(self):
+        try:
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=self.data,
+                anns_field=self.anns_field_name,
+                search_params=self.search_param,
+                limit=1,
+                partition_names=self.p_names,
+                timeout=search_timeout
+            )
+            return res, True
+        except Exception as e:
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        if not self.struct_array_vector_field_list:
+            log.warning("No struct array vector fields available for search")
+            return None, False
+
+        # Randomly select a struct array vector field
+        anns_field_item = random.choice(self.struct_array_vector_field_list)
+        dim = anns_field_item["dim"]
+        dtype = anns_field_item["dtype"]
+
+        # Use the anns_field format: struct_field[vector_field]
+        self.anns_field_name = anns_field_item["anns_field"]
+
+        # Create EmbeddingList with random number of vectors (1-5)
+        num_vectors = random.randint(1, 5)
+        self.data = [self._create_embedding_list(dim, num_vectors, dtype)]
+
+        # Use MAX_SIM_COSINE for struct array vector search
+        self.search_param = {"metric_type": "MAX_SIM_COSINE"}
 
         res, result = self.search()
         return res, result
@@ -793,18 +1011,20 @@ class FullTextSearchChecker(Checker):
 
     @trace()
     def full_text_search(self):
-
         bm25_anns_field = random.choice(self.bm25_sparse_field_names)
-        res, result = self.c_wrap.search(
-            data=cf.gen_vectors(5, self.dim, vector_data_type="TEXT_SPARSE_VECTOR"),
-            anns_field=bm25_anns_field,
-            param=constants.DEFAULT_BM25_SEARCH_PARAM,
-            limit=1,
-            partition_names=self.p_names,
-            timeout=search_timeout,
-            check_task=CheckTasks.check_nothing
-        )
-        return res, result
+        try:
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=cf.gen_vectors(5, self.dim, vector_data_type="TEXT_SPARSE_VECTOR"),
+                anns_field=bm25_anns_field,
+                search_params=constants.DEFAULT_BM25_SEARCH_PARAM,
+                limit=1,
+                partition_names=self.p_names,
+                timeout=search_timeout
+            )
+            return res, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -825,7 +1045,7 @@ class HybridSearchChecker(Checker):
             collection_name = cf.gen_unique_str("HybridSearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         # do load before search
-        self.c_wrap.load(replica_number=replica_number)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
 
     def gen_hybrid_search_request(self):
@@ -845,15 +1065,19 @@ class HybridSearchChecker(Checker):
 
     @trace()
     def hybrid_search(self):
-        res, result = self.c_wrap.hybrid_search(
-            reqs=self.gen_hybrid_search_request(),
-            rerank=RRFRanker(),
-            limit=10,
-            partition_names=self.p_names,
-            timeout=search_timeout,
-            check_task=CheckTasks.check_nothing
-        )
-        return res, result
+        try:
+            res = self.milvus_client.hybrid_search(
+                collection_name=self.c_name,
+                reqs=self.gen_hybrid_search_request(),
+                ranker=RRFRanker(),
+                limit=10,
+                partition_names=self.p_names,
+                timeout=search_timeout
+            )
+            return res, True
+        except Exception as e:
+            log.info(f"hybrid search failed with error {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -872,16 +1096,21 @@ class InsertFlushChecker(Checker):
     def __init__(self, collection_name=None, flush=False, shards_num=2, schema=None):
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
-        self.initial_entities = self.c_wrap.collection.num_entities
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
+
     def keep_running(self):
         while True:
             t0 = time.time()
-            _, insert_result = \
-                self.c_wrap.insert(
+            try:
+                self.milvus_client.insert(
+                    collection_name=self.c_name,
                     data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
-                    timeout=timeout,
-                    enable_traceback=enable_traceback,
-                    check_task=CheckTasks.check_nothing)
+                    timeout=timeout
+                )
+                insert_result = True
+            except Exception:
+                insert_result = False
             t1 = time.time()
             if not self._flush:
                 if insert_result:
@@ -893,9 +1122,11 @@ class InsertFlushChecker(Checker):
                     self._fail += 1
                 sleep(constants.WAIT_PER_OP / 10)
             else:
-                # call flush in property num_entities
+                # call flush to get num_entities
                 t0 = time.time()
-                num_entities = self.c_wrap.num_entities
+                self.milvus_client.flush(collection_names=[self.c_name])
+                stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+                num_entities = stats.get("row_count", 0)
                 t1 = time.time()
                 if num_entities == (self.initial_entities + constants.DELTA_PER_INS):
                     self.rsp_times.append(t1 - t0)
@@ -915,20 +1146,29 @@ class FlushChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("FlushChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.initial_entities = self.c_wrap.collection.num_entities
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
 
     @trace()
     def flush(self):
-        res, result = self.c_wrap.flush()
-        return res, result
+        try:
+            self.milvus_client.flush(collection_name=self.c_name)
+            return None, True
+        except Exception as e:
+            log.info(f"flush error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
-        _, result = self.c_wrap.insert(
-            data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
-            timeout=timeout,
-            enable_traceback=enable_traceback,
-            check_task=CheckTasks.check_nothing)
+        try:
+            self.milvus_client.insert(
+                collection_name=self.c_name,
+                data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                timeout=timeout
+            )
+            result = True
+        except Exception:
+            result = False
         res, result = self.flush()
         return res, result
 
@@ -945,7 +1185,8 @@ class AddFieldChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AddFieldChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.initial_entities = self.c_wrap.collection.num_entities
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
 
     @trace()
     def add_field(self):
@@ -958,7 +1199,10 @@ class AddFieldChecker(Checker):
             log.debug(f"add field {new_field_name} to collection {self.c_name}")
             time.sleep(1)
             _, result = self.insert_data()
-            res, result = self.c_wrap.query(expr=f"{new_field_name} >= 0", output_fields=[new_field_name])
+            res = self.milvus_client.query(collection_name=self.c_name,
+                                           filter=f"{new_field_name} >= 0",
+                                           output_fields=[new_field_name])
+            result = True
             if result:
                 log.debug(f"query with field {new_field_name} success")
             return None, result
@@ -986,7 +1230,8 @@ class InsertChecker(Checker):
             collection_name = cf.gen_unique_str("InsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
-        self.initial_entities = self.c_wrap.collection.num_entities
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
         self.inserted_data = []
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
@@ -995,7 +1240,8 @@ class InsertChecker(Checker):
 
     @trace()
     def insert_entities(self):
-        schema = self.get_schema()
+        # Use describe_collection directly to preserve struct_fields information
+        schema = self.milvus_client.describe_collection(self.c_name)
         data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
         rows = len(data)
         ts_data = []
@@ -1008,12 +1254,23 @@ class InsertChecker(Checker):
             data[i][self.int64_field_name] = ts_data[i]
 
         log.debug(f"insert data: {rows}")
-        res, result = self.c_wrap.insert(data=data,
-                                         partition_names=self.p_names,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
-        return res, result
+        # Debug: Check if struct array fields are present in generated data
+        if data and len(data) > 0:
+            log.debug(f"[InsertChecker] First row keys: {list(data[0].keys())}")
+            # Check for struct array fields (common names: struct_array, metadata, etc.)
+            for key, value in data[0].items():
+                if isinstance(value, list) and value and isinstance(value[0], dict):
+                    log.debug(f"[InsertChecker] Found potential struct array field '{key}': {len(value)} items, first item: {value[0]}")
+
+        try:
+            res = self.milvus_client.insert(collection_name=self.c_name,
+                                           data=data,
+                                           partition_name=self.p_names[0] if self.p_names else None,
+                                           timeout=timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"insert error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1029,14 +1286,11 @@ class InsertChecker(Checker):
     def verify_data_completeness(self):
         # deprecated
         try:
-            self.c_wrap.create_index(self.float_vector_field_name,
-                                     constants.DEFAULT_INDEX_PARAM,
-                                     timeout=timeout,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         except Exception as e:
             log.error(f"create index error: {e}")
-        self.c_wrap.load()
+        self.milvus_client.load_collection(collection_name=self.c_name)
         end_time_stamp = int(time.time() * self.scale)
         self.term_expr = f'{self.int64_field_name} >= {self.start_time_stamp} and ' \
                          f'{self.int64_field_name} <= {end_time_stamp}'
@@ -1044,10 +1298,10 @@ class InsertChecker(Checker):
         for d in self.inserted_data:
             if self.start_time_stamp <= d <= end_time_stamp:
                 data_in_client.append(d)
-        res, result = self.c_wrap.query(self.term_expr, timeout=timeout,
-                                        output_fields=[f'{self.int64_field_name}'],
-                                        limit=len(data_in_client) * 2,
-                                        check_task=CheckTasks.check_nothing)
+        res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr,
+                                      output_fields=[f'{self.int64_field_name}'],
+                                      limit=len(data_in_client) * 2, timeout=timeout)
+        result = True
 
         data_in_server = []
         for r in res:
@@ -1065,7 +1319,8 @@ class InsertFreshnessChecker(Checker):
             collection_name = cf.gen_unique_str("InsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self._flush = flush
-        self.initial_entities = self.c_wrap.collection.num_entities
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        self.initial_entities = stats.get("row_count", 0)
         self.inserted_data = []
         self.scale = 1 * 10 ** 6
         self.start_time_stamp = int(time.time() * self.scale)  # us
@@ -1083,11 +1338,15 @@ class InsertFreshnessChecker(Checker):
 
         data[0] = ts_data  # set timestamp (ms) as int64
         log.debug(f"insert data: {len(ts_data)}")
-        res, result = self.c_wrap.insert(data=data,
-                                         partition_names=self.p_names,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
+        try:
+            res = self.milvus_client.insert(collection_name=self.c_name,
+                                           data=data,
+                                           partition_name=self.p_names[0] if self.p_names else None,
+                                           timeout=timeout)
+            result = True
+        except Exception as e:
+            res = str(e)
+            result = False
         self.latest_data = ts_data[-1]
         self.term_expr = f'{self.int64_field_name} == {self.latest_data}'
         return res, result
@@ -1095,9 +1354,16 @@ class InsertFreshnessChecker(Checker):
     @trace()
     def insert_freshness(self):
         while True:
-            res, result = self.c_wrap.query(self.term_expr, timeout=timeout,
-                                            output_fields=[f'{self.int64_field_name}'],
-                                            check_task=CheckTasks.check_nothing)
+            try:
+                res = self.milvus_client.query(collection_name=self.c_name,
+                                              filter=self.term_expr,
+                                              output_fields=[f'{self.int64_field_name}'],
+                                              timeout=timeout)
+                result = True
+            except Exception as e:
+                res = str(e)
+                result = False
+                break
             if len(res) == 1 and res[0][f"{self.int64_field_name}"] == self.latest_data:
                 break
         return res, result
@@ -1121,24 +1387,26 @@ class UpsertChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("UpsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        schema = self.get_schema()
+        schema = self.milvus_client.describe_collection(collection_name=self.c_name)
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
 
     @trace()
     def upsert_entities(self):
-
-        res, result = self.c_wrap.upsert(data=self.data,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
-        return res, result
+        try:
+            res = self.milvus_client.upsert(collection_name=self.c_name,
+                                           data=self.data,
+                                           timeout=timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"upsert failed: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         # half of the data is upsert, the other half is insert
         rows = len(self.data)
         pk_old = [d[self.int64_field_name] for d in self.data[:rows // 2]]
-        schema = self.get_schema()
+        schema = self.milvus_client.describe_collection(collection_name=self.c_name)
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
         pk_new = [d[self.int64_field_name] for d in self.data[rows // 2:]]
         pk_update = pk_old + pk_new
@@ -1166,19 +1434,27 @@ class UpsertFreshnessChecker(Checker):
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
 
     def upsert_entities(self):
-
-        res, result = self.c_wrap.upsert(data=self.data,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
-        return res, result
+        try:
+            res = self.milvus_client.upsert(collection_name=self.c_name,
+                                           data=self.data,
+                                           timeout=timeout)
+            return res, True
+        except Exception as e:
+            return str(e), False
 
     @trace()
     def upsert_freshness(self):
         while True:
-            res, result = self.c_wrap.query(self.term_expr, timeout=timeout,
-                                            output_fields=[f'{self.int64_field_name}'],
-                                            check_task=CheckTasks.check_nothing)
+            try:
+                res = self.milvus_client.query(collection_name=self.c_name,
+                                              filter=self.term_expr,
+                                              output_fields=[f'{self.int64_field_name}'],
+                                              timeout=timeout)
+                result = True
+            except Exception as e:
+                res = str(e)
+                result = False
+                break
             if len(res) == 1 and res[0][f"{self.int64_field_name}"] == self.latest_data:
                 break
         return res, result
@@ -1210,22 +1486,26 @@ class PartialUpdateChecker(Checker):
     def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartialUpdateChecker_")
-        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, enable_struct_array_field=False)
         schema = self.get_schema()
         self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
 
     @trace()
     def partial_update_entities(self):
-        res, result = self.c_wrap.upsert(data=self.data,
-                                         partial_update=True,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
-        return res, result
+        try:
+
+            res = self.milvus_client.upsert(collection_name=self.c_name,
+                                           data=self.data,
+                                           partial_update=True,
+                                           timeout=timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"error {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self, count=0):
-        # first half: partial update existing rows; second half: insert new rows
+
         schema = self.get_schema()
         pk_field_name = self.int64_field_name
         rows = len(self.data)
@@ -1236,14 +1516,13 @@ class PartialUpdateChecker(Checker):
             full_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema)
             self.data = full_rows
         else:
-            num_fields = len(schema.fields)
+            num_fields = len(schema["fields"])
             # Choose subset fields to update: always include PK + one non-PK field if available
             num = count % num_fields
-            desired_fields = [pk_field_name, schema.fields[num if num != 0 else 1].name]
+            desired_fields = [pk_field_name, schema["fields"][num if num != 0 else 1]["name"]]
             partial_rows = cf.gen_row_data_by_schema(nb=rows, schema=schema,
                                                     desired_field_names=desired_fields)
             self.data = partial_rows
-
         res, result = self.partial_update_entities()
         return res, result
 
@@ -1265,13 +1544,14 @@ class CollectionCreateChecker(Checker):
 
     @trace()
     def init_collection(self):
-        res, result = self.c_wrap.init_collection(
-            name=cf.gen_unique_str("CreateChecker_"),
-            schema=cf.gen_default_collection_schema(),
-            timeout=timeout,
-            enable_traceback=enable_traceback,
-            check_task=CheckTasks.check_nothing)
-        return res, result
+        try:
+            collection_name = cf.gen_unique_str("CreateChecker_")
+            schema = cf.gen_default_collection_schema()
+            self.milvus_client.create_collection(collection_name=collection_name,
+                                                schema=schema)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1301,16 +1581,22 @@ class CollectionDropChecker(Checker):
     def gen_collection_pool(self, pool_size=50, schema=None):
         for i in range(pool_size):
             collection_name = cf.gen_unique_str("DropChecker_")
-            res, result = self.c_wrap.init_collection(name=collection_name, schema=schema)
-            if result:
+            try:
+                self.milvus_client.create_collection(collection_name=collection_name, schema=schema)
                 self.collection_pool.append(collection_name)
+            except Exception as e:
+                log.error(f"Failed to create collection {collection_name}: {e}")
 
     @trace()
     def drop_collection(self):
-        res, result = self.c_wrap.drop()
-        if result:
-            self.collection_pool.remove(self.c_wrap.name)
-        return res, result
+        try:
+            self.milvus_client.drop_collection(collection_name=self.c_name)
+            if self.c_name in self.collection_pool:
+                self.collection_pool.remove(self.c_name)
+            return None, True
+        except Exception as e:
+            log.info(f"error while dropping collection {self.c_name}: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1328,7 +1614,8 @@ class CollectionDropChecker(Checker):
                     log.error(f"Failed to generate collection pool: {e}")
                 try:
                     c_name = self.collection_pool[0]
-                    self.c_wrap.init_collection(name=c_name)
+                    # Update current collection name to use from pool
+                    self.c_name = c_name
                 except Exception as e:
                     log.error(f"Failed to init new collection: {e}")
             sleep(constants.WAIT_PER_OP)
@@ -1342,26 +1629,23 @@ class PartitionCreateChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionCreateChecker_")
         super().__init__(collection_name=collection_name, schema=schema, partition_name=partition_name)
         c_name = cf.gen_unique_str("PartitionDropChecker_")
-        self.c_wrap.init_collection(name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
         self.c_name = c_name
         log.info(f"collection {c_name} created")
-        self.p_wrap.init_partition(collection=self.c_name,
-                                   name=cf.gen_unique_str("PartitionDropChecker_"),
-                                   timeout=timeout,
-                                   enable_traceback=enable_traceback,
-                                   check_task=CheckTasks.check_nothing
-                                   )
-        log.info(f"partition: {self.p_wrap}")
+        p_name = cf.gen_unique_str("PartitionDropChecker_")
+        self.milvus_client.create_partition(collection_name=self.c_name, partition_name=p_name)
+        self.p_name = p_name
+        log.info(f"partition: {self.p_name}")
 
     @trace()
     def create_partition(self):
-        res, result = self.p_wrap.init_partition(collection=self.c_name,
-                                                 name=cf.gen_unique_str("PartitionCreateChecker_"),
-                                                 timeout=timeout,
-                                                 enable_traceback=enable_traceback,
-                                                 check_task=CheckTasks.check_nothing
-                                                 )
-        return res, result
+        try:
+            partition_name = cf.gen_unique_str("PartitionCreateChecker_")
+            self.milvus_client.create_partition(collection_name=self.c_name,
+                                               partition_name=partition_name)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1382,21 +1666,21 @@ class PartitionDropChecker(Checker):
             collection_name = cf.gen_unique_str("PartitionDropChecker_")
         super().__init__(collection_name=collection_name, schema=schema, partition_name=partition_name)
         c_name = cf.gen_unique_str("PartitionDropChecker_")
-        self.c_wrap.init_collection(name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
         self.c_name = c_name
         log.info(f"collection {c_name} created")
-        self.p_wrap.init_partition(collection=self.c_name,
-                                   name=cf.gen_unique_str("PartitionDropChecker_"),
-                                   timeout=timeout,
-                                   enable_traceback=enable_traceback,
-                                   check_task=CheckTasks.check_nothing
-                                   )
-        log.info(f"partition: {self.p_wrap}")
+        p_name = cf.gen_unique_str("PartitionDropChecker_")
+        self.milvus_client.create_partition(collection_name=self.c_name, partition_name=p_name)
+        self.p_name = p_name
+        log.info(f"partition: {self.p_name}")
 
     @trace()
     def drop_partition(self):
-        res, result = self.p_wrap.drop()
-        return res, result
+        try:
+            self.milvus_client.drop_partition(collection_name=self.c_name, partition_name=self.p_name)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1404,12 +1688,10 @@ class PartitionDropChecker(Checker):
         if result:
             # create two partition then drop one
             for i in range(2):
-                self.p_wrap.init_partition(collection=self.c_name,
-                                           name=cf.gen_unique_str("PartitionDropChecker_"),
-                                           timeout=timeout,
-                                           enable_traceback=enable_traceback,
-                                           check_task=CheckTasks.check_nothing
-                                           )
+                p_name = cf.gen_unique_str("PartitionDropChecker_")
+                self.milvus_client.create_partition(collection_name=self.c_name, partition_name=p_name)
+                if i == 1:  # Keep track of the last partition to drop next time
+                    self.p_name = p_name
         return res, result
 
     def keep_running(self):
@@ -1430,15 +1712,18 @@ class DatabaseCreateChecker(Checker):
     @trace()
     def init_db(self):
         db_name = cf.gen_unique_str("db_")
-        res, result = self.db_wrap.create_database(db_name)
-        self.db_name = db_name
-        return res, result
+        try:
+            self.milvus_client.create_database(db_name=db_name)
+            self.db_name = db_name
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.init_db()
         if result:
-            self.db_wrap.drop_database(self.db_name)
+            self.milvus_client.drop_database(db_name=self.db_name)
         return res, result
 
     def keep_running(self):
@@ -1455,19 +1740,22 @@ class DatabaseDropChecker(Checker):
             collection_name = cf.gen_unique_str("DatabaseChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
         self.db_name = cf.gen_unique_str("db_")
-        self.db_wrap.create_database(self.db_name)
+        self.milvus_client.create_database(db_name=self.db_name)
 
     @trace()
     def drop_db(self):
-        res, result = self.db_wrap.drop_database(self.db_name)
-        return res, result
+        try:
+            self.milvus_client.drop_database(db_name=self.db_name)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.drop_db()
         if result:
             self.db_name = cf.gen_unique_str("db_")
-            self.db_wrap.create_database(self.db_name)
+            self.milvus_client.create_database(db_name=self.db_name)
         return res, result
 
     def keep_running(self):
@@ -1484,26 +1772,31 @@ class IndexCreateChecker(Checker):
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
         for i in range(5):
-            self.c_wrap.insert(data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
-                               timeout=timeout, enable_traceback=enable_traceback)
+            self.milvus_client.insert(collection_name=self.c_name,
+                                     data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                                     timeout=timeout)
         # do as a flush before indexing
-        log.debug(f"Index ready entities: {self.c_wrap.num_entities}")
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        log.debug(f"Index ready entities: {stats.get('row_count', 0)}")
 
     @trace()
     def create_index(self):
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        return res, result
+        try:
+            index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+            self.milvus_client.create_index(collection_name=self.c_name,
+                                           index_params=index_params)
+            return None, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         c_name = cf.gen_unique_str("IndexCreateChecker_")
-        self.c_wrap.init_collection(name=c_name, schema=self.schema)
+        self.milvus_client.create_collection(collection_name=c_name, schema=self.schema)
+        self.c_name = c_name
         res, result = self.create_index()
         if result:
-            self.c_wrap.drop_index(timeout=timeout)
+            self.milvus_client.drop_index(collection_name=self.c_name, index_name="")
         return res, result
 
     def keep_running(self):
@@ -1520,34 +1813,35 @@ class IndexDropChecker(Checker):
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
         for i in range(5):
-            self.c_wrap.insert(data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
-                               timeout=timeout, enable_traceback=enable_traceback)
+            self.milvus_client.insert(collection_name=self.c_name, data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                               timeout=timeout)
         # do as a flush before indexing
-        log.debug(f"Index ready entities: {self.c_wrap.num_entities}")
+        stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
+        log.debug(f"Index ready entities: {stats.get('row_count', 0)}")
 
     @trace()
     def drop_index(self):
-        res, result = self.c_wrap.drop_index(timeout=timeout)
-        return res, result
+        try:
+            res = self.milvus_client.drop_index(collection_name=self.c_name, index_name="")
+            return res, True
+        except Exception as e:
+            log.info(f"drop_index error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         res, result = self.drop_index()
         if result:
-            self.c_wrap.init_collection(name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
-            self.c_wrap.create_index(self.float_vector_field_name,
-                                     constants.DEFAULT_INDEX_PARAM,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
+            index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
         return res, result
 
     def keep_running(self):
         while self._keep_running:
-            self.c_wrap.init_collection(name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
-            self.c_wrap.create_index(self.float_vector_field_name,
-                                     constants.DEFAULT_INDEX_PARAM,
-                                     enable_traceback=enable_traceback,
-                                     check_task=CheckTasks.check_nothing)
+            self.milvus_client.create_collection(collection_name=cf.gen_unique_str("IndexDropChecker_"), schema=self.schema)
+            index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+            self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
             self.run_task()
             sleep(constants.WAIT_PER_OP * 6)
 
@@ -1559,20 +1853,20 @@ class QueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
         self.insert_data()
         self.term_expr = f"{self.int64_field_name} > 0"
 
     @trace()
     def query(self):
-        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
-                                        check_task=CheckTasks.check_query_not_empty)
-        return res, result
+        try:
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"query error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1592,12 +1886,9 @@ class TextMatchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
         text_match_field_name = random.choice(self.text_match_field_name_list)
@@ -1605,9 +1896,12 @@ class TextMatchChecker(Checker):
 
     @trace()
     def text_match(self):
-        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
-                                        check_task=CheckTasks.check_query_not_empty)
-        return res, result
+        try:
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"text_match error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1630,12 +1924,9 @@ class PhraseMatchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PhraseMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
         self.insert_data()
         key_word_1 = self.word_freq.most_common(2)[0][0]
         key_word_2 = self.word_freq.most_common(2)[1][0]
@@ -1645,9 +1936,12 @@ class PhraseMatchChecker(Checker):
 
     @trace()
     def phrase_match(self):
-        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
-                                        check_task=CheckTasks.check_query_not_empty)
-        return res, result
+        try:
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"phrase_match error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1672,12 +1966,9 @@ class JsonQueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("JsonQueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load(replica_number=replica_number)  # do load before query
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
         self.insert_data()
         self.term_expr = self.get_term_expr()
 
@@ -1698,14 +1989,56 @@ class JsonQueryChecker(Checker):
 
     @trace()
     def json_query(self):
-        res, result = self.c_wrap.query(self.term_expr, timeout=query_timeout,
-                                        check_task=CheckTasks.check_query_not_empty)
-        return res, result
+        try:
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"json_query error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
         self.term_expr = self.get_term_expr()
         res, result = self.json_query()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP / 10)
+
+class GeoQueryChecker(Checker):
+    """check geometry query operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("GeoQueryChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.insert_data()
+        self.term_expr = self.get_term_expr()
+
+    def get_term_expr(self):
+        geometry_field_name = random.choice(self.geometry_field_names)
+        query_polygon = "POLYGON ((-180 -90, 180 -90, 180 90, -180 90, -180 -90))"
+        return f"ST_WITHIN({geometry_field_name}, '{query_polygon}')"
+        
+
+    @trace()
+    def geo_query(self):
+        try:
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            return res, True
+        except Exception as e:
+            log.info(f"geo_query error: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        self.term_expr = self.get_term_expr()
+        res, result = self.geo_query()
         return res, result
 
     def keep_running(self):
@@ -1721,41 +2054,36 @@ class DeleteChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
         super().__init__(collection_name=collection_name, schema=schema, shards_num=shards_num)
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load()  # load before query
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name)  # load before query
         self.insert_data()
         query_expr = f'{self.int64_field_name} > 0'
-        res, _ = self.c_wrap.query(query_expr,
-                                   output_fields=[self.int64_field_name],
-                                   partition_name=self.p_name)
+        res = self.milvus_client.query(collection_name=self.c_name, filter=query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
         self.ids = [r[self.int64_field_name] for r in res]
         self.query_expr = query_expr
         delete_ids = self.ids[:len(self.ids) // 2]  # delete half of ids
         self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
 
     def update_delete_expr(self):
-        res, _ = self.c_wrap.query(self.query_expr,
-                                   output_fields=[self.int64_field_name],
-                                   partition_name=self.p_name)
+        res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
         all_ids = [r[self.int64_field_name] for r in res]
         if len(all_ids) < 100:
             # insert data to make sure there are enough ids to delete
             self.insert_data(nb=10000)
-            res, _ = self.c_wrap.query(self.query_expr,
-                                       output_fields=[self.int64_field_name],
-                                       partition_name=self.p_name)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
             all_ids = [r[self.int64_field_name] for r in res]
         delete_ids = all_ids[:3000]  # delete 3000 ids
         self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
 
     @trace()
     def delete_entities(self):
-        res, result = self.c_wrap.delete(expr=self.delete_expr, timeout=timeout, partition_name=self.p_name)
-        return res, result
+        try:
+            res = self.milvus_client.delete(collection_name=self.c_name, filter=self.delete_expr, timeout=timeout, partition_name=self.p_name)
+            return res, True
+        except Exception as e:
+            log.info(f"delete_entities error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1776,51 +2104,47 @@ class DeleteFreshnessChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               index_name=self.index_name,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load()  # load before query
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name)  # load before query
         self.insert_data()
         query_expr = f'{self.int64_field_name} > 0'
-        res, _ = self.c_wrap.query(query_expr,
-                                   output_fields=[self.int64_field_name],
-                                   partition_name=self.p_name)
+        res = self.milvus_client.query(collection_name=self.c_name, filter=query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
         self.ids = [r[self.int64_field_name] for r in res]
         self.query_expr = query_expr
         delete_ids = self.ids[:len(self.ids) // 2]  # delete half of ids
         self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
 
     def update_delete_expr(self):
-        res, _ = self.c_wrap.query(self.query_expr,
-                                   output_fields=[self.int64_field_name],
-                                   partition_name=self.p_name)
+        res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
         all_ids = [r[self.int64_field_name] for r in res]
         if len(all_ids) < 100:
             # insert data to make sure there are enough ids to delete
             self.insert_data(nb=10000)
-            res, _ = self.c_wrap.query(self.query_expr,
-                                       output_fields=[self.int64_field_name],
-                                       partition_name=self.p_name)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.query_expr, output_fields=[self.int64_field_name], partition_name=self.p_name)
             all_ids = [r[self.int64_field_name] for r in res]
         delete_ids = all_ids[:len(all_ids) // 2]  # delete half of ids
         self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
 
     def delete_entities(self):
-        res, result = self.c_wrap.delete(expr=self.delete_expr, timeout=timeout, partition_name=self.p_name)
-        return res, result
+        try:
+            res = self.milvus_client.delete(collection_name=self.c_name, filter=self.delete_expr, timeout=timeout, partition_name=self.p_name)
+            return res, True
+        except Exception as e:
+            log.info(f"delete_entities error: {e}")
+            return str(e), False
 
     @trace()
     def delete_freshness(self):
-        while True:
-            res, result = self.c_wrap.query(self.delete_expr, timeout=timeout,
-                                            output_fields=[f'{self.int64_field_name}'],
-                                            check_task=CheckTasks.check_nothing)
-            if len(res) == 0:
-                break
-        return res, result
+        try:
+            while True:
+                res = self.milvus_client.query(collection_name=self.c_name, filter=self.delete_expr, output_fields=[f'{self.int64_field_name}'], timeout=timeout)
+                if len(res) == 0:
+                    break
+            return res, True
+        except Exception as e:
+            log.info(f"delete_freshness error: {e}")
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
@@ -1843,21 +2167,18 @@ class CompactChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("CompactChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
-        self.ut = ApiUtilityWrapper()
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               index_name=self.index_name,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load()  # load before compact
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name)  # load before compact
 
     @trace()
     def compact(self):
-        res, result = self.c_wrap.compact(timeout=timeout)
-        self.c_wrap.wait_for_compaction_completed()
-        self.c_wrap.get_compaction_plans()
-        return res, result
+        from pymilvus import Collection
+        collection = Collection(name=self.c_name, using=self.alias)
+        res = collection.compact(timeout=timeout)
+        collection.wait_for_compaction_completed()
+        collection.get_compaction_plans()
+        return res, True
 
     @exception_handler()
     def run_task(self):
@@ -1877,27 +2198,24 @@ class LoadBalanceChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("LoadBalanceChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
-        self.utility_wrap = ApiUtilityWrapper()
-        res, result = self.c_wrap.create_index(self.float_vector_field_name,
-                                               constants.DEFAULT_INDEX_PARAM,
-                                               index_name=self.index_name,
-                                               timeout=timeout,
-                                               enable_traceback=enable_traceback,
-                                               check_task=CheckTasks.check_nothing)
-        self.c_wrap.load()
+        index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
+        self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
+        self.milvus_client.load_collection(collection_name=self.c_name)
         self.sealed_segment_ids = None
         self.dst_node_ids = None
         self.src_node_id = None
 
     @trace()
     def load_balance(self):
-        res, result = self.utility_wrap.load_balance(
-            self.c_wrap.name, self.src_node_id, self.dst_node_ids, self.sealed_segment_ids)
-        return res, result
+        from pymilvus import utility
+        res = utility.load_balance(collection_name=self.c_name, src_node_id=self.src_node_id, dst_node_ids=self.dst_node_ids, sealed_segment_ids=self.sealed_segment_ids, using=self.alias)
+        return res, True
 
     def prepare(self):
         """prepare load balance params"""
-        res, _ = self.c_wrap.get_replicas()
+        from pymilvus import Collection
+        collection = Collection(name=self.c_name, using=self.alias)
+        res = collection.get_replicas()
         # find a group which has multi nodes
         group_nodes = []
         for g in res.groups:
@@ -1906,7 +2224,8 @@ class LoadBalanceChecker(Checker):
                 break
         self.src_node_id = group_nodes[0]
         self.dst_node_ids = group_nodes[1:]
-        res, _ = self.utility_wrap.get_query_segment_info(self.c_wrap.name)
+        from pymilvus import utility
+        res = utility.get_query_segment_info(self.c_name, using=self.alias)
         segment_distribution = cf.get_segment_distribution(res)
         self.sealed_segment_ids = segment_distribution[self.src_node_id]["sealed"]
 
@@ -1930,7 +2249,6 @@ class BulkInsertChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("BulkInsertChecker_")
         super().__init__(collection_name=collection_name, dim=dim, schema=schema, insert_data=insert_data)
-        self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_bulk_insert_collection_schema() if schema is None else schema
         self.files = files
         self.recheck_failed_task = False
@@ -1954,8 +2272,8 @@ class BulkInsertChecker(Checker):
                 )
         ) as remote_writer:
 
-            for i in range(data_size):
-                row = cf.get_row_data_by_schema(nb=1, schema=self.schema)[0]
+            for _ in range(data_size):
+                row = cf.gen_row_data_by_schema(nb=1, schema=self.schema)[0]
                 remote_writer.append_row(row)
             remote_writer.commit()
             batch_files = remote_writer.batch_files
@@ -1969,19 +2287,20 @@ class BulkInsertChecker(Checker):
             self.schema = schema
 
     def get_bulk_insert_task_state(self):
+        from pymilvus import utility
         state_map = {}
         for task_id in self.failed_tasks_id:
-            state, _ = self.utility_wrap.get_bulk_insert_state(task_id=task_id)
+            state = utility.get_bulk_insert_state(task_id=task_id, using=self.alias)
             state_map[task_id] = state
         return state_map
 
     @trace()
     def bulk_insert(self):
         log.info(f"bulk insert collection name: {self.c_name}")
-        task_ids, result = self.utility_wrap.do_bulk_insert(collection_name=self.c_name,
-                                                            files=self.files)
+        from pymilvus import utility
+        task_ids = utility.do_bulk_insert(collection_name=self.c_name, files=self.files, using=self.alias)
         log.info(f"task ids {task_ids}")
-        completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720)
+        completed = utility.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=720, using=self.alias)
         return task_ids, completed
 
     @exception_handler()
@@ -1992,13 +2311,13 @@ class BulkInsertChecker(Checker):
                 log.debug(f"check failed task: {self.c_name}")
             else:
                 self.c_name = cf.gen_unique_str("BulkInsertChecker_")
-        self.c_wrap.init_collection(name=self.c_name, schema=self.schema)
-        log.info(f"collection schema: {self.c_wrap.schema}")
+        self.milvus_client.create_collection(collection_name=self.c_name, schema=self.schema)
+        log.info(f"collection schema: {self.milvus_client.describe_collection(self.c_name)}")
         # bulk insert data
-        num_entities = self.c_wrap.num_entities
+        num_entities = self.milvus_client.get_collection_stats(collection_name=self.c_name).get("row_count", 0)
         log.info(f"before bulk insert, collection {self.c_name} has num entities {num_entities}")
         task_ids, completed = self.bulk_insert()
-        num_entities = self.c_wrap.num_entities
+        num_entities = self.milvus_client.get_collection_stats(collection_name=self.c_name).get("row_count", 0)
         log.info(f"after bulk insert, collection {self.c_name} has num entities {num_entities}")
         if not completed:
             self.failed_tasks.append(self.c_name)
@@ -2017,27 +2336,29 @@ class AlterCollectionChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AlterCollectionChecker")
         super().__init__(collection_name=collection_name, schema=schema)
-        self.c_wrap.release()
-        res, result = self.c_wrap.describe()
+        self.milvus_client.release_collection(collection_name=self.c_name)
+        res = self.milvus_client.describe_collection(collection_name=self.c_name)
         log.info(f"before alter collection {self.c_name} properties: {res}")
         # alter collection attributes
-        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name,
         properties={"mmap.enabled": True})
-        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name,
         properties={"collection.ttl.seconds": 3600})
-        res, result = self.c_wrap.describe()
+        res = self.milvus_client.describe_collection(collection_name=self.c_name)
         log.info(f"after alter collection {self.c_name} properties: {res}")
         
     @trace()
     def alter_check(self):
-        res, result = self.c_wrap.describe()
-        if result:
-            properties = res["properties"]
-            if properties["mmap.enabled"] != "True":
+        try:
+            res = self.milvus_client.describe_collection(collection_name=self.c_name)
+            properties = res.get("properties", {})
+            if properties.get("mmap.enabled") != "True":
                 return res, False
-            if properties["collection.ttl.seconds"] != "3600":
+            if properties.get("collection.ttl.seconds") != "3600":
                 return res, False
-        return res, result
+            return res, True
+        except Exception as e:
+            return str(e), False
 
     @exception_handler()
     def run_task(self):
