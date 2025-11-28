@@ -497,10 +497,10 @@ func (suite *SessionWithVersionSuite) SetupSuite() {
 	u, err := url.Parse("http://localhost:0")
 	suite.Require().NoError(err)
 
-	config.LCUrls = []url.URL{*u}
+	config.ListenClientUrls = []url.URL{*u}
 	u, err = url.Parse("http://localhost:0")
 	suite.Require().NoError(err)
-	config.LPUrls = []url.URL{*u}
+	config.ListenPeerUrls = []url.URL{*u}
 
 	etcdServer, err := embed.StartEtcd(config)
 	suite.Require().NoError(err)
@@ -834,10 +834,10 @@ func (s *SessionSuite) SetupSuite() {
 	u, err := url.Parse("http://localhost:0")
 	s.Require().NoError(err)
 
-	config.LCUrls = []url.URL{*u}
+	config.ListenClientUrls = []url.URL{*u}
 	u, err = url.Parse("http://localhost:0")
 	s.Require().NoError(err)
-	config.LPUrls = []url.URL{*u}
+	config.ListenPeerUrls = []url.URL{*u}
 
 	etcdServer, err := embed.StartEtcd(config)
 	s.Require().NoError(err)
