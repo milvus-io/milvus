@@ -30,7 +30,7 @@ extern "C" {
  * from storage in Milvus. The reader supports Arrow-based data access
  * through the FFI (Foreign Function Interface) layer.
  */
-typedef ReaderHandle CFFIPackedReader;
+typedef void* CFFIPackedReader;
 
 /**
  * @brief Creates a new packed FFI reader from a manifest file path.
@@ -109,7 +109,7 @@ NewPackedFFIReaderWithManifest(const char* manifest_content,
                                struct ArrowSchema* schema,
                                char** needed_columns,
                                int64_t needed_columns_size,
-                               CFFIPackedReader* c_packed_reader,
+                               CFFIPackedReader* c_loon_reader,
                                CStorageConfig c_storage_config,
                                CPluginContext* c_plugin_context);
 
