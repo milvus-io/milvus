@@ -96,9 +96,9 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	}
 
 	// Track task execution
-	executed := false
+	var executed atomic.Bool
 	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-		executed = true
+		executed.Store(true)
 		return &datapb.UpdateExternalCollectionResponse{
 			State:        indexpb.JobState_JobStateFinished,
 			KeptSegments: []int64{1, 2},
@@ -109,11 +109,17 @@ func TestExternalCollectionManager_SubmitTask_Success(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
 
-	// Wait for task to execute
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return executed.Load()
+	}, time.Second, 10*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished
+	}, time.Second, 10*time.Millisecond)
 
 	// Verify task was executed
-	assert.True(t, executed)
+	assert.True(t, executed.Load())
 
 	// Task info should be retained until explicit drop
 	info := manager.Get(clusterID, taskID)
@@ -146,8 +152,10 @@ func TestExternalCollectionManager_SubmitTask_Failure(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err) // Submit should succeed
 
-	// Wait a bit for task to execute
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFailed
+	}, time.Second, 10*time.Millisecond)
 
 	// Task info should still be present with failure state
 	info := manager.Get(clusterID, taskID)
@@ -292,8 +300,10 @@ func TestExternalCollectionManager_SubmitTask_Duplicate(t *testing.T) {
 	// Unblock the task
 	close(blockChan)
 
-	// Wait for cleanup
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		info := manager.Get(clusterID, taskID)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
@@ -315,7 +325,6 @@ func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 		}
 
 		taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-			time.Sleep(10 * time.Millisecond)
 			return &datapb.UpdateExternalCollectionResponse{
 				State: indexpb.JobState_JobStateFinished,
 			}, nil
@@ -325,8 +334,16 @@ func TestExternalCollectionManager_MultipleTasksConcurrent(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	// Wait for all tasks to complete
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		for i := 0; i < numTasks; i++ {
+			taskID := int64(i + 100)
+			info := manager.Get(clusterID, taskID)
+			if info == nil || info.State != indexpb.JobState_JobStateFinished {
+				return false
+			}
+		}
+		return true
+	}, time.Second, 10*time.Millisecond)
 
 	// Tasks remain queryable until dropped
 	for i := 0; i < numTasks; i++ {
@@ -351,10 +368,17 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	}
 
 	// Submit a task
-	executed := false
+	var executed atomic.Bool
+	started := make(chan struct{})
+	unblock := make(chan struct{})
 	taskFunc := func(ctx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
-		time.Sleep(50 * time.Millisecond)
-		executed = true
+		close(started)
+		select {
+		case <-unblock:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		executed.Store(true)
 		return &datapb.UpdateExternalCollectionResponse{
 			State: indexpb.JobState_JobStateFinished,
 		}, nil
@@ -363,14 +387,26 @@ func TestExternalCollectionManager_Close(t *testing.T) {
 	err := manager.SubmitTask(clusterID, req, taskFunc)
 	assert.NoError(t, err)
 
-	// Close manager
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	// Close manager while the task is still running
 	manager.Close()
 
-	// Wait a bit
-	time.Sleep(100 * time.Millisecond)
+	close(unblock)
+
+	require.Eventually(t, func() bool {
+		return executed.Load()
+	}, time.Second, 10*time.Millisecond)
 
 	// Task should have executed before close
-	assert.True(t, executed)
+	assert.True(t, executed.Load())
 }
 
 func TestExternalCollectionManager_UpdateStateNonExistent(t *testing.T) {
