@@ -234,7 +234,8 @@ ManifestGroupTranslator::load_group_chunk(
 
             std::filesystem::create_directories(filepath.parent_path());
 
-            chunk = create_chunk(field_meta, array_vec, filepath.string());
+            chunk = create_chunk(
+                field_meta, array_vec, filepath.string(), load_priority_);
         }
 
         chunks[fid] = std::move(chunk);

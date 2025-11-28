@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/Types.h"
 #include "simdjson/padded_string.h"
+#include "storage/FileWriter.h"
 
 namespace milvus {
 
@@ -712,7 +713,8 @@ make_chunk(const FieldMeta& field_meta,
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
-             const std::string& file_path) {
+             const std::string& file_path,
+             proto::common::LoadPriority load_priority) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
@@ -721,7 +723,9 @@ create_chunk(const FieldMeta& field_meta,
     if (file_path.empty()) {
         target = std::make_shared<MemChunkTarget>(aligned_size);
     } else {
-        target = std::make_shared<MmapChunkTarget>(file_path, aligned_size);
+        auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
+        target =
+            std::make_shared<MmapChunkTarget>(file_path, aligned_size, io_prio);
     }
     cw->write_to_target(array_vec, target);
     auto data = target->release();
@@ -740,7 +744,8 @@ std::unordered_map<FieldId, std::shared_ptr<Chunk>>
 create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<FieldMeta>& field_metas,
                    const std::vector<arrow::ArrayVector>& array_vec,
-                   const std::string& file_path) {
+                   const std::string& file_path,
+                   proto::common::LoadPriority load_priority) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
@@ -776,8 +781,10 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     if (file_path.empty()) {
         target = std::make_shared<MemChunkTarget>(total_aligned_size);
     } else {
-        target =
-            std::make_shared<MmapChunkTarget>(file_path, total_aligned_size);
+        target = std::make_shared<MmapChunkTarget>(
+            file_path,
+            total_aligned_size,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
     }
     for (size_t i = 0; i < field_ids.size(); i++) {
         auto start_off = target->tell();

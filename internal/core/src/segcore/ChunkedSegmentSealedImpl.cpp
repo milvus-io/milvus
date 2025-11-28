@@ -681,7 +681,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
                      field_id.get());
-            load_system_field_internal(field_id, field_data_info);
+            load_system_field_internal(
+                field_id, field_data_info, load_info.load_priority);
             LOG_INFO("segment {} loads system field {} mmap false done",
                      this->get_segment_id(),
                      field_id.get());
@@ -720,8 +721,10 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 }
 
 void
-ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
-                                                     FieldDataInfo& data) {
+ChunkedSegmentSealedImpl::load_system_field_internal(
+    FieldId field_id,
+    FieldDataInfo& data,
+    proto::common::LoadPriority load_priority) {
     SCOPE_CGO_CALL_METRIC();
 
     auto num_rows = data.row_count;
