@@ -72,10 +72,13 @@ type DeleteResult struct {
 }
 
 func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ...grpc.CallOption) (DeleteResult, error) {
-	req := option.Request()
-
 	result := DeleteResult{}
-	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	req, err := option.Request()
+	if err != nil {
+		return result, err
+	}
+
+	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Delete(ctx, req, callOptions...)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
