@@ -898,7 +898,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
 
     auto enable_mmap = !mmap_filepath_.empty();
     auto column_group_info =
-        FieldDataInfo(column_group_id, num_rows, mmap_filepath_);
+        FieldDataInfo(column_group_id, field_id_, num_rows, mmap_filepath_);
     LOG_INFO(
         "loads column group {} with num_rows {} for segment "
         "{}",
@@ -923,6 +923,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
     auto translator = std::make_unique<
         milvus::segcore::storagev2translator::GroupChunkTranslator>(
         segment_id_,
+        GroupChunkType::JSON_KEY_STATS,
         field_meta_map,
         column_group_info,
         files,
@@ -968,9 +969,11 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
 
 void
 JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
-    if (config.contains(MMAP_FILE_PATH)) {
-        mmap_filepath_ = GetValueFromConfig<std::string>(config, MMAP_FILE_PATH)
-                             .value_or("");
+    if (config.contains(ENABLE_MMAP)) {
+        mmap_filepath_ =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager()
+                ->GetRootPath();
         LOG_INFO("load json stats for segment {} with mmap local file path: {}",
                  segment_id_,
                  mmap_filepath_);

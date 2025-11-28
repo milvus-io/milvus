@@ -95,8 +95,10 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
         defer.AddDefer([buf]() { delete[] buf; });
         memcpy(buf, data.data(), 4 * data.size());
 
+        auto chunk_mmap_guard =
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
         chunks.emplace_back(std::make_unique<FixedWidthChunk>(
-            chunk_size, dim, buf, buf_size, 4, false));
+            chunk_size, dim, buf, buf_size, 4, false, chunk_mmap_guard));
     }
 
     auto translator = std::make_unique<TestChunkTranslator>(
