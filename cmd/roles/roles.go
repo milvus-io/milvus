@@ -283,6 +283,13 @@ func (mr *MilvusRoles) setupLogger() {
 			MaxDays:    params.LogCfg.MaxAge.GetAsInt(),
 			MaxBackups: params.LogCfg.MaxBackups.GetAsInt(),
 		},
+		AsyncWriteEnable:         params.LogCfg.AsyncWriteEnable.GetAsBool(),
+		AsyncWriteFlushInterval:  params.LogCfg.AsyncWriteFlushInterval.GetAsDurationByParse(),
+		AsyncWriteDroppedTimeout: params.LogCfg.AsyncWriteDroppedTimeout.GetAsDurationByParse(),
+		AsyncWriteStopTimeout:    params.LogCfg.AsyncWriteStopTimeout.GetAsDurationByParse(),
+		AsyncWritePendingLength:  params.LogCfg.AsyncWritePendingLength.GetAsInt(),
+		AsyncWriteBufferSize:     int(params.LogCfg.AsyncWriteBufferSize.GetAsSize()),
+		AsyncWriteMaxBytesPerLog: int(params.LogCfg.AsyncWriteMaxBytesPerLog.GetAsSize()),
 	}
 	id := paramtable.GetNodeID()
 	roleName := paramtable.GetRole()
@@ -294,6 +301,7 @@ func (mr *MilvusRoles) setupLogger() {
 	}
 
 	logutil.SetupLogger(&logConfig)
+
 	params.Watch(params.LogCfg.Level.Key, config.NewHandler("log.level", func(event *config.Event) {
 		if !event.HasUpdated || event.EventType == config.DeleteType {
 			return
@@ -417,14 +425,6 @@ func (mr *MilvusRoles) Run() {
 	// init tracer before run any component
 	tracer.Init()
 
-	// Initialize streaming service if enabled.
-
-	if mr.ServerType == typeutil.StandaloneRole || !mr.EnableDataNode {
-		// only datanode does not init streaming service
-		streaming.Init()
-		defer streaming.Release()
-	}
-
 	enableComponents := []bool{
 		mr.EnableProxy,
 		mr.EnableQueryNode,
@@ -444,6 +444,8 @@ func (mr *MilvusRoles) Run() {
 	expr.Init()
 	expr.Register("param", paramtable.Get())
 	mr.setupLogger()
+	defer log.Cleanup()
+
 	http.ServeHTTP()
 	setupPrometheusHTTPServer(Registry)
 
@@ -457,6 +459,13 @@ func (mr *MilvusRoles) Run() {
 			action := func(uint32) {}
 			gc.NewTuner(paramtable.Get().CommonCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(paramtable.Get().CommonCfg.MinimumGOGCConfig.GetAsInt()), uint32(paramtable.Get().CommonCfg.MaximumGOGCConfig.GetAsInt()), action)
 		}
+	}
+
+	// Initialize streaming service if enabled.
+	if mr.ServerType == typeutil.StandaloneRole || !mr.EnableDataNode {
+		// only datanode does not init streaming service
+		streaming.Init()
+		defer streaming.Release()
 	}
 
 	var wg sync.WaitGroup

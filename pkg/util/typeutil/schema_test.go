@@ -28,13 +28,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestSchema(t *testing.T) {
@@ -1071,7 +1069,7 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			FieldId: fieldID,
 		}
 	default:
-		log.Error("not supported field type", zap.String("field type", fieldType.String()))
+		fmt.Printf("not supported field type: %s", fieldType.String())
 	}
 
 	return fieldData

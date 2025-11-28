@@ -155,6 +155,18 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.clusterID", "0")
 	})
 
+	t.Run("test logConfig", func(t *testing.T) {
+		Params := &params.LogCfg
+		assert.True(t, Params.AsyncWriteEnable.GetAsBool())
+		assert.Equal(t, 10*time.Second, Params.AsyncWriteFlushInterval.GetAsDurationByParse())
+		assert.Equal(t, 100*time.Millisecond, Params.AsyncWriteDroppedTimeout.GetAsDurationByParse())
+		assert.Equal(t, "error", Params.AsyncWriteNonDroppableLevel.GetValue())
+		assert.Equal(t, 1*time.Second, Params.AsyncWriteStopTimeout.GetAsDurationByParse())
+		assert.Equal(t, 1024, Params.AsyncWritePendingLength.GetAsInt())
+		assert.Equal(t, int64(1024*1024), Params.AsyncWriteBufferSize.GetAsSize())
+		assert.Equal(t, int64(1024*1024), Params.AsyncWriteMaxBytesPerLog.GetAsSize())
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := &params.RootCoordCfg
 
