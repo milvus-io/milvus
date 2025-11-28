@@ -36,6 +36,12 @@ pub(crate) fn get_stop_words_list(str_list: Vec<String>) -> Vec<String> {
                     }
                     continue;
                 }
+                "_chinese_" => {
+                    for word in stop_words::CHINESE {
+                        stop_words.push(word.to_string());
+                    }
+                    continue;
+                }
                 _other => {}
             }
         }
