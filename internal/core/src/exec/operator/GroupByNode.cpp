@@ -44,6 +44,8 @@ PhyGroupByNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyGroupByNode::GetOutput() {
+    milvus::exec::checkCancellation(query_context_);
+
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }

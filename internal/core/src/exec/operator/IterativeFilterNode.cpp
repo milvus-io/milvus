@@ -112,6 +112,8 @@ insert_helper(milvus::SearchResult& search_result,
 
 RowVectorPtr
 PhyIterativeFilterNode::GetOutput() {
+    milvus::exec::checkCancellation(query_context_);
+
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }

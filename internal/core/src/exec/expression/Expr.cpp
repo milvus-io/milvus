@@ -50,7 +50,11 @@ ExprSet::Eval(int32_t begin,
               EvalCtx& context,
               std::vector<VectorPtr>& results) {
     results.resize(exprs_.size());
+    auto* exec_ctx = context.get_exec_context();
+    auto* query_ctx =
+        exec_ctx != nullptr ? exec_ctx->get_query_context() : nullptr;
     for (size_t i = begin; i < end; ++i) {
+        milvus::exec::checkCancellation(query_ctx);
         exprs_[i]->Eval(context, results[i]);
     }
 }

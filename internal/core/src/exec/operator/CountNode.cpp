@@ -53,6 +53,8 @@ PhyCountNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyCountNode::GetOutput() {
+    milvus::exec::checkCancellation(query_context_);
+
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
