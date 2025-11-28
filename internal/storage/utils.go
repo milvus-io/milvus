@@ -550,11 +550,13 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		Data: make(map[FieldID]FieldData),
 	}
 	length := 0
+	hasMissingFields := false
 	getFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
 		srcField, ok := srcFields[field.GetFieldID()]
 		if !ok && field.GetFieldID() >= common.StartOfUserFieldID {
-			err := fillMissingFields(collSchema, idata)
-			return nil, err
+			// Field not found in incoming message, will be handled by fillMissingFields later
+			hasMissingFields = true
+			return nil, nil
 		}
 		var fieldData FieldData
 		switch field.DataType {
@@ -816,6 +818,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			if fieldData != nil {
 				idata.Data[field.FieldID] = fieldData
 			}
+		}
+	}
+	if hasMissingFields {
+		// Fill missing fields after all fields are processed
+		if err := fillMissingFields(collSchema, idata); err != nil {
+			return nil, err
 		}
 	}
 
