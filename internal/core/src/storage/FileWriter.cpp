@@ -25,7 +25,10 @@ FileWriter::FileWriter(std::string filename, io::Priority priority)
     : filename_(std::move(filename)),
       priority_(priority),
       rate_limiter_(io::WriteRateLimiter::GetInstance()) {
-    auto mode = GetMode();
+    // high priority always use buffered mode, otherwise use the global mode
+    auto mode =
+        priority_ == io::Priority::HIGH ? WriteMode::BUFFERED : GetMode();
+
     use_direct_io_ = mode == WriteMode::DIRECT;
     use_writer_pool_ = FileWriteWorkerPool::GetInstance().HasPool();
 
