@@ -56,20 +56,30 @@ struct RegexMatcher {
         return false;
     }
 
-    explicit RegexMatcher(const std::string& pattern) {
-        use_fnmatch_ = is_simple_pattern(pattern);
-        if (use_fnmatch_) {
-            fnmatch_pattern_ = translate_pattern_match_to_fnmatch(pattern);
+    // Constructor that accepts an already-translated regex pattern
+    explicit RegexMatcher(const std::string& regex_pattern) {
+        r_ = boost::regex(regex_pattern);
+    }
+
+    // Factory method for LIKE pattern matching with fnmatch optimization
+    static RegexMatcher
+    FromLikePattern(const std::string& like_pattern) {
+        RegexMatcher matcher;
+        matcher.use_fnmatch_ = is_simple_pattern(like_pattern);
+        if (matcher.use_fnmatch_) {
+            matcher.fnmatch_pattern_ =
+                translate_pattern_match_to_fnmatch(like_pattern);
         } else {
-            regex_pattern_ = translate_pattern_match_to_regex(pattern);
-            r_ = boost::regex(regex_pattern_);
+            auto regex_pattern = translate_pattern_match_to_regex(like_pattern);
+            matcher.r_ = boost::regex(regex_pattern);
         }
+        return matcher;
     }
 
  private:
+    RegexMatcher() = default;
     bool use_fnmatch_ = false;
     std::string fnmatch_pattern_;
-    std::string regex_pattern_;
     // avoid to construct the regex everytime.
     boost::regex r_;
 };
