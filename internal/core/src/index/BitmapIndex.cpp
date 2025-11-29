@@ -1335,14 +1335,16 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::PatternMatchQuery(const std::string& like_pattern) {
-    ThrowInfo(Unsupported, "PatternMatchQuery is only supported for string type");
+    ThrowInfo(Unsupported,
+              "PatternMatchQuery is only supported for string type");
 }
 
 template <>
 const TargetBitmap
 BitmapIndex<std::string>::PatternMatchQuery(const std::string& like_pattern) {
     AssertInfo(is_built_, "index has not been built");
-    tracer::AutoSpan span("BitmapIndex::PatternMatchQuery", tracer::GetRootSpan());
+    tracer::AutoSpan span("BitmapIndex::PatternMatchQuery",
+                          tracer::GetRootSpan());
 
     auto matcher = RegexMatcher::FromLikePattern(like_pattern);
     TargetBitmap res(total_num_rows_, false);

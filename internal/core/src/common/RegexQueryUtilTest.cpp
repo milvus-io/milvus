@@ -167,11 +167,11 @@ TEST(IsSimplePatternTest, SimplePatterns) {
 TEST(IsSimplePatternTest, ComplexPatterns) {
     using namespace milvus;
     // Patterns with escape sequences or special fnmatch chars
-    EXPECT_FALSE(is_simple_pattern("hello\\%"));  // escape sequence
-    EXPECT_FALSE(is_simple_pattern("test[abc]")); // fnmatch special char
-    EXPECT_FALSE(is_simple_pattern("test*"));     // fnmatch special char
-    EXPECT_FALSE(is_simple_pattern("test?"));     // fnmatch special char
-    EXPECT_FALSE(is_simple_pattern("test\\n"));   // backslash
+    EXPECT_FALSE(is_simple_pattern("hello\\%"));   // escape sequence
+    EXPECT_FALSE(is_simple_pattern("test[abc]"));  // fnmatch special char
+    EXPECT_FALSE(is_simple_pattern("test*"));      // fnmatch special char
+    EXPECT_FALSE(is_simple_pattern("test?"));      // fnmatch special char
+    EXPECT_FALSE(is_simple_pattern("test\\n"));    // backslash
 }
 
 TEST(TranslatePatternMatchToFnmatchTest, BasicPatterns) {
