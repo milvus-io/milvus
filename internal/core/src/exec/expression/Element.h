@@ -31,6 +31,18 @@
 namespace milvus {
 namespace exec {
 
+// Transparent string hash for heterogeneous lookup in unordered_dense::set
+// See: https://github.com/martinus/unordered_dense#324-heterogeneous-overloads-using-is_transparent
+struct StringHash {
+    using is_transparent = void;  // enable heterogeneous overloads
+    using is_avalanching = void;  // mark as high quality avalanching hash
+
+    [[nodiscard]] auto
+    operator()(std::string_view str) const noexcept -> uint64_t {
+        return ankerl::unordered_dense::hash<std::string_view>{}(str);
+    }
+};
+
 class BaseElement {
  public:
     virtual ~BaseElement() = default;
@@ -225,12 +237,9 @@ class FlatVectorElement : public MultiElement {
         }
         // Handle string_view -> string comparison when T is std::string
         if constexpr (std::is_same_v<T, std::string>) {
-            if (std::holds_alternative<std::string_view>(value)) {
-                auto sv = std::get<std::string_view>(value);
-                for (const auto& v : values_) {
-                    if (v == sv)
-                        return true;
-                }
+            if (auto sv = std::get_if<std::string_view>(&value)) {
+                return std::find(values_.begin(), values_.end(), *sv) !=
+                       values_.end();
             }
         }
         return false;
@@ -252,6 +261,13 @@ class FlatVectorElement : public MultiElement {
 
 template <typename T>
 class SetElement : public MultiElement {
+    // Use transparent hash for std::string to enable heterogeneous lookup
+    // This allows O(1) lookup with string_view without string copy
+    using SetType = std::conditional_t<
+        std::is_same_v<T, std::string>,
+        ankerl::unordered_dense::set<T, StringHash, std::equal_to<>>,
+        ankerl::unordered_dense::set<T>>;
+
  public:
     explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
         for (auto& value : values) {
@@ -273,13 +289,12 @@ class SetElement : public MultiElement {
     bool
     In(const ValueType& value) const override {
         if (std::holds_alternative<T>(value)) {
-            return values_.count(std::get<T>(value)) > 0;
+            return values_.find(std::get<T>(value)) != values_.end();
         }
         // Handle string_view -> string comparison when T is std::string
         if constexpr (std::is_same_v<T, std::string>) {
-            if (std::holds_alternative<std::string_view>(value)) {
-                auto sv = std::get<std::string_view>(value);
-                return values_.count(std::string(sv)) > 0;
+            if (auto sv = std::get_if<std::string_view>(&value)) {
+                return values_.find(*sv) != values_.end();
             }
         }
         return false;
@@ -301,7 +316,7 @@ class SetElement : public MultiElement {
     }
 
  public:
-    ankerl::unordered_dense::set<T> values_;
+    SetType values_;
 };
 
 template <>
