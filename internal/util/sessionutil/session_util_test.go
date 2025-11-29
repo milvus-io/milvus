@@ -238,7 +238,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	signal := make(chan struct{}, 1)
 
 	flag := atomic.NewBool(false)
-	s.LivenessCheck(context.Background(), func() {
+	s.LivenessCheck(func() {
 		flag.Store(true)
 		signal <- struct{}{}
 	})
@@ -250,35 +250,6 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	// test close liveCh, liveness exit, callback should trigger
 	close(ch)
-	<-signal
-	assert.True(t, flag.Load())
-
-	// test context done, liveness exit, callback shouldn't trigger
-	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s1 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
-	s1.Register()
-	ctx, cancel := context.WithCancel(context.Background())
-	flag.Store(false)
-
-	s1.LivenessCheck(ctx, func() {
-		flag.Store(true)
-		signal <- struct{}{}
-	})
-	cancel()
-	assert.False(t, flag.Load())
-
-	// test context done, liveness start failed, callback should trigger
-	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s2 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
-	s2.Register()
-	ctx, cancel = context.WithCancel(context.Background())
-	signal = make(chan struct{}, 1)
-	flag.Store(false)
-	cancel()
-	s2.LivenessCheck(ctx, func() {
-		flag.Store(true)
-		signal <- struct{}{}
-	})
 	<-signal
 	assert.True(t, flag.Load())
 }
@@ -673,7 +644,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		return nil
 	})
 	wg.Wait()
-	s1.LivenessCheck(ctx1, func() {
+	s1.LivenessCheck(func() {
 		log.Debug("Session 1 livenessCheck callback")
 		flag = true
 		close(signal)
@@ -972,7 +943,7 @@ func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	s.Require().NoError(err)
 	session.liveCh = make(chan struct{})
 	session.startKeepAliveLoop(ch)
-	session.LivenessCheck(ctx, nil)
+	session.LivenessCheck(nil)
 	// active cancel, should not retry connect
 	session.cancelKeepAlive(true)
 
@@ -996,7 +967,7 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	closeChan := make(chan *clientv3.LeaseKeepAliveResponse)
 	sendChan := (<-chan *clientv3.LeaseKeepAliveResponse)(closeChan)
 	session.startKeepAliveLoop(sendChan)
-	session.LivenessCheck(ctx, nil)
+	session.LivenessCheck(nil)
 	// close channel, should retry connect
 	close(closeChan)
 

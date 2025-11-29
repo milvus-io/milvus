@@ -114,7 +114,7 @@ func (s *mixCoordImpl) Register() error {
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
 		log.Info("MixCoord Register Finished")
-		s.session.LivenessCheck(s.ctx, func() {
+		s.session.LivenessCheck(func() {
 			log.Error("MixCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
 			os.Exit(1)
 		})

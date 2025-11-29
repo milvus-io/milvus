@@ -699,17 +699,6 @@ func (c *Core) cancelIfNotNil() {
 	}
 }
 
-func (c *Core) revokeSession() {
-	if c.session != nil {
-		// wait at most one second to revoke
-		c.session.Stop()
-		log.Ctx(c.ctx).Info("rootcoord session stop")
-	}
-}
-
-func (c *Core) GracefulStop() {
-}
-
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -725,7 +714,11 @@ func (c *Core) Stop() error {
 		c.quotaCenter.stop()
 	}
 
-	c.revokeSession()
+	log.Ctx(c.ctx).Info("rootcoord stop session")
+	if c.session != nil {
+		// wait at most one second to revoke
+		c.session.Stop()
+	}
 	c.cancelIfNotNil()
 	c.wg.Wait()
 	return nil

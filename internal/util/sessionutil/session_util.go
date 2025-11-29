@@ -156,10 +156,8 @@ type Session struct {
 	liveChOnce sync.Once
 	liveCh     chan struct{}
 
-	etcdCli           *clientv3.Client
-	watchSessionKeyCh clientv3.WatchChan
-	watchCancel       atomic.Pointer[context.CancelFunc]
-	wg                sync.WaitGroup
+	etcdCli *clientv3.Client
+	wg      sync.WaitGroup
 
 	metaRoot string
 
@@ -300,6 +298,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {
+		log.Error("failed to init session", zap.String("name", serverName), zap.String("address", address), zap.Error(err))
 		panic(err)
 	}
 	s.ServerID = serverID
@@ -330,7 +329,6 @@ func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()
 	defer serverIDMu.Unlock()
 
-	log.Ctx(s.ctx).Debug("getServerID", zap.Bool("reuse", s.reuseNodeID))
 	if s.reuseNodeID {
 		// Notice, For standalone, all process share the same nodeID.
 		if nodeID := paramtable.GetNodeID(); nodeID != 0 {
@@ -341,6 +339,7 @@ func (s *Session) getServerID() (int64, error) {
 	if err != nil {
 		return nodeID, err
 	}
+	log.Ctx(s.ctx).Debug("getServerID", zap.Int64("nodeID", nodeID))
 	if s.reuseNodeID {
 		paramtable.SetNodeID(nodeID)
 	}
@@ -431,31 +430,6 @@ func (s *Session) getSessionKey() string {
 		key = fmt.Sprintf("%s-%d", key, s.ServerID)
 	}
 	return path.Join(s.metaRoot, DefaultServiceRoot, key)
-}
-
-func (s *Session) initWatchSessionCh(ctx context.Context) error {
-	var (
-		err     error
-		getResp *clientv3.GetResponse
-	)
-
-	ctx, cancel := context.WithCancel(ctx)
-	if old := s.watchCancel.Load(); old != nil {
-		(*old)()
-	}
-	s.watchCancel.Store(&cancel)
-
-	err = retry.Do(ctx, func() error {
-		getResp, err = s.etcdCli.Get(ctx, s.getSessionKey())
-		return err
-	}, retry.Attempts(uint(s.sessionRetryTimes)))
-	if err != nil {
-		log.Warn("fail to get the session key from the etcd", zap.Error(err))
-		cancel()
-		return err
-	}
-	s.watchSessionKeyCh = s.etcdCli.Watch(ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
-	return nil
 }
 
 // registerService registers the service to etcd so that other services
@@ -569,6 +543,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 		case <-s.ctx.Done():
 			log.Warn("session context canceled, stop keepalive")
 			s.cancelKeepAlive(true)
+			s.safeCloseLiveCh()
 			return
 
 		case resp, ok := <-ch:
@@ -806,64 +781,6 @@ func (w *sessionWatcher) Stop() {
 	w.wg.Wait()
 }
 
-// EmptySessionWatcher returns a place holder for IndexNodeBinding mode datacoord
-func EmptySessionWatcher() SessionWatcher {
-	return emptySessionWatcher{}
-}
-
-// emptySessionWatcher is a place holder for IndexNodeBinding mode datacoord
-type emptySessionWatcher struct{}
-
-func (emptySessionWatcher) EventChannel() <-chan *SessionEvent {
-	return nil
-}
-
-func (emptySessionWatcher) Stop() {}
-
-// WatchServices watches the service's up and down in etcd, and sends event to
-// eventChannel.
-// prefix is a parameter to know which service to watch and can be obtained in
-// typeutil.type.go.
-// revision is a etcd reversion to prevent missing key events and can be obtained
-// in GetSessions.
-// If a server up, an event will be add to channel with eventType SessionAddType.
-// If a server down, an event will be add to channel with eventType SessionDelType.
-func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (watcher SessionWatcher) {
-	ctx, cancel := context.WithCancel(s.ctx)
-	w := &sessionWatcher{
-		s:        s,
-		cancel:   cancel,
-		eventCh:  make(chan *SessionEvent, 100),
-		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
-		prefix:   prefix,
-		rewatch:  rewatch,
-		validate: func(s *Session) bool { return true },
-	}
-	w.start(ctx)
-	return w
-}
-
-// WatchServicesWithVersionRange watches the service's up and down in etcd, and sends event to event Channel.
-// Acts like WatchServices but with extra version range check.
-// prefix is a parameter to know which service to watch and can be obtained in type util.type.go.
-// revision is a etcd reversion to prevent missing key events and can be obtained in GetSessions.
-// If a server up, an event will be add to channel with eventType SessionAddType.
-// If a server down, an event will be add to channel with eventType SessionDelType.
-func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (watcher SessionWatcher) {
-	ctx, cancel := context.WithCancel(s.ctx)
-	w := &sessionWatcher{
-		s:        s,
-		cancel:   cancel,
-		eventCh:  make(chan *SessionEvent, 100),
-		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
-		prefix:   prefix,
-		rewatch:  rewatch,
-		validate: func(s *Session) bool { return r(s.Version) },
-	}
-	w.start(ctx)
-	return w
-}
-
 func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 	log := log.Ctx(context.TODO())
 	if wresp.Err() != nil {
@@ -950,80 +867,82 @@ func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {
 	return w.eventCh
 }
 
-// LivenessCheck performs liveness check with provided context and channel
-// ctx controls the liveness check loop
-// ch is the liveness signal channel, ch is closed only when the session is expired
-// callback must be called before liveness check exit, to close the session's owner component
-func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
-	err := s.initWatchSessionCh(ctx)
-	if err != nil {
-		log.Error("failed to get session for liveness check", zap.Error(err))
-		s.cancelKeepAlive(true)
-		if callback != nil {
-			go callback()
-		}
-		return
-	}
+// EmptySessionWatcher returns a place holder for IndexNodeBinding mode datacoord
+func EmptySessionWatcher() SessionWatcher {
+	return emptySessionWatcher{}
+}
 
+// emptySessionWatcher is a place holder for IndexNodeBinding mode datacoord
+type emptySessionWatcher struct{}
+
+func (emptySessionWatcher) EventChannel() <-chan *SessionEvent {
+	return nil
+}
+
+func (emptySessionWatcher) Stop() {}
+
+// WatchServices watches the service's up and down in etcd, and sends event to
+// eventChannel.
+// prefix is a parameter to know which service to watch and can be obtained in
+// typeutil.type.go.
+// revision is a etcd reversion to prevent missing key events and can be obtained
+// in GetSessions.
+// If a server up, an event will be add to channel with eventType SessionAddType.
+// If a server down, an event will be add to channel with eventType SessionDelType.
+func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (watcher SessionWatcher) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	w := &sessionWatcher{
+		s:        s,
+		cancel:   cancel,
+		eventCh:  make(chan *SessionEvent, 100),
+		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		prefix:   prefix,
+		rewatch:  rewatch,
+		validate: func(s *Session) bool { return true },
+	}
+	w.start(ctx)
+	return w
+}
+
+// WatchServicesWithVersionRange watches the service's up and down in etcd, and sends event to event Channel.
+// Acts like WatchServices but with extra version range check.
+// prefix is a parameter to know which service to watch and can be obtained in type util.type.go.
+// revision is a etcd reversion to prevent missing key events and can be obtained in GetSessions.
+// If a server up, an event will be add to channel with eventType SessionAddType.
+// If a server down, an event will be add to channel with eventType SessionDelType.
+func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (watcher SessionWatcher) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	w := &sessionWatcher{
+		s:        s,
+		cancel:   cancel,
+		eventCh:  make(chan *SessionEvent, 100),
+		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		prefix:   prefix,
+		rewatch:  rewatch,
+		validate: func(s *Session) bool { return r(s.Version) },
+	}
+	w.start(ctx)
+	return w
+}
+
+// LivenessCheck should only be related to session keepAlive, there is no need to check etcd path to get liveness
+func (s *Session) LivenessCheck(callback func()) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if callback != nil {
-			// before exit liveness check, callback to exit the session owner
-			defer func() {
-				// the callback method will not be invoked if session is stopped.
-				if ctx.Err() == nil && !s.isStopped.Load() {
-					go callback()
-				}
-			}()
-		}
 		defer s.SetDisconnected(true)
 		for {
 			select {
 			case _, ok := <-s.liveCh:
-				// ok, still alive
 				if ok {
 					continue
 				}
-				// not ok, connection lost
-				log.Warn("connection lost detected, shuting down")
+				log.Ctx(s.ctx).Warn("connection lost detected, shutting down", zap.String("serverName", s.ServerName))
+				if callback != nil {
+					go callback()
+					callback = nil
+				}
 				return
-			case <-ctx.Done():
-				log.Warn("liveness exits due to context done")
-				// cancel the etcd keepAlive context
-				s.cancelKeepAlive(true)
-				return
-			case resp, ok := <-s.watchSessionKeyCh:
-				if !ok {
-					log.Warn("watch session key channel closed")
-					s.cancelKeepAlive(true)
-					return
-				}
-				if resp.Err() != nil {
-					// if not ErrCompacted, just close the channel
-					if resp.Err() != v3rpc.ErrCompacted {
-						// close event channel
-						log.Warn("Watch service found error", zap.Error(resp.Err()))
-						s.cancelKeepAlive(true)
-						return
-					}
-					log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
-					err := s.initWatchSessionCh(ctx)
-					if err != nil {
-						log.Warn("failed to get session during reconnecting", zap.Error(err))
-						s.cancelKeepAlive(true)
-					}
-					continue
-				}
-				for _, event := range resp.Events {
-					switch event.Type {
-					case mvccpb.PUT:
-						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-					case mvccpb.DELETE:
-						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-						s.cancelKeepAlive(true)
-					}
-				}
 			}
 		}
 	}()
@@ -1041,7 +960,7 @@ func (s *Session) Revoke(timeout time.Duration) {
 	if s == nil {
 		return
 	}
-	log.Info("start to revoke session", zap.String("sessionKey", s.activeKey))
+	log.Info("start to revoke session", zap.String("servername", s.ServerName))
 	if s.etcdCli == nil || s.LeaseID == nil {
 		log.Warn("skip remove session",
 			zap.String("sessionKey", s.activeKey),
@@ -1051,7 +970,7 @@ func (s *Session) Revoke(timeout time.Duration) {
 		return
 	}
 	if s.Disconnected() {
-		log.Warn("skip remove session, connection is disconnected", zap.String("sessionKey", s.activeKey))
+		log.Warn("skip remove session, connection is disconnected", zap.String("sessionKey", s.ServerName))
 		return
 	}
 	// can NOT use s.ctx, it may be Done here
@@ -1060,9 +979,9 @@ func (s *Session) Revoke(timeout time.Duration) {
 	// ignores resp & error, just do best effort to revoke
 	_, err := s.etcdCli.Revoke(ctx, *s.LeaseID)
 	if err != nil {
-		log.Warn("failed to revoke session", zap.String("sessionKey", s.activeKey), zap.Error(err))
+		log.Warn("failed to revoke session", zap.String("sessionKey", s.ServerName), zap.Error(err))
 	}
-	log.Info("revoke session successfully", zap.String("sessionKey", s.activeKey))
+	log.Info("revoke session successfully", zap.String("sessionKey", s.ServerName))
 }
 
 // UpdateRegistered update the state of registered.
@@ -1102,9 +1021,6 @@ func (s *Session) updateStandby(b bool) {
 func (s *Session) safeCloseLiveCh() {
 	s.liveChOnce.Do(func() {
 		close(s.liveCh)
-		if s.watchCancel.Load() != nil {
-			(*s.watchCancel.Load())()
-		}
 	})
 }
 
@@ -1193,8 +1109,10 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			return err
 		}
 		if registered {
+			// already become active leader
 			break
 		}
+		// not registered, watch active keys
 		log.Info(fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
 		ctx, cancel := context.WithCancel(s.ctx)
 		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))

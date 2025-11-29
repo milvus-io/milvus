@@ -387,7 +387,7 @@ func (s *Server) startGPRCServer(ctx context.Context) error {
 func (s *Server) registerSessionToETCD() {
 	s.session.Register()
 	// start liveness check
-	s.session.LivenessCheck(context.Background(), func() {
+	s.session.LivenessCheck(func() {
 		log.Ctx(s.ctx).Error("StreamingNode disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
 		os.Exit(1)
 	})

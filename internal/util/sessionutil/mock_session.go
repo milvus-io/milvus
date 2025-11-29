@@ -3,8 +3,6 @@
 package sessionutil
 
 import (
-	context "context"
-
 	semver "github.com/blang/semver/v4"
 	mock "github.com/stretchr/testify/mock"
 
@@ -416,9 +414,9 @@ func (_c *MockSession_IsTriggerKill_Call) RunAndReturn(run func() bool) *MockSes
 	return _c
 }
 
-// LivenessCheck provides a mock function with given fields: ctx, callback
-func (_m *MockSession) LivenessCheck(ctx context.Context, callback func()) {
-	_m.Called(ctx, callback)
+// LivenessCheck provides a mock function with given fields: callback
+func (_m *MockSession) LivenessCheck(callback func()) {
+	_m.Called(callback)
 }
 
 // MockSession_LivenessCheck_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LivenessCheck'
@@ -427,15 +425,14 @@ type MockSession_LivenessCheck_Call struct {
 }
 
 // LivenessCheck is a helper method to define mock.On call
-//   - ctx context.Context
 //   - callback func()
-func (_e *MockSession_Expecter) LivenessCheck(ctx interface{}, callback interface{}) *MockSession_LivenessCheck_Call {
-	return &MockSession_LivenessCheck_Call{Call: _e.mock.On("LivenessCheck", ctx, callback)}
+func (_e *MockSession_Expecter) LivenessCheck(callback interface{}) *MockSession_LivenessCheck_Call {
+	return &MockSession_LivenessCheck_Call{Call: _e.mock.On("LivenessCheck", callback)}
 }
 
-func (_c *MockSession_LivenessCheck_Call) Run(run func(ctx context.Context, callback func())) *MockSession_LivenessCheck_Call {
+func (_c *MockSession_LivenessCheck_Call) Run(run func(callback func())) *MockSession_LivenessCheck_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(func()))
+		run(args[0].(func()))
 	})
 	return _c
 }
@@ -445,7 +442,7 @@ func (_c *MockSession_LivenessCheck_Call) Return() *MockSession_LivenessCheck_Ca
 	return _c
 }
 
-func (_c *MockSession_LivenessCheck_Call) RunAndReturn(run func(context.Context, func())) *MockSession_LivenessCheck_Call {
+func (_c *MockSession_LivenessCheck_Call) RunAndReturn(run func(func())) *MockSession_LivenessCheck_Call {
 	_c.Run(run)
 	return _c
 }
