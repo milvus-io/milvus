@@ -223,6 +223,16 @@ class FlatVectorElement : public MultiElement {
                     return true;
             }
         }
+        // Handle string_view -> string comparison when T is std::string
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (std::holds_alternative<std::string_view>(value)) {
+                auto sv = std::get<std::string_view>(value);
+                for (const auto& v : values_) {
+                    if (v == sv)
+                        return true;
+                }
+            }
+        }
         return false;
     }
 
@@ -264,6 +274,13 @@ class SetElement : public MultiElement {
     In(const ValueType& value) const override {
         if (std::holds_alternative<T>(value)) {
             return values_.count(std::get<T>(value)) > 0;
+        }
+        // Handle string_view -> string comparison when T is std::string
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (std::holds_alternative<std::string_view>(value)) {
+                auto sv = std::get<std::string_view>(value);
+                return values_.count(std::string(sv)) > 0;
+            }
         }
         return false;
     }
