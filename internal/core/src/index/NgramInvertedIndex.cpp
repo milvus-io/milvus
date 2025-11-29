@@ -408,9 +408,7 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     TargetBitmap valid(res.size(), true);
     TargetBitmapView valid_res(valid.data(), valid.size());
 
-    PatternMatchTranslator translator;
-    auto regex_pattern = translator(literal);
-    RegexMatcher matcher(regex_pattern);
+    auto matcher = RegexMatcher::FromLikePattern(literal);
 
     auto ngram_hit_count = bitset.count();
 
