@@ -916,9 +916,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
                 break;
             }
             case proto::plan::Match: {
-                PatternMatchTranslator translator;
-                auto regex_pattern = translator(val);
-                RegexMatcher matcher(regex_pattern);
+                auto matcher = RegexMatcher::FromLikePattern(val);
                 for (size_t i = 0; i < size; ++i) {
                     auto offset = i;
                     if constexpr (filter_type == FilterType::random) {

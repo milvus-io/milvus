@@ -227,3 +227,78 @@ TEST(ExtractFixedPrefixTest, EmptyPattern) {
     // Empty pattern -> empty prefix
     EXPECT_EQ(extract_fixed_prefix_from_pattern(""), "");
 }
+
+// ============== fnmatch optimization Tests ==============
+
+TEST(IsSimplePatternTest, SimplePatterns) {
+    using namespace milvus;
+    // Simple patterns with only % and _
+    EXPECT_TRUE(is_simple_pattern("hello%"));
+    EXPECT_TRUE(is_simple_pattern("%world"));
+    EXPECT_TRUE(is_simple_pattern("he_lo"));
+    EXPECT_TRUE(is_simple_pattern("%test%"));
+    EXPECT_TRUE(is_simple_pattern("a_b_c%"));
+    EXPECT_TRUE(is_simple_pattern(""));
+    EXPECT_TRUE(is_simple_pattern("plain"));
+}
+
+TEST(IsSimplePatternTest, ComplexPatterns) {
+    using namespace milvus;
+    // Patterns with escape sequences or special fnmatch chars
+    EXPECT_FALSE(is_simple_pattern("hello\\%"));  // escape sequence
+    EXPECT_FALSE(is_simple_pattern("test[abc]")); // fnmatch special char
+    EXPECT_FALSE(is_simple_pattern("test*"));     // fnmatch special char
+    EXPECT_FALSE(is_simple_pattern("test?"));     // fnmatch special char
+    EXPECT_FALSE(is_simple_pattern("test\\n"));   // backslash
+}
+
+TEST(TranslatePatternMatchToFnmatchTest, BasicPatterns) {
+    using namespace milvus;
+    EXPECT_EQ(translate_pattern_match_to_fnmatch("hello%"), "hello*");
+    EXPECT_EQ(translate_pattern_match_to_fnmatch("%world"), "*world");
+    EXPECT_EQ(translate_pattern_match_to_fnmatch("he_lo"), "he?lo");
+    EXPECT_EQ(translate_pattern_match_to_fnmatch("%test%"), "*test*");
+    EXPECT_EQ(translate_pattern_match_to_fnmatch("a_b_c%"), "a?b?c*");
+    EXPECT_EQ(translate_pattern_match_to_fnmatch("plain"), "plain");
+}
+
+TEST(RegexMatcherFromLikePatternTest, SimplePatternUsesFnmatch) {
+    using namespace milvus;
+    // Simple patterns should use fnmatch optimization
+    auto matcher = RegexMatcher::FromLikePattern("Hello%");
+
+    EXPECT_TRUE(matcher(std::string("Hello")));
+    EXPECT_TRUE(matcher(std::string("Hello World")));
+    EXPECT_TRUE(matcher(std::string("Hello\n")));  // fnmatch matches newlines
+    EXPECT_FALSE(matcher(std::string("Hi")));
+}
+
+TEST(RegexMatcherFromLikePatternTest, UnderscoreWildcard) {
+    using namespace milvus;
+    auto matcher = RegexMatcher::FromLikePattern("H_llo");
+
+    EXPECT_TRUE(matcher(std::string("Hello")));
+    EXPECT_TRUE(matcher(std::string("Hallo")));
+    EXPECT_FALSE(matcher(std::string("Hllo")));
+    EXPECT_FALSE(matcher(std::string("Heello")));
+}
+
+TEST(RegexMatcherFromLikePatternTest, ComplexPatternUsesRegex) {
+    using namespace milvus;
+    // Complex patterns with escape sequences should use regex
+    auto matcher = RegexMatcher::FromLikePattern("Hello\\%");
+
+    EXPECT_TRUE(matcher(std::string("Hello%")));
+    EXPECT_FALSE(matcher(std::string("Hello World")));
+}
+
+TEST(RegexMatcherFromLikePatternTest, StringViewMatch) {
+    using namespace milvus;
+    auto matcher = RegexMatcher::FromLikePattern("Test%");
+
+    std::string_view sv1 = "Testing";
+    std::string_view sv2 = "Failed";
+
+    EXPECT_TRUE(matcher(sv1));
+    EXPECT_FALSE(matcher(sv2));
+}
