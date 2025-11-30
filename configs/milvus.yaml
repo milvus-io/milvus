@@ -149,16 +149,16 @@ minio:
   cloudProvider: aws
   # The JSON content contains the gcs service account credentials.
   # Used only for the "gcpnative" cloud provider.
-  gcpCredentialJSON: 
+  gcpCredentialJSON:
   # Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
   # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint: 
+  iamEndpoint:
   logLevel: fatal # Log level for aws sdk log. Supported level:  off, fatal, error, warn, info, debug, trace
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
-  # The maximum number of objects requested per batch in minio ListObjects rpc, 
-  # 0 means using oss client by default, decrease these configration if ListObjects timeout
+  # The maximum number of objects requested per batch in minio ListObjects RPC,
+  # 0 means using oss client by default; decrease this configuration if ListObjects time out
   listObjectsMaxKeys: 0
 
 # Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
@@ -178,7 +178,7 @@ mq:
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
     mergeCheckInterval: 0.1 # the interval time(in seconds) for dispatcher to check whether to merge
-    targetBufSize: 16 # the lenth of channel buffer for targe
+    targetBufSize: 16 # the length of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
 # Related configuration of woodpecker, used to manage Milvus logs of recent mutation operations, output streaming log, and provide embedded log sequential read and write.
@@ -228,7 +228,7 @@ pulsar:
   # Default value applies when Pulsar is running on the same network with Milvus.
   address: localhost
   port: 6650 # Port of Pulsar service.
-  webport: 80 # Web port of of Pulsar service. If you connect direcly without proxy, should use 8080.
+  webport: 80 # Web port of of Pulsar service. If you connect directly without proxy, should use 8080.
   # The maximum size of each message in Pulsar. Unit: Byte.
   # By default, Pulsar can transmit at most 2MB of data in a single message. When the size of inserted data is greater than this value, proxy fragments the data into multiple messages to ensure that they can be transmitted correctly.
   # If the corresponding parameter in Pulsar remains unchanged, increasing this configuration will cause Milvus to fail, and reducing it produces no advantage.
@@ -242,8 +242,8 @@ pulsar:
   # Perform a backlog cleanup every time the data of given bytes is written.
   # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
   # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
-  # set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog. 
-  # If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
+  # set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog.
+  # If these options is non-zero, the wal data in pulsar is fully protected by retention policy,
   # so admin of pulsar should give enough retention time to avoid the wal message lost.
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
@@ -252,10 +252,10 @@ pulsar:
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
 #   brokerList: localhost:9092
-#   saslUsername: 
-#   saslPassword: 
-#   saslMechanisms: 
-#   securityProtocol: 
+#   saslUsername:
+#   saslPassword:
+#   saslMechanisms:
+#   securityProtocol:
 #   ssl:
 #     enabled: false # whether to enable ssl mode
 #     tlsCert:  # path to client's public key (PEM) used for authentication
@@ -328,8 +328,8 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
-  # maximum number of result entries, typically Nq * TopK * GroupSize. 
-  # It costs additional memory and time to process a large number of result entries. 
+  # maximum number of result entries, typically Nq * TopK * GroupSize.
+  # It costs additional memory and time to process a large number of result entries.
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
@@ -419,7 +419,7 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
-  heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
+  heartbeatWarningLag: 5000 # the lag value for querycoord report warning when last heartbeat is too old, in milliseconds
   checkHandoffInterval: 5000
   enableActiveStandby: false
   checkInterval: 1000
@@ -607,7 +607,7 @@ dataCoord:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
-    sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
+    sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1 (10%); if seal proportion is 12%, with jitter=0.1, the actual applied ratio will be 10.8~12%
     assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
     allocLatestExpireAttempt: 200 # The time attempting to alloc latest lastExpire from rootCoord after restart
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
@@ -625,7 +625,7 @@ dataCoord:
     compactableProportion: 0.85
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
+    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
     expansionRate: 1.25
   sealPolicy:
     channel:
@@ -642,11 +642,11 @@ dataCoord:
   forceRebuildSegmentIndex: false # force rebuild segment index to specify index engine's version
   # if param forceRebuildSegmentIndex is enabled, the vector index will be rebuilt to aligned with targetVecIndexVersion.
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
-  # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
+  # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version
   targetVecIndexVersion: -1
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   # Switch value to control if to enable segment compaction.
-  # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
+  # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the retention duration of Time Travel.
   enableCompaction: true
   compaction:
     # Switch value to control if to enable automatic segment compaction during which data coord locates and merges compactable segments in the background.
@@ -867,7 +867,7 @@ log:
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
     # If this parameter is set to a valid local path, Milvus writes and stores log files in this path.
     # Set this parameter as the path that you have permission to write.
-    rootPath: 
+    rootPath:
     maxSize: 300 # The maximum size of a log file, unit: MB.
     maxAge: 10 # The maximum retention time before a log file is automatically cleared, unit: day. The minimum value is 1.
     maxBackups: 20 # The maximum number of log files to back up, unit: day. The minimum value is 1.
@@ -958,8 +958,8 @@ common:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
-    superUsers: 
-    # default password for root user. The maximum length is 72 characters. 
+    superUsers:
+    # default password for root user. The maximum length is 72 characters.
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
@@ -1105,7 +1105,7 @@ quotaAndLimits:
     # Maximum number of db-related requests per second.
     # Setting this item to 10 indicates that Milvus processes no more than 10 db-related requests per second, including db creation/drop/alter requests.
     # To use this setting, set quotaAndLimits.dbRate.enabled to true at the same time.
-    # 		
+    #
     max: -1
   dml:
     enabled: false # Whether DML request throttling is enabled.
@@ -1329,7 +1329,7 @@ streaming:
     # Use the underlying wal default value if 0 is given.
     length: 128
   logging:
-    # The threshold of slow log, 1s by default. 
+    # The threshold of slow log, 1s by default.
     # If the wal implementation is woodpecker, the minimum threshold is 3s
     appendSlowThreshold: 1s
   flush:
@@ -1342,7 +1342,7 @@ streaming:
     # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.2 by default
     growingSegmentBytesHwmThreshold: 0.2
     # The lower watermark of total growing segment bytes for one streaming node,
-    # growing segment flush process will try to flush some growing segment into sealed 
+    # growing segment flush process will try to flush some growing segment into sealed
     # until the total bytes of growing segment is less than this threshold, 0.1 by default.
     growingSegmentBytesLwmThreshold: 0.1
     l0:
@@ -1356,12 +1356,12 @@ streaming:
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
   walRecovery:
-    # The interval of persist recovery info, 10s by default. 
+    # The interval of persist recovery info, 10s by default.
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
     # Currently it only affect the recovery of wal, but not affect the recovery of data flush into object storage
     persistInterval: 10s
     # The max dirty message count of wal recovery, 100 by default.
-    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately, 
+    # If there are more than this count of dirty message in wal recovery info, it will be persisted immediately,
     # but not wait for the persist interval.
     maxDirtyMessage: 100
     # The graceful close timeout for wal recovery, 3s by default.

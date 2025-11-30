@@ -570,7 +570,7 @@ func (s *Server) Stop() error {
 	}
 
 	// save target to meta store, after querycoord restart, make it fast to recover current target
-	// should save target after target observer stop, incase of target changed
+	// should save target after target observer stop, in case the target changed
 	if s.targetMgr != nil {
 		s.targetMgr.SaveCurrentTarget(s.ctx, s.store)
 	}

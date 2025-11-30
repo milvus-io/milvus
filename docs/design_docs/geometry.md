@@ -15,13 +15,13 @@ _Perform vector search under spatial constraints_
 Example Industries:
 
 - Local services (such as Ele.me, Uber)
-    
+
 - Map content recommendation (e.g., AutoNavi Maps recommendation)
-    
+
 - E-commerce scenarios (LBS advertising, nearby same-item retrieval)
-    
+
 - Security surveillance (tracking similar faces near a given location)
-    
+
 
 In addition to being combined with vector retrieval, supporting Geographic Information System (GIS) can also meet many common requirements for geographic information-based analysis. For example, heat map analysis, planning transportation routes, and planning market locations through statistical analysis, etc.
 
@@ -36,19 +36,19 @@ Based on the above requirements, it is necessary to provide support for the geos
 Geo Spatial DataType is a data structure used to describe geospatial information. In the SFA (Simple Feature Access) standard developed by the OGC, the following common geometric types are defined:
 
 1. Point: Represents a two-dimensional coordinate, usually representing different objects depending on the scale
-    
+
 2. LineString: An ordered collection composed of two or more points, often used to represent rivers, roads, etc.
-    
+
 3. Polygon: Represents a planar region that can have "holes".
-    
+
 4. MultiPoint: A collection of multiple points
-    
+
 5. MultiLineString: A collection of multiple line strings
-    
+
 6. MultiPolygon: A collection of multiple polygons
-    
+
 7. GeometryCollection: A collection composed of all the above geometries
-    
+
 
 The input and output of these data types have two representation methods in the SFA standard: WKT (Well Known Text) and WKB (Well Known Binary). The former is a human-readable format, such as: `POINT (0 0)` , `MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))` , etc., while the latter is a binary format for efficient storage.
 
@@ -96,29 +96,29 @@ For large data tables, this "two-pass method" of indexing first and then perform
 Common indexing methods include: R-Tree, QuadTree, GeoHash, S2, H3, etc.
 
 > R-Tree：
-> 
+>
 > For each spatial object, a Minimum Bounding Rectangle (MBR) is established, and these MBRs are recursively organized into a tree structure. The internal nodes of the tree contain the MBRs of multiple sub-nodes, which are used to quickly filter out irrelevant regions; leaf nodes store the actual spatial objects. When performing a spatial query, the R-Tree first uses the MBRs for quick filtering to find the set of objects that may meet the conditions, and then conducts precise spatial relationship judgments, thereby significantly improving query efficiency.
 
 
 > QuadTree：
-> 
+>
 > Its core idea is to divide the entire space into four quadrants, with each quadrant continuing to be recursively divided until the number of objects contained within each region is less than the set threshold. Each node represents a spatial region, and leaf nodes store actual data objects. When performing a query, the QuadTree starts from the root node, sequentially checks which sub-nodes intersect with the query range, and recursively enters these sub-nodes, ultimately finding matching objects in the leaf nodes. This structure is simple to implement and suitable for scenarios such as image processing and map tile systems, but it may encounter imbalance issues when dealing with high-density or unevenly distributed data, affecting performance.
 
 
 > geohash：
-> 
+>
 > The basic principle of geohash is: recursively divide the Earth's surface using a quadtree, where each division assigns a binary bit to the resulting sub-region, and finally a hash string for a specific region is given through base32/64 encoding. When querying, input the latitude and longitude, calculate its geohash, then specify the desired prefix length to match (e.g., 6 digits), and the algorithm will return regions with matching prefixes.
-> 
+>
 > This indexing method is suitable for nearest neighbor search. And the longer the prefix, the more precise the match. However, it performs poorly at the "boundary", i.e., there may be cases where neighbors at the junction of rectangular regions do not have the same prefix.
 
 
 > s2：
-> 
+>
 > Its core idea is to project the Earth's surface onto the six faces of a cube, with each face further recursively divided into small cells (referred to as Cells) in a quadtree structure. Each cell has a unique 64-bit integer ID (CellID) and supports up to 30 levels of resolution. The division at each level maintains the Hilbert curve order to ensure spatial locality. When performing queries, a set of spatial cells covering these geometries can be generated based on points, lines, or polygons, enabling efficient operations such as range queries and intersection judgments. This structure has a rigorous mathematical foundation, supports global seamless stitching, avoids boundary issues in traditional planar divisions, and is particularly suitable for complex scenarios such as high-precision spatial analysis, map tile systems, polygon coverage, and spatial aggregation. Although its implementation is relatively complex, it provides rich API support and is suitable for application systems requiring precise spatial operations.
 
 
 > h3：
-> 
+>
 > The core idea is to divide the Earth's surface into a series of regular hexagonal grids (hexagons), with most regions being regular hexagons except for the polar regions. The entire division uses the Icosahedron unfolding method to form a hierarchical hexagonal grid system, with each layer having a different resolution (a total of 15 layers). Each hexagonal cell is assigned a unique 64-bit integer ID, which contains information such as the cell's layer information, parent cell path, and position offset. When performing queries, data in the surrounding area can be quickly obtained by finding the neighbors of a certain hex (up to 6), the K-ring range, etc. This structure is naturally suitable for neighborhood analysis and heat map display, with good spatial uniformity and aggregation capabilities. H3 performs particularly well in scenarios such as spatial aggregation, spatial connection, and path planning.
 
 The geos library provides support for R-Tree and Quad-Tree. s2 and h3 each have their own officially provided libraries. GeoHash, on the other hand, requires additional third-party library support.
@@ -155,7 +155,7 @@ schema.add_field(name = "location",datatype = DataType.GEOMETRY)
 # create collection
 milvus_client.create_collection(collection_name,schema)
 
-# insert 
+# insert
 data =[
         {"id": 1001,"name": "Shop A","location": "POINT(116.4 39.9)"},
         {"id": 1002,"name": "Shop B","location": "POINT(116.5 39.8)"},
@@ -165,12 +165,12 @@ data =[
 milvus_client.insert(collection_name,data)
 # query
 # 1. spatial relationship
-  
-# The usage of spatial relationship querys are like this:
+
+# The usage of spatial relationship queries are like this:
 # ST_XXX({field_name}, {wkt_string})
 # where {field_name} is the name of the field that you want to query,
 # and {wkt_string} is the wkt string of the geometry.
-# So the results of the query are the specific geometry objects in the field that 
+# So the results of the query are the specific geometry objects in the field that
 # meet the spatial relationship to a given geometry
 # Including:
 # ST_Contains,ST_Within,ST_Covers,ST_Intersects
@@ -185,7 +185,7 @@ results = milvus_client.query(
 )
 print(results)
 
-  
+
 # ST_Covers
 covers_wkt = "POLYGON((116.4 39.9,116.5 39.9,116.6 39.9,116.4 39.9))"
 results = milvus_client.query(
@@ -196,7 +196,7 @@ results = milvus_client.query(
 print(results)
 
 # 2. distance relationship
-# The usage of distance relationship querys are like this:
+# The usage of distance relationship queries are like this:
 # ST_DWithin
 point_wkt = "POINT(116.5 39.9)"
 distance = 10000 # meters
@@ -217,11 +217,11 @@ results = milvus_client.query(
 print(results)
 
 # 3. Others
-# These queries need to do some calcutions in filter or output_fields like ST_Distance above,so we need to support this function.
-# But it may be not easy,and confilict with the current implementation of the filter and output_fields.
+# These queries need to do some calculations in filter or output_fields like ST_Distance above, so we need to support this function.
+# But it may not be easy, and conflicts with the current implementation of the filter and output_fields.
 
 # 4. hybrid query
-# We may sometimes use a specific condition to query and get some caculation results,consider the following case:
+# We may sometimes use a specific condition to query and get some calculation results; consider the following case:
 # Hybrid query example: filter by coverage condition and calculate area for qualifying polygons
 
 coverage_wkt = "POLYGON((116.3 39.8,116.7 39.8,116.7 40.0,116.3 40.0,116.3 39.8))"
@@ -286,36 +286,36 @@ We currently require the following third-party libraries as basic dependencies:
 ### Overview of Insertion Mechanism
 
 - Shard mechanism: Users can configure the number of shards for each collection.
-    
+
 - Mapping relationship:
-    
+
     - Each shard → one virtual channel (vchannel)
-        
+
     - A vchannel is assigned to a physical channel (pchannel), and multiple vchannels can share a pchannel
-        
+
     - pchannel → StreamingNode (SN)
-        
+
 - Data Flow:
-    
+
     - After the Proxy layer verifies the data, it splits it into multiple packages;
-        
+
     - Distributed to the corresponding shard's pchannel according to the rules;
-        
+
     - StreamingNode receives and processes data.
-        
+
 
 ### Data writing process
 
 1. SN timestamps each package to establish the operation sequence;
-    
+
 2. Data is first written on the WAL (Write Ahead Log) and divided into segments;
-    
+
 3. When a WAL segment is processed, a refresh operation is triggered;
-    
+
 4. Data is ultimately written to object storage;
-    
+
 5. The above steps are completed by StreamingNode.
-    
+
 
 ### Development sequence: Add support for the geo field from top to bottom
 
@@ -338,21 +338,21 @@ See the appendix for the specific plan
 > Trigger mechanism: When the Growing Segment reaches a certain size or after a period of time, it will be written as a Sealed Segment.
 
 - **Brief Description of** **Query** **Execution Process**
-    
+
     - The user initiates a query request;
-        
+
     - Proxy distributes queries in parallel to all StreamingNodes that hold the shard;
-        
+
     - Each SN generates its own query plan:
-        
+
         1. Query data in the local Growing Segment;
-            
+
         2. Simultaneously communicate with QueryNode to query data in Sealed Segment;
-            
+
     - All results are merged and then returned to the user.
-        
+
 - Modification Point
-    
+
     - Phase 1: Support for regular query expressions (Expr)
 
 | File Path/Module                                | Modify Target                                                           |
@@ -379,36 +379,36 @@ results = milvus_client.query(
 ## Index
 
 - Index building trigger process
-    
+
     - Client requests to create an index:
-        
+
         1. SDK sends`create_index`request;
-            
+
     - Server level processing:
-        
+
         1. Milvus does not immediately execute index building;
-            
+
         2. The request information is written to the log and sent to Datacoord via the channel;
-            
+
     - Task Scheduling Phase:
-        
+
         1. Datacoord listens to this channel;
-            
+
         2. After receiving the request, create an indexing task and add it to the scheduling queue;
-            
+
     - Execution Phase:
-        
+
         1. The scheduler distributes the task to a DataNode;
-            
+
         2. DataNode loads the target segment data from the object storage;
-            
+
         3. Build index;
-            
+
         4. Write the indexing results back to the object storage.
-            
-    
+
+
     > ⚠️ Note: Each flushed segment will build an index independently.
-    
+
 - Modification Point
 
 | Level          | Module/File                                 | Modify Target                                                    |
@@ -427,7 +427,7 @@ results = milvus_client.query(
 ### Proxy Layer
 
 - File:`validate_util.go`
-    
+
 - Modified content: Added logic for parsing and validating the geometry field.
 ### Storage Layer
 

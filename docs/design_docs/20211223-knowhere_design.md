@@ -35,7 +35,7 @@ Load(const BinarySet&);
 /*
  * Create index
  * @param [in] dataset_ptr: index data (key of the Dataset is "tensor", "rows" and "dim")
- * @parma [in] config: index param
+ * @param [in] config: index param
  */
 void
 BuildAll(const DatasetPtr& dataset_ptr, const Config& config);
@@ -43,8 +43,8 @@ BuildAll(const DatasetPtr& dataset_ptr, const Config& config);
 /*
  * KNN (K-Nearest Neighbors) Query
  * @param [in] dataset_ptr: query data (key of the Dataset is "tensor" and "rows")
- * @parma [in] config: query param
- * @parma [out] blacklist: mark for deletion
+ * @param [in] config: query param
+ * @param [out] blacklist: mark for deletion
  * @return: query result (key of the Dataset is "ids" and "distance")
  */
 DatasetPtr
@@ -61,7 +61,7 @@ CopyGpuToCpu();
 /*
  * If the user IDs has been set, they will be returned in the Query interface;
  * else the range of the returned IDs is [0, row_num-1].
- * @parma [in] uids: user ids
+ * @param [in] uids: user ids
  */
 void
 SetUids(std::shared_ptr<std::vector<IDType>> uids);

@@ -5,7 +5,7 @@
 Milvus protobuf service definition is in [repo](https://github.com/milvus-io/milvus-proto)
 When developers try to develop a new  public API or add parameters to existing ones, it's painful to wait for PR merged in milvus-proto repo, especially when the API definition is still in a draft status.
 
-This document demonstrates how to develop a new API without miluvs-proto repo update.
+This document demonstrates how to develop a new API without a milvus-proto repo update.
 
 ## Add or modify messages only
 
@@ -37,23 +37,23 @@ libprotoc 3.21.4
 ~/workspace/milvus-proto
 ```
 
-Back to milvus repo. Golang has provided a "convienient" way to use local repo instead of the remote one
+Back to the Milvus repo. Golang has provided a "convenient" way to use a local repo instead of the remote one
 
 ```
-# go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v2=/home/silverxia/workspace/milvus-proto/go-api 
+# go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v2=/home/silverxia/workspace/milvus-proto/go-api
 # cd pkg
 // set pkg module as well
 # go mod edit -replace github.com/milvus-io/milvus-proto/go-api/v2=/home/silverxia/workspace/milvus-proto/go-api
-# cd .. 
+# cd ..
 ```
 
-Whoola, your IDE shall now recognize the new TestObject definition now
+Voilà! Your IDE should now recognize the new TestObject definition.
 
 <img src="./figs/ide_with_newdef.png" width=550>
 
 ## Update Milvus API
 
-The tricky point is to update Milvus service API as well. If the modification is small and limited, the previous part is enough. The more common case is we need to use the new/updated message in an API(either exising or new).
+The tricky point is to update Milvus service API as well. If the modification is small and limited, the previous part is enough. The more common case is needing to use the new or updated message in an API (either existing or new).
 
 For example, the `TestObject` needs to appear in datanode `SyncSegments` API request struct. Golang module replacement does not fit since we need to generated a new service definition with the modified milvus-proto.
 
@@ -78,9 +78,9 @@ message SyncSegmentsRequest {
 }
 ```
 
-`make generated-proto` will fail since the current public online repo (actully the submodule here)does not contain the definition for TestObject.
+`make generated-proto` will fail since the current public online repo (actually the submodule here) does not contain the definition for TestObject.
 
-To work around that, we could modify the script slighly:
+To work around that, we could modify the script slightly:
 
 ```sh
 # scripts/generate_proto.sh
@@ -110,4 +110,3 @@ type SyncSegmentsRequest struct {
 ```
 
 Feel free to debug and POC your new API locally!
-

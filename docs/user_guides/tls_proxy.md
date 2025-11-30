@@ -49,7 +49,7 @@ oid_section		= new_oids
 # To use this configuration file with the "-extfile" option of the
 # "openssl x509" utility, name here the section containing the
 # X.509v3 extensions to use:
-# extensions		= 
+# extensions		=
 # (Alternatively, use a configuration file that has only
 # X.509v3 extensions in its main [= default] section.)
 
@@ -147,7 +147,7 @@ x509_extensions	= v3_ca	# The extensions to add to the self signed cert
 # input_password = secret
 # output_password = secret
 
-# This sets a mask for permitted string types. There are several options. 
+# This sets a mask for permitted string types. There are several options.
 # default: PrintableString, T61String, BMPString.
 # pkix	 : PrintableString, BMPString (PKIX recommendation before 2004)
 # utf8only: only UTF8Strings (PKIX recommendation after 2004).
@@ -170,7 +170,7 @@ stateOrProvinceName_default	= Some-State
 localityName			= Locality Name (eg, city)
 
 0.organizationName		= Organization Name (eg, company)
-0.organizationName_default	= Internet Widgits Pty Ltd
+0.organizationName_default	= Internet Widgets Pty Ltd
 
 # we can do this but it is not needed normally :-)
 #1.organizationName		= Second Organization Name (eg, company)
@@ -483,7 +483,7 @@ common:
     # tlsMode 0 indicates no authentication
     # tlsMode 1 indicates one-way authentication
     # tlsMode 2 indicates two-way authentication
-    tlsMode: 2 
+    tlsMode: 2
 ```
 ### One-way authentication
 Server-side needs server.pem and server.key files, client-side needs server.pem file.

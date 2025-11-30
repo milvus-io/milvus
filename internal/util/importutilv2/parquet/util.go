@@ -523,7 +523,7 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 			return err
 		}
 		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType, field) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, expect arrow type '%s', get arrow data type '%s'",
+			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mismatch, expect arrow type '%s', get arrow data type '%s'",
 				field.Name, toArrDataType.String(), arrField.Type.String()))
 		}
 	}
@@ -588,13 +588,13 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 
 			// Check if the arrow type is convertible to the expected type
 			if !isArrowDataTypeConvertible(arrowSubField.Type, expectedArrowType, subField) {
-				return merr.WrapErrImportFailed(fmt.Sprintf("sub-field '%s' in struct '%s' type mis-match, expect arrow type '%s', got '%s'",
+				return merr.WrapErrImportFailed(fmt.Sprintf("sub-field '%s' in struct '%s' type mismatch, expect arrow type '%s', got '%s'",
 					fieldName, structField.Name, expectedArrowType.String(), arrowSubField.Type.String()))
 			}
 		}
 
 		if len(structFieldMap) != len(structField.Fields) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("struct field number dismatch: %s, expect %d, got %d", structField.Name, len(structField.Fields), len(structFieldMap)))
+			return merr.WrapErrImportFailed(fmt.Sprintf("struct field number mismatch: %s, expect %d, got %d", structField.Name, len(structField.Fields), len(structFieldMap)))
 		}
 	}
 
