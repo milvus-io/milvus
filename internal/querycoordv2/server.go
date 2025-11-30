@@ -818,11 +818,13 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 				Labels:   nodeSession.GetServerLabel(),
 			}))
 
+			// call handleNodeUp no matter what state new querynode is in
+			// all component need this op so that stopping balance could work correctly
+			s.handleNodeUp(nodeSession.GetServerID())
+
 			if nodeSession.Stopping {
 				s.nodeMgr.Stopping(nodeSession.ServerID)
 				s.handleNodeStopping(nodeSession.ServerID)
-			} else {
-				s.handleNodeUp(nodeSession.GetServerID())
 			}
 		}
 	}
