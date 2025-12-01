@@ -43,6 +43,7 @@ set(MILVUS_TEST_FILES
         test_index_wrapper.cpp
         test_integer_overflow.cpp
         test_query.cpp
+        test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
         test_string_expr.cpp
