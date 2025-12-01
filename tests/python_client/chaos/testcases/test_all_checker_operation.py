@@ -52,23 +52,36 @@ class TestBase:
 class TestOperations(TestBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, host, port, user, password, milvus_ns, database_name):
-        if user and password:
-            # log.info(f"connect to {host}:{port} with user {user} and password {password}")
-            connections.connect('default', host=host, port=port, user=user, password=password)
+    def connection(self, host, port, user, password, uri, token, milvus_ns, database_name):
+        # Prioritize uri and token for connection
+        if uri:
+            actual_uri = uri
         else:
-            connections.connect('default', host=host, port=port)
+            actual_uri = f"http://{host}:{port}"
+
+        if token:
+            actual_token = token
+        else:
+            actual_token = f"{user}:{password}" if user and password else None
+
+        if actual_token:
+            connections.connect('default', uri=actual_uri, token=actual_token)
+        else:
+            connections.connect('default', uri=actual_uri)
+
         if connections.has_connection("default") is False:
             raise Exception("no connections")
         all_dbs = db.list_database()
         if database_name not in all_dbs:
             db.create_database(database_name)
         db.using_database(database_name)
-        log.info(f"connect to milvus {host}:{port}, db {database_name} successfully")
+        log.info(f"connect to milvus {actual_uri}, db {database_name} successfully")
         self.host = host
         self.port = port
         self.user = user
         self.password = password
+        self.uri = actual_uri
+        self.token = actual_token
         self.milvus_sys = MilvusSys(alias='default')
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
