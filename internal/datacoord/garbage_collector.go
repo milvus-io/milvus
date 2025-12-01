@@ -73,8 +73,8 @@ type garbageCollector struct {
 	stopOnce         sync.Once
 	wg               sync.WaitGroup
 	cmdCh            chan gcCmd
-	pauseUntil       atomic.Time
-	pausedCollection *typeutil.ConcurrentMap[int64, time.Time]
+	pauseUntil       *gcPauseRecords
+	pausedCollection *typeutil.ConcurrentMap[int64, *gcPauseRecords]
 
 	systemMetricsListener *hardware.SystemMetricsListener
 }
@@ -83,7 +83,101 @@ type gcCmd struct {
 	cmdType      datapb.GcCommand
 	duration     time.Duration
 	collectionID int64
+	ticket       string
 	done         chan struct{}
+}
+
+type gcPauseRecord struct {
+	ticket     string
+	pauseUntil time.Time
+}
+
+type gcPauseRecords struct {
+	mut     sync.RWMutex
+	maxLen  int
+	records typeutil.Heap[gcPauseRecord]
+}
+
+func (gc *gcPauseRecords) PauseUntil() time.Time {
+	// nil protection
+	if gc == nil {
+		return time.Time{}
+	}
+	gc.mut.RLock()
+	defer gc.mut.RUnlock()
+	// no pause records, return zero value
+	if gc.records.Len() == 0 {
+		return time.Time{}
+	}
+
+	return gc.records.Peek().pauseUntil
+}
+
+func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) {
+	gc.mut.Lock()
+	defer gc.mut.Unlock()
+
+	// heap small enough, short path
+	if gc.records.Len() < gc.maxLen {
+		gc.records.Push(gcPauseRecord{
+			ticket:     ticket,
+			pauseUntil: pauseUntil,
+		})
+		return
+	}
+
+	// too much pause records, refresh heap
+	counter := 1
+	now := time.Now()
+	records := make([]gcPauseRecord, 0, gc.records.Len())
+	for gc.records.Len() > 0 {
+		record := gc.records.Pop()
+		if now.Before(record.pauseUntil) {
+			records = append(records, record)
+			counter++
+		}
+		if counter == gc.maxLen {
+			break
+		}
+	}
+	gc.records = typeutil.NewObjectArrayBasedMaximumHeap(records, func(r gcPauseRecord) int64 {
+		return r.pauseUntil.UnixNano()
+	})
+	gc.records.Push(gcPauseRecord{
+		ticket:     ticket,
+		pauseUntil: pauseUntil,
+	})
+}
+
+func (gc *gcPauseRecords) Delete(ticket string) {
+	gc.mut.Lock()
+	defer gc.mut.Unlock()
+	now := time.Now()
+	records := make([]gcPauseRecord, 0, gc.records.Len())
+	for gc.records.Len() > 0 {
+		record := gc.records.Pop()
+		if now.Before(record.pauseUntil) && record.ticket != ticket {
+			records = append(records, record)
+		}
+	}
+	gc.records = typeutil.NewObjectArrayBasedMaximumHeap(records, func(r gcPauseRecord) int64 {
+		return r.pauseUntil.UnixNano()
+	})
+}
+
+func (gc *gcPauseRecords) Len() int {
+	gc.mut.RLock()
+	defer gc.mut.RUnlock()
+	return gc.records.Len()
+}
+
+func NewGCPauseRecords() *gcPauseRecords {
+	return &gcPauseRecords{
+		records: typeutil.NewObjectArrayBasedMaximumHeap[gcPauseRecord, int64]([]gcPauseRecord{}, func(r gcPauseRecord) int64 {
+			return r.pauseUntil.UnixNano()
+		}),
+		maxLen: 64,
+	}
 }
 
 // newSystemMetricsListener creates a system metrics listener for garbage collector.
@@ -130,7 +224,8 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		option:                opt,
 		cmdCh:                 make(chan gcCmd),
 		systemMetricsListener: newSystemMetricsListener(&opt),
-		pausedCollection:      typeutil.NewConcurrentMap[int64, time.Time](),
+		pauseUntil:            NewGCPauseRecords(),
+		pausedCollection:      typeutil.NewConcurrentMap[int64, *gcPauseRecords](),
 	}
 }
 
@@ -155,7 +250,7 @@ type GcStatus struct {
 
 // GetStatus returns the current status of the garbage collector.
 func (gc *garbageCollector) GetStatus() GcStatus {
-	pauseUntil := gc.pauseUntil.Load()
+	pauseUntil := gc.pauseUntil.PauseUntil()
 	now := time.Now()
 
 	if now.Before(pauseUntil) {
@@ -171,7 +266,7 @@ func (gc *garbageCollector) GetStatus() GcStatus {
 	}
 }
 
-func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, pauseDuration time.Duration) error {
+func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, ticket string, pauseDuration time.Duration) error {
 	if !gc.option.enabled {
 		log.Info("garbage collection not enabled")
 		return nil
@@ -182,6 +277,7 @@ func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, pause
 		cmdType:      datapb.GcCommand_Pause,
 		duration:     pauseDuration,
 		collectionID: collectionID,
+		ticket:       ticket,
 		done:         done,
 	}:
 		<-done
@@ -191,7 +287,7 @@ func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, pause
 	}
 }
 
-func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64) error {
+func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, ticket string) error {
 	if !gc.option.enabled {
 		log.Warn("garbage collection not enabled, cannot resume")
 		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
@@ -202,6 +298,7 @@ func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64) erro
 		cmdType:      datapb.GcCommand_Resume,
 		done:         done,
 		collectionID: collectionID,
+		ticket:       ticket,
 	}:
 		<-done
 		return nil
@@ -249,33 +346,47 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 	for {
 		select {
 		case cmd := <-gc.cmdCh:
+			log := log.With(
+				zap.Int64("collectionID", cmd.collectionID),
+				zap.String("ticket", cmd.ticket),
+			)
 			switch cmd.cmdType {
 			case datapb.GcCommand_Pause:
-				pauseUntil := time.Now().Add(cmd.duration)
+				reqPauseUntil := time.Now().Add(cmd.duration)
+				log = log.With(
+					zap.Time("pauseUntil", reqPauseUntil),
+					zap.Duration("duration", cmd.duration),
+				)
 				if cmd.collectionID <= 0 { // legacy pause all
-					if pauseUntil.After(gc.pauseUntil.Load()) {
-						log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
-						gc.pauseUntil.Store(pauseUntil)
-					} else {
-						log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
-					}
+					gc.pauseUntil.Insert(cmd.ticket, reqPauseUntil)
+					log.Info("global pause ticket recorded")
 				} else {
 					curr, has := gc.pausedCollection.Get(cmd.collectionID)
-					if has && curr.After(pauseUntil) {
-						log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", curr))
-					} else {
-						log.Info("collection garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Int64("collectionID", cmd.collectionID))
-						gc.pausedCollection.Insert(cmd.collectionID, pauseUntil)
+					if !has {
+						curr = NewGCPauseRecords()
+						gc.pausedCollection.Insert(cmd.collectionID, curr)
 					}
+					curr.Insert(cmd.ticket, reqPauseUntil)
+					log.Info("collection new pause ticket recorded")
 				}
 			case datapb.GcCommand_Resume:
 				// reset to zero value
+				var afterResume time.Time
 				if cmd.collectionID <= 0 {
-					gc.pauseUntil.Store(time.Time{})
+					gc.pauseUntil.Delete(cmd.ticket)
+					afterResume = gc.pauseUntil.PauseUntil()
 				} else {
-					gc.pausedCollection.GetAndRemove(cmd.collectionID)
+					curr, has := gc.pausedCollection.Get(cmd.collectionID)
+					if has {
+						curr.Delete(cmd.ticket)
+						afterResume = curr.PauseUntil()
+						if curr.Len() == 0 || time.Now().After(afterResume) {
+							gc.pausedCollection.Remove(cmd.collectionID)
+						}
+					}
 				}
-				log.Info("garbage collection resumed", zap.Int64("collectionID", cmd.collectionID))
+				stillPaused := time.Now().Before(afterResume)
+				log.Info("garbage collection resumed", zap.Bool("stillPaused", stillPaused))
 			}
 			close(cmd.done)
 		case <-gc.ctx.Done():
@@ -296,8 +407,9 @@ func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name s
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			if time.Now().Before(gc.pauseUntil.Load()) {
-				logger.Info("garbage collector paused", zap.Time("until", gc.pauseUntil.Load()))
+			globalPauseUntil := gc.pauseUntil.PauseUntil()
+			if time.Now().Before(globalPauseUntil) {
+				logger.Info("garbage collector paused", zap.Time("until", globalPauseUntil))
 				continue
 			}
 			logger.Info("garbage collector recycle task start...")
@@ -309,8 +421,8 @@ func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name s
 }
 
 func (gc *garbageCollector) collectionGCPaused(collectionID int64) bool {
-	pauseUntil, has := gc.pausedCollection.Get(collectionID)
-	return has && time.Now().Before(pauseUntil)
+	collPauseUntil, has := gc.pausedCollection.Get(collectionID)
+	return has && time.Now().Before(collPauseUntil.PauseUntil())
 }
 
 // close stop the garbage collector.

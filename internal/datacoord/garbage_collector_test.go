@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
@@ -1629,10 +1630,10 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, -1, time.Second)
+		err := gc.Pause(ctx, -1, "", time.Second)
 		s.NoError(err)
 
-		err = gc.Resume(ctx, -1)
+		err = gc.Resume(ctx, -1, "")
 		s.Error(err)
 	})
 
@@ -1650,15 +1651,15 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, -1, time.Minute)
+		err := gc.Pause(ctx, -1, "", time.Minute)
 		s.NoError(err)
 
-		s.NotZero(gc.pauseUntil.Load())
+		s.NotZero(gc.pauseUntil.PauseUntil())
 
-		err = gc.Resume(ctx, -1)
+		err = gc.Resume(ctx, -1, "")
 		s.NoError(err)
 
-		s.Zero(gc.pauseUntil.Load())
+		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
 	s.Run("pause_before_until", func() {
@@ -1675,16 +1676,16 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, -1, time.Minute)
+		err := gc.Pause(ctx, -1, "", time.Minute)
 		s.NoError(err)
 
-		until := gc.pauseUntil.Load()
+		until := gc.pauseUntil.PauseUntil()
 		s.NotZero(until)
 
-		err = gc.Pause(ctx, -1, time.Second)
+		err = gc.Pause(ctx, -1, "", time.Second)
 		s.NoError(err)
 
-		second := gc.pauseUntil.Load()
+		second := gc.pauseUntil.PauseUntil()
 
 		s.Equal(until, second)
 	})
@@ -1701,15 +1702,15 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 		defer cancel()
-		err := gc.Pause(ctx, -1, time.Minute)
+		err := gc.Pause(ctx, -1, "", time.Minute)
 		s.Error(err)
 
-		s.Zero(gc.pauseUntil.Load())
+		s.Zero(gc.pauseUntil.PauseUntil())
 
-		err = gc.Resume(ctx, -1)
+		err = gc.Resume(ctx, -1, "")
 		s.Error(err)
 
-		s.Zero(gc.pauseUntil.Load())
+		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
 	s.Run("pause_collection", func() {
@@ -1726,23 +1727,34 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, 100, time.Minute)
+		ticket := uuid.NewString()
+		err := gc.Pause(ctx, 100, ticket, time.Minute)
 		s.NoError(err)
 
 		until, has := gc.pausedCollection.Get(100)
+		firstPauseUntil := until.PauseUntil()
 		s.True(has)
-		s.NotZero(until)
+		s.NotZero(firstPauseUntil)
 
-		err = gc.Pause(ctx, 100, time.Second)
+		ticket2 := uuid.NewString()
+		err = gc.Pause(ctx, 100, ticket2, time.Second*30)
 		s.NoError(err)
 
 		second, has := gc.pausedCollection.Get(100)
+		secondPauseUntil := second.PauseUntil()
 		s.True(has)
 
-		s.Equal(until, second)
+		s.Equal(firstPauseUntil, secondPauseUntil)
 
-		err = gc.Resume(ctx, 100)
+		err = gc.Resume(ctx, 100, ticket2)
 		s.NoError(err)
+
+		afterResume, has := gc.pausedCollection.Get(100)
+		s.True(has)
+		afterUntil := afterResume.PauseUntil()
+		s.Equal(firstPauseUntil, afterUntil)
+
+		err = gc.Resume(ctx, 100, ticket)
 
 		_, has = gc.pausedCollection.Get(100)
 		s.False(has)

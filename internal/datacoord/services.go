@@ -1809,8 +1809,9 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 		if err != nil {
 			return merr.Status(err), nil
 		}
+		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
 
-		if err := s.garbageCollector.Pause(ctx, collectionID, time.Duration(pauseSeconds)*time.Second); err != nil {
+		if err := s.garbageCollector.Pause(ctx, collectionID, ticket, time.Duration(pauseSeconds)*time.Second); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil
@@ -1820,7 +1821,8 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 		if err != nil {
 			return merr.Status(err), nil
 		}
-		if err := s.garbageCollector.Resume(ctx, collectionID); err != nil {
+		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
+		if err := s.garbageCollector.Resume(ctx, collectionID, ticket); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil

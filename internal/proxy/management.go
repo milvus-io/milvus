@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -91,8 +92,11 @@ func RegisterMgrRoute(proxy *Proxy) {
 
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
+	// generate ticke for request
+	ticket := uuid.New().String()
 	params := []*commonpb.KeyValuePair{
 		{Key: "duration", Value: pauseSeconds},
+		{Key: "ticket", Value: ticket},
 	}
 	if req.URL.Query().Has("collection_id") {
 		params = append(params, &commonpb.KeyValuePair{
@@ -117,11 +121,13 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	fmt.Fprintf(w, `{"msg": "OK", ticket: "%s"}`, ticket)
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
-	params := []*commonpb.KeyValuePair{}
+	params := []*commonpb.KeyValuePair{
+		{Key: "ticket", Value: req.URL.Query().Get("ticket")},
+	}
 	if req.URL.Query().Has("collection_id") {
 		params = append(params, &commonpb.KeyValuePair{
 			Key:   "collection_id",
