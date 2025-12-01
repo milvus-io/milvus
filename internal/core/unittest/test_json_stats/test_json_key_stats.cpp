@@ -267,10 +267,7 @@ TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
             index_->ExecutorForGettingValid(nullptr, field, valid_res_view);
         EXPECT_EQ(processed_size, size_);
     }
-    if (!index_->CanSkipShared(path)) {
-        std::cout << "can not skip shared" << std::endl;
-        index_->ExecuteExistsPathForSharedData(path, valid_res_view);
-    }
+    index_->ExecuteExistsPathForSharedData(path, valid_res_view);
     std::cout << "valid_res.count(): " << valid_res.count() << std::endl;
     if (nullable_) {
         EXPECT_EQ(valid_res.count(), 400);
@@ -321,15 +318,6 @@ TEST_P(JsonKeyStatsTest, TestGetShreddingFields) {
     std::vector<JSONType> types = {JSONType::INT64};
     auto typed_fields = index_->GetShreddingFields(pointer, types);
     EXPECT_FALSE(typed_fields.empty());
-}
-
-TEST_P(JsonKeyStatsTest, TestCanSkipShared) {
-    std::string path = "/int";
-    std::set<JSONType> target_types = {JSONType::INT64};
-    EXPECT_TRUE(index_->CanSkipShared(path, target_types));
-
-    target_types = {JSONType::STRING};
-    EXPECT_TRUE(index_->CanSkipShared(path, target_types));
 }
 
 class JsonKeyStatsUploadLoadTest : public ::testing::Test {
