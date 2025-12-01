@@ -182,7 +182,7 @@ func (node *QueryNode) Register() error {
 	node.session.Register()
 	// start liveness check
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
-	node.session.LivenessCheck(node.ctx, func() {
+	node.session.LivenessCheck(func() {
 		log.Ctx(node.ctx).Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
 		os.Exit(1)
 	})
