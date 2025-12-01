@@ -24,7 +24,13 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
-export OS_NAME="${OS_NAME:-ubuntu20.04}"
+if [[ -f "$ROOT_DIR/.env" ]]; then
+    set -a  # automatically export all variables from .env
+    source $ROOT_DIR/.env
+    set +a  # stop automatically exporting
+fi
+
+export OS_NAME="${OS_NAME:-ubuntu22.04}"
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
