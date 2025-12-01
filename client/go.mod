@@ -12,7 +12,9 @@ require (
 	github.com/samber/lo v1.27.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.17.1
+	go.opentelemetry.io/otel v1.34.0
 	go.uber.org/atomic v1.11.0
+	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.5
 )
@@ -91,7 +93,6 @@ require (
 	go.etcd.io/etcd/server/v3 v3.5.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
-	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.20.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.20.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
