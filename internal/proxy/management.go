@@ -92,7 +92,7 @@ func RegisterMgrRoute(proxy *Proxy) {
 
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
-	// generate ticke for request
+	// generate ticket for request
 	ticket := uuid.New().String()
 	params := []*commonpb.KeyValuePair{
 		{Key: "duration", Value: pauseSeconds},
