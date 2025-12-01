@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"os"
 	"sync"
 	"time"
 
@@ -157,12 +156,6 @@ func (node *DataNode) Register() error {
 
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.DataNodeRole).Inc()
 	log.Info("DataNode Register Finished")
-	// Start liveness check
-	node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetSession().ServerID))
-		os.Exit(1)
-	})
-
 	return nil
 }
 

@@ -165,7 +165,6 @@ func (r *Runner) CheckSessions() error {
 
 func (r *Runner) RegisterSession() error {
 	r.session.Register()
-	r.session.LivenessCheck(r.ctx, func() {})
 	return nil
 }
 
@@ -246,7 +245,7 @@ func (r *Runner) waitUntilSessionExpired() {
 }
 
 func (r *Runner) Stop() {
-	r.session.Revoke(time.Second)
+	r.session.Stop()
 	r.waitUntilSessionExpired()
 	r.cancel()
 	r.wg.Wait()

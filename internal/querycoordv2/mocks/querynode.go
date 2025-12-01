@@ -21,7 +21,6 @@ import (
 	"net"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -149,7 +148,7 @@ func (node *MockQueryNode) Stopping() {
 func (node *MockQueryNode) Stop() {
 	node.cancel()
 	node.server.GracefulStop()
-	node.session.Revoke(time.Second)
+	node.session.Stop()
 }
 
 func (node *MockQueryNode) getAllChannels() []*querypb.ChannelVersionInfo {
