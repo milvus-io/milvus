@@ -258,6 +258,7 @@ message FullStreamingNodeAssignmentWithVersion {
     repeated StreamingNodeAssignment assignments          = 2;
     CChannelAssignment cchannel                           = 3; // Where the control channel located.
     common.ReplicateConfiguration replicate_configuration = 4;
+    StreamingVersion streaming_version = 5;
 }
 
 // CChannelAssignment is the assignment info of a control channel.

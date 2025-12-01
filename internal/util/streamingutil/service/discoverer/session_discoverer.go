@@ -2,6 +2,8 @@ package discoverer
 
 import (
 	"context"
+	"net"
+	"strconv"
 
 	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
@@ -17,27 +19,68 @@ import (
 )
 
 // NewSessionDiscoverer returns a new Discoverer for the milvus session registration.
-func NewSessionDiscoverer(etcdCli *clientv3.Client, prefix string, exclusive bool, semverRange string) Discoverer {
-	return &sessionDiscoverer{
+func NewSessionDiscoverer(etcdCli *clientv3.Client, opts ...SessionDiscovererOption) *sessionDiscoverer {
+	sd := &sessionDiscoverer{
 		etcdCli:      etcdCli,
-		prefix:       prefix,
-		exclusive:    exclusive,
-		versionRange: semver.MustParseRange(semverRange),
-		logger:       log.With(zap.String("prefix", prefix), zap.Bool("exclusive", exclusive), zap.String("semver", semverRange)),
-		revision:     0,
 		peerSessions: make(map[string]*sessionutil.SessionRaw),
 	}
+	for _, opt := range opts {
+		opt(sd)
+	}
+	if sd.prefix == "" {
+		panic("prefix is required")
+	}
+	if sd.versionRangeStr == "" {
+		panic("version range is required")
+	}
+	sd.SetLogger(log.With(zap.String("prefix", sd.prefix), zap.Bool("exclusive", sd.exclusive), zap.String("semver", sd.versionRangeStr)))
+	return sd
 }
+
+// SessionDiscovererOption is a function that can be used to configure the session discoverer.
+type SessionDiscovererOption func(sw *sessionDiscoverer)
 
 // sessionDiscoverer is used to apply a session watch on etcd.
 type sessionDiscoverer struct {
-	etcdCli      *clientv3.Client
-	prefix       string
-	exclusive    bool // if exclusive, only one session is allowed, not use the prefix, only use the role directly.
-	logger       *log.MLogger
-	versionRange semver.Range
-	revision     int64
-	peerSessions map[string]*sessionutil.SessionRaw // map[Key]SessionRaw, map the key path of session to session.
+	log.Binder
+
+	etcdCli         *clientv3.Client
+	prefix          string
+	exclusive       bool // if exclusive, only one session is allowed, not use the prefix, only use the role directly.
+	versionRange    semver.Range
+	versionRangeStr string
+	revision        int64
+	peerSessions    map[string]*sessionutil.SessionRaw // map[Key]SessionRaw, map the key path of session to session.
+	forcePort       int                                // force the port to use when resolving.
+}
+
+// OptSDForcePort forces the port to use when resolving.
+func OptSDForcePort(port int) SessionDiscovererOption {
+	return func(sw *sessionDiscoverer) {
+		sw.forcePort = port
+	}
+}
+
+// OptSDPrefix sets the prefix to use when resolving.
+func OptSDPrefix(prefix string) SessionDiscovererOption {
+	return func(sw *sessionDiscoverer) {
+		sw.prefix = prefix
+	}
+}
+
+// OptSDExclusive sets the exclusive to use when resolving.
+func OptSDExclusive() SessionDiscovererOption {
+	return func(sw *sessionDiscoverer) {
+		sw.exclusive = true
+	}
+}
+
+// OptSDVersionRange sets the version range to use when resolving.
+func OptSDVersionRange(versionRange string) SessionDiscovererOption {
+	return func(sw *sessionDiscoverer) {
+		sw.versionRange = semver.MustParseRange(versionRange)
+		sw.versionRangeStr = versionRange
+	}
 }
 
 // Discover watches the service discovery on these goroutine.
@@ -92,12 +135,12 @@ func (sw *sessionDiscoverer) watch(ctx context.Context, cb func(VersionedState) 
 // handleETCDEvent handles the etcd event.
 func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error {
 	if resp.Err() != nil {
-		sw.logger.Warn("etcd watch failed with error", zap.Error(resp.Err()))
+		sw.Logger().Warn("etcd watch failed with error", zap.Error(resp.Err()))
 		return resp.Err()
 	}
 
 	for _, ev := range resp.Events {
-		logger := sw.logger.With(zap.String("event", ev.Type.String()),
+		logger := sw.Logger().With(zap.String("event", ev.Type.String()),
 			zap.String("sessionKey", string(ev.Kv.Key)))
 		switch ev.Type {
 		case clientv3.EventTypePut:
@@ -130,7 +173,7 @@ func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
 		return err
 	}
 	for _, kv := range resp.Kvs {
-		logger := sw.logger.With(zap.String("sessionKey", string(kv.Key)), zap.String("sessionValue", string(kv.Value)))
+		logger := sw.Logger().With(zap.String("sessionKey", string(kv.Key)), zap.String("sessionValue", string(kv.Value)))
 		session, err := sw.parseSession(kv.Value)
 		if err != nil {
 			logger.Warn("fail to parse session when initializing discoverer", zap.Error(err))
@@ -160,18 +203,27 @@ func (sw *sessionDiscoverer) parseState() VersionedState {
 		session := session
 		v, err := semver.Parse(session.Version)
 		if err != nil {
-			sw.logger.Error("failed to parse version for session", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version), zap.Error(err))
+			sw.Logger().Error("failed to parse version for session", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version), zap.Error(err))
 			continue
 		}
 		// filter low version.
 		// !!! important, stopping nodes should not be removed here.
 		if !sw.versionRange(v) {
-			sw.logger.Info("skip low version node", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version))
+			sw.Logger().Info("skip low version node", zap.Int64("serverID", session.ServerID), zap.String("version", session.Version))
 			continue
 		}
-
+		address := session.Address
+		if sw.forcePort != 0 {
+			// replace the port with the force port in session address.
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				sw.Logger().Error("failed to split host and port for session", zap.Int64("serverID", session.ServerID), zap.String("address", address), zap.Error(err))
+				continue
+			}
+			address = net.JoinHostPort(host, strconv.Itoa(sw.forcePort))
+		}
 		addrs = append(addrs, resolver.Address{
-			Addr: session.Address,
+			Addr: address,
 			// resolverAttributes is important to use when resolving, server id to make resolver.Address with same adresss different.
 			Attributes: attributes.WithServerID(new(attributes.Attributes), session.ServerID),
 			// balancerAttributes can be seen by picker of grpc balancer.
