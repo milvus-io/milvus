@@ -95,7 +95,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 			// note: should enable sync segment distribution to ro node, to avoid balance channel from ro node stucks
 			nodes := replica.GetNodes()
 			if streamingutil.IsStreamingServiceEnabled() {
-				sqNodes := make([]int64, len(replica.GetROSQNodes())+len(replica.GetRWSQNodes()))
+				sqNodes := make([]int64, 0, len(replica.GetROSQNodes())+len(replica.GetRWSQNodes()))
 				sqNodes = append(sqNodes, replica.GetROSQNodes()...)
 				sqNodes = append(sqNodes, replica.GetRWSQNodes()...)
 				nodes = sqNodes
