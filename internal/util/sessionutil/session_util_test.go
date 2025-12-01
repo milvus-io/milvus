@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"strconv"
 	"strings"
@@ -20,13 +20,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -38,20 +36,14 @@ import (
 func TestGetServerIDConcurrently(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
-	params := paramtable.Get()
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
+	err := etcdKV.RemoveWithPrefix(ctx, "")
 	assert.NoError(t, err)
 
-	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	var wg sync.WaitGroup
@@ -81,19 +73,14 @@ func TestGetServerIDConcurrently(t *testing.T) {
 func TestInit(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
-	params := paramtable.Get()
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
+	err := etcdKV.RemoveWithPrefix(ctx, "")
 	assert.NoError(t, err)
 
-	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
@@ -109,19 +96,14 @@ func TestInit(t *testing.T) {
 func TestInitNoArgs(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
-	params := paramtable.Get()
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
+	err := etcdKV.RemoveWithPrefix(ctx, "")
 	assert.NoError(t, err)
 
-	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	s := NewSession(ctx)
@@ -137,17 +119,11 @@ func TestInitNoArgs(t *testing.T) {
 func TestUpdateSessions(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
-	params := paramtable.Get()
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "")
 
-	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	var wg sync.WaitGroup
@@ -163,8 +139,6 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-		require.NoError(t, err)
 		singleS := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 		singleS.Init("test", "testAddr", false, false)
 		singleS.Register()
@@ -221,86 +195,17 @@ LOOP:
 	assert.Equal(t, delEventLen, 10)
 }
 
-func TestSessionLivenessCheck(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	s := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
-	s.Register()
-	ch := make(chan struct{})
-	s.liveCh = ch
-	signal := make(chan struct{}, 1)
-
-	flag := atomic.NewBool(false)
-	s.LivenessCheck(context.Background(), func() {
-		flag.Store(true)
-		signal <- struct{}{}
-	})
-	assert.False(t, flag.Load())
-
-	// test liveCh receive event, liveness won't exit, callback won't trigger
-	ch <- struct{}{}
-	assert.False(t, flag.Load())
-
-	// test close liveCh, liveness exit, callback should trigger
-	close(ch)
-	<-signal
-	assert.True(t, flag.Load())
-
-	// test context done, liveness exit, callback shouldn't trigger
-	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s1 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
-	s1.Register()
-	ctx, cancel := context.WithCancel(context.Background())
-	flag.Store(false)
-
-	s1.LivenessCheck(ctx, func() {
-		flag.Store(true)
-		signal <- struct{}{}
-	})
-	cancel()
-	assert.False(t, flag.Load())
-
-	// test context done, liveness start failed, callback should trigger
-	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s2 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
-	s2.Register()
-	ctx, cancel = context.WithCancel(context.Background())
-	signal = make(chan struct{}, 1)
-	flag.Store(false)
-	cancel()
-	s2.LivenessCheck(ctx, func() {
-		flag.Store(true)
-		signal <- struct{}{}
-	})
-	<-signal
-	assert.True(t, flag.Load())
-}
-
 func TestWatcherHandleWatchResp(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
-	params := paramtable.Get()
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/by-dev/session-ut")
-	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix(ctx, "/by-dev/session-ut")
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
-	defer s.Revoke(time.Second)
+	defer s.Stop()
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
 		return &sessionWatcher{
@@ -405,21 +310,6 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 			w.handleWatchResponse(wresp)
 		})
 	})
-
-	t.Run("err handled but list failed", func(t *testing.T) {
-		s := NewSessionWithEtcd(ctx, "/by-dev/session-ut", etcdCli)
-		s.etcdCli.Close()
-		w := getWatcher(s, func(sessions map[string]*Session) error {
-			return nil
-		})
-		wresp := clientv3.WatchResponse{
-			CompactRevision: 1,
-		}
-
-		assert.Panics(t, func() {
-			w.handleWatchResponse(wresp)
-		})
-	})
 }
 
 func TestSession_Registered(t *testing.T) {
@@ -473,8 +363,7 @@ func TestSessionUnmarshal(t *testing.T) {
 
 type SessionWithVersionSuite struct {
 	suite.Suite
-	tmpDir     string
-	etcdServer *embed.Etcd
+	tmpDir string
 
 	metaRoot   string
 	serverName string
@@ -482,63 +371,31 @@ type SessionWithVersionSuite struct {
 	client     *clientv3.Client
 }
 
-// SetupSuite setup suite env
 func (suite *SessionWithVersionSuite) SetupSuite() {
-	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
-	suite.Require().NoError(err)
-	suite.tmpDir = dir
-	suite.T().Log("using tmp dir:", dir)
-
-	config := embed.NewConfig()
-
-	config.Dir = os.TempDir()
-	config.LogLevel = "warn"
-	config.LogOutputs = []string{"default"}
-	u, err := url.Parse("http://localhost:0")
-	suite.Require().NoError(err)
-
-	config.ListenClientUrls = []url.URL{*u}
-	u, err = url.Parse("http://localhost:0")
-	suite.Require().NoError(err)
-	config.ListenPeerUrls = []url.URL{*u}
-
-	etcdServer, err := embed.StartEtcd(config)
-	suite.Require().NoError(err)
-	suite.etcdServer = etcdServer
-}
-
-func (suite *SessionWithVersionSuite) TearDownSuite() {
-	if suite.etcdServer != nil {
-		suite.etcdServer.Close()
-	}
-	if suite.tmpDir != "" {
-		os.RemoveAll(suite.tmpDir)
-	}
+	client, _ := kvfactory.GetEtcdAndPath()
+	suite.client = client
 }
 
 func (suite *SessionWithVersionSuite) SetupTest() {
-	client := v3client.New(suite.etcdServer.Server)
-	suite.client = client
-
 	ctx := context.Background()
 	suite.metaRoot = "sessionWithVersion"
 	suite.serverName = "sessionComp"
 
-	s1 := NewSessionWithEtcd(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s1 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
 	s1.Register()
 
 	suite.sessions = append(suite.sessions, s1)
 
-	s2 := NewSessionWithEtcd(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s2 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
 	s2.Init(suite.serverName, "s2", false, false)
 	s2.Register()
 
 	suite.sessions = append(suite.sessions, s2)
 
-	s3 := NewSessionWithEtcd(ctx, suite.metaRoot, client, WithResueNodeID(false))
+	s3 := NewSessionWithEtcd(ctx, suite.metaRoot, suite.client, WithResueNodeID(false))
 	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
 	s3.Version.Build = []string{"dev"}
 	s3.Init(suite.serverName, "s3", false, false)
@@ -549,17 +406,13 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 
 func (suite *SessionWithVersionSuite) TearDownTest() {
 	for _, s := range suite.sessions {
-		s.Revoke(time.Second)
+		s.Stop()
 	}
 
 	suite.sessions = nil
-	_, err := suite.client.Delete(context.Background(), suite.metaRoot, clientv3.WithPrefix())
+	client, _ := kvfactory.GetEtcdAndPath()
+	_, err := client.Delete(context.Background(), suite.metaRoot, clientv3.WithPrefix())
 	suite.Require().NoError(err)
-
-	if suite.client != nil {
-		suite.client.Close()
-		suite.client = nil
-	}
 }
 
 func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
@@ -621,7 +474,7 @@ func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
 		// remove all sessions
 		go func() {
 			for _, s := range suite.sessions {
-				s.Revoke(time.Second)
+				s.Stop()
 			}
 		}()
 
@@ -642,22 +495,16 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	ctx := context.TODO()
 	// initial etcd
 	paramtable.Init()
-	params := paramtable.Get()
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
 	metaRoot := fmt.Sprintf("%d/%s1", rand.Int(), DefaultServiceRoot)
 
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
+	err := etcdKV.RemoveWithPrefix(ctx, "")
 	assert.NoError(t, err)
 
-	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix(ctx, "")
 
 	var wg sync.WaitGroup
-	signal := make(chan struct{})
 	flag := false
 
 	// register session 1, will be active
@@ -673,12 +520,6 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		return nil
 	})
 	wg.Wait()
-	s1.LivenessCheck(ctx1, func() {
-		log.Debug("Session 1 livenessCheck callback")
-		flag = true
-		close(signal)
-		s1.cancelKeepAlive(true)
-	})
 	assert.False(t, s1.isStandby.Load().(bool))
 
 	// register session 2, will be standby
@@ -700,21 +541,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
 
-	s1.safeCloseLiveCh()
-	{
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_, _ = s1.etcdCli.Revoke(ctx, *s1.LeaseID)
-	}
-	select {
-	case <-signal:
-		log.Debug("receive s1 signal")
-	case <-time.After(10 * time.Second):
-		log.Debug("wait to fail Liveness Check  timeout")
-		t.FailNow()
-	}
-	assert.True(t, flag)
-	log.Debug("session s1 stop")
+	s1.Stop()
 
 	wg.Wait()
 	log.Debug("session s2 wait done")
@@ -811,8 +638,7 @@ func TestIntegrationMode(t *testing.T) {
 
 type SessionSuite struct {
 	suite.Suite
-	tmpDir     string
-	etcdServer *embed.Etcd
+	tmpDir string
 
 	metaRoot   string
 	serverName string
@@ -821,53 +647,19 @@ type SessionSuite struct {
 
 func (s *SessionSuite) SetupSuite() {
 	paramtable.Init()
-	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
-	s.Require().NoError(err)
-	s.tmpDir = dir
-	s.T().Log("using tmp dir:", dir)
-
-	config := embed.NewConfig()
-
-	config.Dir = os.TempDir()
-	config.LogLevel = "warn"
-	config.LogOutputs = []string{"default"}
-	u, err := url.Parse("http://localhost:0")
-	s.Require().NoError(err)
-
-	config.ListenClientUrls = []url.URL{*u}
-	u, err = url.Parse("http://localhost:0")
-	s.Require().NoError(err)
-	config.ListenPeerUrls = []url.URL{*u}
-
-	etcdServer, err := embed.StartEtcd(config)
-	s.Require().NoError(err)
-	s.etcdServer = etcdServer
 }
 
 func (s *SessionSuite) TearDownSuite() {
-	if s.etcdServer != nil {
-		s.etcdServer.Close()
-	}
-	if s.tmpDir != "" {
-		os.RemoveAll(s.tmpDir)
-	}
 }
 
 func (s *SessionSuite) SetupTest() {
-	client := v3client.New(s.etcdServer.Server)
-	s.client = client
-
+	s.client, _ = kvfactory.GetEtcdAndPath()
 	s.metaRoot = fmt.Sprintf("milvus-ut/session-%s/", funcutil.GenRandomStr())
 }
 
 func (s *SessionSuite) TearDownTest() {
 	_, err := s.client.Delete(context.Background(), s.metaRoot, clientv3.WithPrefix())
 	s.Require().NoError(err)
-
-	if s.client != nil {
-		s.client.Close()
-		s.client = nil
-	}
 }
 
 func (s *SessionSuite) TestDisconnected() {
@@ -925,61 +717,19 @@ func (s *SessionSuite) TestGoingStop() {
 	}
 }
 
-func (s *SessionSuite) TestRevoke() {
-	ctx := context.Background()
-	disconnected := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
-	disconnected.Init("test", "disconnected", false, false)
-	disconnected.Register()
-	disconnected.SetDisconnected(true)
-
-	sess := NewSessionWithEtcd(ctx, s.metaRoot, s.client, WithResueNodeID(false))
-	sess.Init("test", "normal", false, false)
-	sess.Register()
-
-	cases := []struct {
-		tag      string
-		input    *Session
-		preExist bool
-		success  bool
-	}{
-		{"not_inited", &Session{}, false, true},
-		{"disconnected", disconnected, true, false},
-		{"normal", sess, false, true},
-	}
-
-	for _, c := range cases {
-		s.Run(c.tag, func() {
-			c.input.Revoke(time.Second)
-			resp, err := s.client.Get(ctx, c.input.getCompleteKey())
-			s.Require().NoError(err)
-			if !c.preExist || c.success {
-				s.Equal(0, len(resp.Kvs))
-			}
-			if c.preExist && !c.success {
-				s.Equal(1, len(resp.Kvs))
-			}
-		})
-	}
-}
-
 func (s *SessionSuite) TestKeepAliveRetryActiveCancel() {
 	ctx := context.Background()
 	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
 	session.Init("test", "normal", false, false)
 
 	// Register
-	ch, err := session.registerService()
+	err := session.registerService()
 	s.Require().NoError(err)
-	session.liveCh = make(chan struct{})
-	session.startKeepAliveLoop(ch)
-	session.LivenessCheck(ctx, nil)
-	// active cancel, should not retry connect
-	session.cancelKeepAlive(true)
+	session.startKeepAliveLoop()
+	session.Stop()
 
 	// wait workers exit
 	session.wg.Wait()
-	// expected Disconnected = true, means session is closed
-	assert.Equal(s.T(), true, session.Disconnected())
 }
 
 func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
@@ -988,15 +738,12 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	session.Init("test", "normal", false, false)
 
 	// Register
-	_, err := session.registerService()
+	err := session.registerService()
 	if err != nil {
 		panic(err)
 	}
-	session.liveCh = make(chan struct{})
 	closeChan := make(chan *clientv3.LeaseKeepAliveResponse)
-	sendChan := (<-chan *clientv3.LeaseKeepAliveResponse)(closeChan)
-	session.startKeepAliveLoop(sendChan)
-	session.LivenessCheck(ctx, nil)
+	session.startKeepAliveLoop()
 	// close channel, should retry connect
 	close(closeChan)
 
@@ -1007,17 +754,6 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 	time.Sleep(time.Second * 1)
 	// expected Disconnected = false, means session is not closed, keepalive keeps working
 	assert.Equal(s.T(), false, session.Disconnected())
-}
-
-func (s *SessionSuite) TestSafeCloseLiveCh() {
-	ctx := context.Background()
-	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init("test", "normal", false, false)
-	session.liveCh = make(chan struct{})
-	session.safeCloseLiveCh()
-	assert.NotPanics(s.T(), func() {
-		session.safeCloseLiveCh()
-	})
 }
 
 func (s *SessionSuite) TestGetSessions() {
@@ -1035,45 +771,75 @@ func (s *SessionSuite) TestGetSessions() {
 	assert.Equal(s.T(), "value2", ret["key2"])
 }
 
+func (s *SessionSuite) TestSessionLifetime() {
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+	session.Register()
+
+	resp, err := s.client.Get(ctx, session.getCompleteKey())
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	str, err := json.Marshal(session.SessionRaw)
+	s.Require().NoError(err)
+	s.Equal(string(resp.Kvs[0].Value), string(str))
+
+	ttlResp, err := s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	s.Require().NoError(err)
+	s.Greater(ttlResp.TTL, int64(0))
+
+	session.GoingStop()
+	resp, err = s.client.Get(ctx, session.getCompleteKey())
+	s.Require().True(session.SessionRaw.Stopping)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	str, err = json.Marshal(session.SessionRaw)
+	s.Require().NoError(err)
+	s.Equal(string(resp.Kvs[0].Value), string(str))
+
+	session.Stop()
+	session.wg.Wait()
+
+	resp, err = s.client.Get(ctx, session.getCompleteKey())
+	s.Require().NoError(err)
+	s.Equal(0, len(resp.Kvs))
+
+	ttlResp, err = s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	s.Require().NoError(err)
+	s.Equal(int64(-1), ttlResp.TTL)
+}
+
 func TestSessionSuite(t *testing.T) {
 	suite.Run(t, new(SessionSuite))
 }
 
-func (s *SessionSuite) TestKeepAliveCancelWithoutStop() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
-	session.Init("test", "normal", false, false)
-	_, err := session.registerService()
-	assert.NoError(s.T(), err)
-
-	// Override liveCh and LeaseKeepAliveResponse channel for testing
-	session.liveCh = make(chan struct{})
-	kaCh := make(chan *clientv3.LeaseKeepAliveResponse)
-	session.startKeepAliveLoop(kaCh)
-
-	session.keepAliveMu.Lock()
-	cancelOld := session.keepAliveCancel
-	session.keepAliveCancel = func() {
-		// only cancel, not setting isStopped, to simulate not "stop"
-	}
-	session.keepAliveMu.Unlock()
-	if cancelOld != nil {
-		cancelOld()
+func TestForceKill(t *testing.T) {
+	if os.Getenv("TEST_EXIT") == "1" {
+		testForceKill("testForceKill")
+		return
 	}
 
-	// send a nil (simulate closed keepalive channel)
-	go func() {
-		kaCh <- nil
-	}()
+	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */
+	cmd.Env = append(os.Environ(), "TEST_EXIT=1")
 
-	// Give time for retry logic to trigger
-	time.Sleep(200 * time.Millisecond)
+	err := cmd.Run()
 
-	// should not be disconnected, session could recover
-	assert.False(s.T(), session.Disconnected())
+	// 子进程退出码
+	if e, ok := err.(*exec.ExitError); ok {
+		if e.ExitCode() != 1 {
+			t.Fatalf("expected exit 1, got %d", e.ExitCode())
+		}
+	} else {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+}
 
-	// Routine clean up
-	session.Stop()
+func testForceKill(serverName string) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	session := NewSessionWithEtcd(context.Background(), "test", etcdCli)
+	session.Init(serverName, "normal", false, false)
+	session.Register()
+
+	// trigger a force kill
+	etcdCli.Revoke(context.Background(), *session.LeaseID)
 }
