@@ -98,6 +98,7 @@ func (w *WriteAheadBuffer) ReadFromExclusiveTimeTick(ctx context.Context, timeti
 	}
 	return &WriteAheadBufferReader{
 		nextOffset:    nextOffset,
+		lastTimeTick:  timetick,
 		snapshot:      snapshot,
 		underlyingBuf: w,
 	}, nil
