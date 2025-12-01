@@ -90,7 +90,7 @@ func (s *asyncTextIOCore) With(fields []zapcore.Field) zapcore.Core {
 	return &asyncTextIOCore{
 		LevelEnabler:        s.LevelEnabler,
 		notifier:            s.notifier,
-		enc:                 s.enc.Clone(),
+		enc:                 enc.Clone(),
 		bws:                 s.bws,
 		pending:             s.pending,
 		writeDroppedTimeout: s.writeDroppedTimeout,

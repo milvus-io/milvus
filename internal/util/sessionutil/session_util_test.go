@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path"
 	"strconv"
 	"strings"
@@ -204,7 +205,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/by-dev/session-ut")
 	defer etcdKV.RemoveWithPrefix(ctx, "/by-dev/session-ut")
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
-	defer s.Revoke(time.Second)
+	defer s.Stop()
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
 		return &sessionWatcher{
@@ -473,7 +474,7 @@ func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
 		// remove all sessions
 		go func() {
 			for _, s := range suite.sessions {
-				s.Revoke(time.Second)
+				s.Stop()
 			}
 		}()
 
@@ -770,6 +771,75 @@ func (s *SessionSuite) TestGetSessions() {
 	assert.Equal(s.T(), "value2", ret["key2"])
 }
 
+func (s *SessionSuite) TestSessionLifetime() {
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init("test", "normal", false, false)
+	session.Register()
+
+	resp, err := s.client.Get(ctx, session.getCompleteKey())
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	str, err := json.Marshal(session.SessionRaw)
+	s.Require().NoError(err)
+	s.Equal(string(resp.Kvs[0].Value), string(str))
+
+	ttlResp, err := s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	s.Require().NoError(err)
+	s.Greater(ttlResp.TTL, int64(0))
+
+	session.GoingStop()
+	resp, err = s.client.Get(ctx, session.getCompleteKey())
+	s.Require().True(session.SessionRaw.Stopping)
+	s.Require().NoError(err)
+	s.Equal(1, len(resp.Kvs))
+	str, err = json.Marshal(session.SessionRaw)
+	s.Require().NoError(err)
+	s.Equal(string(resp.Kvs[0].Value), string(str))
+
+	session.Stop()
+	session.wg.Wait()
+
+	resp, err = s.client.Get(ctx, session.getCompleteKey())
+	s.Require().NoError(err)
+	s.Equal(0, len(resp.Kvs))
+
+	ttlResp, err = s.client.Lease.TimeToLive(ctx, *session.LeaseID)
+	s.Require().NoError(err)
+	s.Equal(int64(-1), ttlResp.TTL)
+}
+
 func TestSessionSuite(t *testing.T) {
 	suite.Run(t, new(SessionSuite))
+}
+
+func TestForceKill(t *testing.T) {
+	if os.Getenv("TEST_EXIT") == "1" {
+		testForceKill("testForceKill")
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestForceKill") /* #nosec G204 */
+	cmd.Env = append(os.Environ(), "TEST_EXIT=1")
+
+	err := cmd.Run()
+
+	// 子进程退出码
+	if e, ok := err.(*exec.ExitError); ok {
+		if e.ExitCode() != 1 {
+			t.Fatalf("expected exit 1, got %d", e.ExitCode())
+		}
+	} else {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+}
+
+func testForceKill(serverName string) {
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	session := NewSessionWithEtcd(context.Background(), "test", etcdCli)
+	session.Init(serverName, "normal", false, false)
+	session.Register()
+
+	// trigger a force kill
+	etcdCli.Revoke(context.Background(), *session.LeaseID)
 }

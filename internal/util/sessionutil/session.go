@@ -16,8 +16,6 @@
 package sessionutil
 
 import (
-	"time"
-
 	"github.com/blang/semver/v4"
 )
 
@@ -36,7 +34,6 @@ type SessionInterface interface {
 	WatchServices(prefix string, revision int64, rewatch Rewatch) (watcher SessionWatcher)
 	WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (watcher SessionWatcher)
 	Stop()
-	Revoke(timeout time.Duration)
 	UpdateRegistered(b bool)
 	Registered() bool
 	SetDisconnected(b bool)

@@ -31,7 +31,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -57,6 +56,7 @@ const (
 	LabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_STREAMING-EMBEDDED"
 	LabelStandalone                     = "STANDALONE"
 	MilvusNodeIDForTesting              = "MILVUS_NODE_ID_FOR_TESTING"
+	exitCodeSessionLeaseExpired         = 1
 )
 
 // EnableEmbededQueryNodeLabel set server labels for embedded query node.
@@ -426,39 +426,6 @@ func (s *Session) getCompleteKey() string {
 	return path.Join(s.metaRoot, DefaultServiceRoot, key)
 }
 
-func (s *Session) getSessionKey() string {
-	key := s.ServerName
-	if !s.Exclusive {
-		key = fmt.Sprintf("%s-%d", key, s.ServerID)
-	}
-	return path.Join(s.metaRoot, DefaultServiceRoot, key)
-}
-
-func (s *Session) initWatchSessionCh(ctx context.Context) error {
-	var (
-		err     error
-		getResp *clientv3.GetResponse
-	)
-
-	ctx, cancel := context.WithCancel(ctx)
-	if old := s.watchCancel.Load(); old != nil {
-		(*old)()
-	}
-	s.watchCancel.Store(&cancel)
-
-	err = retry.Do(ctx, func() error {
-		getResp, err = s.etcdCli.Get(ctx, s.getSessionKey())
-		return err
-	}, retry.Attempts(uint(s.sessionRetryTimes)))
-	if err != nil {
-		log.Warn("fail to get the session key from the etcd", zap.Error(err))
-		cancel()
-		return err
-	}
-	s.watchSessionKeyCh = s.etcdCli.Watch(ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
-	return nil
-}
-
 // registerService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
 // RegisterService will save a key-value in etcd
@@ -568,6 +535,8 @@ func (s *Session) processKeepAliveResponse() {
 
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
 	var lastErr error
+	nextKeepaliveInstant := time.Now().Add(time.Duration(s.sessionTTL) * time.Second)
+
 	for {
 		if s.ctx.Err() != nil {
 			return
@@ -583,21 +552,10 @@ func (s *Session) processKeepAliveResponse() {
 		}
 
 		if ch == nil {
-			ttlResp, err := s.etcdCli.TimeToLive(s.ctx, *s.LeaseID)
-			if err != nil {
-				if errors.Is(err, rpctypes.ErrLeaseNotFound) {
-					s.Logger().Error("confirm the lease is not found, the session is expired without activing closing", zap.Error(err))
-					os.Exit(1)
-				}
-				lastErr = errors.Wrap(err, "failed to check TTL")
+			if err := s.checkKeepaliveTTL(nextKeepaliveInstant); err != nil {
+				lastErr = err
 				continue
 			}
-			if ttlResp.TTL <= 0 {
-				s.Logger().Error("confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
-				os.Exit(1)
-			}
-			s.Logger().Info("check TTL success, try to keep alive...", zap.Int64("ttl", ttlResp.TTL))
-
 			newCH, err := s.etcdCli.KeepAlive(s.ctx, *s.LeaseID)
 			if err != nil {
 				s.Logger().Error("failed to keep alive with etcd", zap.Error(err))
@@ -615,9 +573,36 @@ func (s *Session) processKeepAliveResponse() {
 		// receive a keep alive response, continue the opeartion.
 		// the keep alive channel may be closed because of network error, we should retry the keep alive.
 		ch = nil
+		nextKeepaliveInstant = time.Now().Add(time.Duration(s.sessionTTL) * time.Second)
 		lastErr = nil
 		backoff.Reset()
 	}
+}
+
+// checkKeepaliveTTL checks the TTL of the lease and returns the error if the lease is not found or expired.
+func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
+	errSessionExpiredAtClientSide := errors.New("session expired at client side")
+	ctx, cancel := context.WithDeadlineCause(s.ctx, nextKeepaliveInstant, errSessionExpiredAtClientSide)
+	defer cancel()
+
+	ttlResp, err := s.etcdCli.TimeToLive(ctx, *s.LeaseID)
+	if err != nil {
+		if errors.Is(err, v3rpc.ErrLeaseNotFound) {
+			s.Logger().Error("confirm the lease is not found, the session is expired without activing closing", zap.Error(err))
+			os.Exit(exitCodeSessionLeaseExpired)
+		}
+		if ctx.Err() != nil && errors.Is(context.Cause(ctx), errSessionExpiredAtClientSide) {
+			s.Logger().Error("session expired at client side, the session is expired without activing closing", zap.Error(err))
+			os.Exit(exitCodeSessionLeaseExpired)
+		}
+		return errors.Wrap(err, "failed to check TTL")
+	}
+	if ttlResp.TTL <= 0 {
+		s.Logger().Error("confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
+		os.Exit(exitCodeSessionLeaseExpired)
+	}
+	s.Logger().Info("check TTL success, try to keep alive...", zap.Int64("ttl", ttlResp.TTL))
+	return nil
 }
 
 func (s *Session) startKeepAliveLoop() {
@@ -693,7 +678,7 @@ func (s *Session) GoingStop() error {
 	completeKey := s.getCompleteKey()
 	resp, err := s.etcdCli.Get(s.ctx, completeKey, clientv3.WithCountOnly())
 	if err != nil {
-		log.Error("fail to get the session", zap.String("key", completeKey), zap.Error(err))
+		s.Logger().Error("fail to get the session", zap.String("key", completeKey), zap.Error(err))
 		return err
 	}
 	if resp.Count == 0 {
@@ -702,12 +687,12 @@ func (s *Session) GoingStop() error {
 	s.Stopping = true
 	sessionJSON, err := json.Marshal(s)
 	if err != nil {
-		log.Error("fail to marshal the session", zap.String("key", completeKey))
+		s.Logger().Error("fail to marshal the session", zap.String("key", completeKey))
 		return err
 	}
 	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))
 	if err != nil {
-		log.Error("fail to update the session to stopping state", zap.String("key", completeKey))
+		s.Logger().Error("fail to update the session to stopping state", zap.String("key", completeKey))
 		return err
 	}
 	return nil
@@ -911,37 +896,10 @@ func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {
 
 func (s *Session) Stop() {
 	log.Info("session stopping", zap.String("serverName", s.ServerName))
-	s.cancel()
+	if s.cancel != nil {
+		s.cancel()
+	}
 	s.wg.Wait()
-}
-
-// Revoke revokes the internal LeaseID for the session key
-func (s *Session) Revoke(timeout time.Duration) {
-	if s == nil {
-		return
-	}
-	log.Info("start to revoke session", zap.String("sessionKey", s.activeKey))
-	if s.etcdCli == nil || s.LeaseID == nil {
-		log.Warn("skip remove session",
-			zap.String("sessionKey", s.activeKey),
-			zap.Bool("etcdCliIsNil", s.etcdCli == nil),
-			zap.Bool("LeaseIDIsNil", s.LeaseID == nil),
-		)
-		return
-	}
-	if s.Disconnected() {
-		log.Warn("skip remove session, connection is disconnected", zap.String("sessionKey", s.activeKey))
-		return
-	}
-	// can NOT use s.ctx, it may be Done here
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	// ignores resp & error, just do best effort to revoke
-	_, err := s.etcdCli.Revoke(ctx, *s.LeaseID)
-	if err != nil {
-		log.Warn("failed to revoke session", zap.String("sessionKey", s.activeKey), zap.Error(err))
-	}
-	log.Info("revoke session successfully", zap.String("sessionKey", s.activeKey))
 }
 
 // UpdateRegistered update the state of registered.
