@@ -34,6 +34,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// SegmentInfoWithAllocations is a temporary structure used to pass combined Segment metadata
+// and its associated Allocations to the allocation policy function.
+type SegmentInfoWithAllocations struct {
+	*SegmentInfo
+	Allocations []*Allocation
+}
+
 type calUpperLimitPolicy func(schema *schemapb.CollectionSchema) (int, error)
 
 func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
@@ -84,11 +91,12 @@ func calBySegmentSizePolicy(schema *schemapb.CollectionSchema, segmentSize int64
 }
 
 // AllocatePolicy helper function definition to allocate Segment space
-type AllocatePolicy func(segments []*SegmentInfo, count int64,
+// MODIFIED: segments parameter now uses the new combined structure.
+type AllocatePolicy func(segments []*SegmentInfoWithAllocations, count int64,
 	maxCountPerL1Segment int64, level datapb.SegmentLevel) ([]*Allocation, []*Allocation)
 
-// alloca policy for L1 segment
-func AllocatePolicyL1(segments []*SegmentInfo, count int64,
+// AllocatePolicyL1 alloca policy for L1 segment
+func AllocatePolicyL1(segments []*SegmentInfoWithAllocations, count int64,
 	maxCountPerL1Segment int64, level datapb.SegmentLevel,
 ) ([]*Allocation, []*Allocation) {
 	newSegmentAllocations := make([]*Allocation, 0)
@@ -104,9 +112,15 @@ func AllocatePolicyL1(segments []*SegmentInfo, count int64,
 	if count == 0 {
 		return newSegmentAllocations, existedSegmentAllocations
 	}
-	for _, segment := range segments {
+
+	// MODIFIED: Iterate over the new combined struct
+	for _, segmentWithAllocs := range segments {
+		// Use the embedded SegmentInfo fields
+		segment := segmentWithAllocs.SegmentInfo
+
 		var allocSize int64
-		for _, allocation := range segment.allocations {
+		// MODIFIED: Access the Allocations field from the new struct
+		for _, allocation := range segmentWithAllocs.Allocations {
 			allocSize += allocation.NumOfRows
 		}
 
