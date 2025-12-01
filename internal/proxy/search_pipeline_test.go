@@ -298,8 +298,8 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 		DbName:         "default",
 	}
 
-	highlightTasks := []*highlightTask{
-		{
+	highlightTasks := map[int64]*highlightTask{
+		100: {
 			HighlightTask: &querypb.HighlightTask{
 				Texts:     []string{"target text"},
 				FieldName: testVarCharField,
@@ -312,8 +312,10 @@ func (s *SearchPipelineSuite) TestHighlightOp() {
 
 	mockLb := shardclient.NewMockLBPolicy(s.T())
 	searchTask := &searchTask{
-		node:           proxy,
-		highlightTasks: highlightTasks,
+		node: proxy,
+		highlighter: &LexicalHighlighter{
+			tasks: highlightTasks,
+		},
 		lb:             mockLb,
 		schema:         newSchemaInfo(schema),
 		request:        req,
