@@ -171,9 +171,9 @@ RandomScorer::random_score(milvus::OpContext* op_ctx,
                    "now only support int64 field as seed");
         // TODO: Support varchar and int32 field as random field.
 
-        auto datas = array->scalars().long_data();
-        for (int i = 0; i < datas.data_size(); i++) {
-            auto a = datas.data()[i];
+        auto data = array->scalars().long_data();
+        for (int i = 0; i < data.data_size(); i++) {
+            auto a = data.data()[i];
             auto random_score =
                 hash_to_double(MurmurHash3_x64_64_Special(a, seed_));
             if (idx == nullptr) {
