@@ -245,7 +245,7 @@ func (r *Runner) waitUntilSessionExpired() {
 }
 
 func (r *Runner) Stop() {
-	r.session.Revoke(time.Second)
+	r.session.Stop()
 	r.waitUntilSessionExpired()
 	r.cancel()
 	r.wg.Wait()
