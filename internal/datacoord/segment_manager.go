@@ -62,8 +62,9 @@ func getAllocation(numOfRows int64) *Allocation {
 	return a
 }
 
-// putAllocation puts an allocation for recycling
-func putAllocation(a *Allocation) {
+// putAllocation is a function variable used to recycle Allocation objects.
+// It is set to the default implementation upon initialization.
+var putAllocation = func(a *Allocation) {
 	allocPool.Put(a)
 }
 
@@ -313,9 +314,11 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	defer s.channelLock.Unlock(channelName)
 
 	// filter segments
-	segmentInfos := make([]*SegmentInfo, 0)
+	// MODIFIED: The slice type is changed to the new combined structure for allocation policy
+	segmentInfosWithAllocs := make([]*SegmentInfoWithAllocations, 0)
 	growing, _ := s.channel2Growing.Get(channelName)
 	growing.Range(func(segmentID int64) bool {
+		// Fetch core metadata (protected by segMu RLock)
 		segment := s.meta.GetHealthySegment(ctx, segmentID)
 		if segment == nil {
 			log.Warn("failed to get segment, remove it", zap.String("channel", channelName), zap.Int64("segmentID", segmentID))
@@ -325,7 +328,15 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		if segment.GetPartitionID() != partitionID {
 			return true
 		}
-		segmentInfos = append(segmentInfos, segment)
+
+		// NEW: Fetch allocations using the high-performance meta API (protected by allocationMu RLock / COW read)
+		allocs := s.meta.GetAllocations(segmentID)
+
+		// Combine the core SegmentInfo and the Allocations list
+		segmentInfosWithAllocs = append(segmentInfosWithAllocs, &SegmentInfoWithAllocations{
+			SegmentInfo: segment,
+			Allocations: allocs, // allocs is a safe pointer to the current slice due to COW
+		})
 		return true
 	})
 
@@ -334,7 +345,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	if err != nil {
 		return nil, err
 	}
-	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segmentInfos,
+	// MODIFIED: Pass the new structure to allocPolicy
+	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segmentInfosWithAllocs,
 		requestRows, int64(maxCountPerSegment), datapb.SegmentLevel_L1)
 
 	// create new segments and add allocations
@@ -350,6 +362,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		}
 		allocation.ExpireTime = expireTs
 		allocation.SegmentID = segment.GetID()
+		// Write Path: Uses the optimized s.meta.AddAllocation (COW + atomic LastExpireTime update)
 		if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
 			return nil, err
 		}
@@ -357,6 +370,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 
 	for _, allocation := range existedSegmentAllocations {
 		allocation.ExpireTime = expireTs
+		// Write Path: Uses the optimized s.meta.AddAllocation (COW + atomic LastExpireTime update)
 		if err := s.meta.AddAllocation(allocation.SegmentID, allocation); err != nil {
 			log.Error("Failed to add allocation to existed segment", zap.Int64("segmentID", allocation.SegmentID))
 			return nil, err
@@ -462,6 +476,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmen
 	s.channelLock.Lock(channel)
 	defer s.channelLock.Unlock(channel)
 
+	// Remove the segment from the in-memory maps regardless of its state
 	if growing, ok := s.channel2Growing.Get(channel); ok {
 		growing.Remove(segmentID)
 	}
@@ -469,13 +484,19 @@ func (s *SegmentManager) DropSegment(ctx context.Context, channel string, segmen
 		sealed.Remove(segmentID)
 	}
 
+	// 1. Fetch SegmentInfo for logging/context (optional, but good practice)
 	segment := s.meta.GetHealthySegment(ctx, segmentID)
 	if segment == nil {
-		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
-		return
+		log.Warn("Failed to get SegmentInfo for logging purposes (segment may have been concurrently removed), but proceeding with allocation cleanup", zap.Int64("id", segmentID))
+		// NOTE: We do not return here, as we must still attempt to clean up allocations.
 	}
-	s.meta.SetAllocations(segmentID, []*Allocation{})
-	for _, allocation := range segment.allocations {
+
+	// Use the new meta method to safely remove allocations under allocationMu.
+	// This removes the map entry and returns the list of *Allocation objects for recycling.
+	allocations := s.meta.RemoveSegmentAllocations(segmentID)
+
+	// 2. Recycle the returned allocation objects
+	for _, allocation := range allocations {
 		putAllocation(allocation)
 	}
 }
@@ -559,7 +580,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	return ret, nil
 }
 
-// ExpireAllocations notify segment status to expire old allocations
+// ExpireAllocations notifies segment status to expire old allocations based on a timestamp (ts).
 func (s *SegmentManager) ExpireAllocations(ctx context.Context, channel string, ts Timestamp) {
 	s.channelLock.Lock(channel)
 	defer s.channelLock.Unlock(channel)
@@ -570,23 +591,47 @@ func (s *SegmentManager) ExpireAllocations(ctx context.Context, channel string, 
 	}
 
 	growing.Range(func(id int64) bool {
-		segment := s.meta.GetHealthySegment(ctx, id)
-		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", id))
-			growing.Remove(id)
+		// 1. Define the Filter/Cleanup function that contains the business logic.
+		filterFn := func(currentAllocations []*Allocation) (new []*Allocation, expired []*Allocation, maxExpireTime Timestamp) {
+			new = make([]*Allocation, 0, len(currentAllocations))
+			maxExpireTime = 0
+
+			for _, alloc := range currentAllocations {
+				if alloc.ExpireTime <= ts {
+					// Expired: collect for recycling
+					expired = append(expired, alloc)
+				} else {
+					// Not expired: keep in the new list
+					new = append(new, alloc)
+					if alloc.ExpireTime > maxExpireTime {
+						maxExpireTime = alloc.ExpireTime
+					}
+				}
+			}
+			return new, expired, maxExpireTime
+		}
+
+		// Declaring variables outside the loop to receive results
+		var expiredAllocations []*Allocation
+		var err error
+
+		// 2. Call the new meta function, which handles the CAS retry loop internally.
+		// The result is the list of objects that were successfully removed/expired.
+		expiredAllocations, err = s.meta.ReplaceAllocationsWithFilter(id, filterFn)
+
+		if err != nil {
+			log.Error("Failed to replace allocations with filter", zap.Int64("segmentID", id), zap.Error(err))
 			return true
 		}
-		allocations := make([]*Allocation, 0, len(segment.allocations))
-		for i := 0; i < len(segment.allocations); i++ {
-			if segment.allocations[i].ExpireTime <= ts {
-				a := segment.allocations[i]
-				putAllocation(a)
-			} else {
-				allocations = append(allocations, segment.allocations[i])
+
+		// 3. Recycle expired objects (SegmentManager's explicit responsibility)
+		if len(expiredAllocations) > 0 {
+			for _, alloc := range expiredAllocations {
+				putAllocation(alloc)
 			}
 		}
-		s.meta.SetAllocations(segment.GetID(), allocations)
-		return true
+
+		return true // Continue to next segment in the Range loop
 	})
 }
 
@@ -685,70 +730,108 @@ func (s *SegmentManager) tryToSealSegment(ctx context.Context, ts Timestamp, cha
 
 // DropSegmentsOfChannel drops all segments in a channel
 func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel string) {
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Drop-Segment")
+	defer sp.End()
+
 	s.channelLock.Lock(channel)
 	defer s.channelLock.Unlock(channel)
 
+	// Clear sealed segments (no allocations to clean up here)
 	s.channel2Sealed.Remove(channel)
+
 	growing, ok := s.channel2Growing.Get(channel)
 	if !ok {
 		return
 	}
+
 	growing.Range(func(sid int64) bool {
+		// We don't strictly need SegmentInfo for cleanup, but we keep the read logic
+		// to check if the segment exists and to log warnings if the in-memory map is stale.
 		segment := s.meta.GetHealthySegment(ctx, sid)
 		if segment == nil {
-			log.Warn("failed to get segment, remove it", zap.String("channel", channel), zap.Int64("segmentID", sid))
+			log.Warn("failed to get segment, remove it from growing map", zap.String("channel", channel), zap.Int64("segmentID", sid))
 			growing.Remove(sid)
-			return true
+			// We still continue to try cleaning up allocations in the meta, in case the segment was
+			// removed from SegmentsInfo but not from allocations map.
+			// Fallthrough to cleanup logic.
 		}
-		s.meta.SetAllocations(sid, nil)
-		for _, allocation := range segment.allocations {
+
+		// MODIFIED: Use the new meta method to safely remove allocations under allocationMu.
+		// This removes the map entry and returns the list of *Allocation objects for recycling.
+		allocations := s.meta.RemoveSegmentAllocations(sid)
+
+		// Recycle the returned allocation objects
+		for _, allocation := range allocations {
 			putAllocation(allocation)
 		}
+
+		// Old logic replaced:
+		// s.meta.SetAllocations(sid, nil)
+		// for _, allocation := range segment.allocations { putAllocation(allocation) }
+
 		return true
 	})
+
 	s.channel2Growing.Remove(channel)
 }
 
+// DropSegmentsOfPartition drops all segments in a channel
 func (s *SegmentManager) DropSegmentsOfPartition(ctx context.Context, channel string, partitionIDs []int64) {
 	s.channelLock.Lock(channel)
 	defer s.channelLock.Unlock(channel)
+
+	// Handle growing segments
 	if growing, ok := s.channel2Growing.Get(channel); ok {
 		for sid := range growing {
 			segment := s.meta.GetHealthySegment(ctx, sid)
+
+			isToBeDropped := false
 			if segment == nil {
 				log.Warn("failed to get segment, remove it",
 					zap.String("channel", channel),
 					zap.Int64("segmentID", sid))
-				growing.Remove(sid)
-				continue
+				isToBeDropped = true // SegmentInfo is gone, remove it from in-memory map
+			} else if contains(partitionIDs, segment.GetPartitionID()) {
+				isToBeDropped = true // Segment belongs to one of the partitions
 			}
 
-			if contains(partitionIDs, segment.GetPartitionID()) {
+			if isToBeDropped {
 				growing.Remove(sid)
+
+				// NEW ALLOCATION CLEANUP LOGIC
+				allocations := s.meta.RemoveSegmentAllocations(sid)
+				for _, allocation := range allocations {
+					putAllocation(allocation)
+				}
 			}
-			s.meta.SetAllocations(sid, nil)
-			for _, allocation := range segment.allocations {
-				putAllocation(allocation)
-			}
+			// If the segment was not dropped (and segment was not nil), we continue without cleaning up allocations
 		}
 	}
 
+	// Handle sealed segments
 	if sealed, ok := s.channel2Sealed.Get(channel); ok {
 		for sid := range sealed {
 			segment := s.meta.GetHealthySegment(ctx, sid)
+
+			isToBeDropped := false
 			if segment == nil {
 				log.Warn("failed to get segment, remove it",
 					zap.String("channel", channel),
 					zap.Int64("segmentID", sid))
 				sealed.Remove(sid)
 				continue
+			} else if contains(partitionIDs, segment.GetPartitionID()) {
+				isToBeDropped = true
 			}
-			if contains(partitionIDs, segment.GetPartitionID()) {
+
+			if isToBeDropped {
 				sealed.Remove(sid)
-			}
-			s.meta.SetAllocations(sid, nil)
-			for _, allocation := range segment.allocations {
-				putAllocation(allocation)
+
+				// NEW ALLOCATION CLEANUP LOGIC
+				allocations := s.meta.RemoveSegmentAllocations(sid)
+				for _, allocation := range allocations {
+					putAllocation(allocation)
+				}
 			}
 		}
 	}

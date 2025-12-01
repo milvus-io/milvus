@@ -23,6 +23,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -91,6 +92,11 @@ type meta struct {
 	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
 
+	// Separate lock for high-frequency Allocation updates (allocationMu)
+	allocationMu lock.RWMutex
+	// The value stored in the map is a pointer to atomic.Value, which holds the []Allocation slice.
+	allocations map[UniqueID]*atomic.Value
+
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
@@ -121,6 +127,12 @@ func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
 func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 	return m.compactionTaskMeta
 }
+
+// AllocationFilterFunc defines the function signature for filtering and transforming
+// a segment's current allocations list.
+// It returns the new list of allocations, the list of allocations to be recycled,
+// and the maximum ExpireTime among the remaining (non-recycled) allocations.
+type AllocationFilterFunc func(current []*Allocation) (new []*Allocation, expired []*Allocation, maxExpireTime Timestamp)
 
 type channelCPs struct {
 	lock.RWMutex
@@ -195,6 +207,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		ctx:                ctx,
 		catalog:            catalog,
 		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		allocations:        make(map[UniqueID]*atomic.Value),
 		segments:           NewSegmentsInfo(),
 		channelCPs:         newChannelCps(),
 		indexMeta:          im,
@@ -1537,38 +1550,209 @@ func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
 	return m.segments.GetRealSegmentsForChannel(channel)
 }
 
-// AddAllocation add allocation in segment
-func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
-	log.Ctx(m.ctx).Debug("meta update: add allocation",
-		zap.Int64("segmentID", segmentID),
-		zap.Any("allocation", allocation))
+// getSegmentsMap returns the underlying map of segment info.
+// This hides the nested structure m.segments.segments.
+func (m *meta) getSegmentsMap() map[UniqueID]*SegmentInfo {
+	if m.segments == nil {
+		return nil
+	}
+	return m.segments.segments
+}
+
+// updateLastExpireTime updates the LastExpireTime of a SegmentInfo, ensuring it is monotonically increasing.
+// This function handles the logic for updating the field based on new allocations or cleanup results.
+// NOTE: Case 2 (resetting to 0) has been removed to comply with domain constraints
+// that prevent LastExpireTime from being arbitrarily set to 0.
+func (m *meta) updateLastExpireTime(segmentID UniqueID, expireTime Timestamp) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
-	curSegInfo := m.segments.GetSegment(segmentID)
-	if curSegInfo == nil {
-		// TODO: Error handling.
-		log.Ctx(m.ctx).Error("meta update: add allocation failed - segment not found", zap.Int64("segmentID", segmentID))
-		return errors.New("meta update: add allocation failed - segment not found")
+
+	segmentsMap := m.getSegmentsMap()
+
+	if segment, ok := segmentsMap[segmentID]; ok {
+		// Get the current LastExpireTime safely
+		currentExpireTime := segment.GetLastExpireTime()
+
+		// Only update if the new time is strictly greater (Monotonically Increasing)
+		if expireTime > currentExpireTime {
+			// Apply the option to clone and set the new maximum time.
+			segmentsMap[segmentID] = segment.ShadowClone(SetExpireTime(expireTime))
+		}
 	}
-	// As we use global segment lastExpire to guarantee data correctness after restart
-	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
-	m.segments.AddAllocation(segmentID, allocation)
-	log.Ctx(m.ctx).Info("meta update: add allocation - complete", zap.Int64("segmentID", segmentID))
+}
+
+// GetAllocationAtomicValue is a helper to safely get the atomic.Value for a segment.
+func (m *meta) GetAllocationAtomicValue(sid UniqueID) *atomic.Value {
+	// RLock protects the map access, not the slice inside the atomic.Value.
+	m.allocationMu.RLock()
+	defer m.allocationMu.RUnlock()
+	return m.allocations[sid]
+}
+
+// AddAllocation: Implements the COW pattern to atomically add a new allocation.
+func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
+	atomicVal := m.getAllocationsAtomicValue(segmentID)
+	if atomicVal == nil {
+		return errors.New("AddAllocation failed: atomic.Value not found or created")
+	}
+
+	// 1. COW Loop: retry until the swap is successful
+	for {
+		// FIX: Load the pointer to the current slice
+		currentSlicePtr, ok := atomicVal.Load().(*[]*Allocation)
+		if !ok || currentSlicePtr == nil {
+			return errors.New("AddAllocation failed: atomic.Value holds invalid or nil pointer type")
+		}
+
+		currentSlice := *currentSlicePtr // Dereference the slice for reading
+
+		// Create a new slice (The COPY part of COW)
+		newSlice := make([]*Allocation, len(currentSlice)+1)
+		copy(newSlice, currentSlice)
+		newSlice[len(currentSlice)] = allocation
+
+		newSlicePtr := &newSlice // Get the pointer to the new slice for storage
+
+		// 2. Atomically swap the pointer: Compare old pointer with new pointer
+		if atomicVal.CompareAndSwap(currentSlicePtr, newSlicePtr) {
+			break // Success, exit the loop
+		}
+	}
+
+	// 3. Update LastExpireTime
+	m.updateLastExpireTime(segmentID, allocation.ExpireTime)
+
 	return nil
+}
+
+// GetAllocations: Implements the UNLOCKED READ
+func (m *meta) GetAllocations(segmentID UniqueID) []*Allocation {
+	atomicVal := m.GetAllocationAtomicValue(segmentID)
+	if atomicVal == nil {
+		return nil
+	}
+
+	// UNLOCKED READ: Directly return the slice pointer held by atomic.Value.
+	// The slice is guaranteed to be stable and immutable for the duration of the read,
+	// even if a write (AddAllocation) is happening concurrently.
+	currentSlice, ok := atomicVal.Load().([]*Allocation)
+	if !ok {
+		return nil
+	}
+
+	// NOTE: The caller receives a pointer to the *current* list.
+	// Since the list itself is never modified in place (only replaced),
+	// this is safe, provided the *elements* (*Allocation) are immutable.
+	return currentSlice
+}
+
+// getAllocationsAtomicValue ensures the atomic.Value for a segmentID exists and is initialized.
+// It stores a pointer to the slice (*[]*Allocation) to allow atomic.Value.CompareAndSwap.
+func (m *meta) getAllocationsAtomicValue(segmentID UniqueID) *atomic.Value {
+	var atomicVal *atomic.Value
+
+	// 1. Check if the atomic.Value exists for this SegmentID (RLock on the map)
+	m.allocationMu.RLock()
+	atomicVal = m.allocations[segmentID]
+	m.allocationMu.RUnlock()
+
+	// 2. Initialize atomic.Value if needed (DCL pattern)
+	if atomicVal == nil {
+		m.allocationMu.Lock()
+		// Double-check under lock
+		atomicVal = m.allocations[segmentID]
+		if atomicVal == nil {
+			atomicVal = &atomic.Value{}
+
+			emptySlice := make([]*Allocation, 0)
+			atomicVal.Store(&emptySlice)
+
+			m.allocations[segmentID] = atomicVal
+		}
+		m.allocationMu.Unlock()
+	}
+	return atomicVal
+}
+
+// ReplaceAllocationsWithFilter atomically replaces the current allocation list for a segment,
+// using a filter function, and retries until the CAS is successful.
+// It returns the list of allocations that were successfully removed/expired.
+// NOTE: This method encapsulates the CAS retry loop logic.
+func (m *meta) ReplaceAllocationsWithFilter(segmentID UniqueID, filterFn AllocationFilterFunc) ([]*Allocation, error) {
+	atomicVal := m.getAllocationsAtomicValue(segmentID)
+	if atomicVal == nil {
+		return nil, nil
+	}
+
+	var finalExpiredAllocations []*Allocation
+	var newAllocations []*Allocation
+	var expiredAllocations []*Allocation
+	var maxExpireTime Timestamp
+
+	for {
+		currentAllocationsPtr, ok := atomicVal.Load().(*[]*Allocation)
+		if !ok || currentAllocationsPtr == nil {
+			return nil, errors.New("ReplaceAllocationsWithFilter failed: atomic.Value holds invalid or nil pointer type")
+		}
+		currentAllocations := *currentAllocationsPtr // Dereference for filtering
+
+		// Apply the filter function (Business Logic)
+		newAllocations, expiredAllocations, maxExpireTime = filterFn(currentAllocations)
+
+		if len(expiredAllocations) == 0 && len(newAllocations) == len(currentAllocations) {
+			return nil, nil
+		}
+
+		newAllocationsPtr := &newAllocations // Get the pointer to the new slice for storage
+
+		// 2. Atomically swap the pointer (CAS)
+		if atomicVal.CompareAndSwap(currentAllocationsPtr, newAllocationsPtr) {
+			finalExpiredAllocations = expiredAllocations
+			break
+		}
+	}
+
+	// 3. Update LastExpireTime after successful CAS
+	m.updateLastExpireTime(segmentID, maxExpireTime)
+
+	return finalExpiredAllocations, nil
+}
+
+// RemoveSegmentAllocations cleans up the allocation records for a sealed or dropped segment.
+// It is protected by allocationMu and returns the removed allocations for recycling by the SegmentManager caller.
+func (m *meta) RemoveSegmentAllocations(sid UniqueID) []*Allocation {
+	// 1. Acquire the allocationMu write lock to protect map key modification (deletion).
+	m.allocationMu.Lock()
+	defer m.allocationMu.Unlock()
+
+	// 2. Check if the SegmentID exists in the map.
+	atomicVal, ok := m.allocations[sid]
+	if !ok {
+		return nil // Not found, return nil immediately.
+	}
+
+	// 3. Load and retrieve the actual []*Allocation slice from atomic.Value.
+	// In COW mode, this slice is immutable before the map entry is deleted.
+	allocations, ok := atomicVal.Load().([]*Allocation)
+	if !ok {
+		// If type assertion fails, it indicates a critical internal error. We should still try to delete the key.
+		// Log the error and return nil.
+		log.Warn("RemoveSegmentAllocations failed: atomic.Value holds invalid type", zap.Int64("segmentID", sid))
+		delete(m.allocations, sid)
+		return nil
+	}
+
+	// 4. Delete the SegmentID entry from the map.
+	delete(m.allocations, sid)
+
+	// 5. Return the removed allocations list for caller recycling.
+	return allocations
 }
 
 func (m *meta) SetRowCount(segmentID UniqueID, rowCount int64) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	m.segments.SetRowCount(segmentID, rowCount)
-}
-
-// SetAllocations set Segment allocations, will overwrite ALL original allocations
-// Note that allocations is not persisted in KV store
-func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	m.segments.SetAllocations(segmentID, allocations)
 }
 
 // SetLastExpire set lastExpire time for segment

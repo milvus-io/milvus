@@ -849,6 +849,52 @@ func TestMeta_Basic(t *testing.T) {
 	})
 }
 
+// Test_meta_Allocations tests the core allocation methods using COW logic.
+func Test_meta_Allocations(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	sid := UniqueID(100)
+	// Add segment to meta for LastExpireTime update to work without internal errors
+	err = meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{ID: sid}))
+	assert.NoError(t, err)
+
+	// Test 1: AddAllocation
+	alloc1 := getAllocation(100)
+	alloc1.SegmentID = sid
+	alloc1.ExpireTime = 1000 // Set for LastExpireTime check
+	err = meta.AddAllocation(sid, alloc1)
+	assert.NoError(t, err)
+
+	// Test 2: GetAllocations (should be 1 item)
+	allocs := meta.GetAllocations(sid)
+	assert.Len(t, allocs, 1)
+	assert.Equal(t, int64(100), allocs[0].NumOfRows)
+
+	// Test 3: Add second allocation (COW should work)
+	alloc2 := getAllocation(50)
+	alloc2.SegmentID = sid
+	alloc2.ExpireTime = 2000
+	err = meta.AddAllocation(sid, alloc2)
+	assert.NoError(t, err)
+
+	allocs = meta.GetAllocations(sid)
+	assert.Len(t, allocs, 2)
+	assert.Equal(t, int64(100), allocs[0].NumOfRows)
+	assert.Equal(t, int64(50), allocs[1].NumOfRows)
+
+	// Test 4: Verify LastExpireTime was updated (should be 2000)
+	segment := meta.GetHealthySegment(context.Background(), sid)
+	assert.Equal(t, Timestamp(2000), segment.LastExpireTime)
+
+	// Test 5: RemoveSegmentAllocations
+	removedAllocs := meta.RemoveSegmentAllocations(sid)
+	assert.Len(t, removedAllocs, 2)
+
+	// Verify removed
+	assert.Nil(t, meta.GetAllocations(sid))
+}
+
 func TestGetUnFlushedSegments(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	assert.NoError(t, err)

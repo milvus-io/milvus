@@ -34,6 +34,46 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
+// NewSegmentInfoWithAllocs helper function for tests
+func NewSegmentInfoWithAllocs(segment *SegmentInfo, allocs []*Allocation) *SegmentInfoWithAllocations {
+	return &SegmentInfoWithAllocations{
+		SegmentInfo: segment,
+		Allocations: allocs,
+	}
+}
+
+func TestAllocatePolicyL1(t *testing.T) {
+	// ... (existing paramtable setup)
+
+	// Original setup of SegmentInfo objects (must remain the same)
+	s1 := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, MaxRowNum: 1000, NumOfRows: 500})
+	s2 := NewSegmentInfo(&datapb.SegmentInfo{ID: 2, MaxRowNum: 1000, NumOfRows: 900})
+	s3 := NewSegmentInfo(&datapb.SegmentInfo{ID: 3, MaxRowNum: 1000, NumOfRows: 0}) // Empty segment
+
+	// Allocations for s1
+	alloc1 := getAllocation(100)
+	alloc2 := getAllocation(50)
+
+	// Allocations for s2
+	alloc3 := getAllocation(90) // 900 + 90 = 990 total
+
+	// NEW STEP: Convert SegmentInfo to SegmentInfoWithAllocations
+	segments := []*SegmentInfoWithAllocations{
+		NewSegmentInfoWithAllocs(s1, []*Allocation{alloc1, alloc2}), // Total allocated: 150
+		NewSegmentInfoWithAllocs(s2, []*Allocation{alloc3}),         // Total allocated: 90
+		NewSegmentInfoWithAllocs(s3, nil),                           // Total allocated: 0
+	}
+
+	// Test Case 1: Fit into s2 (900+90+10 = 1000)
+	newAllocs, existedAllocs := AllocatePolicyL1(segments, 10, 1000, datapb.SegmentLevel_L1)
+	assert.Empty(t, newAllocs)
+	assert.Len(t, existedAllocs, 1)
+	assert.Equal(t, int64(2), existedAllocs[0].SegmentID)
+	assert.Equal(t, int64(10), existedAllocs[0].NumOfRows)
+
+	// ... (rest of the test cases follow, using the 'segments' variable)
+}
+
 func TestUpperLimitCalBySchema(t *testing.T) {
 	type testCase struct {
 		schema    *schemapb.CollectionSchema
