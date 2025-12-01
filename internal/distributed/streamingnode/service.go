@@ -18,7 +18,6 @@ package streamingnode
 
 import (
 	"context"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -251,7 +250,7 @@ func (s *Server) start() (err error) {
 		return errors.Wrap(err, "StreamingNode start gRPC server fail")
 	}
 	// Register current server to etcd.
-	s.registerSessionToETCD()
+	s.session.Register()
 
 	s.componentState.OnInitialized(s.session.ServerID)
 	return nil
@@ -381,14 +380,4 @@ func (s *Server) startGPRCServer(ctx context.Context) error {
 	}()
 	funcutil.CheckGrpcReady(ctx, errCh)
 	return <-errCh
-}
-
-// registerSessionToETCD registers current server to etcd.
-func (s *Server) registerSessionToETCD() {
-	s.session.Register()
-	// start liveness check
-	s.session.LivenessCheck(context.Background(), func() {
-		log.Ctx(s.ctx).Error("StreamingNode disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
-		os.Exit(1)
-	})
 }
