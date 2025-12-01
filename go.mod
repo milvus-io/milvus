@@ -21,7 +21,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.7-0.20251117093134-44bb43c7e07b
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.7
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81 // indirect
@@ -45,12 +45,12 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.41.0
+	golang.org/x/crypto v0.45.0
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
-	golang.org/x/net v0.43.0
+	golang.org/x/net v0.47.0
 	golang.org/x/oauth2 v0.28.0
-	golang.org/x/sync v0.16.0
-	golang.org/x/text v0.28.0
+	golang.org/x/sync v0.18.0
+	golang.org/x/text v0.31.0
 	google.golang.org/grpc v1.71.1
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 )
@@ -286,11 +286,12 @@ require (
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	go.uber.org/automaxprocs v1.5.3 // indirect
 	golang.org/x/arch v0.11.0 // indirect
-	golang.org/x/mod v0.26.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/mod v0.29.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/telemetry v0.0.0-20251008203120-078029d740a8 // indirect
+	golang.org/x/term v0.37.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
-	golang.org/x/tools v0.35.0 // indirect
+	golang.org/x/tools v0.38.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	gonum.org/v1/gonum v0.15.0 // indirect
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
