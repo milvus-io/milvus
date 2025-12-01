@@ -3235,9 +3235,10 @@ type queryNodeConfig struct {
 	ForwardBatchSize            ParamItem `refreshable:"true"`
 
 	// loader
-	IoPoolSize             ParamItem `refreshable:"false"`
-	DeltaDataExpansionRate ParamItem `refreshable:"true"`
-	DiskSizeFetchInterval  ParamItem `refreshable:"false"`
+	IoPoolSize                  ParamItem `refreshable:"false"`
+	DeltaDataExpansionRate      ParamItem `refreshable:"true"`
+	JSONKeyStatsExpansionFactor ParamItem `refreshable:"true"`
+	DiskSizeFetchInterval       ParamItem `refreshable:"false"`
 
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
@@ -4235,6 +4236,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "the expansion rate for deltalog physical size to actual memory usage",
 	}
 	p.DeltaDataExpansionRate.Init(base.mgr)
+
+	p.JSONKeyStatsExpansionFactor = ParamItem{
+		Key:          "querynode.JSONKeyStatsExpansionFactor",
+		Version:      "2.6.7",
+		DefaultValue: "1.0",
+		Doc:          "the expansion factor for json key stats memory size estimation",
+	}
+	p.JSONKeyStatsExpansionFactor.Init(base.mgr)
 
 	p.DiskSizeFetchInterval = ParamItem{
 		Key:          "querynode.diskSizeFetchInterval",
