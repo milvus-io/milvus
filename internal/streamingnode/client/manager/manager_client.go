@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
@@ -51,7 +52,7 @@ type ManagerClient interface {
 // NewManagerClient creates a new manager client.
 func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 	role := sessionutil.GetSessionPrefixByRole(typeutil.StreamingNodeRole)
-	rb := resolver.NewSessionBuilder(etcdCli, role, ">=2.6.0-dev")
+	rb := resolver.NewSessionBuilder(etcdCli, discoverer.OptSDPrefix(role), discoverer.OptSDVersionRange(">=2.6.0-dev"))
 	dialTimeout := paramtable.Get().StreamingNodeGrpcClientCfg.DialTimeout.GetAsDuration(time.Millisecond)
 	dialOptions := getDialOptions(rb)
 	conn := lazygrpc.NewConn(func(ctx context.Context) (*grpc.ClientConn, error) {
