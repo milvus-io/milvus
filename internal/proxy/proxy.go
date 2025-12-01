@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"sync"
 	"time"
 
@@ -157,10 +156,6 @@ func (node *Proxy) Register() error {
 	node.session.Register()
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.ProxyRole).Inc()
 	log.Info("Proxy Register Finished")
-	node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Proxy disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
-		os.Exit(1)
-	})
 	// TODO Reset the logger
 	// Params.initLogCfg()
 	return nil

@@ -165,7 +165,6 @@ func (r *Runner) CheckSessions() error {
 
 func (r *Runner) RegisterSession() error {
 	r.session.Register()
-	r.session.LivenessCheck(r.ctx, func() {})
 	return nil
 }
 
