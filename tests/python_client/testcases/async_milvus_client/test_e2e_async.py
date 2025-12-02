@@ -252,10 +252,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
             assert r[0]['insert_count'] == step
 
         # flush
-        # TODO: call async flush() as https://github.com/milvus-io/pymilvus/issues/3060 fixed
-        # await self.async_milvus_client_wrap.flush(c_name)
-        milvus_client = self._client()
-        self.flush(milvus_client, c_name)
+        await self.async_milvus_client_wrap.flush(c_name)
         stats, _ = await self.async_milvus_client_wrap.get_collection_stats(c_name)
         assert stats["row_count"] == async_default_nb
 
