@@ -198,6 +198,50 @@ func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
+func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollectionTTLField" + funcutil.RandomString(10)
+
+	// Create collection with a ttl field.
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		DbName: dbName,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	testSchema := &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "description",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+		},
+	}
+	schemaBytes, err := proto.Marshal(testSchema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:           dbName,
+		CollectionName:   collectionName,
+		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		Schema:           schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+}
+
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,

@@ -430,6 +430,10 @@ message SegmentInfo {
   // we could keep the fullpath since one segment shall only have one active manifest
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
+
+  // expirationTimeByPercentile records the expiration timestamps of the segment
+  // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
+  repeated int64 expirationTimeByPercentile = 33;
 }
 
 message SegmentStartPosition {
@@ -688,6 +692,9 @@ message CompactionSegmentBinlogs {
   bool is_sorted = 9;
   int64 storage_version = 10;
   string manifest = 11;
+  // expirationTimeByPercentile records the expiration timestamps of the segment
+  // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
+  repeated int64 expirationTimeByPercentile = 12;
 }
 
 message CompactionPlan {
@@ -717,6 +724,7 @@ message CompactionPlan {
   string json_params = 22;
   int32 current_scalar_index_version = 23;
   repeated common.KeyValuePair plugin_context = 29;
+  int64 ttl_fieldID = 30;
 }
 
 message CompactionSegment {
@@ -732,6 +740,7 @@ message CompactionSegment {
   int64 storage_version = 10;
   map<int64, data.TextIndexStats> text_stats_logs = 11;
   string manifest = 12;
+  repeated int64 expirationTimeByPercentile = 13;
 }
 
 message CompactionPlanResult {

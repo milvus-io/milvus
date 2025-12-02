@@ -176,4 +176,17 @@ void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info);
 
+/**
+ * Convert Milvus timestamp to physical time in millisecond.
+ * Milvus timestamp format: physical time (18 bits) + logical time (46 bits)
+ * This function extracts the physical time part and converts it to millisecond.
+ *
+ * @param timestamp Milvus timestamp value
+ * @return Physical time in millisecond
+ */
+inline uint64_t
+TimestampToPhysicalMs(Timestamp timestamp) {
+    return timestamp >> LOGICAL_BITS;
+}
+
 }  // namespace milvus::segcore

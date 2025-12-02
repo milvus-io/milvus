@@ -166,7 +166,7 @@ func (suite *UtilSuite) TestGetCollectionTTL() {
 
 	ttl, err = getCollectionTTL(map[string]string{})
 	suite.NoError(err)
-	suite.Equal(ttl, Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+	suite.Equal(int(ttl), -1)
 }
 
 func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {

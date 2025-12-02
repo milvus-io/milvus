@@ -509,6 +509,9 @@ type CompositeBinlogRecordWriter struct {
 
 	flushedUncompressed uint64
 	options             []StreamWriterOption
+
+	ttlFieldID     int64
+	ttlFieldValues []int64
 }
 
 var _ BinlogRecordWriter = (*CompositeBinlogRecordWriter)(nil)
@@ -528,6 +531,29 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 		}
 		if ts > c.tsTo {
 			c.tsTo = ts
+		}
+	}
+
+	// not system column
+	if c.ttlFieldID > 1 {
+		// Defensive check to prevent panic
+		ttlColumn := r.Column(c.ttlFieldID)
+		if ttlColumn == nil {
+			return merr.WrapErrServiceInternal("ttl field not found")
+		}
+		ttlArray, ok := ttlColumn.(*array.Int64)
+		if !ok {
+			return merr.WrapErrServiceInternal("ttl field is not int64")
+		}
+		for i := 0; i < rows; i++ {
+			if ttlArray.IsNull(i) {
+				continue
+			}
+			ttlValue := ttlArray.Value(i)
+			if ttlValue <= 0 {
+				continue
+			}
+			c.ttlFieldValues = append(c.ttlFieldValues, ttlValue)
 		}
 	}
 
@@ -693,13 +719,18 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 	return nil
 }
 
+func (c *CompositeBinlogRecordWriter) GetExpirationTimeByPercentile() []int64 {
+	return calculateExpirationTimeByPercentile(c.ttlFieldID, c.rowNum, c.ttlFieldValues)
+}
+
 func (c *CompositeBinlogRecordWriter) GetLogs() (
 	fieldBinlogs map[FieldID]*datapb.FieldBinlog,
 	statsLog *datapb.FieldBinlog,
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 	manifest string,
+	expirationTimeByPercentile []int64,
 ) {
-	return c.fieldBinlogs, c.statsLog, c.bm25StatsLog, ""
+	return c.fieldBinlogs, c.statsLog, c.bm25StatsLog, "", c.GetExpirationTimeByPercentile()
 }
 
 func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
@@ -708,6 +739,7 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
+	ttlFieldID int64,
 	options ...StreamWriterOption,
 ) (*CompositeBinlogRecordWriter, error) {
 	writer := &CompositeBinlogRecordWriter{
@@ -723,6 +755,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		options:      options,
 		tsFrom:       math.MaxUint64,
 		tsTo:         0,
+		ttlFieldID:   ttlFieldID,
 	}
 
 	// Create stats collectors

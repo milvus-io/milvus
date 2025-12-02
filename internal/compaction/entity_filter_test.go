@@ -69,7 +69,7 @@ func (s *EntityFilterSuite) TestEntityFilterByTTL() {
 			filter := newEntityFilter(nil, test.collTTL, test.nowTime)
 
 			entityTs := tsoutil.ComposeTSByTime(test.entityTime, 0)
-			got := filter.Filtered("mockpk", entityTs)
+			got := filter.Filtered("mockpk", entityTs, 0)
 			s.Equal(test.expect, got)
 
 			if got {

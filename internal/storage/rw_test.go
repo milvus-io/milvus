@@ -161,7 +161,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	rowNum := w.GetRowNum()
 	s.Equal(rowNum, int64(rows))
 
-	fieldBinlogs, statsLog, bm25StatsLog, _ := w.GetLogs()
+	fieldBinlogs, statsLog, bm25StatsLog, _, _ := w.GetLogs()
 	s.Equal(len(fieldBinlogs), len(columnGroups))
 	for _, columnGroup := range fieldBinlogs {
 		s.Equal(len(columnGroup.Binlogs), 1)
@@ -240,7 +240,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	s.NoError(err)
 	err = w.Close()
 	s.NoError(err)
-	fieldBinlogs, statsLog, bm25StatsLog, _ := w.GetLogs()
+	fieldBinlogs, statsLog, bm25StatsLog, _, _ := w.GetLogs()
 	s.Equal(len(fieldBinlogs), len(columnGroups))
 
 	s.Equal(statsLog.Binlogs[0].EntriesNum, int64(1))

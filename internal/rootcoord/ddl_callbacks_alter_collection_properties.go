@@ -90,6 +90,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	udpates := &messagespb.AlterCollectionMessageUpdates{}
 
 	// Apply the properties to override the existing properties.
+	oldProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	for _, prop := range req.GetProperties() {
 		switch prop.GetKey() {
@@ -110,11 +111,52 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	for _, deleteKey := range req.GetDeleteKeys() {
 		delete(newProperties, deleteKey)
 	}
+
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {
 		udpates.Properties = newPropsKeyValuePairs
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
+	}
+
+	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
+	// so QueryNode can refresh runtime schema properties without requiring release/load.
+	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
+	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
+	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
+	if needTTLFieldSchemaRefresh {
+		// validate ttl field name exists in schema fields when setting it
+		if okNew {
+			found := false
+			for _, f := range coll.Fields {
+				if f.Name == ttlNew {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return merr.WrapErrParameterInvalidMsg("ttl field name %s not found in schema", ttlNew)
+			}
+		}
+
+		// Ensure schema update mask exists so QueryNode pipeline treats this as a schema update event.
+		if !funcutil.SliceContain(header.UpdateMask.Paths, message.FieldMaskCollectionSchema) {
+			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
+		}
+
+		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		schema := &schemapb.CollectionSchema{
+			Name:               coll.Name,
+			Description:        coll.Description,
+			AutoID:             coll.AutoID,
+			Fields:             model.MarshalFieldModels(coll.Fields),
+			StructArrayFields:  model.MarshalStructArrayFieldModels(coll.StructArrayFields),
+			Functions:          model.MarshalFunctionModels(coll.Functions),
+			EnableDynamicField: coll.EnableDynamicField,
+			Properties:         newPropsKeyValuePairs,
+			Version:            coll.SchemaVersion,
+		}
+		udpates.Schema = schema
 	}
 
 	// if there's no change, return nil directly to promise idempotent.

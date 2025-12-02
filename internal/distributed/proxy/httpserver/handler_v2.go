@@ -1815,6 +1815,12 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			Value: fmt.Sprintf("%v", httpReq.Params["ttlSeconds"]),
 		})
 	}
+	if _, ok := httpReq.Params["ttlField"]; ok {
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLFieldKey,
+			Value: fmt.Sprintf("%v", httpReq.Params["ttlField"]),
+		})
+	}
 	if _, ok := httpReq.Params["partitionKeyIsolation"]; ok {
 		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
 			Key:   common.PartitionKeyIsolationKey,
