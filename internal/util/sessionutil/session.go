@@ -16,9 +16,6 @@
 package sessionutil
 
 import (
-	"context"
-	"time"
-
 	"github.com/blang/semver/v4"
 )
 
@@ -36,16 +33,13 @@ type SessionInterface interface {
 	GoingStop() error
 	WatchServices(prefix string, revision int64, rewatch Rewatch) (watcher SessionWatcher)
 	WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (watcher SessionWatcher)
-	LivenessCheck(ctx context.Context, callback func())
 	Stop()
-	Revoke(timeout time.Duration)
 	UpdateRegistered(b bool)
 	Registered() bool
 	SetDisconnected(b bool)
 	Disconnected() bool
 	SetEnableActiveStandBy(enable bool)
 	ProcessActiveStandBy(activateFunc func() error) error
-	ForceActiveStandby(activateFunc func() error) error
 
 	GetAddress() string
 	GetServerID() int64

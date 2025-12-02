@@ -902,6 +902,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	RegisterCGOMetrics(registry)
 
 	RegisterStreamingServiceClient(registry)
+	RegisterLoggingMetrics(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

@@ -401,11 +401,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
-    LOG_INFO(
-        "[StorageV2] segment {} loads manifest cg index {} with field ids "
-        "{} ",
-        this->get_segment_id(),
-        index);
+    LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
+             this->get_segment_id(),
+             index);
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -562,6 +560,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         auto translator =
             std::make_unique<storagev2translator::GroupChunkTranslator>(
                 get_segment_id(),
+                GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
                 insert_files,
@@ -682,7 +681,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
                      field_id.get());
-            load_system_field_internal(field_id, field_data_info);
+            load_system_field_internal(
+                field_id, field_data_info, load_info.load_priority);
             LOG_INFO("segment {} loads system field {} mmap false done",
                      this->get_segment_id(),
                      field_id.get());
@@ -721,8 +721,10 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 }
 
 void
-ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
-                                                     FieldDataInfo& data) {
+ChunkedSegmentSealedImpl::load_system_field_internal(
+    FieldId field_id,
+    FieldDataInfo& data,
+    proto::common::LoadPriority load_priority) {
     SCOPE_CGO_CALL_METRIC();
 
     auto num_rows = data.row_count;
@@ -880,8 +882,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len =
-        std::nullopt) const {
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -897,8 +898,7 @@ ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len =
-        std::nullopt) const {
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -914,8 +914,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     int64_t chunk_id,
-    std::optional<std::pair<int64_t, int64_t>> offset_len =
-        std::nullopt) const {
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
@@ -1433,6 +1432,54 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
         case DataType::VARCHAR:
             search_sorted_pk_range_impl<std::string>(
                 op, std::get<std::string>(pk), pk_column, bitset);
+            break;
+        default:
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
+                                          const PkType& lower_pk,
+                                          bool lower_inclusive,
+                                          const PkType& upper_pk,
+                                          bool upper_inclusive,
+                                          BitsetTypeView& bitset) const {
+    if (!is_sorted_by_pk_) {
+        // For unsorted segments, use the InsertRecord's binary range search
+        insert_record_.search_pk_binary_range(
+            lower_pk, lower_inclusive, upper_pk, upper_inclusive, bitset);
+        return;
+    }
+
+    // For sorted segments, use binary search
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = get_column(pk_field_id);
+    AssertInfo(pk_column != nullptr, "primary key column not loaded");
+
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64:
+            search_sorted_pk_binary_range_impl<int64_t>(
+                std::get<int64_t>(lower_pk),
+                lower_inclusive,
+                std::get<int64_t>(upper_pk),
+                upper_inclusive,
+                pk_column,
+                bitset);
+            break;
+        case DataType::VARCHAR:
+            search_sorted_pk_binary_range_impl<std::string>(
+                std::get<std::string>(lower_pk),
+                lower_inclusive,
+                std::get<std::string>(upper_pk),
+                upper_inclusive,
+                pk_column,
+                bitset);
             break;
         default:
             ThrowInfo(

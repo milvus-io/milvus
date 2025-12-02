@@ -293,6 +293,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init meta
 	s.nodeMgr = session.NewNodeManager()
+	s.nodeMgr.Start(s.ctx)
 	err = s.initMeta()
 	if err != nil {
 		return err
@@ -715,10 +716,14 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 			// node in node manager but session not exist, means it's offline
 			s.nodeMgr.Remove(node.ID())
 			s.handleNodeDown(node.ID())
-		} else if nodeSession.Stopping && !node.IsStoppingState() {
-			// node in node manager but session is stopping, means it's stopping
-			s.nodeMgr.Stopping(node.ID())
-			s.handleNodeStopping(node.ID())
+		} else {
+			if nodeSession.Stopping && !node.IsStoppingState() {
+				// node in node manager but session is stopping, means it's stopping
+				log.Warn("rewatch found old querynode in stopping state", zap.Int64("nodeID", nodeSession.ServerID))
+				s.nodeMgr.Stopping(node.ID())
+				s.handleNodeStopping(node.ID())
+			}
+			delete(sessionMap, node.ID())
 		}
 	}
 
@@ -734,11 +739,14 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 				Labels:   nodeSession.GetServerLabel(),
 			}))
 
+			// call handleNodeUp no matter what state new querynode is in
+			// all component need this op so that stopping balance could work correctly
+			s.handleNodeUp(nodeSession.GetServerID())
+
 			if nodeSession.Stopping {
+				log.Warn("rewatch found new querynode in stopping state", zap.Int64("nodeID", nodeSession.ServerID))
 				s.nodeMgr.Stopping(nodeSession.ServerID)
 				s.handleNodeStopping(nodeSession.ServerID)
-			} else {
-				s.handleNodeUp(nodeSession.GetServerID())
 			}
 		}
 	}

@@ -17,14 +17,12 @@
 package typeutil
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 func TestConversion(t *testing.T) {
@@ -104,7 +102,7 @@ func TestConversion(t *testing.T) {
 			v := (rand.Float32() - 0.5) * 100
 			b := Float32ToFloat16Bytes(v)
 			v2 := Float16BytesToFloat32(b)
-			log.Info("float16", zap.Float32("v", v), zap.Float32("v2", v2))
+			fmt.Printf("float16 v: %f, v2: %f", v, v2)
 			assert.Less(t, math.Abs(float64(v2/v-1)), 0.001)
 		}
 	})
@@ -114,7 +112,7 @@ func TestConversion(t *testing.T) {
 			v := (rand.Float32() - 0.5) * 100
 			b := Float32ToBFloat16Bytes(v)
 			v2 := BFloat16BytesToFloat32(b)
-			log.Info("bfloat16", zap.Float32("v", v), zap.Float32("v2", v2))
+			fmt.Printf("bfloat16 v: %f, v2: %f", v, v2)
 			assert.Less(t, math.Abs(float64(v2/v-1)), 0.01)
 		}
 	})

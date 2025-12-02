@@ -70,13 +70,17 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*
 
 func ConvertToArrowField(field *schemapb.FieldSchema, dataType arrow.DataType, useFieldID bool) arrow.Field {
 	f := arrow.Field{
-		Name:     field.GetName(),
 		Type:     dataType,
 		Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{strconv.Itoa(int(field.GetFieldID()))}),
 		Nullable: field.GetNullable(),
 	}
-	if useFieldID {
-		field.Name = fmt.Sprintf("%d", field.GetFieldID())
+	// external field name has higher priority
+	if field.GetExternalField() != "" {
+		f.Name = field.GetExternalField()
+	} else if useFieldID { // use fieldID as name when specified
+		f.Name = fmt.Sprintf("%d", field.GetFieldID())
+	} else {
+		f.Name = field.GetName()
 	}
 	return f
 }

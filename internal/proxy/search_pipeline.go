@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -30,16 +29,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -114,9 +110,15 @@ const (
 	rerankOp             = "rerank"
 	requeryOp            = "requery"
 	organizeOp           = "organize"
-	filterFieldOp        = "filter_field"
+	endOp                = "end"
 	lambdaOp             = "lambda"
 	highlightOp          = "highlight"
+)
+
+const (
+	pipelineOutput      = "output"
+	pipelineInput       = "input"
+	pipelineStorageCost = "storage_cost"
 )
 
 var opFactory = map[string]func(t *searchTask, params map[string]any) (operator, error){
@@ -126,7 +128,7 @@ var opFactory = map[string]func(t *searchTask, params map[string]any) (operator,
 	organizeOp:           newOrganizeOperator,
 	requeryOp:            newRequeryOperator,
 	lambdaOp:             newLambdaOperator,
-	filterFieldOp:        newFilterFieldOperator,
+	endOp:                newEndOperator,
 	highlightOp:          newHighlightOperator,
 }
 
@@ -569,19 +571,19 @@ func (op *lambdaOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	return op.f(ctx, span, inputs...)
 }
 
-type filterFieldOperator struct {
+type endOperator struct {
 	outputFieldNames []string
 	fieldSchemas     []*schemapb.FieldSchema
 }
 
-func newFilterFieldOperator(t *searchTask, _ map[string]any) (operator, error) {
-	return &filterFieldOperator{
+func newEndOperator(t *searchTask, _ map[string]any) (operator, error) {
+	return &endOperator{
 		outputFieldNames: t.translatedOutputFields,
 		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
 	}, nil
 }
 
-func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
 	for _, retField := range result.Results.FieldsData {
 		for _, fieldSchema := range op.fieldSchemas {
@@ -595,195 +597,13 @@ func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs 
 	result.Results.FieldsData = lo.Filter(result.Results.FieldsData, func(field *schemapb.FieldData, _ int) bool {
 		return lo.Contains(op.outputFieldNames, field.FieldName)
 	})
+	allSearchCount := aggregatedAllSearchCount(inputs[1].([]*milvuspb.SearchResults))
+	result.GetResults().AllSearchCount = allSearchCount
 	return []any{result}, nil
-}
-
-const (
-	PreTagsKey             = "pre_tags"
-	PostTagsKey            = "post_tags"
-	HighlightSearchTextKey = "highlight_search_data"
-	FragmentOffsetKey      = "fragment_offset"
-	FragmentSizeKey        = "fragment_size"
-	FragmentNumKey         = "num_of_fragments"
-	DefaultFragmentSize    = 100
-	DefaultFragmentNum     = 1
-	DefaultPreTag          = "<em>"
-	DefaultPostTag         = "</em>"
-)
-
-type highlightTask struct {
-	*querypb.HighlightTask
-	preTags  [][]byte
-	postTags [][]byte
-}
-
-type highlightOperator struct {
-	tasks        []*highlightTask
-	fieldSchemas []*schemapb.FieldSchema
-	lbPolicy     shardclient.LBPolicy
-	scheduler    *taskScheduler
-
-	collectionName string
-	collectionID   int64
-	dbName         string
-
-	preTag  []byte
-	postTag []byte
 }
 
 func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
-	return &highlightOperator{
-		tasks:          t.highlightTasks,
-		lbPolicy:       t.lb,
-		scheduler:      t.node.(*Proxy).sched,
-		fieldSchemas:   typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
-		collectionName: t.request.CollectionName,
-		collectionID:   t.CollectionID,
-		dbName:         t.request.DbName,
-	}, nil
-}
-
-func sliceByRune(s string, start, end int) string {
-	if start >= end {
-		return ""
-	}
-
-	i, from, to := 0, 0, len(s)
-	for idx := range s {
-		if i == start {
-			from = idx
-		}
-		if i == end {
-			to = idx
-			break
-		}
-		i++
-	}
-
-	return s[from:to]
-}
-
-// get slice texts according to fragment options
-func getHighlightTexts(task *querypb.HighlightTask, datas []string) []string {
-	if task.GetOptions().GetNumOfFragments() == 0 {
-		return datas
-	}
-
-	results := make([]string, len(datas))
-	offset := int(task.GetOptions().GetFragmentOffset())
-	size := offset + int(task.GetOptions().GetFragmentSize()*task.GetOptions().GetNumOfFragments())
-	for i, text := range datas {
-		results[i] = sliceByRune(text, min(offset, len(text)), min(size, len(text)))
-	}
-	return results
-}
-
-func (op *highlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
-	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.Results.GetFieldsData()
-	req := &querypb.GetHighlightRequest{
-		Topks: result.GetResults().GetTopks(),
-		Tasks: lo.Map(op.tasks, func(task *highlightTask, _ int) *querypb.HighlightTask { return task.HighlightTask }),
-	}
-
-	for _, task := range req.GetTasks() {
-		textFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == task.GetFieldId() })
-		if !ok {
-			return nil, errors.Errorf("get highlight failed, text field not in output field %s: %d", task.GetFieldName(), task.GetFieldId())
-		}
-		texts := getHighlightTexts(task, textFieldDatas.GetScalars().GetStringData().GetData())
-		task.Texts = append(task.Texts, texts...)
-		task.CorpusTextNum = int64(len(texts))
-		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
-			return schema.GetFieldID() == task.GetFieldId()
-		})
-		if !ok {
-			return nil, errors.Errorf("get highlight failed, field not found in schema %s: %d", task.GetFieldName(), task.GetFieldId())
-		}
-
-		// if use multi analyzer
-		// get analyzer field data
-		helper := typeutil.CreateFieldSchemaHelper(field)
-		if v, ok := helper.GetMultiAnalyzerParams(); ok {
-			params := map[string]any{}
-			err := json.Unmarshal([]byte(v), &params)
-			if err != nil {
-				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params-: %v", err)
-			}
-			analyzerField, ok := params["by_field"]
-			if !ok {
-				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params, no by_field")
-			}
-
-			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldName == analyzerField.(string) })
-			if !ok {
-				return nil, errors.Errorf("get highlight failed, analyzer field not in output field")
-			}
-			task.AnalyzerNames = append(task.AnalyzerNames, analyzerFieldDatas.GetScalars().GetStringData().GetData()...)
-		}
-	}
-
-	task := &HighlightTask{
-		ctx:                 ctx,
-		lb:                  op.lbPolicy,
-		Condition:           NewTaskCondition(ctx),
-		GetHighlightRequest: req,
-		collectionName:      op.collectionName,
-		collectionID:        op.collectionID,
-		dbName:              op.dbName,
-	}
-	if err := op.scheduler.dqQueue.Enqueue(task); err != nil {
-		return nil, err
-	}
-
-	if err := task.WaitToFinish(); err != nil {
-		return nil, err
-	}
-
-	rowNum := len(result.Results.GetScores())
-	HighlightResults := []*commonpb.HighlightResult{}
-	if rowNum != 0 {
-		rowDatas := lo.Map(task.result.Results, func(result *querypb.HighlightResult, i int) *commonpb.HighlightData {
-			return buildStringFragments(op.tasks[i/rowNum], i%rowNum, result.GetFragments())
-		})
-
-		for i, task := range req.GetTasks() {
-			HighlightResults = append(HighlightResults, &commonpb.HighlightResult{
-				FieldName: task.GetFieldName(),
-				Datas:     rowDatas[i*rowNum : (i+1)*rowNum],
-			})
-		}
-	}
-
-	result.Results.HighlightResults = HighlightResults
-	return []any{result}, nil
-}
-
-func buildStringFragments(task *highlightTask, idx int, frags []*querypb.HighlightFragment) *commonpb.HighlightData {
-	bytes := []byte(task.Texts[int(task.GetSearchTextNum())+idx])
-	preTagsNum := len(task.preTags)
-	postTagsNum := len(task.postTags)
-	result := &commonpb.HighlightData{Fragments: make([]string, 0)}
-	for _, frag := range frags {
-		fragBytes := []byte{}
-		cursor := int(frag.GetStartOffset())
-		for i := 0; i < len(frag.GetOffsets())/2; i++ {
-			startOffset := int(frag.Offsets[i<<1])
-			endOffset := int(frag.Offsets[(i<<1)+1])
-			if cursor < startOffset {
-				fragBytes = append(fragBytes, bytes[cursor:startOffset]...)
-			}
-			fragBytes = append(fragBytes, task.preTags[i%preTagsNum]...)
-			fragBytes = append(fragBytes, bytes[startOffset:endOffset]...)
-			fragBytes = append(fragBytes, task.postTags[i%postTagsNum]...)
-			cursor = endOffset
-		}
-		if cursor < int(frag.GetEndOffset()) {
-			fragBytes = append(fragBytes, bytes[cursor:frag.GetEndOffset()]...)
-		}
-		result.Fragments = append(result.Fragments, string(fragBytes))
-	}
-	return result
+	return t.highlighter.AsSearchPipelineOperator(t)
 }
 
 func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
@@ -856,8 +676,8 @@ func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
 	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.String()))
 	msg := opMsg{}
-	msg["input"] = toReduceResults
-	msg["storage_cost"] = storageCost
+	msg[pipelineInput] = toReduceResults
+	msg[pipelineStorageCost] = storageCost
 	for _, node := range p.nodes {
 		var err error
 		log.Ctx(ctx).Debug("SearchPipeline run node", zap.String("node", node.name))
@@ -867,7 +687,7 @@ func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*
 			return nil, storageCost, err
 		}
 	}
-	return msg["output"].(*milvuspb.SearchResults), msg["storage_cost"].(segcore.StorageCost), nil
+	return msg[pipelineOutput].(*milvuspb.SearchResults), msg[pipelineStorageCost].(segcore.StorageCost), nil
 }
 
 func (p *pipeline) String() string {
@@ -883,17 +703,17 @@ type pipelineDef struct {
 	nodes []*nodeDef
 }
 
-var filterFieldNode = &nodeDef{
+var endNode = &nodeDef{
 	name:    "filter_field",
-	inputs:  []string{"result"},
-	outputs: []string{"output"},
-	opName:  filterFieldOp,
+	inputs:  []string{"result", "reduced"},
+	outputs: []string{pipelineOutput},
+	opName:  endOp,
 }
 
 var highlightNode = &nodeDef{
 	name:    "highlight",
 	inputs:  []string{"result"},
-	outputs: []string{"output"},
+	outputs: []string{pipelineOutput},
 	opName:  highlightOp,
 }
 
@@ -902,7 +722,7 @@ var searchPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -926,7 +746,7 @@ var searchWithRequeryPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -941,8 +761,8 @@ var searchWithRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"unique_ids", "storage_cost"},
-			outputs: []string{"fields", "storage_cost"},
+			inputs:  []string{"unique_ids", pipelineStorageCost},
+			outputs: []string{"fields", pipelineStorageCost},
 			opName:  requeryOp,
 		},
 		{
@@ -984,7 +804,7 @@ var searchWithRerankPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -1036,7 +856,7 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  searchReduceOp,
 		},
@@ -1061,8 +881,8 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"ids", "storage_cost"},
-			outputs: []string{"fields", "storage_cost"},
+			inputs:  []string{"ids", pipelineStorageCost},
+			outputs: []string{"fields", pipelineStorageCost},
 			opName:  requeryOp,
 		},
 		{
@@ -1104,7 +924,7 @@ var hybridSearchPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  hybridSearchReduceOp,
 		},
@@ -1122,7 +942,7 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  hybridSearchReduceOp,
 		},
@@ -1137,8 +957,8 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"ids", "storage_cost"},
-			outputs: []string{"fields", "storage_cost"},
+			inputs:  []string{"ids", pipelineStorageCost},
+			outputs: []string{"fields", pipelineStorageCost},
 			opName:  requeryOp,
 		},
 		{
@@ -1223,7 +1043,7 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 	nodes: []*nodeDef{
 		{
 			name:    "reduce",
-			inputs:  []string{"input", "storage_cost"},
+			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
 			opName:  hybridSearchReduceOp,
 		},
@@ -1248,8 +1068,8 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "requery",
-			inputs:  []string{"ids", "storage_cost"},
-			outputs: []string{"fields", "storage_cost"},
+			inputs:  []string{"ids", pipelineStorageCost},
+			outputs: []string{"fields", pipelineStorageCost},
 			opName:  requeryOp,
 		},
 		{
@@ -1274,9 +1094,9 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 		},
 		{
 			name:    "filter_field",
-			inputs:  []string{"result"},
-			outputs: []string{"output"},
-			opName:  filterFieldOp,
+			inputs:  []string{"result", "reduced"},
+			outputs: []string{pipelineOutput},
+			opName:  endOp,
 		},
 	},
 }
@@ -1318,16 +1138,26 @@ func newSearchPipeline(t *searchTask) (*pipeline, error) {
 		return nil, err
 	}
 
-	if len(t.highlightTasks) > 0 {
-		err := p.AddNodes(t, highlightNode, filterFieldNode)
+	if t.highlighter != nil {
+		err := p.AddNodes(t, highlightNode, endNode)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		err := p.AddNodes(t, filterFieldNode)
+		err := p.AddNodes(t, endNode)
 		if err != nil {
 			return nil, err
 		}
 	}
 	return p, nil
+}
+
+func aggregatedAllSearchCount(searchResults []*milvuspb.SearchResults) int64 {
+	allSearchCount := int64(0)
+	for _, sr := range searchResults {
+		if sr != nil && sr.GetResults() != nil {
+			allSearchCount += sr.GetResults().GetAllSearchCount()
+		}
+	}
+	return allSearchCount
 }

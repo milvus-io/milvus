@@ -19,6 +19,7 @@ package zilliz
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -227,8 +228,8 @@ func TestZillizClient_setMeta(t *testing.T) {
 func TestZillizClient_Embedding(t *testing.T) {
 	// Setup mock server
 	s, lis, dialer := setupMockServer(t)
-	defer s.Stop()
 	defer lis.Close()
+	defer s.Stop()
 
 	// Create test embedding data
 	embeddingData1 := make([]byte, 8)                              // 2 float32 values
@@ -265,7 +266,7 @@ func TestZillizClient_Embedding(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
+			fmt.Printf("Server exited with error: %v\n", err)
 		}
 	}()
 
@@ -301,8 +302,8 @@ func TestZillizClient_Embedding(t *testing.T) {
 func TestZillizClient_Embedding_Error(t *testing.T) {
 	// Setup mock server with error
 	s, lis, dialer := setupMockServer(t)
-	defer s.Stop()
 	defer lis.Close()
+	defer s.Stop()
 
 	mockServer := &mockTextEmbeddingServer{
 		err: assert.AnError,
@@ -312,7 +313,7 @@ func TestZillizClient_Embedding_Error(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
+			fmt.Printf("Server exited with error: %v\n", err)
 		}
 	}()
 
@@ -346,8 +347,8 @@ func TestZillizClient_Embedding_Error(t *testing.T) {
 func TestZillizClient_Rerank(t *testing.T) {
 	// Setup mock server
 	s, lis, dialer := setupMockServer(t)
-	defer s.Stop()
 	defer lis.Close()
+	defer s.Stop()
 
 	mockServer := &mockRerankServer{
 		response: &modelservicepb.TextRerankResponse{
@@ -360,7 +361,7 @@ func TestZillizClient_Rerank(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
+			fmt.Printf("Server exited with error: %v\n", err)
 		}
 	}()
 
@@ -395,8 +396,8 @@ func TestZillizClient_Rerank(t *testing.T) {
 func TestZillizClient_Rerank_Error(t *testing.T) {
 	// Setup mock server with error
 	s, lis, dialer := setupMockServer(t)
-	defer s.Stop()
 	defer lis.Close()
+	defer s.Stop()
 
 	mockServer := &mockRerankServer{
 		err: assert.AnError,
@@ -406,7 +407,7 @@ func TestZillizClient_Rerank_Error(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
+			fmt.Printf("Server exited with error: %v\n", err)
 		}
 	}()
 
@@ -478,12 +479,12 @@ func TestNewZilliClient(t *testing.T) {
 func TestNewZilliClient_WithMockServer(t *testing.T) {
 	// Setup mock server for successful connection test
 	s, lis, _ := setupMockServer(t)
-	defer s.Stop()
 	defer lis.Close()
+	defer s.Stop()
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
+			fmt.Printf("Server exited with error: %v\n", err)
 		}
 	}()
 
@@ -514,8 +515,8 @@ func TestNewZilliClient_WithMockServer(t *testing.T) {
 func TestZillizClient_Embedding_EmptyResponse(t *testing.T) {
 	// Setup mock server with empty results
 	s, lis, dialer := setupMockServer(t)
-	defer s.Stop()
 	defer lis.Close()
+	defer s.Stop()
 
 	mockServer := &mockTextEmbeddingServer{
 		response: &modelservicepb.TextEmbeddingResponse{
@@ -528,7 +529,7 @@ func TestZillizClient_Embedding_EmptyResponse(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(lis); err != nil {
-			t.Logf("Server exited with error: %v", err)
+			fmt.Printf("Server exited with error: %v\n", err)
 		}
 	}()
 

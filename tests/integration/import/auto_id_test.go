@@ -47,7 +47,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert" + funcutil.RandomString(8)
 
 	var schema *schemapb.CollectionSchema
 	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: true}

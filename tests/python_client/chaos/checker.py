@@ -355,7 +355,7 @@ class Checker:
         self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
 
-        # Initialize MilvusClient
+        # Initialize MilvusClient - prioritize uri and token
         if cf.param_info.param_uri:
             uri = cf.param_info.param_uri
         else:
@@ -371,10 +371,8 @@ class Checker:
         self.alias = cf.gen_unique_str("checker_alias_")
         connections.connect(
             alias=self.alias,
-            host=cf.param_info.param_host,
-            port=str(cf.param_info.param_port),
-            user=cf.param_info.param_user,
-            password=cf.param_info.param_password
+            uri=uri,
+            token=token
         )
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
@@ -389,9 +387,10 @@ class Checker:
             schema = CollectionSchema.construct_from_dict(collection_info)
         else:
             enable_struct_array_field = kwargs.get("enable_struct_array_field", True)
-            schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field) if schema is None else schema
+            enable_dynamic_field = kwargs.get("enable_dynamic_field", True)
+            schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=enable_struct_array_field, enable_dynamic_field=enable_dynamic_field) if schema is None else schema
 
-        log.info(f"schema: {schema}")
+        log.debug(f"schema: {schema}")
         self.schema = schema
         self.dim = cf.get_dim_by_schema(schema=schema)
         self.int64_field_name = cf.get_int64_field_name(schema=schema)
@@ -602,8 +601,7 @@ class Checker:
 
     def insert_data(self, nb=constants.DELTA_PER_INS, partition_name=None):
         partition_name = self.p_name if partition_name is None else partition_name
-        client_schema = self.milvus_client.describe_collection(collection_name=self.c_name)
-        data = cf.gen_row_data_by_schema(nb=nb, schema=client_schema)
+        data = cf.gen_row_data_by_schema(nb=nb, schema=self.get_schema())
         ts_data = []
         for i in range(nb):
             time.sleep(0.001)
@@ -808,7 +806,7 @@ class CollectionRenameChecker(Checker):
             result = self.milvus_client.has_collection(collection_name=new_collection_name)
             if result:
                 self.c_name = new_collection_name
-                data = cf.gen_row_data_by_schema(nb=1, schema=self.schema)
+                data = cf.gen_row_data_by_schema(nb=1, schema=self.get_schema())
                 self.milvus_client.insert(collection_name=new_collection_name, data=data)
         return res, result
 
@@ -904,7 +902,7 @@ class SearchChecker(Checker):
                 data=self.data,
                 anns_field=self.anns_field_name,
                 search_params=self.search_param,
-                limit=1,
+                limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout
             )
@@ -962,7 +960,7 @@ class TensorSearchChecker(Checker):
                 data=self.data,
                 anns_field=self.anns_field_name,
                 search_params=self.search_param,
-                limit=1,
+                limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout
             )
@@ -1018,7 +1016,7 @@ class FullTextSearchChecker(Checker):
                 data=cf.gen_vectors(5, self.dim, vector_data_type="TEXT_SPARSE_VECTOR"),
                 anns_field=bm25_anns_field,
                 search_params=constants.DEFAULT_BM25_SEARCH_PARAM,
-                limit=1,
+                limit=5,
                 partition_names=self.p_names,
                 timeout=search_timeout
             )
@@ -1105,7 +1103,7 @@ class InsertFlushChecker(Checker):
             try:
                 self.milvus_client.insert(
                     collection_name=self.c_name,
-                    data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                    data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
                     timeout=timeout
                 )
                 insert_result = True
@@ -1163,14 +1161,14 @@ class FlushChecker(Checker):
         try:
             self.milvus_client.insert(
                 collection_name=self.c_name,
-                data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
                 timeout=timeout
             )
-            result = True
-        except Exception:
-            result = False
-        res, result = self.flush()
-        return res, result
+            res, result = self.flush()
+            return res, result
+        except Exception as e:
+            log.error(f"run task error: {e}")
+            return str(e), False
 
     def keep_running(self):
         while self._keep_running:
@@ -1240,9 +1238,7 @@ class InsertChecker(Checker):
 
     @trace()
     def insert_entities(self):
-        # Use describe_collection directly to preserve struct_fields information
-        schema = self.milvus_client.describe_collection(self.c_name)
-        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
         rows = len(data)
         ts_data = []
         for i in range(constants.DELTA_PER_INS):
@@ -1328,8 +1324,7 @@ class InsertFreshnessChecker(Checker):
         self.file_name = f"/tmp/ci_logs/insert_data_{uuid.uuid4()}.parquet"
 
     def insert_entities(self):
-        schema = self.get_schema()
-        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
         ts_data = []
         for i in range(constants.DELTA_PER_INS):
             time.sleep(0.001)
@@ -1387,8 +1382,7 @@ class UpsertChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("UpsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        schema = self.milvus_client.describe_collection(collection_name=self.c_name)
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
 
     @trace()
     def upsert_entities(self):
@@ -1406,8 +1400,7 @@ class UpsertChecker(Checker):
         # half of the data is upsert, the other half is insert
         rows = len(self.data)
         pk_old = [d[self.int64_field_name] for d in self.data[:rows // 2]]
-        schema = self.milvus_client.describe_collection(collection_name=self.c_name)
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
         pk_new = [d[self.int64_field_name] for d in self.data[rows // 2:]]
         pk_update = pk_old + pk_new
         for i in range(rows):
@@ -1430,8 +1423,7 @@ class UpsertFreshnessChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("UpsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        schema = self.get_schema()
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
 
     def upsert_entities(self):
         try:
@@ -1464,8 +1456,7 @@ class UpsertFreshnessChecker(Checker):
         # half of the data is upsert, the other half is insert
         rows = len(self.data[0])
         pk_old = self.data[0][:rows // 2]
-        schema = self.get_schema()
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
         pk_new = self.data[0][rows // 2:]
         pk_update = pk_old + pk_new
         self.data[0] = pk_update
@@ -1487,8 +1478,7 @@ class PartialUpdateChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("PartialUpdateChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema, enable_struct_array_field=False)
-        schema = self.get_schema()
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.get_schema())
 
     @trace()
     def partial_update_entities(self):
@@ -1773,7 +1763,7 @@ class IndexCreateChecker(Checker):
         super().__init__(collection_name=collection_name, schema=schema)
         for i in range(5):
             self.milvus_client.insert(collection_name=self.c_name,
-                                     data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+                                     data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
                                      timeout=timeout)
         # do as a flush before indexing
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
@@ -1813,7 +1803,7 @@ class IndexDropChecker(Checker):
             collection_name = cf.gen_unique_str("IndexChecker_")
         super().__init__(collection_name=collection_name, schema=schema)
         for i in range(5):
-            self.milvus_client.insert(collection_name=self.c_name, data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.schema),
+            self.milvus_client.insert(collection_name=self.c_name, data=cf.gen_row_data_by_schema(nb=constants.ENTITIES_FOR_SEARCH, schema=self.get_schema()),
                                timeout=timeout)
         # do as a flush before indexing
         stats = self.milvus_client.get_collection_stats(collection_name=self.c_name)
@@ -1862,7 +1852,7 @@ class QueryChecker(Checker):
     @trace()
     def query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"query error: {e}")
@@ -1897,7 +1887,7 @@ class TextMatchChecker(Checker):
     @trace()
     def text_match(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"text_match error: {e}")
@@ -1937,7 +1927,7 @@ class PhraseMatchChecker(Checker):
     @trace()
     def phrase_match(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"phrase_match error: {e}")
@@ -1990,7 +1980,7 @@ class JsonQueryChecker(Checker):
     @trace()
     def json_query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"json_query error: {e}")
@@ -2029,7 +2019,7 @@ class GeoQueryChecker(Checker):
     @trace()
     def geo_query(self):
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, timeout=query_timeout)
+            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
             return res, True
         except Exception as e:
             log.info(f"geo_query error: {e}")
@@ -2273,7 +2263,7 @@ class BulkInsertChecker(Checker):
         ) as remote_writer:
 
             for _ in range(data_size):
-                row = cf.gen_row_data_by_schema(nb=1, schema=self.schema)[0]
+                row = cf.gen_row_data_by_schema(nb=1, schema=self.get_schema())[0]
                 remote_writer.append_row(row)
             remote_writer.commit()
             batch_files = remote_writer.batch_files
@@ -2335,17 +2325,19 @@ class AlterCollectionChecker(Checker):
     def __init__(self, collection_name=None, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("AlterCollectionChecker")
-        super().__init__(collection_name=collection_name, schema=schema)
+        super().__init__(collection_name=collection_name, schema=schema, enable_dynamic_field=False)
         self.milvus_client.release_collection(collection_name=self.c_name)
         res = self.milvus_client.describe_collection(collection_name=self.c_name)
-        log.info(f"before alter collection {self.c_name} properties: {res}")
+        log.info(f"before alter collection {self.c_name} schema: {res}")
         # alter collection attributes
         self.milvus_client.alter_collection_properties(collection_name=self.c_name,
-        properties={"mmap.enabled": True})
+                                                       properties={"mmap.enabled": True})
         self.milvus_client.alter_collection_properties(collection_name=self.c_name,
-        properties={"collection.ttl.seconds": 3600})
+                                                       properties={"collection.ttl.seconds": 3600})
+        self.milvus_client.alter_collection_properties(collection_name=self.c_name, 
+                                                       properties={"dynamicfield.enabled": True})
         res = self.milvus_client.describe_collection(collection_name=self.c_name)
-        log.info(f"after alter collection {self.c_name} properties: {res}")
+        log.info(f"after alter collection {self.c_name} schema: {res}")
         
     @trace()
     def alter_check(self):
@@ -2355,6 +2347,8 @@ class AlterCollectionChecker(Checker):
             if properties.get("mmap.enabled") != "True":
                 return res, False
             if properties.get("collection.ttl.seconds") != "3600":
+                return res, False
+            if res["enable_dynamic_field"] != True:
                 return res, False
             return res, True
         except Exception as e:

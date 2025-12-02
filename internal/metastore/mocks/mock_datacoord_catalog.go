@@ -991,6 +991,53 @@ func (_c *DataCoordCatalog_DropStatsTask_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// DropUpdateExternalCollectionTask provides a mock function with given fields: ctx, taskID
+func (_m *DataCoordCatalog) DropUpdateExternalCollectionTask(ctx context.Context, taskID int64) error {
+	ret := _m.Called(ctx, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropUpdateExternalCollectionTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropUpdateExternalCollectionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropUpdateExternalCollectionTask'
+type DataCoordCatalog_DropUpdateExternalCollectionTask_Call struct {
+	*mock.Call
+}
+
+// DropUpdateExternalCollectionTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - taskID int64
+func (_e *DataCoordCatalog_Expecter) DropUpdateExternalCollectionTask(ctx interface{}, taskID interface{}) *DataCoordCatalog_DropUpdateExternalCollectionTask_Call {
+	return &DataCoordCatalog_DropUpdateExternalCollectionTask_Call{Call: _e.mock.On("DropUpdateExternalCollectionTask", ctx, taskID)}
+}
+
+func (_c *DataCoordCatalog_DropUpdateExternalCollectionTask_Call) Run(run func(ctx context.Context, taskID int64)) *DataCoordCatalog_DropUpdateExternalCollectionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropUpdateExternalCollectionTask_Call) Return(_a0 error) *DataCoordCatalog_DropUpdateExternalCollectionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropUpdateExternalCollectionTask_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropUpdateExternalCollectionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GcConfirm provides a mock function with given fields: ctx, collectionID, partitionID
 func (_m *DataCoordCatalog) GcConfirm(ctx context.Context, collectionID int64, partitionID int64) bool {
 	ret := _m.Called(ctx, collectionID, partitionID)
@@ -1795,6 +1842,64 @@ func (_c *DataCoordCatalog_ListStatsTasks_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// ListUpdateExternalCollectionTasks provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListUpdateExternalCollectionTasks(ctx context.Context) ([]*indexpb.UpdateExternalCollectionTask, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUpdateExternalCollectionTasks")
+	}
+
+	var r0 []*indexpb.UpdateExternalCollectionTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*indexpb.UpdateExternalCollectionTask, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*indexpb.UpdateExternalCollectionTask); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*indexpb.UpdateExternalCollectionTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListUpdateExternalCollectionTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUpdateExternalCollectionTasks'
+type DataCoordCatalog_ListUpdateExternalCollectionTasks_Call struct {
+	*mock.Call
+}
+
+// ListUpdateExternalCollectionTasks is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListUpdateExternalCollectionTasks(ctx interface{}) *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call {
+	return &DataCoordCatalog_ListUpdateExternalCollectionTasks_Call{Call: _e.mock.On("ListUpdateExternalCollectionTasks", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call) Return(_a0 []*indexpb.UpdateExternalCollectionTask, _a1 error) *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call) RunAndReturn(run func(context.Context) ([]*indexpb.UpdateExternalCollectionTask, error)) *DataCoordCatalog_ListUpdateExternalCollectionTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MarkChannelAdded provides a mock function with given fields: ctx, channel
 func (_m *DataCoordCatalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	ret := _m.Called(ctx, channel)
@@ -2500,6 +2605,53 @@ func (_c *DataCoordCatalog_SaveStatsTask_Call) Return(_a0 error) *DataCoordCatal
 }
 
 func (_c *DataCoordCatalog_SaveStatsTask_Call) RunAndReturn(run func(context.Context, *indexpb.StatsTask) error) *DataCoordCatalog_SaveStatsTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveUpdateExternalCollectionTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error {
+	ret := _m.Called(ctx, task)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveUpdateExternalCollectionTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.UpdateExternalCollectionTask) error); ok {
+		r0 = rf(ctx, task)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveUpdateExternalCollectionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveUpdateExternalCollectionTask'
+type DataCoordCatalog_SaveUpdateExternalCollectionTask_Call struct {
+	*mock.Call
+}
+
+// SaveUpdateExternalCollectionTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task *indexpb.UpdateExternalCollectionTask
+func (_e *DataCoordCatalog_Expecter) SaveUpdateExternalCollectionTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call {
+	return &DataCoordCatalog_SaveUpdateExternalCollectionTask_Call{Call: _e.mock.On("SaveUpdateExternalCollectionTask", ctx, task)}
+}
+
+func (_c *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call) Run(run func(ctx context.Context, task *indexpb.UpdateExternalCollectionTask)) *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.UpdateExternalCollectionTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call) Return(_a0 error) *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call) RunAndReturn(run func(context.Context, *indexpb.UpdateExternalCollectionTask) error) *DataCoordCatalog_SaveUpdateExternalCollectionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

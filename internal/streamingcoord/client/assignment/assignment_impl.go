@@ -49,6 +49,16 @@ type AssignmentServiceImpl struct {
 	logger         *log.MLogger
 }
 
+// GetLatestStreamingVersion returns the version of the streaming service.
+func (c *AssignmentServiceImpl) GetLatestStreamingVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, status.NewOnShutdownError("assignment service client is closing")
+	}
+	defer c.lifetime.Done()
+
+	return c.watcher.GetLatestStreamingVersion(ctx)
+}
+
 // GetLatestAssignments returns the latest assignment discovery result.
 func (c *AssignmentServiceImpl) GetLatestAssignments(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {

@@ -31,12 +31,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
 const DynamicFieldMaxLength = 512
@@ -501,7 +499,6 @@ func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.Fie
 		}
 	}
 	errMsg := fmt.Sprintf("field %s not exist", fieldName)
-	log.Warn(errMsg)
 	return nil, fmt.Errorf("%s", errMsg)
 }
 
@@ -990,8 +987,6 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 				} else {
 					dstScalar.GetGeometryWktData().Data = append(dstScalar.GetGeometryWktData().Data, srcScalar.GeometryWktData.Data[idx])
 				}
-			default:
-				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
 		case *schemapb.FieldData_Vectors:
 			dim := fieldType.Vectors.Dim
@@ -1094,8 +1089,6 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 				} else {
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data[idx])
 				}
-			default:
-				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
 		}
 	}
@@ -1109,7 +1102,6 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
 			if dst[i] == nil || dst[i].GetScalars() == nil {
-				log.Info("empty field data can't be deleted")
 				return
 			}
 			dstScalar := dst[i].GetScalars()
@@ -1132,12 +1124,9 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
 				dstScalar.GetGeometryData().Data = dstScalar.GetGeometryData().Data[:len(dstScalar.GetGeometryData().Data)-1]
-			default:
-				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
 			}
 		case *schemapb.FieldData_Vectors:
 			if dst[i] == nil || dst[i].GetVectors() == nil {
-				log.Info("empty field data can't be deleted")
 				return
 			}
 			dim := fieldType.Vectors.Dim
@@ -1159,8 +1148,6 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 			case *schemapb.VectorField_Int8Vector:
 				dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
 				dstInt8Vector.Int8Vector = dstInt8Vector.Int8Vector[:len(dstInt8Vector.Int8Vector)-int(dim)]
-			default:
-				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
 			}
 		}
 	}
@@ -1297,7 +1284,6 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					baseData.Data[baseIdx] = updateData.Data[updateIdx]
 				}
 			default:
-				log.Error("Not supported scalar field type", zap.String("field type", baseFieldData.Type.String()))
 				return fmt.Errorf("unsupported scalar field type: %s", baseFieldData.Type.String())
 			}
 
@@ -1379,11 +1365,9 @@ func UpdateFieldData(base, update []*schemapb.FieldData, baseIdx, updateIdx int6
 					}
 				}
 			default:
-				log.Error("Not supported vector field type", zap.String("field type", baseFieldData.Type.String()))
 				return fmt.Errorf("unsupported vector field type: %s", baseFieldData.Type.String())
 			}
 		default:
-			log.Error("Not supported field type", zap.String("field type", baseFieldData.Type.String()))
 			return fmt.Errorf("unsupported field type: %s", baseFieldData.Type.String())
 		}
 	}
@@ -1523,7 +1507,6 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					dstScalar.GetBytesData().Data = append(dstScalar.GetBytesData().Data, srcScalar.BytesData.Data...)
 				}
 			default:
-				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
 		case *schemapb.FieldData_Vectors:
@@ -1599,7 +1582,6 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					dstVector.GetVectorArray().Data = append(dstVector.GetVectorArray().Data, srcVector.VectorArray.Data...)
 				}
 			default:
-				log.Error("Not supported data type", zap.String("data type", srcFieldData.Type.String()))
 				return errors.New("unsupported data type: " + srcFieldData.Type.String())
 			}
 		}
@@ -2011,8 +1993,6 @@ func AppendPKs(pks *schemapb.IDs, pk interface{}) {
 			}
 		}
 		pks.GetStrId().Data = append(pks.GetStrId().GetData(), realPK)
-	default:
-		log.Warn("got unexpected data type of pk when append pks", zap.Any("pk", pk))
 	}
 }
 

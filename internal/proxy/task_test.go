@@ -5550,7 +5550,7 @@ func TestHighlightTask(t *testing.T) {
 		err := task.OnEnqueue()
 		assert.NoError(t, err)
 		assert.NotNil(t, task.Base)
-		assert.Equal(t, commonpb.MsgType_RunAnalyzer, task.Base.MsgType)
+		assert.Equal(t, commonpb.MsgType_Undefined, task.Base.MsgType)
 		assert.Equal(t, paramtable.GetNodeID(), task.Base.SourceID)
 	})
 

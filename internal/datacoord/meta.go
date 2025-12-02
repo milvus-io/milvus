@@ -94,11 +94,12 @@ type meta struct {
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	indexMeta          *indexMeta
-	analyzeMeta        *analyzeMeta
-	partitionStatsMeta *partitionStatsMeta
-	compactionTaskMeta *compactionTaskMeta
-	statsTaskMeta      *statsTaskMeta
+	indexMeta                  *indexMeta
+	analyzeMeta                *analyzeMeta
+	partitionStatsMeta         *partitionStatsMeta
+	compactionTaskMeta         *compactionTaskMeta
+	statsTaskMeta              *statsTaskMeta
+	externalCollectionTaskMeta *externalCollectionTaskMeta
 
 	// File Resource Meta
 	resourceMeta map[string]*model.FileResource
@@ -183,6 +184,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO: add external collection task meta
+	// ectm, err := newExternalCollectionTaskMeta(ctx, catalog)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
@@ -195,7 +203,8 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		partitionStatsMeta: psm,
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
-		resourceMeta:       make(map[string]*model.FileResource),
+		// externalCollectionTaskMeta: ectm,
+		resourceMeta: make(map[string]*model.FileResource),
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {

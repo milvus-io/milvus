@@ -23,46 +23,66 @@
 namespace milvus {
 class ChunkTarget {
  public:
-    virtual void
-    write(const void* data, size_t size) = 0;
-
-    virtual std::pair<char*, size_t>
-    get() = 0;
+    static constexpr size_t ALIGNED_SIZE = 4096;  // 4KB
 
     virtual ~ChunkTarget() = default;
 
+    /**
+     * @brief write data to the target at the current position
+     * @param data the data to write
+     * @param size the size of the data to write
+     */
+    virtual void
+    write(const void* data, size_t size) = 0;
+
+    /**
+     * @brief release the data pointer to the caller
+     * @note no write() should be called after release()
+     * @return the data pointer
+     */
+    virtual char*
+    release() = 0;
+
+    /**
+     * @brief get the current position of the target
+     * @return the current position
+     */
     virtual size_t
     tell() = 0;
 };
 
 class MmapChunkTarget : public ChunkTarget {
  public:
-    explicit MmapChunkTarget(std::string file_path)
-        : file_path_(std::move(file_path)) {
-        file_writer_ = std::make_unique<storage::FileWriter>(file_path_);
+    explicit MmapChunkTarget(std::string file_path,
+                             size_t cap,
+                             storage::io::Priority io_prio)
+        : file_path_(std::move(file_path)), cap_(cap) {
+        file_writer_ =
+            std::make_unique<storage::FileWriter>(file_path_, io_prio);
     }
-
-    void
-    flush();
 
     void
     write(const void* data, size_t size) override;
 
-    std::pair<char*, size_t>
-    get() override;
+    char*
+    release() override;
 
     size_t
     tell() override;
 
  private:
+    void
+    flush();
+
     std::unique_ptr<storage::FileWriter> file_writer_{nullptr};
     std::string file_path_{};
-    size_t size_ = 0;
+    size_t cap_{0};
+    size_t size_{0};
 };
 
 class MemChunkTarget : public ChunkTarget {
  public:
-    MemChunkTarget(size_t cap) : cap_(cap) {
+    explicit MemChunkTarget(size_t cap) : cap_(cap) {
         auto m = mmap(nullptr,
                       cap,
                       PROT_READ | PROT_WRITE,
@@ -79,8 +99,8 @@ class MemChunkTarget : public ChunkTarget {
     void
     write(const void* data, size_t size) override;
 
-    std::pair<char*, size_t>
-    get() override;
+    char*
+    release() override;
 
     size_t
     tell() override;

@@ -177,6 +177,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 	// check all ro nodes, remove it from replica if all segment/channel has been moved
 	for _, collectionID := range collections {
 		replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+		hasNodeRemoved := false
 		for _, replica := range replicas {
 			if enableChannelExclusiveMode && !replica.IsChannelExclusiveModeEnabled() {
 				// register channel for enable exclusive mode
@@ -217,9 +218,13 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 					zap.Error(err))
 				continue
 			}
+			hasNodeRemoved = true
 			logger.Info("all segment/channel has been removed from ro node, remove it from replica",
 				zap.Int64s("removedNodes", removeNodes),
 			)
+		}
+		if hasNodeRemoved {
+			utils.RecoverReplicaOfCollection(ctx, ob.meta, collectionID)
 		}
 	}
 }

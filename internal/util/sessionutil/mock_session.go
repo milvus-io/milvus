@@ -3,8 +3,6 @@
 package sessionutil
 
 import (
-	context "context"
-
 	semver "github.com/blang/semver/v4"
 	mock "github.com/stretchr/testify/mock"
 
@@ -65,52 +63,6 @@ func (_c *MockSession_Disconnected_Call) Return(_a0 bool) *MockSession_Disconnec
 }
 
 func (_c *MockSession_Disconnected_Call) RunAndReturn(run func() bool) *MockSession_Disconnected_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ForceActiveStandby provides a mock function with given fields: activateFunc
-func (_m *MockSession) ForceActiveStandby(activateFunc func() error) error {
-	ret := _m.Called(activateFunc)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ForceActiveStandby")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(func() error) error); ok {
-		r0 = rf(activateFunc)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockSession_ForceActiveStandby_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForceActiveStandby'
-type MockSession_ForceActiveStandby_Call struct {
-	*mock.Call
-}
-
-// ForceActiveStandby is a helper method to define mock.On call
-//   - activateFunc func() error
-func (_e *MockSession_Expecter) ForceActiveStandby(activateFunc interface{}) *MockSession_ForceActiveStandby_Call {
-	return &MockSession_ForceActiveStandby_Call{Call: _e.mock.On("ForceActiveStandby", activateFunc)}
-}
-
-func (_c *MockSession_ForceActiveStandby_Call) Run(run func(activateFunc func() error)) *MockSession_ForceActiveStandby_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func() error))
-	})
-	return _c
-}
-
-func (_c *MockSession_ForceActiveStandby_Call) Return(_a0 error) *MockSession_ForceActiveStandby_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSession_ForceActiveStandby_Call) RunAndReturn(run func(func() error) error) *MockSession_ForceActiveStandby_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -459,40 +411,6 @@ func (_c *MockSession_IsTriggerKill_Call) Return(_a0 bool) *MockSession_IsTrigge
 
 func (_c *MockSession_IsTriggerKill_Call) RunAndReturn(run func() bool) *MockSession_IsTriggerKill_Call {
 	_c.Call.Return(run)
-	return _c
-}
-
-// LivenessCheck provides a mock function with given fields: ctx, callback
-func (_m *MockSession) LivenessCheck(ctx context.Context, callback func()) {
-	_m.Called(ctx, callback)
-}
-
-// MockSession_LivenessCheck_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LivenessCheck'
-type MockSession_LivenessCheck_Call struct {
-	*mock.Call
-}
-
-// LivenessCheck is a helper method to define mock.On call
-//   - ctx context.Context
-//   - callback func()
-func (_e *MockSession_Expecter) LivenessCheck(ctx interface{}, callback interface{}) *MockSession_LivenessCheck_Call {
-	return &MockSession_LivenessCheck_Call{Call: _e.mock.On("LivenessCheck", ctx, callback)}
-}
-
-func (_c *MockSession_LivenessCheck_Call) Run(run func(ctx context.Context, callback func())) *MockSession_LivenessCheck_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(func()))
-	})
-	return _c
-}
-
-func (_c *MockSession_LivenessCheck_Call) Return() *MockSession_LivenessCheck_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSession_LivenessCheck_Call) RunAndReturn(run func(context.Context, func())) *MockSession_LivenessCheck_Call {
-	_c.Run(run)
 	return _c
 }
 

@@ -4760,6 +4760,7 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 			testutils.GenerateScalarFieldData(dType, fieldName, int(nq*topk)),
 			testutils.GenerateScalarFieldData(schemapb.DataType_Int64, testInt64Field, int(nq*topk)),
 		},
+		AllSearchCount: nq * topk,
 	}
 	resultData.FieldsData[0].FieldId = fieldId
 	sliceBlob, _ := proto.Marshal(resultData)
@@ -4939,9 +4940,12 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(task.highlightTasks))
-		assert.Equal(t, int64(100), task.highlightTasks[0].FieldId)
-		assert.Equal(t, "text_field", task.highlightTasks[0].FieldName)
+
+		h, ok := task.highlighter.(*LexicalHighlighter)
+		require.True(t, ok)
+		require.Equal(t, 1, len(h.tasks))
+		assert.Equal(t, int64(100), h.tasks[100].FieldId)
+		assert.Equal(t, "text_field", h.tasks[100].FieldName)
 	})
 
 	t.Run("Lexical highlight with custom tags", func(t *testing.T) {
@@ -4958,11 +4962,13 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 		err := task.addHighlightTask(highlighter, metric.BM25, 101, placeholderBytes, "")
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(task.highlightTasks))
-		assert.Equal(t, 1, len(task.highlightTasks[0].preTags))
-		assert.Equal(t, []byte("<b>"), task.highlightTasks[0].preTags[0])
-		assert.Equal(t, 1, len(task.highlightTasks[0].postTags))
-		assert.Equal(t, []byte("</b>"), task.highlightTasks[0].postTags[0])
+
+		h, ok := task.highlighter.(*LexicalHighlighter)
+		require.True(t, ok)
+		assert.Equal(t, 1, len(h.preTags))
+		assert.Equal(t, []byte("<b>"), h.preTags[0])
+		assert.Equal(t, 1, len(h.postTags))
+		assert.Equal(t, []byte("</b>"), h.postTags[0])
 	})
 
 	t.Run("lexical highlight with wrong metric type", func(t *testing.T) {

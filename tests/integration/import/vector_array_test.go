@@ -47,7 +47,7 @@ func TestGenerateJsonFileWithVectorArray(t *testing.T) {
 		maxArrayCapacity = 10
 	)
 
-	collectionName := "TestBulkInsert_VectorArray_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_VectorArray_" + funcutil.RandomString(8)
 
 	// Create schema with StructArrayField containing vector array
 	schema := integration.ConstructSchema(collectionName, 0, true, &schemapb.FieldSchema{
@@ -127,7 +127,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 600*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_VectorArray_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_VectorArray_" + funcutil.RandomString(8)
 
 	// Create schema with StructArrayField containing vector array
 	schema := integration.ConstructSchema(collectionName, 0, true, &schemapb.FieldSchema{

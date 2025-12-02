@@ -37,6 +37,7 @@ type (
 	}
 
 	WatchChannelAssignmentsCallbackParam struct {
+		StreamingVersion       *streamingpb.StreamingVersion
 		Version                typeutil.VersionInt64Pair
 		CChannelAssignment     *streamingpb.CChannelAssignment
 		PChannelView           *PChannelView
@@ -579,7 +580,8 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 		replicateConfig = cm.replicateConfig.GetReplicateConfiguration()
 	}
 	return version, cb(WatchChannelAssignmentsCallbackParam{
-		Version: version,
+		StreamingVersion: cm.streamingVersion,
+		Version:          version,
 		CChannelAssignment: &streamingpb.CChannelAssignment{
 			Meta: cchannelAssignment,
 		},

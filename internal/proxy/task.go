@@ -3204,7 +3204,7 @@ func (t *HighlightTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
-	t.Base.MsgType = commonpb.MsgType_RunAnalyzer
+	t.Base.MsgType = commonpb.MsgType_Undefined
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }

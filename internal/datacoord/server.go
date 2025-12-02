@@ -156,10 +156,11 @@ type Server struct {
 	// segReferManager  *SegmentReferenceManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	statsInspector   *statsInspector
-	indexInspector   *indexInspector
-	analyzeInspector *analyzeInspector
-	globalScheduler  task.GlobalScheduler
+	statsInspector              *statsInspector
+	indexInspector              *indexInspector
+	analyzeInspector            *analyzeInspector
+	externalCollectionInspector *externalCollectionInspector
+	globalScheduler             task.GlobalScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -320,6 +321,10 @@ func (s *Server) initDataCoord() error {
 
 	s.initStatsInspector()
 	log.Info("init statsJobManager done")
+
+	// TODO: enable external collection inspector
+	// s.initExternalCollectionInspector()
+	// log.Info("init external collection inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -523,6 +528,7 @@ func (s *Server) initServiceDiscovery() error {
 			log.Warn("DataCoord failed to add datanode", zap.Error(err))
 			return err
 		}
+		s.dnSessionWatcher = sessionutil.EmptySessionWatcher()
 	} else {
 		err := s.rewatchDataNodes(sessions)
 		if err != nil {
@@ -674,6 +680,12 @@ func (s *Server) initStatsInspector() {
 	}
 }
 
+func (s *Server) initExternalCollectionInspector() {
+	if s.externalCollectionInspector == nil {
+		s.externalCollectionInspector = newExternalCollectionInspector(s.ctx, s.meta, s.globalScheduler, s.allocator)
+	}
+}
+
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.loadMeta()
@@ -749,6 +761,8 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
+	// TODO: enable external collection inspector
+	// s.externalCollectionInspector.Start()
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
@@ -1060,6 +1074,9 @@ func (s *Server) Stop() error {
 	if s.qnSessionWatcher != nil {
 		s.qnSessionWatcher.Stop()
 	}
+	// TODO: enable external collection inspector
+	// s.externalCollectionInspector.Stop()
+	// log.Info("datacoord external collection inspector stopped")
 
 	if s.session != nil {
 		s.session.Stop()

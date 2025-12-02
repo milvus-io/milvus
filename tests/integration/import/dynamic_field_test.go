@@ -48,7 +48,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_B_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_B_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchema(collectionName, dim, true, &schemapb.FieldSchema{
 		FieldID:      100,

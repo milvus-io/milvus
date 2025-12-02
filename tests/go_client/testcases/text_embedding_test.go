@@ -676,7 +676,7 @@ func TestHybridSearchTextEmbeddingBM25(t *testing.T) {
 	}
 
 	// create collection
-	err := mc.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(collectionName, schema))
+	err := mc.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(collectionName, schema).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 
 	// insert test data with diverse content
