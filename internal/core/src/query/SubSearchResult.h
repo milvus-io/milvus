@@ -118,7 +118,7 @@ class SubSearchResult {
     }
 
     std::pair<std::vector<int64_t>, std::vector<int32_t>>
-    convert_as_element_offsets(const IArrayOffsets* array_offsets) {
+    convert_to_element_offsets(const IArrayOffsets* array_offsets) {
         std::vector<int64_t> doc_offsets;
         std::vector<int32_t> element_indices;
         doc_offsets.reserve(offsets_.size());

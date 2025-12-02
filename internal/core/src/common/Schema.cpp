@@ -150,4 +150,36 @@ Schema::AbsentFields(Schema& old_schema) const {
     return std::make_unique<std::vector<FieldMeta>>(result);
 }
 
+const FieldMeta&
+Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
+    // Check cache first
+    auto cache_it = struct_array_field_cache_.find(struct_name);
+    if (cache_it != struct_array_field_cache_.end()) {
+        return fields_.at(cache_it->second);
+    }
+
+    // Not cached, search for the field
+    for (const auto& [field_id, field_meta] : fields_) {
+        const std::string& field_name = field_meta.get_name().get();
+
+        if (field_name.size() > struct_name.size() + 2 &&
+            field_name.substr(0, struct_name.size()) == struct_name &&
+            field_name[struct_name.size()] == '[') {
+            auto data_type = field_meta.get_data_type();
+
+            AssertInfo(data_type == DataType::ARRAY ||
+                           data_type == DataType::VECTOR_ARRAY,
+                       "Expected ARRAY or VECTOR_ARRAY type for struct field");
+
+            // Cache the result
+            struct_array_field_cache_[struct_name] = field_id;
+            return field_meta;
+        }
+    }
+
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "No array field found in struct: {}",
+              struct_name);
+}
+
 }  // namespace milvus

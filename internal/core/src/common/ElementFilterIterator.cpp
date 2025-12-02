@@ -104,7 +104,7 @@ ElementFilterIterator::FetchAndFilterBatch() {
 
     // Step 4: Filter elements based on evaluation results and cache them
     for (size_t i = 0; i < element_ids_buffer_.size(); ++i) {
-        if (bitsetview[i] > 0) {
+        if (bitsetview[i]) {
             // Element passes filter, cache it
             filtered_buffer_.emplace_back(element_ids_buffer_[i],
                                           distances_buffer_[i]);

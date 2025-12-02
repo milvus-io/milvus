@@ -45,13 +45,17 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		Topks:      make([]int64, 0),
 	}
 
-	// Check if any input has ElementIndices, if so, initialize for output
-	for _, data := range searchResultData {
-		if data.ElementIndices != nil {
-			ret.ElementIndices = &schemapb.LongArray{
-				Data: make([]int64, 0),
-			}
-			break
+	// Check element-level consistency: all results must have ElementIndices or none
+	hasElementIndices := searchResultData[0].ElementIndices != nil
+	for i, data := range searchResultData {
+		if (data.ElementIndices != nil) != hasElementIndices {
+			return nil, fmt.Errorf("inconsistent element-level flag in search results: result[0] has ElementIndices=%v, but result[%d] has ElementIndices=%v",
+				hasElementIndices, i, data.ElementIndices != nil)
+		}
+	}
+	if hasElementIndices {
+		ret.ElementIndices = &schemapb.LongArray{
+			Data: make([]int64, 0),
 		}
 	}
 
@@ -140,13 +144,17 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		Topks:      make([]int64, 0),
 	}
 
-	// Check if any input has ElementIndices, if so, initialize for output
-	for _, data := range searchResultData {
-		if data.ElementIndices != nil {
-			ret.ElementIndices = &schemapb.LongArray{
-				Data: make([]int64, 0),
-			}
-			break
+	// Check element-level consistency: all results must have ElementIndices or none
+	hasElementIndices := searchResultData[0].ElementIndices != nil
+	for i, data := range searchResultData {
+		if (data.ElementIndices != nil) != hasElementIndices {
+			return nil, fmt.Errorf("inconsistent element-level flag in search results: result[0] has ElementIndices=%v, but result[%d] has ElementIndices=%v",
+				hasElementIndices, i, data.ElementIndices != nil)
+		}
+	}
+	if hasElementIndices {
+		ret.ElementIndices = &schemapb.LongArray{
+			Data: make([]int64, 0),
 		}
 	}
 

@@ -374,6 +374,10 @@ class Schema {
     std::unique_ptr<std::vector<FieldMeta>>
     AbsentFields(Schema& old_schema) const;
 
+    // Find the first array field belonging to a struct (cached)
+    const FieldMeta&
+    GetFirstArrayFieldInStruct(const std::string& struct_name) const;
+
  private:
     int64_t debug_id = START_USER_FIELDID;
     std::vector<FieldId> field_ids_;
@@ -395,6 +399,9 @@ class Schema {
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
+
+    // Cache for struct_name -> first array field mapping
+    mutable std::unordered_map<std::string, FieldId> struct_array_field_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

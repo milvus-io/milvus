@@ -321,7 +321,7 @@ PhyIterativeFilterNode::GetOutput() {
                         Assert(bitsetview.size() <= batch_size);
                         Assert(bitsetview.size() == offsets.size());
                         for (auto i = 0; i < offsets.size(); ++i) {
-                            if (bitsetview[i] > 0) {
+                            if (bitsetview[i]) {
                                 insert_helper(search_result,
                                               topk,
                                               large_is_better,

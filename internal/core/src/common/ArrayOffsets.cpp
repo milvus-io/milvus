@@ -76,7 +76,7 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
             "ArrayOffsetsSealed::BuildFromSegment: empty segment for struct "
             "'{}'",
             field_meta.get_name().get());
-        return ArrayOffsetsSealed();
+        return ArrayOffsetsSealed({}, {0});
     }
 
     FieldId field_id = field_meta.get_id();

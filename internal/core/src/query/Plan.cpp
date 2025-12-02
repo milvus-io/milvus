@@ -45,7 +45,7 @@ check_data_type(
                            EmbListFloatVector;
             }
         } else if (field_meta.get_element_type() == DataType::VECTOR_FLOAT16) {
-            return placeholder_value.type() == placeholder_value.type() ==
+            return placeholder_value.type() ==
                    milvus::proto::common::PlaceholderType::EmbListFloat16Vector;
         } else if (field_meta.get_element_type() == DataType::VECTOR_BFLOAT16) {
             return placeholder_value.type() ==

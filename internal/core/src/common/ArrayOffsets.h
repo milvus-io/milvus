@@ -58,19 +58,21 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     friend class ArrayOffsetsTest;
 
  public:
-    ArrayOffsetsSealed() = default;
+    ArrayOffsetsSealed()
+        : element_row_ids_(), row_to_element_start_({0}) {
+    }
 
     ArrayOffsetsSealed(std::vector<int32_t> element_row_ids,
                        std::vector<int32_t> row_to_element_start)
         : element_row_ids_(std::move(element_row_ids)),
           row_to_element_start_(std::move(row_to_element_start)) {
+        AssertInfo(!row_to_element_start_.empty(),
+                   "row_to_element_start must have at least one element");
     }
 
     int64_t
     GetRowCount() const override {
-        return row_to_element_start_.empty()
-                   ? 0
-                   : static_cast<int64_t>(row_to_element_start_.size()) - 1;
+        return static_cast<int64_t>(row_to_element_start_.size()) - 1;
     }
 
     int64_t

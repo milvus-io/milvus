@@ -82,11 +82,11 @@ PhyVectorSearchNode::GetOutput() {
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
-    auto array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
+    auto array_offsets = nullptr;
     if (ph.element_level_) {
+        array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
         AssertInfo(array_offsets != nullptr, "Array offsets not available");
         query_context_->set_array_offsets(array_offsets);
-        search_info_.array_offsets_ = array_offsets;
     }
 
     // There are two types of execution: pre-filter and iterative filter
@@ -117,8 +117,6 @@ PhyVectorSearchNode::GetOutput() {
 
     auto col_input = GetColumnVector(input_);
     TargetBitmapView view(col_input->GetRawData(), col_input->size());
-    TargetBitmapView valid_view(col_input->GetValidRawData(),
-                                col_input->size());
 
     if (view.all()) {
         query_context_->set_search_result(

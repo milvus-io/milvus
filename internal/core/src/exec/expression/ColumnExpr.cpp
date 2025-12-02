@@ -71,8 +71,8 @@ PhyColumnExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 VectorPtr
 PhyColumnExpr::DoEval(OffsetVector* input) {
-    AssertInfo(expr_->GetColumn().element_level_,
-               "ColumnExpr of element-level access is not supported");
+    AssertInfo(!expr_->GetColumn().element_level_,
+               "ColumnExpr of row-level access is not supported");
 
     // similar to PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op)
     // take offsets as input

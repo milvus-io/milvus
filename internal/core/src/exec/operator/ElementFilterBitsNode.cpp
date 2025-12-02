@@ -65,8 +65,8 @@ PhyElementFilterBitsNode::GetOutput() {
 
     // Step 1: Get array offsets
     auto segment = query_context_->get_segment();
-    auto field_meta = milvus::FindFirstArrayFieldInStruct(segment->get_schema(),
-                                                          struct_name_);
+    auto& field_meta =
+        segment->get_schema().GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
     auto array_offsets = segment->GetArrayOffsets(field_id);
     if (array_offsets == nullptr) {
@@ -180,28 +180,26 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
     bitset = TargetBitmap(total_elements, false);
     valid_bitset = TargetBitmap(total_elements, true);
 
-    if (auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0])) {
-        if (col_vec->IsBitmap()) {
-            auto col_vec_size = col_vec->size();
-            TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
-
-            AssertInfo(col_vec_size == element_offsets.size(),
-                       "ElementFilterBitsNode result size mismatch: {} vs {}",
-                       col_vec_size,
-                       element_offsets.size());
-
-            for (size_t i = 0; i < element_offsets.size(); ++i) {
-                if (bitsetview[i]) {
-                    bitset[element_offsets[i]] = true;
-                }
-            }
-        } else {
-            ThrowInfo(ExprInvalid,
-                      "ElementFilterBitsNode result should be bitmap");
-        }
-    } else {
+    auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
+    if (!col_vec) {
         ThrowInfo(ExprInvalid,
                   "ElementFilterBitsNode result should be ColumnVector");
+    }
+    if (!col_vec->IsBitmap()) {
+        ThrowInfo(ExprInvalid, "ElementFilterBitsNode result should be bitmap");
+    }
+    auto col_vec_size = col_vec->size();
+    TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
+
+    AssertInfo(col_vec_size == element_offsets.size(),
+               "ElementFilterBitsNode result size mismatch: {} vs {}",
+               col_vec_size,
+               element_offsets.size());
+
+    for (size_t i = 0; i < element_offsets.size(); ++i) {
+        if (bitsetview[i]) {
+            bitset[element_offsets[i]] = true;
+        }
     }
 
     bitset.flip();

@@ -77,9 +77,6 @@ class PhyElementFilterNode : public Operator {
     }
 
  private:
-    TargetBitmap
-    EvaluateElementBatch(const std::vector<int64_t>& element_ids);
-
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;
     std::string struct_name_;

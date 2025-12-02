@@ -81,7 +81,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
-    auto active_doc_count =
+    auto active_row_count =
         std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
 
     // step 1.1: get meta
@@ -162,7 +162,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
-                                             active_doc_count,
+                                             active_row_count,
                                              info,
                                              index_info,
                                              bitset,
@@ -172,7 +172,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
 
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-        auto max_chunk = upper_div(active_doc_count, vec_size_per_chunk);
+        auto max_chunk = upper_div(active_row_count, vec_size_per_chunk);
 
         // embedding search embedding on embedding list
         bool embedding_search = false;
@@ -185,17 +185,17 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
              ++chunk_id) {
             auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
 
-            auto doc_begin = chunk_id * vec_size_per_chunk;
-            auto doc_end =
-                std::min(active_doc_count, (chunk_id + 1) * vec_size_per_chunk);
-            auto size_per_chunk = doc_end - doc_begin;
+            auto row_begin = chunk_id * vec_size_per_chunk;
+            auto row_end =
+                std::min(active_row_count, (chunk_id + 1) * vec_size_per_chunk);
+            auto size_per_chunk = row_end - row_begin;
 
             query::dataset::RawDataset sub_data;
             std::unique_ptr<uint8_t[]> buf = nullptr;
             std::vector<size_t> offsets;
             if (data_type != DataType::VECTOR_ARRAY) {
                 sub_data = query::dataset::RawDataset{
-                    doc_begin, dim, size_per_chunk, chunk_data};
+                    row_begin, dim, size_per_chunk, chunk_data};
             } else {
                 // TODO(SpadeA): For VectorArray(Embedding List), data is
                 // discreted stored in FixedVector which means we will copy the
@@ -218,7 +218,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         count += vec_ptr[i].length();
                     }
                     sub_data = query::dataset::RawDataset{
-                        doc_begin, dim, count, buf.get()};
+                        row_begin, dim, count, buf.get()};
                 } else {
                     offsets.reserve(size_per_chunk + 1);
                     offsets.push_back(0);
@@ -232,7 +232,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         offset += vec_ptr[i].length();
                         offsets.push_back(offset);
                     }
-                    sub_data = query::dataset::RawDataset{doc_begin,
+                    sub_data = query::dataset::RawDataset{row_begin,
                                                           dim,
                                                           size_per_chunk,
                                                           buf.get(),
@@ -284,7 +284,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         } else {
             if (info.array_offsets_ != nullptr) {
                 auto [seg_offsets, elem_indicies] =
-                    final_qr.convert_as_element_offsets(
+                    final_qr.convert_to_element_offsets(
                         info.array_offsets_.get());
                 search_result.seg_offsets_ = std::move(seg_offsets);
                 search_result.element_indices_ = std::move(elem_indicies);

@@ -58,17 +58,17 @@ class ElementFilterIterator : public VectorIterator {
     std::shared_ptr<VectorIterator> base_iterator_;
 
     // Execution context for expression evaluation
-    exec::ExecContext* exec_context_;
+    const exec::ExecContext* exec_context_;
 
     // Expression set containing element-level filter expression
-    exec::ExprSet* expr_set_;
+    const exec::ExprSet* expr_set_;
 
     // Cache of filtered elements ready to be consumed
     std::deque<std::pair<int64_t, float>> filtered_buffer_;
 
     // Reusable buffers for batch fetching (avoid repeated allocations)
     FixedVector<int32_t> element_ids_buffer_;
-    std::vector<float> distances_buffer_;
+    FixedVector<float> distances_buffer_;
 };
 
 }  // namespace milvus

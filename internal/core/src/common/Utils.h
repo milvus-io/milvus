@@ -347,28 +347,4 @@ class Defer {
 
 #define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
-inline const FieldMeta&
-FindFirstArrayFieldInStruct(const milvus::Schema& schema,
-                            const std::string& struct_name) {
-    const auto& fields = schema.get_fields();
-
-    for (const auto& [field_id, field_meta] : fields) {
-        const std::string& field_name = field_meta.get_name().get();
-
-        if (field_name.size() > struct_name.size() + 2 &&
-            field_name.substr(0, struct_name.size()) == struct_name &&
-            field_name[struct_name.size()] == '[') {
-            auto data_type = field_meta.get_data_type();
-
-            assert(data_type == DataType::ARRAY ||
-                   data_type == DataType::VECTOR_ARRAY);
-            return field_meta;
-        }
-    }
-
-    ThrowInfo(ErrorCode::UnexpectedError,
-              "No array field found in struct: {}",
-              struct_name);
-}
-
 }  // namespace milvus

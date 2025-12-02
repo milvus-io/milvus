@@ -2582,6 +2582,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
+    std::string struct_name;
+    const FieldMeta* field_meta_ptr = nullptr;
+
     {
         std::unique_lock lck(mutex_);
         AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
@@ -2600,32 +2603,40 @@ ChunkedSegmentSealedImpl::load_field_data_common(
             // Construct GeometryCache for the entire field
             LoadGeometryCache(field_id, column);
         }
+
+        // Check if need to build ArrayOffsetsSealed for struct array fields
+        if (data_type == DataType::ARRAY ||
+            data_type == DataType::VECTOR_ARRAY) {
+            auto& field_meta = schema_->operator[](field_id);
+            const std::string& field_name = field_meta.get_name().get();
+
+            if (field_name.find('[') != std::string::npos &&
+                field_name.find(']') != std::string::npos) {
+                struct_name = field_name.substr(0, field_name.find('['));
+
+                auto it = struct_to_array_offsets_.find(struct_name);
+                if (it != struct_to_array_offsets_.end()) {
+                    array_offsets_map_[field_id] = it->second;
+                } else {
+                    field_meta_ptr = &field_meta;  // need to build
+                }
+            }
+        }
     }
 
-    // Build ArrayOffsetsSealed for array fields that belong to a struct
-    if (data_type == DataType::ARRAY || data_type == DataType::VECTOR_ARRAY) {
-        auto& field_meta = schema_->operator[](field_id);
-        const std::string& field_name = field_meta.get_name().get();
+    // Build ArrayOffsetsSealed outside lock (expensive operation)
+    if (field_meta_ptr) {
+        auto new_offsets = std::make_shared<ArrayOffsetsSealed>(
+            ArrayOffsetsSealed::BuildFromSegment(this, *field_meta_ptr));
 
-        // Check if this field belongs to a struct (field name contains '[' and ']')
-        if (field_name.find('[') != std::string::npos &&
-            field_name.find(']') != std::string::npos) {
-            // Extract struct name: "structA[field_name]" -> "structA"
-            std::string struct_name =
-                field_name.substr(0, field_name.find('['));
-
-            // Check if ArrayOffsetsSealed for this struct already exists
-            if (struct_to_array_offsets_.find(struct_name) ==
-                struct_to_array_offsets_.end()) {
-                // First field of this struct, build ArrayOffsetsSealed
-                auto array_offsets = std::make_shared<ArrayOffsetsSealed>(
-                    ArrayOffsetsSealed::BuildFromSegment(this, field_meta));
-                struct_to_array_offsets_[struct_name] = array_offsets;
-            }
-
-            // Map this field_id to the shared ArrayOffsetsSealed
-            array_offsets_map_[field_id] =
-                struct_to_array_offsets_[struct_name];
+        std::unique_lock lck(mutex_);
+        // Double-check after re-acquiring lock
+        auto it = struct_to_array_offsets_.find(struct_name);
+        if (it == struct_to_array_offsets_.end()) {
+            struct_to_array_offsets_[struct_name] = new_offsets;
+            array_offsets_map_[field_id] = new_offsets;
+        } else {
+            array_offsets_map_[field_id] = it->second;
         }
     }
 }

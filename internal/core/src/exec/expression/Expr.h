@@ -692,7 +692,7 @@ class SegmentExpr : public Expr {
         OffsetVector* element_ids,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        ValTypes... values) {
+        const ValTypes&... values) {
         auto& skip_index = segment_->GetSkipIndex();
         if (segment_->type() == SegmentType::Sealed) {
             AssertInfo(

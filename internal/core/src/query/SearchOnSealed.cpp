@@ -230,7 +230,7 @@ SearchOnSealedColumn(const Schema& schema,
     } else {
         if (search_info.array_offsets_ != nullptr) {
             auto [seg_offsets, elem_indicies] =
-                final_qr.convert_as_element_offsets(
+                final_qr.convert_to_element_offsets(
                     search_info.array_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
