@@ -245,7 +245,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegment() {
 			for i := range c.collectionIDs {
 				plans := balancer.AssignSegment(ctx, c.collectionIDs[i], c.assignments[i], c.nodes, false)
 				if c.unstableAssignment {
-					suite.Equal(len(plans), len(c.expectPlans[i]))
+					assertSegmentPlanNumAndTargetNodeMatch(&suite.Suite, c.expectPlans[i], plans)
 				} else {
 					assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans[i], plans)
 				}
