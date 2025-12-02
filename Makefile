@@ -575,7 +575,7 @@ generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-ro
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
-	@$(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
+	@source $(PWD)/scripts/setenv.sh && $(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
 
 MMAP_MIGRATION_PATH = $(PWD)/cmd/tools/migration/mmap/tool
 mmap-migration:

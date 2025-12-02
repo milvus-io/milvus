@@ -71,6 +71,10 @@ inline constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE_MAP =
 const int64_t START_JSON_STATS_FIELD_ID = 2000;
 const int64_t END_JSON_STATS_FIELD_ID = 12000;
 
+// LOB (Large Object) field ID used in arrow schema for LOB files.
+// this must be greater than END_JSON_STATS_FIELD_ID to avoid conflicts.
+const int64_t LOB_FIELD_ID = 13000;
+
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
 const char DEFAULT_TASK_ID[] = "0";

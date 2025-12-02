@@ -29,12 +29,17 @@
 #include "InsertRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
+#include "GrowingLOBManager.h"
 #include "common/EasyAssert.h"
 #include "common/IndexMeta.h"
 #include "common/Types.h"
 #include "query/PlanNode.h"
 #include "common/GeometryCache.h"
 #include "common/ArrayOffsets.h"
+#include "mmap/ChunkedColumnInterface.h"
+#include "segcore/Utils.h"
+#include "storage/Types.h"
+#include <folly/Synchronized.h>
 
 namespace milvus::segcore {
 
@@ -615,6 +620,40 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     InitializeArrayOffsets();
 
+    // LOB-related helper methods
+    // get or create LOB manager (lazy initialization)
+    GrowingLOBManager*
+    get_lob_manager();
+
+    // process TEXT field data during insert, converting large TEXT to LOB references
+    void
+    process_text_field_with_lob(FieldId field_id,
+                                const DataArray& data_array,
+                                int64_t reserved_offset,
+                                int64_t size);
+
+    // retrieve TEXT field data, resolving LOB references
+    void
+    retrieve_text_field_with_lob(
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* output) const;
+
+    // remote LOB handling for binlog recovery scenario
+    // register LOB metadata from LoadFieldDataInfo (no file I/O)
+    void
+    load_remote_lob_metadata(const LoadFieldDataInfo& load_info);
+
+    // lazily load LOB column from remote storage
+    std::shared_ptr<ChunkedColumnInterface>
+    GetOrCreateRemoteLOBColumn(uint64_t lob_file_id) const;
+
+    // read actual text from remote LOB file using LOB reference
+    std::string
+    ReadRemoteLOBText(milvus::OpContext* op_ctx,
+                      const milvus::LOBReference& ref) const;
+
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
@@ -631,6 +670,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // deleted pks
     mutable DeletedRecord<false> deleted_record_;
+
+    // LOB manager for TEXT fields in growing segment (for real-time insert)
+    std::unique_ptr<GrowingLOBManager> lob_manager_;
+    mutable std::once_flag lob_manager_init_flag_;
+
+    // remote LOB metadata: stored during load from binlog recovery
+    // lob_file_id -> (LOBFileInfo, field_id, enable_mmap, load_priority)
+    // LOBColumnMeta is defined in segcore/Utils.h
+    folly::Synchronized<std::unordered_map<uint64_t, LOBColumnMeta>>
+        remote_lob_metadata_;
+
+    // remote LOB columns: lazily created on first access during retrieve
+    // lob_file_id -> ChunkedColumnInterface (actual LOB data from remote storage)
+    mutable folly::Synchronized<
+        std::unordered_map<uint64_t, std::shared_ptr<ChunkedColumnInterface>>>
+        remote_lob_columns_;
 
     int64_t id_;
 

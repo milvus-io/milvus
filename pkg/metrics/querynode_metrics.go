@@ -826,6 +826,55 @@ var (
 			queryTypeLabelName,
 			collectionIDLabelName,
 		})
+
+	// Growing segment LOB (Large Object) metrics for TEXT fields
+	QueryNodeGrowingLOBMemoryBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_lob_memory_bytes",
+			Help:      "memory bytes used by LOB data in growing segments",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentIDLabelName,
+		})
+
+	QueryNodeGrowingLOBCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_lob_count",
+			Help:      "count of LOB objects in growing segments",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			segmentIDLabelName,
+		})
+
+	QueryNodeGrowingLOBWriteLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_lob_write_latency",
+			Help:      "latency of writing LOB data in microseconds",
+			Buckets:   []float64{1, 10, 50, 100, 500, 1000, 5000, 10000},
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
+
+	QueryNodeGrowingLOBReadLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "growing_lob_read_latency",
+			Help:      "latency of reading LOB data in microseconds",
+			Buckets:   []float64{1, 10, 50, 100, 500, 1000, 5000, 10000},
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -898,6 +947,11 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
 	registry.MustRegister(QueryNodePartialResultCount)
+	// Add growing segment LOB metrics
+	registry.MustRegister(QueryNodeGrowingLOBMemoryBytes)
+	registry.MustRegister(QueryNodeGrowingLOBCount)
+	registry.MustRegister(QueryNodeGrowingLOBWriteLatency)
+	registry.MustRegister(QueryNodeGrowingLOBReadLatency)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 

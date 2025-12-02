@@ -72,6 +72,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 			zap.Time("posTime", posTime),
 			zap.Duration("tsLag", tsLag))
 	}
+
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:        segment.ID,
 		PartitionID:      segment.PartitionID,
@@ -91,6 +92,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		TextStatsLogs:    segment.GetTextStatsLogs(),
 		JsonKeyStatsLogs: segment.GetJsonKeyStats(),
 		ManifestPath:     segment.GetManifestPath(),
+		LobMetadata:      segment.GetLobMetadata(),
 	}
 	return loadInfo
 }

@@ -339,6 +339,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
+			gc.recycleOrphanLOBFiles(ctx)
 		})
 	}()
 	go func() {
@@ -751,12 +752,18 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			logs[key] = struct{}{}
 		}
 
+		lobFiles := getLOBFiles(ctx, cloned, gc)
+		for key := range lobFiles {
+			logs[key] = struct{}{}
+		}
+
 		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
 			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
 			zap.Int("stats_logs", len(cloned.GetStatslogs())),
 			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
 			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
+			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+			zap.Int("lob_files", len(lobFiles)))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
 			cloned = nil
@@ -877,6 +884,162 @@ func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 	}
 
 	return textLogs
+}
+
+// getLOBFiles returns LOB files that can be safely deleted.
+// it checks if each LOB file is still referenced by other healthy segments.
+// only files with no references are returned for deletion.
+func getLOBFiles(ctx context.Context, sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {
+	lobFiles := make(map[string]struct{})
+
+	lobMetadata := sinfo.GetLobMetadata()
+	if lobMetadata == nil || len(lobMetadata) == 0 {
+		return lobFiles
+	}
+
+	collectionID := sinfo.GetCollectionID()
+	partitionID := sinfo.GetPartitionID()
+
+	for _, fieldMeta := range lobMetadata {
+		for _, lobFile := range fieldMeta.LobFiles {
+			lobFileID := lobFile.GetLobFileId()
+
+			// check if this LOB file is still referenced by other healthy segments
+			if isLOBFileReferencedByOtherSegments(ctx, gc.meta, sinfo.GetID(), collectionID, partitionID, lobFileID) {
+				log.Debug("LOB file still referenced by other segments, skipping deletion",
+					zap.Int64("lobFileID", lobFileID),
+					zap.Int64("segmentID", sinfo.GetID()))
+				continue
+			}
+
+			// build full path for deletion
+			fullPath := path.Join(gc.option.cli.RootPath(), lobFile.GetFilePath())
+			lobFiles[fullPath] = struct{}{}
+		}
+	}
+
+	return lobFiles
+}
+
+// isLOBFileReferencedByOtherSegments checks if a LOB file is referenced by any healthy segment
+// other than the specified segment being GC'd
+func isLOBFileReferencedByOtherSegments(ctx context.Context, m *meta, excludeSegmentID, collectionID, partitionID, lobFileID int64) bool {
+	// get all healthy segments in the partition
+	segments := m.SelectSegments(ctx,
+		WithCollection(collectionID),
+		SegmentFilterFunc(func(si *SegmentInfo) bool {
+			// exclude the segment being GC'd, only check other healthy segments
+			return si.GetID() != excludeSegmentID &&
+				isSegmentHealthy(si) &&
+				si.GetPartitionID() == partitionID
+		}),
+	)
+
+	// check each segment's LOB metadata
+	for _, seg := range segments {
+		lobMetadata := seg.GetLobMetadata()
+		if lobMetadata == nil {
+			continue
+		}
+
+		for _, fieldMeta := range lobMetadata {
+			if fieldMeta == nil {
+				continue
+			}
+			for _, lobFile := range fieldMeta.GetLobFiles() {
+				if lobFile.GetLobFileId() == lobFileID {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// recycleOrphanLOBFiles scans the storage for orphan LOB files that are not referenced by any segment.
+// This handles the case where LOB files were written (eager mode) but the segment flush failed,
+// leaving orphan files that are not tracked in any segment's metadata.
+func (gc *garbageCollector) recycleOrphanLOBFiles(ctx context.Context) {
+	start := time.Now()
+	logger := log.With(zap.String("gcName", "recycleOrphanLOBFiles"), zap.Time("startAt", start))
+	logger.Info("start recycleOrphanLOBFiles...")
+	defer func() { logger.Info("recycleOrphanLOBFiles done", zap.Duration("timeCost", time.Since(start))) }()
+
+	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentInsertLogPath)
+
+	total := 0
+	valid := 0
+	removed := atomic.NewInt32(0)
+	unexpectedFailure := atomic.NewInt32(0)
+
+	futures := make([]*conc.Future[struct{}], 0)
+
+	err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *storage.ChunkObjectInfo) bool {
+		// only process LOB files (path contains "/lobs/")
+		collectionID, partitionID, _, lobFileID, ok := metautil.ParseLOBFilePathFull(chunkInfo.FilePath)
+		if !ok {
+			// not a LOB file, skip
+			return true
+		}
+
+		total++
+
+		// check file tolerance first to avoid deleting files that are still being written
+		if time.Since(chunkInfo.ModifyTime) <= gc.option.missingTolerance {
+			logger.Debug("skip LOB file since it is not expired",
+				zap.String("filePath", chunkInfo.FilePath),
+				zap.Time("modifyTime", chunkInfo.ModifyTime))
+			valid++
+			return true
+		}
+
+		// check if this LOB file is referenced by any healthy segment
+		// use excludeSegmentID = 0 to check all segments (no exclusion)
+		if isLOBFileReferencedByOtherSegments(ctx, gc.meta, 0, collectionID, partitionID, int64(lobFileID)) {
+			valid++
+			return true
+		}
+
+		// this is an orphan LOB file, schedule for deletion
+		file := chunkInfo.FilePath
+		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+			logger.Info("recycleOrphanLOBFiles remove orphan LOB file...",
+				zap.String("file", file),
+				zap.Uint64("lobFileID", lobFileID))
+
+			if err := gc.option.cli.Remove(ctx, file); err != nil {
+				logger.Warn("recycleOrphanLOBFiles remove file failed",
+					zap.String("file", file),
+					zap.Error(err))
+				unexpectedFailure.Inc()
+				return struct{}{}, err
+			}
+			logger.Info("recycleOrphanLOBFiles remove file success", zap.String("file", file))
+			removed.Inc()
+			return struct{}{}, nil
+		})
+		futures = append(futures, future)
+		return true
+	})
+
+	// wait for all remove tasks done
+	if err := conc.BlockOnAll(futures...); err != nil {
+		logger.Warn("some task failure in remove object pool", zap.Error(err))
+	}
+
+	cost := time.Since(start)
+	logger.Info("recycleOrphanLOBFiles done",
+		zap.Int("total", total),
+		zap.Int("valid", valid),
+		zap.Int("removed", int(removed.Load())),
+		zap.Int("unexpectedFailure", int(unexpectedFailure.Load())),
+		zap.Duration("cost", cost),
+		zap.Error(err))
+
+	metrics.GarbageCollectorFileScanDuration.
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.LOBFileLabel).
+		Observe(float64(cost.Milliseconds()))
 }
 
 func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {

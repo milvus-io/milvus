@@ -434,6 +434,122 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 }
 
 void
+ChunkedSegmentSealedImpl::load_lob_columns(const LoadFieldDataInfo& load_info) {
+    if (load_info.lob_metadata.empty()) {
+        return;
+    }
+
+    LOG_INFO("registering LOB metadata for segment {} (lazy loading)",
+             get_segment_id());
+
+    bool enable_mmap = false;
+    if (!load_info.field_infos.empty()) {
+        enable_mmap = load_info.field_infos.begin()->second.enable_mmap;
+    }
+
+    // iterate over all LOB metadata and store for lazy loading
+    for (const auto& [field_id, lob_meta] : load_info.lob_metadata) {
+        auto milvus_field_id = FieldId(field_id);
+        auto field_meta = schema_->operator[](milvus_field_id);
+
+        AssertInfo(field_meta.get_data_type() == DataType::TEXT,
+                   "Field {} is not TEXT type, skipping LOB registration",
+                   field_id);
+
+        LOG_DEBUG(
+            "Registering LOB files for field {}: {} files, {} records, {} "
+            "bytes",
+            field_id,
+            lob_meta.lob_files.size(),
+            lob_meta.record_count,
+            lob_meta.total_bytes);
+
+        // store metadata for each LOB file (no file I/O here)
+        for (const auto& lob_file : lob_meta.lob_files) {
+            LOBColumnMeta meta;
+            meta.file_info = lob_file;
+            meta.field_id = milvus_field_id;
+            meta.enable_mmap = enable_mmap;
+            meta.load_priority = load_info.load_priority;
+
+            (*lob_metadata_.wlock())[lob_file.lob_file_id] = std::move(meta);
+
+            LOG_DEBUG(
+                "registered LOB file metadata: segment={}, field={}, "
+                "lob_file_id={}, path={}, rows={}",
+                get_segment_id(),
+                field_id,
+                lob_file.lob_file_id,
+                lob_file.file_path,
+                lob_file.row_count);
+        }
+    }
+
+    auto lob_metadata_count = lob_metadata_.rlock()->size();
+    LOG_INFO(
+        "registered {} LOB file metadata for segment {} (will load on demand)",
+        lob_metadata_count,
+        get_segment_id());
+}
+
+// lazily create LOB column on first access
+std::shared_ptr<ChunkedColumnInterface>
+ChunkedSegmentSealedImpl::GetOrCreateLOBColumn(uint64_t lob_file_id) const {
+    // fast path: check if already created
+    {
+        auto lob_columns_lock = lob_columns_.rlock();
+        auto it = lob_columns_lock->find(lob_file_id);
+        if (it != lob_columns_lock->end()) {
+            return it->second;
+        }
+    }
+
+    // slow path: need to create the column
+    auto lob_metadata_lock = lob_metadata_.rlock();
+    auto meta_it = lob_metadata_lock->find(lob_file_id);
+    AssertInfo(meta_it != lob_metadata_lock->end(),
+               "LOB file {} metadata not found for segment {}",
+               lob_file_id,
+               get_segment_id());
+
+    const auto& meta = meta_it->second;
+    lob_metadata_lock.unlock();
+
+    // use common helper to create the LOB column
+    auto proxy_column =
+        CreateLOBColumnFromMeta(meta, schema_.get(), get_segment_id());
+
+    // store in lob_columns_ map (double-check locking)
+    {
+        auto lob_columns_wlock = lob_columns_.wlock();
+        auto it = lob_columns_wlock->find(lob_file_id);
+        if (it != lob_columns_wlock->end()) {
+            return it->second;
+        }
+        (*lob_columns_wlock)[lob_file_id] = proxy_column;
+    }
+
+    LOG_INFO(
+        "Lazily loaded LOB column: segment={}, field={}, lob_file_id={}, "
+        "rows={}",
+        get_segment_id(),
+        meta.field_id.get(),
+        lob_file_id,
+        meta.file_info.row_count);
+
+    return proxy_column;
+}
+
+// read actual text from LOB file using LOB reference
+std::string
+ChunkedSegmentSealedImpl::ReadLOBText(milvus::OpContext* op_ctx,
+                                      const milvus::LOBReference& ref) const {
+    auto lob_column = GetOrCreateLOBColumn(ref.lob_file_id);
+    return ReadLOBTextFromColumn(
+        lob_column.get(), op_ctx, ref, get_segment_id());
+}
+
+void
 ChunkedSegmentSealedImpl::load_field_data_internal(
     const LoadFieldDataInfo& load_info) {
     SCOPE_CGO_CALL_METRIC();
@@ -1779,14 +1895,40 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
 
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::TEXT: {
+        case DataType::STRING: {
             bulk_subscript_ptr_impl<std::string>(
                 op_ctx,
                 column.get(),
                 seg_offsets,
                 count,
                 ret->mutable_scalars()->mutable_string_data()->mutable_data());
+            break;
+        }
+        case DataType::TEXT: {
+            auto dst =
+                ret->mutable_scalars()->mutable_string_data()->mutable_data();
+
+            // mixed storage means some values may be inline text while others are LOBReferences.
+            column->BulkRawStringAt(
+                op_ctx,
+                [this, op_ctx, dst](
+                    std::string_view data, size_t offset, bool is_valid) {
+                    if (!is_valid) {
+                        dst->at(offset) = "";
+                        return;
+                    }
+
+                    if (milvus::LOBReference::IsLOBReference(data)) {
+                        auto lob_ref =
+                            milvus::LOBReference::DecodeFromString(data);
+                        auto text = ReadLOBText(op_ctx, lob_ref);
+                        dst->at(offset) = std::move(text);
+                    } else {
+                        dst->at(offset) = std::string(data);
+                    }
+                },
+                seg_offsets,
+                count);
             break;
         }
 
@@ -2781,11 +2923,12 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     segment_load_info_ = SegmentLoadInfo(load_info);
     LOG_INFO(
         "SetLoadInfo for segment {}, num_rows: {}, index count: {}, "
-        "storage_version: {}",
+        "storage_version: {}, lob_metadata_count: {}",
         id_,
         segment_load_info_.GetNumOfRows(),
         segment_load_info_.GetIndexInfoCount(),
-        segment_load_info_.GetStorageVersion());
+        segment_load_info_.GetStorageVersion(),
+        segment_load_info_.GetLobMetadataCount());
 }
 
 void
@@ -3181,6 +3324,41 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
 
     auto diff = segment_load_info_.GetLoadDiff();
     ApplyLoadDiff(segment_load_info_, diff);
+
+    // step 5: load LOB metadata from segment_load_info_
+    if (segment_load_info_.GetLobMetadataCount() > 0) {
+        LOG_INFO(
+            "Loading LOB metadata from proto for segment {}, {} fields have "
+            "LOB "
+            "data",
+            id_,
+            segment_load_info_.GetLobMetadataCount());
+
+        // convert proto LOB metadata to LoadFieldDataInfo format
+        LoadFieldDataInfo lob_load_info;
+        lob_load_info.load_priority = segment_load_info_.GetPriority();
+
+        for (const auto& [field_id, proto_lob_meta] :
+             segment_load_info_.GetLobMetadataMap()) {
+            LOBFieldMetadata lob_meta;
+            lob_meta.size_threshold = proto_lob_meta.size_threshold();
+            lob_meta.record_count = proto_lob_meta.record_count();
+            lob_meta.total_bytes = proto_lob_meta.total_bytes();
+
+            // convert lob_files from proto LOBFile messages
+            for (const auto& proto_lob_file : proto_lob_meta.lob_files()) {
+                LOBFileInfo lob_file;
+                lob_file.file_path = proto_lob_file.file_path();
+                lob_file.lob_file_id = proto_lob_file.lob_file_id();
+                lob_file.row_count = proto_lob_file.row_count();
+                lob_meta.lob_files.push_back(lob_file);
+            }
+
+            lob_load_info.lob_metadata[field_id] = std::move(lob_meta);
+        }
+
+        load_lob_columns(lob_load_info);
+    }
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }

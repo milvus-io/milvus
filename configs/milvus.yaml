@@ -1047,6 +1047,12 @@ common:
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
   usingJSONShreddingForQuery: true # Indicates whether to use json stats when query
   clusterID: 0 # cluster id
+  lob:
+    sizeThreshold: 65536 # Minimum size threshold in bytes for storing TEXT data as LOB (Large Object). TEXT values larger than this threshold will be stored as LOB references. Default: 65536 (64KB)
+    lazyWriteMaxSize: 10485760 # Maximum size in bytes for lazy-mode LOB writes. TEXT values between sizeThreshold and lazyWriteMaxSize are written during segment flush (lazy mode), while larger TEXT values are written immediately (eager mode) to reduce memory pressure. This provides a hybrid approach: small TEXT inline, medium TEXT lazy, large TEXT eager. Default: 10485760 (10MB)
+    maxFileSize: 268435456 # Maximum size in bytes for a single LOB file. When a LOB file reaches this size limit, a new file is created for subsequent writes. This applies to both normal insert operations and compaction SmartRewrite mode. Smaller files are easier to manage during compaction and GC, but too small may increase file count. Default: 268435456 (256MB)
+    compaction:
+      smartRewriteThreshold: 0.2 # Delete ratio threshold for LOB compaction SmartRewrite mode. At or Above this threshold, LOB files are filtered to remove unused rows and merge small files (SmartRewrite mode). Default: 0.20 (20%)
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

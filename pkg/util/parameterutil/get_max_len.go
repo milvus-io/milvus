@@ -19,6 +19,11 @@ func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
 	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
 	maxLengthStr, err := h.Get(common.MaxLengthKey)
 	if err != nil {
+		// for TEXT type, max_length is optional (defaults to math.MaxInt64 for LOB storage)
+		// for VARCHAR/STRING, max_length is required
+		if typeutil.IsTextType(field.GetDataType()) {
+			return int64(^uint(0) >> 1), nil // math.MaxInt64
+		}
 		msg := "max length not found"
 		return 0, merr.WrapErrParameterInvalid("max length key in type parameters", "not found", msg)
 	}

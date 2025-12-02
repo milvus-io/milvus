@@ -17,14 +17,37 @@
 #include <vector>
 
 #include "common/FieldData.h"
+#include "common/LoadInfo.h"
 #include "common/type_c.h"
 #include "common/Types.h"
 #include "index/Index.h"
 #include "cachinglayer/Utils.h"
+#include "mmap/ChunkedColumn.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Types.h"
 
 namespace milvus::segcore {
+
+// LOB column metadata for lazy loading
+struct LOBColumnMeta {
+    LOBFileInfo file_info;
+    FieldId field_id;
+    bool enable_mmap;
+    milvus::proto::common::LoadPriority load_priority;
+};
+
+// create a LOB column from metadata
+std::shared_ptr<ChunkedColumnInterface>
+CreateLOBColumnFromMeta(const LOBColumnMeta& meta,
+                        const Schema* schema,
+                        int64_t segment_id);
+
+// read text from a LOB column using LOB reference
+std::string
+ReadLOBTextFromColumn(ChunkedColumnInterface* lob_column,
+                      milvus::OpContext* op_ctx,
+                      const milvus::LOBReference& ref,
+                      int64_t segment_id);
 
 void
 ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);

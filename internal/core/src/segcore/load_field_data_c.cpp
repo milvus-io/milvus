@@ -154,3 +154,63 @@ SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority) {
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->load_priority = milvus::proto::common::LoadPriority(priority);
 }
+
+CStatus
+AppendLOBMetadata(CLoadFieldDataInfo c_load_field_data_info,
+                  int64_t field_id,
+                  int64_t size_threshold,
+                  int64_t record_count,
+                  int64_t total_bytes) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto load_field_data_info =
+            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+
+        // create or get existing LOB metadata for this field
+        LOBFieldMetadata& lob_meta =
+            load_field_data_info->lob_metadata[field_id];
+        lob_meta.field_id = field_id;
+        lob_meta.size_threshold = size_threshold;
+        lob_meta.record_count = record_count;
+        lob_meta.total_bytes = total_bytes;
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+AppendLOBFile(CLoadFieldDataInfo c_load_field_data_info,
+              int64_t field_id,
+              const char* c_file_path,
+              uint64_t lob_file_id,
+              int64_t row_count) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto load_field_data_info =
+            static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
+
+        // ensure LOB metadata exists for this field
+        auto iter = load_field_data_info->lob_metadata.find(field_id);
+        if (iter == load_field_data_info->lob_metadata.end()) {
+            ThrowInfo(milvus::ErrorCode::FieldIDInvalid,
+                      "please append LOB metadata first");
+        }
+
+        // add LOB file info
+        LOBFileInfo lob_file;
+        lob_file.file_path = std::string(c_file_path);
+        lob_file.lob_file_id = lob_file_id;
+        lob_file.row_count = row_count;
+
+        load_field_data_info->lob_metadata[field_id].lob_files.push_back(
+            lob_file);
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}

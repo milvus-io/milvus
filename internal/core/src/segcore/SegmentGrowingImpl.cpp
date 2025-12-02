@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -41,12 +42,16 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "common/TypeTraits.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "mmap/ChunkedColumnGroup.h"
+#include "common/Chunk.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -319,11 +324,28 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_meta);
         }
         if (!indexing_record_.HasRawData(field_id)) {
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset,
-                num_rows,
-                &insert_record_proto->fields_data(data_offset),
-                field_meta);
+            // check if this is a TEXT field - handle via LOB manager
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                // process TEXT field through LOB manager
+                process_text_field_with_lob(
+                    field_id,
+                    insert_record_proto->fields_data(data_offset),
+                    reserved_offset,
+                    num_rows);
+            } else {
+                // regular field processing
+                if (field_meta.is_nullable()) {
+                    insert_record_.get_valid_data(field_id)->set_data_raw(
+                        num_rows,
+                        &insert_record_proto->fields_data(data_offset),
+                        field_meta);
+                }
+                insert_record_.get_data_base(field_id)->set_data_raw(
+                    reserved_offset,
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
+            }
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -497,6 +519,9 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
+
+    // step 6: load remote LOB metadata for TEXT fields (for binlog recovery)
+    load_remote_lob_metadata(infos);
 }
 
 void
@@ -725,6 +750,9 @@ SegmentGrowingImpl::load_column_group_data_internal(
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset,
                                              reserved_offset + num_rows);
+
+    // step 6: load remote LOB metadata for TEXT fields (for binlog recovery)
+    load_remote_lob_metadata(infos);
 }
 
 SegcoreError
@@ -1128,8 +1156,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(op_ctx,
                                                  vec_ptr,
                                                  seg_offsets,
@@ -1137,6 +1164,16 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                  result->mutable_scalars()
                                                      ->mutable_string_data()
                                                      ->mutable_data());
+            break;
+        }
+        case DataType::TEXT: {
+            // TEXT fields use LOB manager - retrieve actual TEXT from LOB references
+            retrieve_text_field_with_lob(field_id,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_string_data()
+                                             ->mutable_data());
             break;
         }
         case DataType::JSON: {
@@ -1578,6 +1615,33 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
             std::move(binlog_info);
     }
 
+    // convert LOB metadata from proto to LoadFieldDataInfo
+    for (const auto& [field_id, proto_lob_meta] : load_info_.lob_metadata()) {
+        LOBFieldMetadata lob_meta;
+        lob_meta.field_id = proto_lob_meta.field_id();
+        lob_meta.size_threshold = proto_lob_meta.size_threshold();
+        lob_meta.record_count = proto_lob_meta.record_count();
+        lob_meta.total_bytes = proto_lob_meta.total_bytes();
+
+        for (const auto& lob_file : proto_lob_meta.lob_files()) {
+            LOBFileInfo lob_file_info;
+            lob_file_info.file_path = lob_file.file_path();
+            lob_file_info.lob_file_id = lob_file.lob_file_id();
+            lob_file_info.row_count = lob_file.row_count();
+            lob_meta.lob_files.push_back(std::move(lob_file_info));
+        }
+
+        field_data_info.lob_metadata[field_id] = std::move(lob_meta);
+
+        LOG_INFO(
+            "Growing segment {} loaded LOB metadata for field {}: {} files, {} "
+            "records",
+            id_,
+            field_id,
+            proto_lob_meta.lob_files().size(),
+            proto_lob_meta.record_count());
+    }
+
     // Call LoadFieldData with the converted info
     if (!field_data_info.field_infos.empty()) {
         LoadFieldData(field_data_info);
@@ -1935,6 +1999,310 @@ SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
         }
     }
     return result;
+}
+
+// ============================================================================
+// LOB (Large Object) support for TEXT fields in growing segment
+// ============================================================================
+
+GrowingLOBManager*
+SegmentGrowingImpl::get_lob_manager() {
+    std::call_once(lob_manager_init_flag_, [this]() {
+        auto chunk_manager = storage::LocalChunkManagerSingleton::GetInstance()
+                                 .GetChunkManager();
+        AssertInfo(chunk_manager != nullptr,
+                   "LocalChunkManager not initialized");
+        std::string local_data_path =
+            (std::filesystem::path(chunk_manager->GetRootPath()) /
+             "growing_blob")
+                .string();
+        lob_manager_ =
+            std::make_unique<GrowingLOBManager>(id_, local_data_path);
+        LOG_INFO("created GrowingLOBManager for segment {}", id_);
+    });
+    return lob_manager_.get();
+}
+
+void
+SegmentGrowingImpl::process_text_field_with_lob(FieldId field_id,
+                                                const DataArray& data_array,
+                                                int64_t reserved_offset,
+                                                int64_t size) {
+    // TEXT field mixed storage strategy:
+    // - Texts < lob_size_threshold: stored directly (inline)
+    // - Texts >= lob_size_threshold: stored in LOB manager with 16-byte reference
+    AssertInfo(data_array.has_scalars(), "TEXT field must have scalars data");
+    AssertInfo(data_array.scalars().has_string_data(),
+               "TEXT field must have string_data");
+
+    const auto& string_data = data_array.scalars().string_data();
+    AssertInfo(string_data.data_size() == size,
+               fmt::format("TEXT field data size mismatch: expected {}, got {}",
+                           size,
+                           string_data.data_size()));
+
+    auto* lob_mgr = get_lob_manager();
+    int64_t lob_threshold = segcore_config_.get_lob_size_threshold();
+
+    std::vector<std::string> stored_values;
+    stored_values.reserve(size);
+
+    int inline_count = 0;
+    int lob_count = 0;
+
+    for (int i = 0; i < size; ++i) {
+        const std::string& text_value = string_data.data(i);
+
+        if (text_value.size() < static_cast<size_t>(lob_threshold)) {
+            stored_values.push_back(text_value);
+            inline_count++;
+        } else {
+            LOBReference ref = lob_mgr->WriteLOB(field_id, text_value);
+
+            stored_values.push_back(ref.EncodeToString());
+            lob_count++;
+        }
+    }
+
+    LOG_INFO(
+        "process_text_field_with_lob: segment={}, field={}, total={}, "
+        "inline={}, lob={}",
+        id_,
+        field_id.get(),
+        size,
+        inline_count,
+        lob_count);
+
+    // write to InsertRecord (mix of inline texts and LOB references)
+    auto* field_data = insert_record_.get_data<std::string>(field_id);
+    field_data->set_data_raw(
+        reserved_offset, stored_values.data(), stored_values.size());
+}
+
+void
+SegmentGrowingImpl::retrieve_text_field_with_lob(
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<std::string>* output) const {
+    LOG_DEBUG(
+        "retrieve_text_field_with_lob: START - segment={}, field={}, count={}",
+        id_,
+        field_id.get(),
+        count);
+
+    auto* field_data = insert_record_.get_data<std::string>(field_id);
+    AssertInfo(field_data != nullptr, "Field data is null");
+
+    int inline_count = 0;
+    int lob_count = 0;
+
+    // check if we have remote LOB metadata (from binlog recovery)
+    bool has_remote_lob = !remote_lob_metadata_.rlock()->empty();
+
+    for (int64_t i = 0; i < count; ++i) {
+        int64_t offset = seg_offsets[i];
+        const std::string& stored_value = (*field_data)[offset];
+
+        if (LOBReference::IsLOBReference(stored_value)) {
+            auto ref = LOBReference::DecodeFromString(stored_value);
+
+            std::string text_data;
+
+            // check if this LOB file ID exists in remote metadata
+            // remote LOB: lob_file_id is a TSO-allocated file ID (large value)
+            // local LOB: lob_file_id field stores byte_offset
+            bool use_remote_lob = false;
+            if (has_remote_lob) {
+                auto remote_meta_lock = remote_lob_metadata_.rlock();
+                use_remote_lob = (remote_meta_lock->find(ref.lob_file_id) !=
+                                  remote_meta_lock->end());
+            }
+
+            if (use_remote_lob) {
+                // remote LOB from binlog recovery
+                text_data = ReadRemoteLOBText(nullptr, ref);
+                LOG_DEBUG(
+                    "retrieve_text_field_with_lob: row {} - retrieved from "
+                    "remote LOB: "
+                    "lob_file_id={}, row_offset={}, size={}",
+                    i,
+                    ref.lob_file_id,
+                    ref.row_offset,
+                    text_data.size());
+            } else {
+                // local LOB from real-time insert
+                AssertInfo(
+                    lob_manager_ != nullptr,
+                    "LOB manager not initialized for TEXT field retrieval");
+                text_data = lob_manager_->ReadLOB(field_id, ref);
+                LOG_DEBUG(
+                    "retrieve_text_field_with_lob: row {} - retrieved from "
+                    "local LOB: "
+                    "size={}",
+                    i,
+                    text_data.size());
+            }
+
+            (*output)[i] = std::move(text_data);
+            lob_count++;
+
+        } else {
+            LOG_DEBUG(
+                "retrieve_text_field_with_lob: row {} - inline text: size={}",
+                i,
+                stored_value.size());
+
+            (*output)[i] = stored_value;
+            inline_count++;
+        }
+    }
+
+    LOG_INFO(
+        "retrieve_text_field_with_lob: COMPLETE - segment={}, field={}, "
+        "retrieved {} values (inline={}, lob={})",
+        id_,
+        field_id.get(),
+        count,
+        inline_count,
+        lob_count);
+}
+
+void
+SegmentGrowingImpl::load_remote_lob_metadata(
+    const LoadFieldDataInfo& load_info) {
+    LOG_INFO(
+        "Registering remote LOB metadata for growing segment {} (lazy loading)",
+        get_segment_id());
+
+    if (load_info.lob_metadata.empty()) {
+        LOG_DEBUG("No remote LOB metadata found for growing segment {}",
+                  get_segment_id());
+        return;
+    }
+
+    bool enable_mmap = false;
+    if (!load_info.field_infos.empty()) {
+        enable_mmap = load_info.field_infos.begin()->second.enable_mmap;
+    }
+
+    for (const auto& [field_id, lob_meta] : load_info.lob_metadata) {
+        auto milvus_field_id = FieldId(field_id);
+        auto field_meta = schema_->operator[](milvus_field_id);
+
+        if (field_meta.get_data_type() != DataType::TEXT) {
+            LOG_WARN(
+                "Field {} is not TEXT type, skipping remote LOB registration",
+                field_id);
+            continue;
+        }
+
+        LOG_DEBUG(
+            "Registering remote LOB files for field {}: {} files, {} records, "
+            "{} bytes",
+            field_id,
+            lob_meta.lob_files.size(),
+            lob_meta.record_count,
+            lob_meta.total_bytes);
+
+        for (const auto& lob_file : lob_meta.lob_files) {
+            LOBColumnMeta meta;
+            meta.file_info = lob_file;
+            meta.field_id = milvus_field_id;
+            meta.enable_mmap = enable_mmap;
+            meta.load_priority = load_info.load_priority;
+
+            (*remote_lob_metadata_.wlock())[lob_file.lob_file_id] =
+                std::move(meta);
+
+            LOG_DEBUG(
+                "Registered remote LOB file metadata: segment={}, field={}, "
+                "lob_file_id={}, path={}, rows={}",
+                get_segment_id(),
+                field_id,
+                lob_file.lob_file_id,
+                lob_file.file_path,
+                lob_file.row_count);
+        }
+    }
+
+    auto lob_metadata_count = remote_lob_metadata_.rlock()->size();
+    LOG_INFO(
+        "Registered {} remote LOB file metadata for growing segment {} (will "
+        "load on demand)",
+        lob_metadata_count,
+        get_segment_id());
+}
+
+std::shared_ptr<ChunkedColumnInterface>
+SegmentGrowingImpl::GetOrCreateRemoteLOBColumn(uint64_t lob_file_id) const {
+    // fast path: check if already created
+    {
+        auto lob_columns_lock = remote_lob_columns_.rlock();
+        auto it = lob_columns_lock->find(lob_file_id);
+        if (it != lob_columns_lock->end()) {
+            return it->second;
+        }
+    }
+
+    // slow path: need to create the column
+    auto lob_metadata_lock = remote_lob_metadata_.rlock();
+    auto meta_it = lob_metadata_lock->find(lob_file_id);
+    if (meta_it == lob_metadata_lock->end()) {
+        LOG_WARN("Remote LOB file {} metadata not found for growing segment {}",
+                 lob_file_id,
+                 get_segment_id());
+        return nullptr;
+    }
+
+    const auto& meta = meta_it->second;
+    lob_metadata_lock.unlock();
+
+    LOG_INFO(
+        "Lazily loading remote LOB column for growing segment: segment={}, "
+        "field={}, lob_file_id={}, path={}",
+        get_segment_id(),
+        meta.field_id.get(),
+        lob_file_id,
+        meta.file_info.file_path);
+
+    // use common helper to create the LOB column
+    auto proxy_column =
+        CreateLOBColumnFromMeta(meta, schema_.get(), get_segment_id());
+
+    // store in remote_lob_columns_ map (double-check locking)
+    {
+        auto lob_columns_wlock = remote_lob_columns_.wlock();
+        auto it = lob_columns_wlock->find(lob_file_id);
+        if (it != lob_columns_wlock->end()) {
+            return it->second;
+        }
+        (*lob_columns_wlock)[lob_file_id] = proxy_column;
+    }
+
+    LOG_INFO(
+        "Lazily loaded remote LOB column for growing segment: segment={}, "
+        "field={}, lob_file_id={}, rows={}",
+        get_segment_id(),
+        meta.field_id.get(),
+        lob_file_id,
+        meta.file_info.row_count);
+
+    return proxy_column;
+}
+
+std::string
+SegmentGrowingImpl::ReadRemoteLOBText(milvus::OpContext* op_ctx,
+                                      const milvus::LOBReference& ref) const {
+    auto lob_column = GetOrCreateRemoteLOBColumn(ref.lob_file_id);
+    if (lob_column == nullptr) {
+        LOG_WARN("Remote LOB file {} not found for growing segment {}",
+                 ref.lob_file_id,
+                 get_segment_id());
+        return "";
+    }
+    return ReadLOBTextFromColumn(
+        lob_column.get(), op_ctx, ref, get_segment_id());
 }
 
 }  // namespace milvus::segcore

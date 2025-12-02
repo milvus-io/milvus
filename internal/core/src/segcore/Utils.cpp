@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "cachinglayer/Manager.h"
+#include "common/Chunk.h"
 #include "common/type_c.h"
 #include "common/Common.h"
 #include "common/FieldData.h"
@@ -26,10 +27,13 @@
 #include "common/Utils.h"
 #include "index/ScalarIndex.h"
 #include "log/Log.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/Types.h"
 #include "storage/DataCodec.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
@@ -1365,6 +1369,82 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     load_index_info->cache_index =
         milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator));
+}
+
+std::shared_ptr<ChunkedColumnInterface>
+CreateLOBColumnFromMeta(const LOBColumnMeta& meta,
+                        const Schema* schema,
+                        int64_t segment_id) {
+    const auto& lob_file = meta.file_info;
+
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
+
+    auto field_data_info =
+        FieldDataInfo(lob_file.lob_file_id,
+                      lob_file.row_count,
+                      mmap_dir_path,
+                      schema->ShouldLoadField(meta.field_id));
+
+    // LOB files use LOB_FIELD_ID (13000) in arrow schema metadata,
+    // so we need to create field_metas with LOB_FIELD_ID as key
+    auto field_meta = schema->operator[](meta.field_id);
+    std::unordered_map<FieldId, FieldMeta> field_metas;
+    field_metas.emplace(FieldId(LOB_FIELD_ID), field_meta);
+
+    std::vector<std::string> insert_files = {lob_file.file_path};
+
+    auto translator =
+        std::make_unique<storagev2translator::GroupChunkTranslator>(
+            segment_id,
+            GroupChunkType::DEFAULT,
+            field_metas,
+            field_data_info,
+            std::move(insert_files),
+            meta.enable_mmap,
+            1,
+            meta.load_priority);
+
+    auto chunked_column_group =
+        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+
+    // ProxyChunkColumn still uses original field_id for compatibility
+    auto proxy_column = std::make_shared<ProxyChunkColumn>(
+        chunked_column_group, FieldId(LOB_FIELD_ID), field_meta);
+
+    return proxy_column;
+}
+
+std::string
+ReadLOBTextFromColumn(ChunkedColumnInterface* lob_column,
+                      milvus::OpContext* op_ctx,
+                      const milvus::LOBReference& ref,
+                      int64_t segment_id) {
+    if (lob_column == nullptr) {
+        LOG_WARN("LOB column is null for segment {}", segment_id);
+        return "";
+    }
+
+    auto [chunk_id, offset_in_chunk] =
+        lob_column->GetChunkIDByOffset(ref.row_offset);
+
+    auto chunk_pin = lob_column->GetChunk(op_ctx, chunk_id);
+    auto* chunk = chunk_pin.get();
+
+    auto* string_chunk = dynamic_cast<StringChunk*>(chunk);
+    if (string_chunk == nullptr) {
+        LOG_ERROR(
+            "Invalid chunk type for LOB file {}, expected StringChunk for "
+            "segment {}",
+            ref.lob_file_id,
+            segment_id);
+        return "";
+    }
+
+    auto string_view = (*string_chunk)[offset_in_chunk];
+    return std::string(string_view);
 }
 
 }  // namespace milvus::segcore

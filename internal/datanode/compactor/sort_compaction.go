@@ -72,6 +72,8 @@ type sortCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+
+	sourceLOBMetadata map[int64]*datapb.LOBFieldMetadata
 }
 
 var _ Compactor = (*sortCompactionTask)(nil)
@@ -84,6 +86,7 @@ func NewSortCompactionTask(
 	sortByFieldIDs []int64,
 ) *sortCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
+
 	return &sortCompactionTask{
 		ctx:              ctx1,
 		cancel:           cancel,
@@ -148,6 +151,13 @@ func (t *sortCompactionTask) preCompact() error {
 		zap.Bool("useLoonFFI", t.useLoonFFI),
 		zap.Any("compactionParams", t.compactionParams),
 	)
+
+	if lobMeta := segment.GetLobMetadata(); len(lobMeta) > 0 {
+		t.sourceLOBMetadata = lobMeta
+		log.Ctx(t.ctx).Info("loaded LOB metadata for sort compaction",
+			zap.Int64("segmentID", t.segmentID),
+			zap.Int("lobFields", len(lobMeta)))
+	}
 
 	return nil
 }
@@ -350,6 +360,15 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		}, nil
 	}
 	res.Segments[0].TextStatsLogs = textStatsLogs
+
+	// attach LOB metadata to result segment (ReferenceOnly mode - just copy proto directly)
+	if len(t.sourceLOBMetadata) > 0 {
+		res.Segments[0].LobMetadata = t.sourceLOBMetadata
+		log.Info("attached LOB metadata to sort compaction result",
+			zap.Int64("targetSegmentID", targetSegemntID),
+			zap.Int("lobFields", len(t.sourceLOBMetadata)))
+	}
+
 	log.Info("compact done", zap.Int64("targetSegmentID", targetSegemntID),
 		zap.Duration("compact cost", time.Since(compactStart)))
 	return res, nil

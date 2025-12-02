@@ -30,6 +30,7 @@ type Params struct {
 	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
 	PreferSegmentSizeRatio    float64                `json:"prefer_segment_size_ratio,omitempty"`
 	BloomFilterApplyBatchSize int                    `json:"bloom_filter_apply_batch_size,omitempty"`
+	LOBMaxFileSize            int64                  `json:"lob_max_file_size,omitempty"`
 	StorageConfig             *indexpb.StorageConfig `json:"storage_config,omitempty"`
 	UseLoonFFI                bool                   `json:"use_loon_ffi,omitempty"`
 }
@@ -46,6 +47,7 @@ func GenParams() Params {
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
+		LOBMaxFileSize:            paramtable.Get().CommonCfg.LOBMaxFileSize.GetAsInt64(),
 		StorageConfig:             CreateStorageConfig(),
 		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 	}

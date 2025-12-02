@@ -1106,6 +1106,24 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 	}
 }
 
+// UpdateLOBMetadataOperator updates LOB metadata for a segment
+func UpdateLOBMetadataOperator(segmentID int64, lobMetadata map[int64]*datapb.LOBFieldMetadata) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update LOB metadata failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+
+		segment.LobMetadata = lobMetadata
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -1726,6 +1744,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
 			ManifestPath:   seg.GetManifest(),
+			LobMetadata:    seg.GetLobMetadata(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1836,6 +1855,7 @@ func (m *meta) completeMixCompactionMutation(
 				})),
 				IsSorted:     compactToSegment.GetIsSorted(),
 				ManifestPath: compactToSegment.GetManifest(),
+				LobMetadata:  compactToSegment.GetLobMetadata(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2329,6 +2349,7 @@ func (m *meta) completeSortCompactionMutation(
 		CompactionFrom:            []int64{compactFromSegID},
 		IsSorted:                  true,
 		ManifestPath:              resultSegment.GetManifest(),
+		LobMetadata:               resultSegment.GetLobMetadata(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)

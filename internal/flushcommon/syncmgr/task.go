@@ -74,6 +74,8 @@ type SyncTask struct {
 	statsBinlogs  map[int64]*datapb.FieldBinlog // map[int64]*datapb.Binlog
 	bm25Binlogs   map[int64]*datapb.FieldBinlog
 	deltaBinlog   *datapb.FieldBinlog
+	lobMetadata   *storage.LOBSegmentMetadata // LOB metadata for this segment
+	lobManager    *storage.LOBManager         // LOB manager for uploading LOB files
 
 	manifestPath string
 
@@ -169,6 +171,24 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	metrics.DataNodeFlushedRows.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.dataSource).Add(float64(t.batchRows))
 
 	metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.level.String()).Observe(float64(t.tr.RecordSpan().Milliseconds()))
+
+	// upload LOB files after binlog upload, before metadata save
+	if t.lobManager != nil {
+		log.Debug("uploading LOB files for segment", zap.Int64("segmentID", t.segmentID))
+		lobMeta, err := t.lobManager.FlushSegment(ctx, t.segmentID)
+		if err != nil {
+			log.Error("failed to upload LOB files", zap.Error(err))
+			return err
+		}
+
+		t.lobMetadata = lobMeta
+		if t.lobMetadata != nil && t.lobMetadata.HasLOBFields() {
+			log.Debug("LOB files uploaded successfully",
+				zap.Int64("segmentID", t.segmentID),
+				zap.Int("fileCount", t.lobMetadata.TotalLOBFiles),
+				zap.Int64("totalBytes", t.lobMetadata.TotalLOBBytes))
+		}
+	}
 
 	if t.metaWriter != nil {
 		err = t.writeMeta(ctx)

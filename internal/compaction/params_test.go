@@ -45,6 +45,7 @@ func TestGetJSONParams(t *testing.T) {
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
+		LOBMaxFileSize:            paramtable.Get().CommonCfg.LOBMaxFileSize.GetAsInt64(),
 		StorageConfig:             CreateStorageConfig(),
 	}, result)
 }
@@ -95,6 +96,7 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
+		LOBMaxFileSize:            paramtable.Get().CommonCfg.LOBMaxFileSize.GetAsInt64(),
 		StorageConfig:             CreateStorageConfig(),
 	}, result)
 }

@@ -296,7 +296,7 @@ class Schema {
     }
 
     const std::unordered_map<FieldId, FieldMeta>
-    get_field_metas(const std::vector<FieldId>& field_ids) {
+    get_field_metas(const std::vector<FieldId>& field_ids) const {
         std::unordered_map<FieldId, FieldMeta> field_metas;
         for (const auto& field_id : field_ids) {
             field_metas.emplace(field_id, operator[](field_id));
@@ -342,7 +342,7 @@ class Schema {
     }
 
     bool
-    ShouldLoadField(FieldId field_id) {
+    ShouldLoadField(FieldId field_id) const {
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 

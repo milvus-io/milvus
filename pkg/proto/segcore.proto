@@ -40,6 +40,23 @@ message JsonKeyStats {
   int64 json_key_stats_data_format = 7;
 }
 
+// LOBFile stores metadata for a single LOB file
+message LOBFile {
+  string file_path = 1;      // relative path to LOB file
+  int64 lob_file_id = 2;     // unique ID for this LOB file
+  int64 row_count = 3;       // number of rows in this file
+  int64 valid_record_count = 4; 
+}
+
+// LOBFieldMetadata stores metadata for LOB files of a single field
+message LOBFieldMetadata {
+  int64 field_id = 1;
+  repeated LOBFile lob_files = 2;  // LOB file info with row_count
+  int64 size_threshold = 3;        // size threshold for LOB storage
+  int64 record_count = 4;          // number of records stored as LOB
+  int64 total_bytes = 5;           // total bytes of LOB data
+}
+
 message RetrieveResults {
   schema.IDs ids = 1;
   repeated int64 offset = 2;
@@ -119,4 +136,5 @@ message SegmentLoadInfo {
   map<int64, JsonKeyStats> jsonKeyStatsLogs = 19;
   common.LoadPriority priority = 20;
   string manifest_path = 21;
+  map<int64, LOBFieldMetadata> lob_metadata = 22;  // LOB metadata per field
 }

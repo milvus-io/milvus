@@ -38,6 +38,7 @@ set(MILVUS_TEST_FILES
         test_expr_materialized_view.cpp
         test_float16.cpp
         test_group_by.cpp
+        test_growing_lob.cpp
         test_iterative_filter.cpp
         test_indexing.cpp
         test_index_wrapper.cpp
@@ -51,6 +52,9 @@ set(MILVUS_TEST_FILES
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
         test_element_filter.cpp
+        test_text_insert_retrieve.cpp
+        test_text_sealed_mixed_storage.cpp
+        test_text_growing_segment_e2e.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

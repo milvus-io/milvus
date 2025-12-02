@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
@@ -385,7 +387,52 @@ func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) *segcorepb.Se
 		JsonKeyStatsLogs: convertJSONKeyStats(src.GetJsonKeyStatsLogs()),
 		Priority:         src.GetPriority(),
 		ManifestPath:     src.GetManifestPath(),
+		LobMetadata:      convertLOBMetadata(src.GetLobMetadata(), src.GetCollectionID(), src.GetPartitionID()),
 	}
+}
+
+// convertLOBMetadata converts datapb.LOBFieldMetadata to segcorepb.LOBFieldMetadata.
+// It also builds full LOB file paths using the remote storage root path.
+// For remote storage (S3/MinIO), paths need to include bucket name prefix.
+func convertLOBMetadata(src map[int64]*datapb.LOBFieldMetadata, collectionID, partitionID int64) map[int64]*segcorepb.LOBFieldMetadata {
+	if src == nil || len(src) == 0 {
+		return nil
+	}
+
+	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
+	bucketName := paramtable.Get().MinioCfg.BucketName.GetValue()
+	storageType := paramtable.Get().CommonCfg.StorageType.GetValue()
+
+	result := make(map[int64]*segcorepb.LOBFieldMetadata, len(src))
+	for fieldID, meta := range src {
+		if meta == nil {
+			continue
+		}
+
+		// build full paths for each LOB file
+		lobFiles := make([]*segcorepb.LOBFile, 0, len(meta.GetLobFiles()))
+		for _, lobFile := range meta.GetLobFiles() {
+			lobFileID := lobFile.GetLobFileId()
+			fullPath := metautil.BuildLOBLogPath(rootPath, collectionID, partitionID, fieldID, lobFileID)
+			if storageType != "local" && bucketName != "" {
+				fullPath = bucketName + "/" + fullPath
+			}
+			lobFiles = append(lobFiles, &segcorepb.LOBFile{
+				FilePath:  fullPath,
+				LobFileId: lobFileID,
+				RowCount:  lobFile.GetRowCount(),
+			})
+		}
+
+		result[fieldID] = &segcorepb.LOBFieldMetadata{
+			FieldId:       meta.GetFieldId(),
+			LobFiles:      lobFiles,
+			SizeThreshold: meta.GetSizeThreshold(),
+			RecordCount:   meta.GetRecordCount(),
+			TotalBytes:    meta.GetTotalBytes(),
+		}
+	}
+	return result
 }
 
 // convertFieldBinlogs converts datapb.FieldBinlog to segcorepb.FieldBinlog.

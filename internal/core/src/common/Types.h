@@ -856,6 +856,81 @@ vector_bytes_per_element(const DataType data_type, int64_t dim) {
     }
 }
 
+// LOB (Large Object) Reference structure for TEXT fields
+// this is a 16-byte reference with magic number for mixed storage support:
+// - texts < threshold: stored directly as variable-length strings (no LOB reference)
+// - texts >= threshold: stored as 16-byte LOB references with magic header
+//   (threshold configured by common.lob.sizeThreshold, default 64KB)
+//
+// layout (16 bytes total):
+//   bytes 0-3:   magic (0x00FF00FF for LOB ref)
+//   bytes 4-11:  lob_file_id (TSO-allocated LOB file ID)
+//   bytes 12-15: row_offset (row offset in LOB file)
+#pragma pack(push, 1)
+struct LOBReference {
+    // this sequence is extremely rare in all text encodings and binary data
+    static constexpr uint32_t MAGIC_LOB_REF = 0x00FF00FF;
+
+    uint32_t magic;
+    uint64_t lob_file_id;
+    uint32_t row_offset;
+
+    LOBReference() : magic(MAGIC_LOB_REF), lob_file_id(0), row_offset(0) {
+    }
+
+    LOBReference(uint64_t file_id, uint32_t offset)
+        : magic(MAGIC_LOB_REF), lob_file_id(file_id), row_offset(offset) {
+    }
+
+    // constructor for growing segment (offset + size)
+    static LOBReference
+    ForGrowing(uint64_t byte_offset, uint32_t size) {
+        return LOBReference(byte_offset, size);
+    }
+
+    // getters for growing segment interpretation
+    uint64_t
+    GetOffset() const {
+        return lob_file_id;
+    }
+
+    uint32_t
+    GetSize() const {
+        return row_offset;
+    }
+
+    bool
+    IsLOBRef() const {
+        return magic == MAGIC_LOB_REF;
+    }
+
+    static bool
+    IsLOBReference(std::string_view data) {
+        if (data.size() != 16) {
+            return false;
+        }
+        uint32_t magic_read;
+        std::memcpy(&magic_read, data.data(), 4);
+        return magic_read == MAGIC_LOB_REF;
+    }
+
+    std::string
+    EncodeToString() const {
+        return std::string(reinterpret_cast<const char*>(this), 16);
+    }
+
+    static LOBReference
+    DecodeFromString(std::string_view data) {
+        AssertInfo(data.size() == 16,
+                   fmt::format("Invalid LOBReference size: expected 16, got {}",
+                               data.size()));
+        LOBReference ref;
+        std::memcpy(&ref, data.data(), 16);
+        return ref;
+    }
+};
+#pragma pack(pop)
+
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {

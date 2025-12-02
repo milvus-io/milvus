@@ -15,6 +15,7 @@
 #include "common/protobuf_utils.h"
 #include "common/Common.h"
 #include <boost/lexical_cast.hpp>
+#include <limits>
 #include <optional>
 
 #include "Consts.h"
@@ -200,8 +201,20 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
 
     if (IsStringDataType(data_type)) {
         auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
-        AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
-        auto max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+
+        // for TEXT type, max_length is optional (defaults to INT64_MAX for LOB storage)
+        // for VARCHAR/STRING, max_length is required
+        int64_t max_len;
+        if (type_map.count(MAX_LENGTH)) {
+            max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+        } else if (data_type == DataType::TEXT) {
+            // TEXT type: use maximum value for LOB storage
+            max_len = std::numeric_limits<int64_t>::max();
+        } else {
+            // VARCHAR/STRING: max_length is required
+            AssertInfo(false, "max_length not found for VARCHAR/STRING field");
+            max_len = 0;  // unreachable, but added for compiler
+        }
 
         auto get_bool_value = [&](const std::string& key) -> bool {
             if (!type_map.count(key)) {

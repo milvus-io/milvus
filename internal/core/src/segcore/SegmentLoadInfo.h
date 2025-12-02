@@ -542,6 +542,19 @@ class SegmentLoadInfo {
         return info_.jsonkeystatslogs();
     }
 
+    // ==================== LOB Metadata ====================
+
+    [[nodiscard]] int
+    GetLobMetadataCount() const {
+        return info_.lob_metadata_size();
+    }
+
+    [[nodiscard]] const google::protobuf::Map<int64_t,
+                                              proto::segcore::LOBFieldMetadata>&
+    GetLobMetadataMap() const {
+        return info_.lob_metadata();
+    }
+
     // ==================== Diff Computation ====================
 
     /**

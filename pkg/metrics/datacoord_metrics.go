@@ -29,6 +29,7 @@ const (
 	DeleteFileLabel          = "delete_file"
 	StatFileLabel            = "stat_file"
 	IndexFileLabel           = "index_file"
+	LOBFileLabel             = "lob_file"
 	segmentFileTypeLabelName = "segment_file_type"
 )
 
