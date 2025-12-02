@@ -317,6 +317,11 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         std::sort(slices.second.begin(), slices.second.end());
     }
 
+    // TODO: remove this log when #45590 is solved
+    LOG_INFO("CacheIndexToDisk: caching {} files to {}",
+             index_slices.size(),
+             local_index_prefix);
+
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
@@ -362,6 +367,8 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         }
 
         local_paths_.emplace_back(local_index_file_name);
+        // TODO: remove this log when #45590 is solved
+        LOG_INFO("CacheIndexToDisk: cached file {}", local_index_file_name);
     }
 }
 
