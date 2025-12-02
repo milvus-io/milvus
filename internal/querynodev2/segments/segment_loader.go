@@ -1456,20 +1456,26 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	)
 
 	if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-			toMB(maxSegmentSize),
-			toMB(memUsage),
-			toMB(predictMemUsage),
-			toMB(totalMem),
-			paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
+		log.Warn("load segment failed, OOM if load",
+			zap.String("resourceType", "Memory"),
+			zap.Float64("maxSegmentSizeMB", toMB(maxSegmentSize)),
+			zap.Float64("memUsageMB", toMB(memUsage)),
+			zap.Float64("predictMemUsageMB", toMB(predictMemUsage)),
+			zap.Float64("totalMemMB", toMB(totalMem)),
+			zap.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()),
+		)
+		return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Memory")
 	}
 
 	if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
-		return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, diskUsage = %v MB, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
-			toMB(diskUsage),
-			toMB(predictDiskUsage),
-			toMB(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())),
-			paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
+		log.Warn("load segment failed, disk space is not enough",
+			zap.String("resourceType", "Disk"),
+			zap.Float64("diskUsageMB", toMB(diskUsage)),
+			zap.Float64("predictDiskUsageMB", toMB(predictDiskUsage)),
+			zap.Float64("totalDiskMB", toMB(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()))),
+			zap.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()),
+		)
+		return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Disk")
 	}
 
 	return predictMemUsage - memUsage, predictDiskUsage - diskUsage, nil
