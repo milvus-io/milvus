@@ -427,6 +427,9 @@ message SegmentInfo {
   // we could keep the fullpath since one segment shall only have one active manifest
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
+
+  // lobMetadata is used to track LOB (Large Object) files for fields with large data
+  map<int64, LOBFieldMetadata> lob_metadata = 33;
 }
 
 message SegmentStartPosition {
@@ -453,6 +456,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2Bm25logPaths = 16;
   bool with_full_binlogs = 17; // report with full data for verification.
   string manifest_path = 18; //
+  map<int64, LOBFieldMetadata> lob_metadata = 19; // LOB metadata by field ID
 }
 
 message CheckPoint {
@@ -525,6 +529,15 @@ message JsonKeyStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int64 json_key_stats_data_format =7;
+}
+
+// LOBFieldMetadata stores metadata for LOB files of a single field
+message LOBFieldMetadata {
+  int64 field_id = 1;
+  repeated string lob_files = 2;  // relative paths to LOB files
+  int64 size_threshold = 3;       // size threshold for LOB storage
+  int64 record_count = 4;         // number of records stored as LOB
+  int64 total_bytes = 5;          // total bytes of LOB data
 }
 
 message Binlog {
@@ -729,6 +742,7 @@ message CompactionSegment {
   int64 storage_version = 10;
   map<int64, data.TextIndexStats> text_stats_logs = 11;
   string manifest = 12;
+  map<int64, LOBFieldMetadata> lob_metadata = 13;
 }
 
 message CompactionPlanResult {

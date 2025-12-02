@@ -20,6 +20,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -137,4 +140,254 @@ func TestParseInsertLogPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildLOBLogPath(t *testing.T) {
+	tests := []struct {
+		name         string
+		rootPath     string
+		collectionID typeutil.UniqueID
+		partitionID  typeutil.UniqueID
+		segmentID    typeutil.UniqueID
+		fieldID      typeutil.UniqueID
+		logID        typeutil.UniqueID
+		want         string
+	}{
+		{
+			name:         "normal path",
+			rootPath:     "files",
+			collectionID: 100,
+			partitionID:  200,
+			segmentID:    300,
+			fieldID:      101,
+			logID:        12345,
+			want:         "files/insert_log/100/200/300/101/lob/12345",
+		},
+		{
+			name:         "empty root path",
+			rootPath:     "",
+			collectionID: 100,
+			partitionID:  200,
+			segmentID:    300,
+			fieldID:      101,
+			logID:        12345,
+			want:         "insert_log/100/200/300/101/lob/12345",
+		},
+		{
+			name:         "large IDs",
+			rootPath:     "data",
+			collectionID: 446266956600703270,
+			partitionID:  446266956600703326,
+			segmentID:    447985737531772787,
+			fieldID:      102,
+			logID:        453718835200262143,
+			want:         "data/insert_log/446266956600703270/446266956600703326/447985737531772787/102/lob/453718835200262143",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildLOBLogPath(tt.rootPath, tt.collectionID, tt.partitionID, tt.segmentID, tt.fieldID, tt.logID)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParseLOBFilePath(t *testing.T) {
+	tests := []struct {
+		name        string
+		filePath    string
+		wantFieldID int64
+		wantLobID   uint64
+		wantOk      bool
+	}{
+		{
+			name:        "valid path",
+			filePath:    "files/insert_log/100/200/300/101/lob/12345",
+			wantFieldID: 101,
+			wantLobID:   12345,
+			wantOk:      true,
+		},
+		{
+			name:        "valid path with large IDs",
+			filePath:    "data/insert_log/446266956600703270/446266956600703326/447985737531772787/102/lob/453718835200262143",
+			wantFieldID: 102,
+			wantLobID:   453718835200262143,
+			wantOk:      true,
+		},
+		{
+			name:        "path without root",
+			filePath:    "insert_log/100/200/300/101/lob/12345",
+			wantFieldID: 101,
+			wantLobID:   12345,
+			wantOk:      true,
+		},
+		{
+			name:        "no lob in path",
+			filePath:    "files/insert_log/100/200/300/101/12345",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "invalid field ID",
+			filePath:    "files/insert_log/100/200/300/abc/lob/12345",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "invalid lob file ID",
+			filePath:    "files/insert_log/100/200/300/101/lob/abc",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "too short path",
+			filePath:    "lob",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "empty path",
+			filePath:    "",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "lob at start",
+			filePath:    "lob/12345",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "lob at end without file",
+			filePath:    "101/lob",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "no insert_log in path",
+			filePath:    "files/100/200/300/101/lob/12345",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "blob in path should not match",
+			filePath:    "files/blob/insert_log/100/200/300/101/lob/12345",
+			wantFieldID: 101,
+			wantLobID:   12345,
+			wantOk:      true,
+		},
+		{
+			name:        "lob in wrong position",
+			filePath:    "files/insert_log/100/lob/200/300/101/12345",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+		{
+			name:        "missing segments before lob",
+			filePath:    "files/insert_log/100/101/lob/12345",
+			wantFieldID: 0,
+			wantLobID:   0,
+			wantOk:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFieldID, gotLobID, gotOk := ParseLOBFilePath(tt.filePath)
+			assert.Equal(t, tt.wantOk, gotOk)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantFieldID, gotFieldID)
+				assert.Equal(t, tt.wantLobID, gotLobID)
+			}
+		})
+	}
+}
+
+func TestExtractLOBFileID(t *testing.T) {
+	tests := []struct {
+		name     string
+		filePath string
+		want     uint64
+		wantErr  bool
+	}{
+		{
+			name:     "valid path",
+			filePath: "files/insert_log/100/200/300/101/lob/12345",
+			want:     12345,
+			wantErr:  false,
+		},
+		{
+			name:     "large ID",
+			filePath: "data/insert_log/100/200/300/101/lob/453718835200262143",
+			want:     453718835200262143,
+			wantErr:  false,
+		},
+		{
+			name:     "simple path",
+			filePath: "12345",
+			want:     12345,
+			wantErr:  false,
+		},
+		{
+			name:     "invalid - non-numeric",
+			filePath: "files/insert_log/100/200/300/101/lob/abc",
+			want:     0,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid - with extension",
+			filePath: "files/insert_log/100/200/300/101/lob/12345.parquet",
+			want:     0,
+			wantErr:  true,
+		},
+		{
+			name:     "empty path",
+			filePath: "",
+			want:     0,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExtractLOBFileID(tt.filePath)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestBuildLOBLogPath_RoundTrip(t *testing.T) {
+	// Test that BuildLOBLogPath and ParseLOBFilePath work together
+	rootPath := "files"
+	collectionID := typeutil.UniqueID(100)
+	partitionID := typeutil.UniqueID(200)
+	segmentID := typeutil.UniqueID(300)
+	fieldID := typeutil.UniqueID(101)
+	logID := typeutil.UniqueID(12345)
+
+	path := BuildLOBLogPath(rootPath, collectionID, partitionID, segmentID, fieldID, logID)
+
+	gotFieldID, gotLobID, ok := ParseLOBFilePath(path)
+	require.True(t, ok)
+	assert.Equal(t, int64(fieldID), gotFieldID)
+	assert.Equal(t, uint64(logID), gotLobID)
+
+	gotLobID2, err := ExtractLOBFileID(path)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(logID), gotLobID2)
 }

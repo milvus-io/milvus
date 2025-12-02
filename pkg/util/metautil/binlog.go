@@ -16,6 +16,67 @@ func BuildInsertLogPath(rootPath string, collectionID, partitionID, segmentID, f
 	return path.Join(rootPath, common.SegmentInsertLogPath, k)
 }
 
+// BuildLOBLogPath builds the path for the LOB log file.
+// Format: {root_path}/insert_log/{collection_id}/{partition_id}/{segment_id}/{field_id}/lob/{log_id}
+func BuildLOBLogPath(rootPath string, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) string {
+	k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+	return path.Join(rootPath, common.SegmentInsertLogPath, k, "lob", strconv.FormatInt(logID, 10))
+}
+
+// ParseLOBFilePath extracts field ID and LOB file ID from a LOB file path.
+// Returns (fieldID, lobFileID, ok) where ok indicates if parsing was successful.
+func ParseLOBFilePath(filePath string) (fieldID int64, lobFileID uint64, ok bool) {
+	parts := strings.Split(filePath, pathSep)
+
+	insertLogIdx := -1
+	for i, part := range parts {
+		if part == common.SegmentInsertLogPath {
+			insertLogIdx = i
+			break
+		}
+	}
+
+	if insertLogIdx < 0 {
+		return 0, 0, false
+	}
+
+	// after insert_log, need at least 6 more parts: coll/part/seg/field/lob/lobfile
+	remaining := parts[insertLogIdx+1:]
+	if len(remaining) < 6 {
+		return 0, 0, false
+	}
+
+	// verify "lob" is at position 4 (after coll/part/seg/field)
+	if remaining[4] != "lob" {
+		return 0, 0, false
+	}
+
+	// parse field ID (position 3)
+	fid, err := strconv.ParseInt(remaining[3], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	// parse lob file ID (position 5)
+	lfid, err := strconv.ParseUint(remaining[5], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return fid, lfid, true
+}
+
+// ExtractLOBFileID extracts the LOB file ID from a file path.
+// Must prove that the path is a valid LOB file path.
+func ExtractLOBFileID(filePath string) (uint64, error) {
+	parts := strings.Split(filePath, pathSep)
+	if len(parts) == 0 {
+		return 0, strconv.ErrSyntax
+	}
+	filename := parts[len(parts)-1]
+	return strconv.ParseUint(filename, 10, 64)
+}
+
 func ParseInsertLogPath(path string) (collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID, ok bool) {
 	infos := strings.Split(path, pathSep)
 	l := len(infos)

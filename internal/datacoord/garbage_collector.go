@@ -228,6 +228,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context) {
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
+			gc.recycleOrphanedLOBFiles(ctx)
 		})
 	}()
 	go func() {
@@ -557,12 +558,18 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			logs[key] = struct{}{}
 		}
 
+		lobFiles := getLOBFiles(cloned, gc)
+		for key := range lobFiles {
+			logs[key] = struct{}{}
+		}
+
 		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
 			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
 			zap.Int("stats_logs", len(cloned.GetStatslogs())),
 			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
 			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
+			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())),
+			zap.Int("lob_files", len(lobFiles)))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
 			cloned = nil
@@ -678,6 +685,24 @@ func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 	}
 
 	return textLogs
+}
+
+func getLOBFiles(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {
+	lobFiles := make(map[string]struct{})
+
+	lobMetadata := sinfo.GetLobMetadata()
+	if lobMetadata == nil || len(lobMetadata) == 0 {
+		return lobFiles
+	}
+
+	for _, fieldMeta := range lobMetadata {
+		for _, lobFile := range fieldMeta.LobFiles {
+			fullPath := path.Join(gc.option.cli.RootPath(), lobFile)
+			lobFiles[fullPath] = struct{}{}
+		}
+	}
+
+	return lobFiles
 }
 
 func getJSONKeyLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {
@@ -1171,4 +1196,68 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 	log.Info("json index files recycle done")
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+}
+
+// recycleOrphanedLOBFiles scans and removes orphaned LOB files (Layer 2 GC)
+//
+// This is a safety net that complements recycleDroppedSegments (Layer 1 GC):
+// - Layer 1: Deletes all files from dropped segments based on metadata
+// - Layer 2: Deletes files whose segments don't exist in metadata (true orphans)
+//
+// Protection mechanism:
+// - Only deletes files if segment doesn't exist in metadata
+// - Files from existing segments are kept (regardless of state)
+// - Files younger than minAge are always protected
+//
+// This handles edge cases:
+// - Incomplete metadata (write failures)
+// - Layer 1 deletion failures
+// - Code bugs causing orphaned files
+func (gc *garbageCollector) recycleOrphanedLOBFiles(ctx context.Context) {
+	start := time.Now()
+	log := log.Ctx(ctx).With(zap.String("gcName", "recycleOrphanedLOBFiles"), zap.Time("startAt", start))
+	log.Info("start recycleOrphanedLOBFiles (Layer 2: orphan safety net)...")
+	defer func() {
+		log.Info("recycleOrphanedLOBFiles done", zap.Duration("timeCost", time.Since(start)))
+	}()
+
+	// Create LOB GC with same minAge as binlog GC for consistency
+	// Dual protection: minAge (time-based) + segment existence (metadata-based)
+	lobGC := storage.NewLOBGarbageCollector(
+		gc.option.cli,
+		storage.WithLOBGCMinAge(gc.option.missingTolerance),
+	)
+
+	log.Info("starting LOB GC Layer 2 scan",
+		zap.Duration("minAge", gc.option.missingTolerance),
+		zap.String("strategy", "delete files with non-existent segments only"))
+
+	// Pass meta interface to LOB GC for segment state queries
+	metaAdapter := &segmentMetaAdapter{meta: gc.meta}
+	if err := lobGC.ScanAndCleanup(ctx, metaAdapter, gc.option.cli.RootPath()); err != nil {
+		log.Warn("LOB GC scan and cleanup failed", zap.Error(err))
+		return
+	}
+
+	// Get and log statistics
+	stats := lobGC.GetStatistics()
+	log.Info("LOB GC completed",
+		zap.Any("scannedFiles", stats["scanned_files"]),
+		zap.Any("deletedFiles", stats["deleted_files"]),
+		zap.Any("deletedBytes", stats["deleted_bytes"]))
+
+	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
+}
+
+// segmentMetaAdapter adapts datacoord meta to storage.SegmentMetaInterface
+type segmentMetaAdapter struct {
+	meta *meta
+}
+
+func (a *segmentMetaAdapter) GetSegment(ctx context.Context, segmentID int64) storage.SegmentInfo {
+	seg := a.meta.GetSegment(ctx, segmentID)
+	if seg == nil {
+		return nil
+	}
+	return seg
 }

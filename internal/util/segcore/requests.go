@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -44,6 +45,7 @@ type LoadFieldDataRequest struct {
 	StorageVersion int64
 	LoadPriority   commonpb.LoadPriority
 	WarmupPolicy   string
+	LobMetadata    map[int64]*datapb.LOBFieldMetadata
 }
 
 type LoadFieldDataInfo struct {
@@ -100,6 +102,42 @@ func (req *LoadFieldDataRequest) getCLoadFieldDataRequest() (result *cLoadFieldD
 		}
 		C.AppendWarmupPolicy(cLoadFieldDataInfo, C.CacheWarmupPolicy(warmupPolicy))
 	}
+
+	// append LOB metadata
+	for fieldID, lobMeta := range req.LobMetadata {
+		cFieldID := C.int64_t(fieldID)
+		cSizeThreshold := C.int64_t(lobMeta.GetSizeThreshold())
+		cRecordCount := C.int64_t(lobMeta.GetRecordCount())
+		cTotalBytes := C.int64_t(lobMeta.GetTotalBytes())
+
+		status = C.AppendLOBMetadata(cLoadFieldDataInfo, cFieldID, cSizeThreshold, cRecordCount, cTotalBytes)
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			return nil, errors.Wrapf(err, "AppendLOBMetadata failed at fieldID %d", fieldID)
+		}
+
+		// append each LOB file for this field
+		for _, lobFilePath := range lobMeta.GetLobFiles() {
+			// extract LOB file ID from path (last segment numeric, no extension)
+			lobFileID, err := metautil.ExtractLOBFileID(lobFilePath)
+			if err != nil {
+				return nil, errors.Wrapf(err, "extractLOBFileID failed for path %s", lobFilePath)
+			}
+
+			// estimate row count per file (simple average distribution)
+			estimatedRowCount := lobMeta.GetRecordCount() / int64(len(lobMeta.GetLobFiles()))
+
+			cFilePath := C.CString(lobFilePath)
+			defer C.free(unsafe.Pointer(cFilePath))
+			cLobFileID := C.uint64_t(lobFileID)
+			cRowCount := C.int64_t(estimatedRowCount)
+
+			status = C.AppendLOBFile(cLoadFieldDataInfo, cFieldID, cFilePath, cLobFileID, cRowCount)
+			if err := ConsumeCStatusIntoError(&status); err != nil {
+				return nil, errors.Wrapf(err, "AppendLOBFile failed at fieldID %d, path %s", fieldID, lobFilePath)
+			}
+		}
+	}
+
 	return &cLoadFieldDataRequest{
 		cLoadFieldDataInfo: cLoadFieldDataInfo,
 	}, nil
