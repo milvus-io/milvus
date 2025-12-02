@@ -590,6 +590,9 @@ func (s *Server) Stop() error {
 	if s.leaderCacheObserver != nil {
 		s.leaderCacheObserver.Stop()
 	}
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.Stop()
+	}
 
 	if s.distController != nil {
 		log.Info("stop dist controller...")

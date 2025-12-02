@@ -46,9 +46,12 @@ type FileResourceObserver struct {
 	nodeManager *session.NodeManager
 	cluster     session.Cluster
 
-	notifyCh chan struct{}
-	sf       conc.Singleflight[any]
-	once     sync.Once
+	notifyCh  chan struct{}
+	closeCh   chan struct{}
+	wg        sync.WaitGroup
+	sf        conc.Singleflight[any]
+	once      sync.Once
+	closeOnce sync.Once
 }
 
 func NewFileResourceObserver(ctx context.Context, nodeManager *session.NodeManager, cluster session.Cluster) *FileResourceObserver {
@@ -59,6 +62,7 @@ func NewFileResourceObserver(ctx context.Context, nodeManager *session.NodeManag
 		distribution: map[int64]uint64{},
 
 		notifyCh: make(chan struct{}, 1),
+		closeCh:  make(chan struct{}),
 		sf:       conc.Singleflight[any]{},
 	}
 }
@@ -70,6 +74,7 @@ func (m *FileResourceObserver) getResources() ([]*internalpb.FileResourceInfo, u
 }
 
 func (m *FileResourceObserver) syncLoop() {
+	defer m.wg.Done()
 	for {
 		select {
 		case <-m.notifyCh:
@@ -83,7 +88,11 @@ func (m *FileResourceObserver) syncLoop() {
 					return nil, nil
 				})
 			}
+		case <-m.closeCh:
+			log.Info("file resource observer close")
+			return
 		case <-m.ctx.Done():
+			log.Info("file resource observer context done")
 			return
 		}
 	}
@@ -92,10 +101,18 @@ func (m *FileResourceObserver) syncLoop() {
 func (m *FileResourceObserver) Start() {
 	if fileresource.IsSyncMode(paramtable.Get().QueryCoordCfg.FileResourceMode.GetValue()) {
 		m.once.Do(func() {
+			m.wg.Add(1)
 			go m.syncLoop()
 			m.Notify()
 		})
 	}
+}
+
+func (m *FileResourceObserver) Stop() {
+	m.closeOnce.Do(func() {
+		close(m.closeCh)
+		m.wg.Wait()
+	})
 }
 
 func (m *FileResourceObserver) Notify() {
