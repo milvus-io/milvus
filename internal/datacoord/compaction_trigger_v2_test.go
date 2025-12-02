@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -153,6 +154,21 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+		},
+	}, nil)
+	s.triggerManager.handler = handler
+
+	_, err := s.triggerManager.ManualTrigger(context.Background(), 1, true, false)
+	s.Error(err)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
