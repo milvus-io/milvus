@@ -108,16 +108,19 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         }
 
         auto writer_properties = builder.build();
-        auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
-            trueFs,
-            truePaths,
-            trueSchema,
-            storage_config,
-            columnGroups,
-            buffer_size,
-            writer_properties);
-        AssertInfo(writer, "[StorageV2] writer pointer is null");
-        *c_packed_writer = writer.release();
+        auto result =
+            milvus_storage::PackedRecordBatchWriter::Make(trueFs,
+                                                          truePaths,
+                                                          trueSchema,
+                                                          storage_config,
+                                                          columnGroups,
+                                                          buffer_size,
+                                                          writer_properties);
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to create packed writer: " +
+                       result.status().ToString());
+        auto writer = result.ValueOrDie();
+        *c_packed_writer = writer.get();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -177,16 +180,19 @@ NewPackedWriter(struct ArrowSchema* schema,
         }
 
         auto writer_properties = builder.build();
-        auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
-            trueFs,
-            truePaths,
-            trueSchema,
-            conf,
-            columnGroups,
-            buffer_size,
-            writer_properties);
-        AssertInfo(writer, "[StorageV2] writer pointer is null");
-        *c_packed_writer = writer.release();
+        auto result =
+            milvus_storage::PackedRecordBatchWriter::Make(trueFs,
+                                                          truePaths,
+                                                          trueSchema,
+                                                          conf,
+                                                          columnGroups,
+                                                          buffer_size,
+                                                          writer_properties);
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to create packed writer: " +
+                       result.status().ToString());
+        auto writer = result.ValueOrDie();
+        *c_packed_writer = writer.get();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

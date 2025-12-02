@@ -198,15 +198,15 @@ func GetManifest(manifestPath string, storageConfig *indexpb.StorageConfig) (man
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
-	var cManifest *C.char
+	var cColumnGroups C.ColumnGroupsHandle
 	var cVersion C.int64_t
-	result := C.get_latest_column_groups(cBasePath, cProperties, &cManifest, &cVersion)
+	result := C.get_latest_column_groups(cBasePath, cProperties, &cColumnGroups, &cVersion)
 	err = HandleFFIResult(result)
 	if err != nil {
 		return "", err
 	}
 
-	manifest = C.GoString(cManifest)
+	manifest = C.GoString(cColumnGroups)
 	return manifest, nil
 }
 

@@ -22,14 +22,14 @@
 #include "monitor/scope_metric.h"
 
 ReaderHandle
-createFFIReader(char* manifest,
+createFFIReader(ColumnGroupsHandle column_groups_handle,
                 struct ArrowSchema* schema,
                 char** needed_columns,
                 int64_t needed_columns_size,
                 const std::shared_ptr<Properties>& properties) {
     ReaderHandle reader_handler = 0;
 
-    FFIResult result = reader_new(manifest,
+    FFIResult result = reader_new(column_groups_handle,
                                   schema,
                                   needed_columns,
                                   needed_columns_size,
