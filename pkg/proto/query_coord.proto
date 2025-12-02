@@ -188,13 +188,13 @@ message ComputePhraseMatchSlopRequest {
     common.MsgBase base = 1;
     string analyzer_params = 2;
     string query_text = 3;
-    repeated string data_text = 4;
+    repeated string data_texts = 4;
 }
 
 message ComputePhraseMatchSlopResponse {
     common.Status status = 1;
     repeated bool is_match = 2;
-    repeated int64 slop = 3;
+    repeated int64 slops = 3;
 }
 
 message ShowCollectionsRequest {

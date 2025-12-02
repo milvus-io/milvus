@@ -22,7 +22,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
 	github.com/klauspost/compress v1.17.9
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20251119054300-fcb3986f4af1
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20251202063704-ae73d554b80f
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.20.5
@@ -232,7 +232,6 @@ require (
 )
 
 replace (
-	github.com/milvus-io/milvus-proto/go-api/v2 => github.com/SpadeA-Tang/milvus-proto/go-api/v2 v2.0.0-20251127094749-397b138d82ab
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0

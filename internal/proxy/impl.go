@@ -6749,7 +6749,7 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 	resp, err := node.mixCoord.ComputePhraseMatchSlop(ctx, &querypb.ComputePhraseMatchSlopRequest{
 		AnalyzerParams: req.GetAnalyzerParams(),
 		QueryText:      req.GetQueryText(),
-		DataText:       req.GetDataText(),
+		DataTexts:      req.GetDataTexts(),
 	})
 	if err != nil {
 		return &milvuspb.ComputePhraseMatchSlopResponse{
@@ -6764,6 +6764,6 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 	return &milvuspb.ComputePhraseMatchSlopResponse{
 		Status:  resp.GetStatus(),
 		IsMatch: resp.GetIsMatch(),
-		Slop:    resp.GetSlop(),
+		Slops:   resp.GetSlops(),
 	}, nil
 }

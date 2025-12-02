@@ -17,8 +17,6 @@ require (
 
 replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
 
-replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/SpadeA-Tang/milvus-proto/go-api/v2 v2.0.0-20251127094749-397b138d82ab
-
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -56,7 +54,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20240226150601-1dcf7310316a // indirect
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20251119054300-fcb3986f4af1 // indirect
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.6-0.20251202063704-ae73d554b80f // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

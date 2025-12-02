@@ -2043,7 +2043,7 @@ func TestProxy_ComputePhraseMatchSlop(t *testing.T) {
 		req := &milvuspb.ComputePhraseMatchSlopRequest{
 			AnalyzerParams: `{"tokenizer": "standard"}`,
 			QueryText:      "hello world",
-			DataText:       []string{"hello world", "world hello"},
+			DataTexts:      []string{"hello world", "world hello"},
 		}
 
 		resp, err := proxy.ComputePhraseMatchSlop(context.Background(), req)
@@ -2063,7 +2063,7 @@ func TestProxy_ComputePhraseMatchSlop(t *testing.T) {
 		req := &milvuspb.ComputePhraseMatchSlopRequest{
 			AnalyzerParams: `{"tokenizer": "standard"}`,
 			QueryText:      "hello world",
-			DataText:       []string{"hello world", "world hello", "foo bar"},
+			DataTexts:      []string{"hello world", "world hello", "foo bar"},
 		}
 
 		resp, err := node.ComputePhraseMatchSlop(context.Background(), req)

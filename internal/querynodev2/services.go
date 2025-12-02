@@ -1790,7 +1790,7 @@ func (node *QueryNode) ComputePhraseMatchSlop(ctx context.Context, req *querypb.
 
 func (node *QueryNode) computePhraseMatchSlopByParams(req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	query := req.GetQueryText()
-	datas := req.GetDataText()
+	datas := req.GetDataTexts()
 
 	if query == "" || len(datas) == 0 {
 		return &querypb.ComputePhraseMatchSlopResponse{
@@ -1815,6 +1815,6 @@ func (node *QueryNode) computePhraseMatchSlopByParams(req *querypb.ComputePhrase
 	return &querypb.ComputePhraseMatchSlopResponse{
 		Status:  merr.Success(),
 		IsMatch: isMatches,
-		Slop:    slops,
+		Slops:   slops,
 	}, nil
 }

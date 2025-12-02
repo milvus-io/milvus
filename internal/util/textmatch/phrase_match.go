@@ -15,6 +15,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+// Error codes from C++ segcore (internal/core/output/include/common/EasyAssert.h)
+const (
+	errCodeUnsupported = 2003 // Unsupported operation
+	errCodeClusterSkip = 2033 // ClusterSkip - pretend finished
+)
+
 // ComputePhraseMatchSlop computes the minimum slop required for a phrase match
 // between query and data texts using the specified analyzer.
 // Returns the slop value if match is possible, or error if terms are missing.
