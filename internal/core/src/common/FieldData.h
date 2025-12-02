@@ -134,23 +134,25 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
 };
 
 template <>
-class FieldData<FloatVector> : public FieldDataImpl<float, false> {
+class FieldData<FloatVector> : public FieldDataVectorImpl<float, false> {
  public:
     explicit FieldData(int64_t dim,
                        DataType data_type,
+                       bool nullable,
                        int64_t buffered_num_rows = 0)
-        : FieldDataImpl<float, false>::FieldDataImpl(
-              dim, data_type, false, buffered_num_rows) {
+        : FieldDataVectorImpl<float, false>::FieldDataVectorImpl(
+              dim, data_type, nullable, buffered_num_rows) {
     }
 };
 
 template <>
-class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
+class FieldData<BinaryVector> : public FieldDataVectorImpl<uint8_t, false> {
  public:
     explicit FieldData(int64_t dim,
                        DataType data_type,
+                       bool nullable,
                        int64_t buffered_num_rows = 0)
-        : FieldDataImpl(dim / 8, data_type, false, buffered_num_rows),
+        : FieldDataVectorImpl(dim / 8, data_type, nullable, buffered_num_rows),
           binary_dim_(dim) {
         Assert(dim % 8 == 0);
     }
@@ -165,43 +167,48 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
 };
 
 template <>
-class FieldData<Float16Vector> : public FieldDataImpl<float16, false> {
+class FieldData<Float16Vector> : public FieldDataVectorImpl<float16, false> {
  public:
     explicit FieldData(int64_t dim,
                        DataType data_type,
+                       bool nullable,
                        int64_t buffered_num_rows = 0)
-        : FieldDataImpl<float16, false>::FieldDataImpl(
-              dim, data_type, false, buffered_num_rows) {
+        : FieldDataVectorImpl<float16, false>::FieldDataVectorImpl(
+              dim, data_type, nullable, buffered_num_rows) {
     }
 };
 
 template <>
-class FieldData<BFloat16Vector> : public FieldDataImpl<bfloat16, false> {
+class FieldData<BFloat16Vector> : public FieldDataVectorImpl<bfloat16, false> {
  public:
     explicit FieldData(int64_t dim,
                        DataType data_type,
+                       bool nullable,
                        int64_t buffered_num_rows = 0)
-        : FieldDataImpl<bfloat16, false>::FieldDataImpl(
-              dim, data_type, false, buffered_num_rows) {
+        : FieldDataVectorImpl<bfloat16, false>::FieldDataVectorImpl(
+              dim, data_type, nullable, buffered_num_rows) {
     }
 };
 
 template <>
 class FieldData<SparseFloatVector> : public FieldDataSparseVectorImpl {
  public:
-    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
-        : FieldDataSparseVectorImpl(data_type, buffered_num_rows) {
+    explicit FieldData(DataType data_type,
+                       bool nullable = false,
+                       int64_t buffered_num_rows = 0)
+        : FieldDataSparseVectorImpl(data_type, nullable, buffered_num_rows) {
     }
 };
 
 template <>
-class FieldData<Int8Vector> : public FieldDataImpl<int8, false> {
+class FieldData<Int8Vector> : public FieldDataVectorImpl<int8, false> {
  public:
     explicit FieldData(int64_t dim,
                        DataType data_type,
+                       bool nullable,
                        int64_t buffered_num_rows = 0)
-        : FieldDataImpl<int8, false>::FieldDataImpl(
-              dim, data_type, false, buffered_num_rows) {
+        : FieldDataVectorImpl<int8, false>::FieldDataVectorImpl(
+              dim, data_type, nullable, buffered_num_rows) {
     }
 };
 
