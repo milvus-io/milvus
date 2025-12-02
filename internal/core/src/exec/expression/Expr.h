@@ -718,7 +718,7 @@ class SegmentExpr : public Expr {
                 // Start of a new chunk batch
                 int64_t element_id = (*element_ids)[i];
                 auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToDoc(element_id);
+                    array_offsets->ElementIDToRowID(element_id);
                 auto [chunk_id, chunk_offset] =
                     segment_->get_chunk_by_offset(field_id_, doc_id);
 
@@ -735,7 +735,7 @@ class SegmentExpr : public Expr {
                 while (i < element_ids->size()) {
                     int64_t next_element_id = (*element_ids)[i];
                     auto [next_doc_id, next_elem_idx] =
-                        array_offsets->ElementIDToDoc(next_element_id);
+                        array_offsets->ElementIDToRowID(next_element_id);
                     auto [next_chunk_id, next_chunk_offset] =
                         segment_->get_chunk_by_offset(field_id_, next_doc_id);
 
@@ -802,7 +802,7 @@ class SegmentExpr : public Expr {
                 int64_t element_id = (*element_ids)[i];
 
                 auto [doc_id, elem_idx] =
-                    array_offsets->ElementIDToDoc(element_id);
+                    array_offsets->ElementIDToRowID(element_id);
 
                 // Calculate chunk_id and chunk_offset for this doc
                 auto chunk_id = doc_id / size_per_chunk_;

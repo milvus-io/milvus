@@ -104,7 +104,7 @@ insert_helper(milvus::SearchResult& search_result,
     int64_t doc_id;
     int32_t elem_idx = -1;
     if (array_offsets != nullptr) {
-        auto [doc, idx] = array_offsets->ElementIDToDoc(offsets[i]);
+        auto [doc, idx] = array_offsets->ElementIDToRowID(offsets[i]);
         doc_id = doc;
         elem_idx = idx;
     } else {
@@ -264,7 +264,7 @@ PhyIterativeFilterNode::GetOutput() {
 
                     for (auto element_id : offsets) {
                         auto [doc_id, elem_index] =
-                            array_offsets->ElementIDToDoc(element_id);
+                            array_offsets->ElementIDToRowID(element_id);
                         element_to_doc_mapping.push_back(doc_id);
                         unique_doc_ids.insert(doc_id);
                     }

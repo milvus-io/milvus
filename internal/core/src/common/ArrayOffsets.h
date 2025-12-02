@@ -31,56 +31,70 @@ class IArrayOffsets {
     virtual ~IArrayOffsets() = default;
 
     virtual int64_t
-    GetDocCount() const = 0;
+    GetRowCount() const = 0;
 
     virtual int64_t
     GetTotalElementCount() const = 0;
 
+    // Convert element ID to row ID
+    // returns pair of <row_id, element_index>
+    // element id is contiguous between rows
     virtual std::pair<int64_t, int64_t>
-    ElementIDToDoc(int64_t elem_id) const = 0;
+    ElementIDToRowID(int64_t elem_id) const = 0;
 
-    // Convert doc ID to element ID range
-    // Returns pair of (first_element_id, last_element_id + 1)
-    // last_element_id + 1 means one past the last element (similar to end iterator)
+    // Convert row ID to element ID range
+    // elements with id in [ret.first, ret.last) belong to row_id
     virtual std::pair<int64_t, int64_t>
-    DocIDToElementID(int64_t doc_id) const = 0;
+    ElementIDRangeOfRow(int64_t row_id) const = 0;
 
-    // Convert doc-level bitsets to element-level bitsets
+    // Convert row-level bitsets to element-level bitsets
     virtual std::pair<TargetBitmap, TargetBitmap>
-    DocBitsetToElementBitset(
-        const TargetBitmapView& doc_bitset,
-        const TargetBitmapView& valid_doc_bitset) const = 0;
+    RowBitsetToElementBitset(
+        const TargetBitmapView& row_bitset,
+        const TargetBitmapView& valid_row_bitset) const = 0;
 };
 
-struct ArrayOffsetsSealed : public IArrayOffsets {
-    std::vector<int32_t> element_doc_ids;
-    int32_t doc_count = 0;
+class ArrayOffsetsSealed : public IArrayOffsets {
+    friend class ArrayOffsetsTest;
 
-    std::vector<int32_t> doc_to_element_start_;
+ public:
+    ArrayOffsetsSealed() = default;
+
+    ArrayOffsetsSealed(std::vector<int32_t> element_row_ids,
+                       std::vector<int32_t> row_to_element_start)
+        : element_row_ids_(std::move(element_row_ids)),
+          row_to_element_start_(std::move(row_to_element_start)) {
+    }
 
     int64_t
-    GetDocCount() const override {
-        return doc_count;
+    GetRowCount() const override {
+        return row_to_element_start_.empty()
+                   ? 0
+                   : static_cast<int64_t>(row_to_element_start_.size()) - 1;
     }
 
     int64_t
     GetTotalElementCount() const override {
-        return element_doc_ids.size();
+        return element_row_ids_.size();
     }
 
     std::pair<int64_t, int64_t>
-    ElementIDToDoc(int64_t elem_id) const override;
+    ElementIDToRowID(int64_t elem_id) const override;
 
     std::pair<int64_t, int64_t>
-    DocIDToElementID(int64_t doc_id) const override;
+    ElementIDRangeOfRow(int64_t row_id) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
-    DocBitsetToElementBitset(
-        const TargetBitmapView& doc_bitset,
-        const TargetBitmapView& valid_doc_bitset) const override;
+    RowBitsetToElementBitset(
+        const TargetBitmapView& row_bitset,
+        const TargetBitmapView& valid_row_bitset) const override;
 
     static ArrayOffsetsSealed
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
+
+ private:
+    const std::vector<int32_t> element_row_ids_;
+    const std::vector<int32_t> row_to_element_start_;
 };
 
 class ArrayOffsetsGrowing : public IArrayOffsets {
@@ -88,51 +102,51 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     ArrayOffsetsGrowing() = default;
 
     void
-    Insert(int64_t doc_id_start, const int32_t* array_lengths, int64_t count);
+    Insert(int64_t row_id_start, const int32_t* array_lengths, int64_t count);
 
     int64_t
-    GetDocCount() const override {
+    GetRowCount() const override {
         std::shared_lock lock(mutex_);
-        return committed_doc_count_;
+        return committed_row_count_;
     }
 
     int64_t
     GetTotalElementCount() const override {
         std::shared_lock lock(mutex_);
-        return element_doc_ids_.size();
+        return element_row_ids_.size();
     }
 
     std::pair<int64_t, int64_t>
-    ElementIDToDoc(int64_t elem_id) const override;
+    ElementIDToRowID(int64_t elem_id) const override;
 
     std::pair<int64_t, int64_t>
-    DocIDToElementID(int64_t doc_id) const override;
+    ElementIDRangeOfRow(int64_t row_id) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
-    DocBitsetToElementBitset(
-        const TargetBitmapView& doc_bitset,
-        const TargetBitmapView& valid_doc_bitset) const override;
+    RowBitsetToElementBitset(
+        const TargetBitmapView& row_bitset,
+        const TargetBitmapView& valid_row_bitset) const override;
 
  private:
-    struct PendingDoc {
-        int64_t doc_id;
+    struct PendingRow {
+        int64_t row_id;
         int32_t array_len;
     };
 
     void
-    DrainPendingDocs();
+    DrainPendingRows();
 
  private:
-    std::vector<int32_t> element_doc_ids_;
+    std::vector<int32_t> element_row_ids_;
 
-    std::vector<int32_t> doc_to_element_start_;
+    std::vector<int32_t> row_to_element_start_;
 
-    // Number of documents committed (contiguous from 0)
-    int32_t committed_doc_count_ = 0;
+    // Number of rows committed (contiguous from 0)
+    int32_t committed_row_count_ = 0;
 
-    // Pending documents waiting for earlier docs to complete
-    // Key: doc_id, automatically sorted
-    std::map<int64_t, PendingDoc> pending_docs_;
+    // Pending rows waiting for earlier rows to complete
+    // Key: row_id, automatically sorted
+    std::map<int64_t, PendingRow> pending_rows_;
 
     // Protects all member variables
     mutable std::shared_mutex mutex_;

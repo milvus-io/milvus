@@ -76,7 +76,7 @@ PhyElementFilterBitsNode::GetOutput() {
     }
     query_context_->set_array_offsets(array_offsets);
     auto [first_elem, _] =
-        array_offsets->DocIDToElementID(query_context_->get_active_count());
+        array_offsets->ElementIDRangeOfRow(query_context_->get_active_count());
     query_context_->set_active_element_count(first_elem);
 
     // Step 2: Prepare doc bitset
@@ -128,7 +128,7 @@ PhyElementFilterBitsNode::DocBitsetToElementOffsets(
     auto array_offsets = query_context_->get_array_offsets();
     AssertInfo(array_offsets != nullptr, "Array offsets not available");
 
-    int64_t doc_count = array_offsets->GetDocCount();
+    int64_t doc_count = array_offsets->GetRowCount();
     AssertInfo(doc_bitset.size() == doc_count,
                "Doc bitset size mismatch: {} vs {}",
                doc_bitset.size(),
@@ -142,7 +142,7 @@ PhyElementFilterBitsNode::DocBitsetToElementOffsets(
         if (doc_bitset[doc_id]) {
             // Get element range for this document
             auto [first_elem, last_elem] =
-                array_offsets->DocIDToElementID(doc_id);
+                array_offsets->ElementIDRangeOfRow(doc_id);
 
             // Add all element IDs for this document
             for (int64_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {

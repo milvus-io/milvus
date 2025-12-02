@@ -110,7 +110,7 @@ SearchOnSealedIndex(const Schema& schema,
                     search_result.element_indices_[i] = -1;
                 } else {
                     auto [doc_id, elem_index] =
-                        search_info.array_offsets_->ElementIDToDoc(
+                        search_info.array_offsets_->ElementIDToRowID(
                             element_ids[i]);
                     search_result.seg_offsets_[i] = doc_id;
                     search_result.element_indices_[i] = elem_index;

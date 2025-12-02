@@ -502,7 +502,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
         << "Fields in same struct should share ArrayOffsetsGrowing";
 
     // Verify counts
-    ASSERT_EQ(offsets_vec->GetDocCount(), N)
+    ASSERT_EQ(offsets_vec->GetRowCount(), N)
         << "Should have " << N << " documents";
     ASSERT_EQ(offsets_vec->GetTotalElementCount(), N * array_len)
         << "Should have " << N * array_len << " total elements";
@@ -511,7 +511,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
         for (int32_t elem_idx = 0; elem_idx < array_len; ++elem_idx) {
             int64_t elem_id = doc_id * array_len + elem_idx;
             auto [mapped_doc, mapped_idx] =
-                offsets_vec->ElementIDToDoc(elem_id);
+                offsets_vec->ElementIDToRowID(elem_id);
 
             ASSERT_EQ(mapped_doc, doc_id)
                 << "Element " << elem_id << " should map to doc " << doc_id;
@@ -600,7 +600,7 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     ASSERT_NE(offsets, nullptr);
 
     // After inserting docs [0-19] (batch3 cached due to gap), committed count should be 20
-    ASSERT_EQ(offsets->GetDocCount(), 20)
+    ASSERT_EQ(offsets->GetRowCount(), 20)
         << "Should have committed docs 0-19, batch3 cached";
     ASSERT_EQ(offsets->GetTotalElementCount(), 20 * array_len)
         << "Should have 20 docs worth of elements";
@@ -609,7 +609,7 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     for (int64_t doc_id = 0; doc_id < 20; ++doc_id) {
         for (int32_t elem_idx = 0; elem_idx < array_len; ++elem_idx) {
             int64_t elem_id = doc_id * array_len + elem_idx;
-            auto [mapped_doc, mapped_idx] = offsets->ElementIDToDoc(elem_id);
+            auto [mapped_doc, mapped_idx] = offsets->ElementIDToRowID(elem_id);
 
             ASSERT_EQ(mapped_doc, doc_id)
                 << "Element " << elem_id << " should map to doc " << doc_id;
@@ -685,7 +685,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
     ASSERT_NE(growing_impl, nullptr);
     auto offsets = growing_impl->GetArrayOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
-    ASSERT_EQ(offsets->GetDocCount(), N);
+    ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
 
     int topK = 5;

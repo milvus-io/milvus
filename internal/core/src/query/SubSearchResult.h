@@ -129,7 +129,7 @@ class SubSearchResult {
                 element_indices.push_back(-1);
             } else {
                 auto [doc_id, elem_index] =
-                    array_offsets->ElementIDToDoc(offsets_[i]);
+                    array_offsets->ElementIDToRowID(offsets_[i]);
                 doc_offsets.push_back(doc_id);
                 element_indices.push_back(elem_index);
             }

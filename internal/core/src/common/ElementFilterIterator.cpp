@@ -28,8 +28,7 @@ ElementFilterIterator::ElementFilterIterator(
     exec::ExprSet* expr_set)
     : base_iterator_(std::move(base_iterator)),
       exec_context_(exec_context),
-      expr_set_(expr_set),
-      exhausted_(false) {
+      expr_set_(expr_set) {
     AssertInfo(base_iterator_ != nullptr, "Base iterator cannot be null");
     AssertInfo(exec_context_ != nullptr, "Exec context cannot be null");
     AssertInfo(expr_set_ != nullptr, "ExprSet cannot be null");
@@ -37,8 +36,8 @@ ElementFilterIterator::ElementFilterIterator(
 
 bool
 ElementFilterIterator::HasNext() {
-    // If cache is empty and base iterator not exhausted, fetch more
-    if (filtered_buffer_.empty() && !exhausted_) {
+    // If cache is empty and base iterator has more, fetch more
+    while (filtered_buffer_.empty() && base_iterator_->HasNext()) {
         FetchAndFilterBatch();
     }
     return !filtered_buffer_.empty();
@@ -60,29 +59,27 @@ ElementFilterIterator::FetchAndFilterBatch() {
     constexpr size_t kBatchSize = 1024;
 
     // Step 1: Fetch a batch from base iterator (up to kBatchSize elements)
-    FixedVector<int32_t> element_ids;
-    FixedVector<float> distances;
+    element_ids_buffer_.clear();
+    distances_buffer_.clear();
+    element_ids_buffer_.reserve(kBatchSize);
+    distances_buffer_.reserve(kBatchSize);
 
-    element_ids.reserve(kBatchSize);
-    distances.reserve(kBatchSize);
-
-    while (base_iterator_->HasNext() && element_ids.size() < kBatchSize) {
+    while (base_iterator_->HasNext() &&
+           element_ids_buffer_.size() < kBatchSize) {
         auto pair = base_iterator_->Next();
         if (pair.has_value()) {
-            element_ids.push_back(static_cast<int32_t>(pair->first));
-            distances.push_back(pair->second);
+            element_ids_buffer_.push_back(static_cast<int32_t>(pair->first));
+            distances_buffer_.push_back(pair->second);
         }
     }
 
-    // If no elements fetched, mark as exhausted
-    if (element_ids.empty()) {
-        exhausted_ = true;
+    // If no elements fetched, base iterator is exhausted
+    if (element_ids_buffer_.empty()) {
         return;
     }
 
-    // Full implementation would be:
     // Step 2: Batch evaluate element-level expression
-    exec::EvalCtx eval_ctx(exec_context_, expr_set_, &element_ids);
+    exec::EvalCtx eval_ctx(exec_context_, expr_set_, &element_ids_buffer_);
     std::vector<VectorPtr> results;
 
     // Evaluate the expression set (should contain only element_expr)
@@ -100,16 +97,17 @@ ElementFilterIterator::FetchAndFilterBatch() {
                "ElementFilterIterator: result should be bitmap");
 
     auto col_vec_size = col_vec->size();
-    AssertInfo(col_vec_size == element_ids.size(),
+    AssertInfo(col_vec_size == element_ids_buffer_.size(),
                "ElementFilterIterator: evaluation result size mismatch");
 
     TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
 
     // Step 4: Filter elements based on evaluation results and cache them
-    for (size_t i = 0; i < element_ids.size(); ++i) {
+    for (size_t i = 0; i < element_ids_buffer_.size(); ++i) {
         if (bitsetview[i] > 0) {
             // Element passes filter, cache it
-            filtered_buffer_.emplace_back(element_ids[i], distances[i]);
+            filtered_buffer_.emplace_back(element_ids_buffer_[i],
+                                          distances_buffer_[i]);
         }
     }
 }

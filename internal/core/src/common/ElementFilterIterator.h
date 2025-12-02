@@ -66,8 +66,9 @@ class ElementFilterIterator : public VectorIterator {
     // Cache of filtered elements ready to be consumed
     std::deque<std::pair<int64_t, float>> filtered_buffer_;
 
-    // Flag indicating base iterator is exhausted
-    bool exhausted_ = false;
+    // Reusable buffers for batch fetching (avoid repeated allocations)
+    FixedVector<int32_t> element_ids_buffer_;
+    std::vector<float> distances_buffer_;
 };
 
 }  // namespace milvus
