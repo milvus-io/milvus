@@ -56,6 +56,13 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	sortViews := make([]CompactionView, 0)
 	partitionKeySortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
+		if collection == nil {
+			continue
+		}
+		if collection.IsExternal() {
+			log.Ctx(ctx).Info("skip single compaction trigger for external collection", zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
@@ -97,6 +104,10 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 	}
 	if collection == nil {
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
+		return nil
+	}
+	if collection.IsExternal() {
+		log.Info("skip sort compaction for external collection", zap.Int64("collectionID", collection.ID))
 		return nil
 	}
 	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Properties)
@@ -164,6 +175,10 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
+	if collection.IsExternal() {
+		log.Info("skip triggerSegmentSortCompaction for external collection", zap.Int64("collectionID", collection.ID))
+		return nil, nil
+	}
 	isPartitionIsolationEnabled := IsPartitionKeySortCompactionEnabled(collection.Properties)
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
@@ -224,6 +239,10 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 	}
 	if collection == nil {
 		log.Warn("fail to apply singleCompactionPolicy, collection not exist")
+		return nil, nil, 0, nil
+	}
+	if collection.IsExternal() {
+		log.Info("skip single compaction for external collection")
 		return nil, nil, 0, nil
 	}
 

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -58,6 +59,10 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
+	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	})
 
 	s.mockAlloc = newMockAllocator(s.T())
 	mockHandler := NewNMockHandler(s.T())
@@ -263,4 +268,21 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 
 	sortView = s.singlePolicy.triggerSegmentSortCompaction(context.TODO(), 103)
 	s.Nil(sortView)
+}
+
+func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
+	collID := s.testLabel.CollectionID
+	coll := &collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+		},
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
+
+	views, sortViews, triggerID, err := s.singlePolicy.triggerOneCollection(context.Background(), collID, false)
+	s.NoError(err)
+	s.Nil(views)
+	s.Nil(sortViews)
+	s.EqualValues(0, triggerID)
 }

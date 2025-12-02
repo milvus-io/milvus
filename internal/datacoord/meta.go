@@ -158,6 +158,17 @@ type collectionInfo struct {
 	VChannelNames  []string
 }
 
+// IsExternal returns true when the collection schema references an external source or spec.
+func (c *collectionInfo) IsExternal() bool {
+	if c == nil {
+		return false
+	}
+	if c.Schema == nil {
+		return false
+	}
+	return c.Schema.GetExternalSource() != "" || c.Schema.GetExternalSpec() != ""
+}
+
 type dbInfo struct {
 	ID         int64
 	Name       string
