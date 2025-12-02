@@ -2425,6 +2425,16 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 	})
 }
 
+func TestIsCollectionAutoCompactionEnabledExternal(t *testing.T) {
+	coll := &collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+		},
+	}
+	assert.False(t, isCollectionAutoCompactionEnabled(coll))
+}
+
 func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{

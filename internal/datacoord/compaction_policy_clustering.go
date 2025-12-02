@@ -57,6 +57,13 @@ func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[Comp
 	views := make([]CompactionView, 0)
 	partitionKeySortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
+		if collection == nil {
+			continue
+		}
+		if collection.IsExternal() {
+			log.Info("skip clustering compaction for external collection", zap.Int64("collectionID", collection.ID))
+			continue
+		}
 		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
@@ -106,6 +113,10 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 	}
 	if collection == nil {
 		log.Warn("collection not exist")
+		return nil, 0, nil
+	}
+	if collection.IsExternal() {
+		log.Info("skip clustering compaction for external collection")
 		return nil, 0, nil
 	}
 	clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
