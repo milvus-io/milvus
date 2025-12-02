@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -962,6 +963,21 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log.Info("segment in target has been cleaned, trigger force update next target", zap.Int64("collectionID", task.CollectionID()))
 		// Avoid using task.Ctx as it may be canceled before remove is called.
 		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
+	}
+
+	// If task failed due to resource exhaustion (OOM, disk full, GPU OOM, etc.),
+	// mark the node as resource exhausted for a penalty period.
+	// During this period, the balancer will skip this node when assigning new segments/channels.
+	// This prevents continuous failures on the same node and allows it time to recover.
+	if errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
+		for _, action := range task.Actions() {
+			if action.Type() == ActionTypeGrow {
+				nodeID := action.Node()
+				duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
+				scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
+				log.Info("mark resource exhaustion for node", zap.Int64("nodeID", nodeID), zap.Duration("duration", duration), zap.Error(task.Err()))
+			}
+		}
 	}
 
 	task.Cancel(nil)
