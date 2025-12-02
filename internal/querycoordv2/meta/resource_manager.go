@@ -469,7 +469,12 @@ func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 }
 
 func (rm *ResourceManager) handleNodeUp(ctx context.Context, node int64) {
-	if nodeInfo := rm.nodeMgr.Get(node); nodeInfo == nil || nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+	nodeInfo := rm.nodeMgr.Get(node)
+	if nodeInfo == nil || nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+		return
+	}
+	if nodeInfo.IsStoppingState() {
+		log.Warn("node is stopping, skip handle node up in resource manager", zap.Int64("node", node))
 		return
 	}
 	rm.incomingNode.Insert(node)
