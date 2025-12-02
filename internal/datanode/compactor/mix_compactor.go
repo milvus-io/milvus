@@ -150,7 +150,13 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig), storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
+	mWriter, err := NewMultiSegmentWriter(ctx,
+		t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(),
+		t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096,
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -226,6 +232,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			storage.WithDownloader(t.binlogIO.Download),
 			storage.WithVersion(seg.GetStorageVersion()),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 	} else {
 		reader, err = storage.NewBinlogRecordReader(ctx,
@@ -235,6 +242,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			storage.WithDownloader(t.binlogIO.Download),
 			storage.WithVersion(seg.GetStorageVersion()),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 	}
 	if err != nil {
@@ -242,6 +250,8 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		return
 	}
 	defer reader.Close()
+
+	hasTTLField := t.plan.GetTtlFieldID() > 1
 
 	for {
 		var r storage.Record
@@ -257,8 +267,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		}
 
 		var (
-			pkArray    = r.Column(pkField.FieldID)
-			tsArray    = r.Column(common.TimeStampField).(*array.Int64)
+			pkArray     = r.Column(pkField.FieldID)
+			tsArray     = r.Column(common.TimeStampField).(*array.Int64)
+
 			sliceStart = -1
 			rb         *storage.RecordBuilder
 		)
@@ -275,7 +286,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				panic("invalid data type")
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
-			if entityFilter.Filtered(pk, ts) {
+			expireTs := int64(-1)
+			if hasTTLField {
+				expireTs = r.Column(t.plan.GetTtlFieldID()).(*array.Int64).Value(i)
+			}
+			if entityFilter.Filtered(pk, ts, expireTs) {
 				if rb == nil {
 					rb = storage.NewRecordBuilder(t.plan.GetSchema())
 				}
@@ -329,6 +344,9 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer span.End()
 	compactStart := time.Now()
 
+	log.Info("compact start", zap.Any("compactionParams", t.compactionParams),
+		zap.Any("plan", t.plan))
+
 	if err := t.preCompact(); err != nil {
 		log.Warn("compact wrong, failed to preCompact", zap.Error(err))
 		return nil, err
@@ -379,7 +397,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if sortMergeAppicable {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs, t.plan.GetTtlFieldID())
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err

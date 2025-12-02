@@ -73,6 +73,7 @@ const (
 	testFloat16VecField  = "f16vec"
 	testBFloat16VecField = "bf16vec"
 	testStructArrayField = "structArray"
+	testTTLField         = "ttl"
 	testGeometryField    = "geometry"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
@@ -233,6 +234,55 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 	return &schemapb.CollectionSchema{
 		Name:   collectionName,
 		Fields: fieldsSchema,
+	}
+}
+
+func constructCollectionSchemaWithTTLField(collectionName string, ttlField string) *schemapb.CollectionSchema {
+	pk := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         int64Field,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       true,
+	}
+	tz := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         ttlField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_Timestamptz,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      102,
+		Name:         floatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: strconv.Itoa(dim),
+			},
+		},
+		IndexParams: nil,
+		AutoID:      false,
+	}
+	return &schemapb.CollectionSchema{
+		Name:        collectionName,
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			pk,
+			tz,
+			fVec,
+		},
+		Properties: []*commonpb.KeyValuePair{},
 	}
 }
 
@@ -1517,6 +1567,45 @@ func TestCreateCollectionTask(t *testing.T) {
 		task.CreateCollectionRequest.Schema = invalidStructSchema3Bytes
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
+
+		ttlFieldSchema := constructCollectionSchemaWithTTLField(collectionName+"_ttl", testTTLField)
+
+		// Test invalid ttl field - ttl field not found
+		ttlFieldSchemaBytes, err := proto.Marshal(ttlFieldSchema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Properties = make([]*commonpb.KeyValuePair, 0)
+		task.CreateCollectionRequest.Schema = ttlFieldSchemaBytes
+		task.CreateCollectionRequest.Properties = append(task.CreateCollectionRequest.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLFieldKey,
+			Value: "invalid",
+		})
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// Test invalid ttl field - exist with collection ttl
+		task.CreateCollectionRequest.Properties = make([]*commonpb.KeyValuePair, 0)
+		task.CreateCollectionRequest.Properties = append(task.CreateCollectionRequest.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLFieldKey,
+			Value: testTTLField,
+		})
+		task.CreateCollectionRequest.Properties = append(task.CreateCollectionRequest.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: "100",
+		})
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		// Test invalid ttl field - ttl field is not timestamptz
+		task.CreateCollectionRequest.Properties = make([]*commonpb.KeyValuePair, 0)
+		task.CreateCollectionRequest.Properties = append(task.CreateCollectionRequest.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLFieldKey,
+			Value: "pk",
+		})
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 		// Restore original schema for remaining tests
 		task.CreateCollectionRequest = reqBackup
@@ -4526,6 +4615,158 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+}
+
+func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	err := InitMetaCache(ctx, qc)
+	assert.NoError(t, err)
+
+	createCollectionWithProps := func(colName string, props []*commonpb.KeyValuePair) {
+		schema := &schemapb.CollectionSchema{
+			Name:        colName,
+			Description: "ttl alter test",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+				{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+			},
+			Properties: props,
+		}
+		bs, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		_, err = qc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			DbName:         "",
+			CollectionName: colName,
+			Schema:         bs,
+			ShardsNum:      1,
+			Properties:     props,
+		})
+		assert.NoError(t, err)
+	}
+
+	t.Run("mutual exclusion: existing ttl.seconds, alter ttl.field should fail", func(t *testing.T) {
+		col := "alter_ttl_seconds_then_field_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("mutual exclusion: existing ttl.field, alter ttl.seconds should fail", func(t *testing.T) {
+		col := "alter_ttl_field_then_seconds_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}})
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "10"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("ttl.seconds must be positive integer", func(t *testing.T) {
+		col := "alter_ttl_seconds_invalid_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, nil)
+		task1 := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "-1"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		assert.Error(t, task1.PreExecute(ctx))
+
+		task2 := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "abc"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		assert.Error(t, task2.PreExecute(ctx))
+	})
+
+	t.Run("ttl.field must exist in schema", func(t *testing.T) {
+		col := "alter_ttl_field_invalid_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, nil)
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "not_exist"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		assert.Error(t, task.PreExecute(ctx))
+	})
+
+	t.Run("ttl.field must be timestamptz", func(t *testing.T) {
+		col := "alter_ttl_field_invalid_type_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, nil)
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "pk"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		assert.Error(t, task.PreExecute(ctx))
+	})
+
+	t.Run("delete ttl.seconds should pass", func(t *testing.T) {
+		col := "alter_delete_ttl_seconds_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}})
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				DeleteKeys:     []string{common.CollectionTTLConfigKey},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		assert.NoError(t, task.PreExecute(ctx))
+	})
+
+	t.Run("delete ttl.field should pass", func(t *testing.T) {
+		col := "alter_delete_ttl_field_" + funcutil.GenRandomStr()
+		createCollectionWithProps(col, []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}})
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: col,
+				DeleteKeys:     []string{common.CollectionTTLFieldKey},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+		}
+		assert.NoError(t, task.PreExecute(ctx))
+	})
 }
 
 func TestTaskPartitionKeyIsolation(t *testing.T) {

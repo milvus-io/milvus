@@ -1411,6 +1411,70 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
         bitset.resize(size, false);
         bitset_chunk |= bitset;
     }
+
+    // Filter by TTL field if exists
+    if (schema_->get_ttl_field_id().has_value()) {
+        auto ttl_field_id = schema_->get_ttl_field_id().value();
+        if (insert_record_.is_data_exist(ttl_field_id)) {
+            int64_t physical_us =
+                static_cast<int64_t>(TimestampToPhysicalMs(timestamp)) * 1000;
+            auto ttl_vec = insert_record_.get_data<int64_t>(ttl_field_id);
+            auto total_size = static_cast<int64_t>(bitset_chunk.size());
+            auto num_chunks = ttl_vec->num_chunk();
+            bool has_valid_data =
+                insert_record_.is_valid_data_exist(ttl_field_id);
+
+            ThreadSafeValidDataPtr valid_data_ptr = nullptr;
+            if (has_valid_data) {
+                valid_data_ptr = insert_record_.get_valid_data(ttl_field_id);
+            }
+
+            int64_t row_offset = 0;
+            for (ssize_t chunk_id = 0;
+                 chunk_id < num_chunks && row_offset < total_size;
+                 ++chunk_id) {
+                auto chunk_data = static_cast<const int64_t*>(
+                    ttl_vec->get_chunk_data(chunk_id));
+                auto chunk_rows = std::min(ttl_vec->get_chunk_size(chunk_id),
+                                           total_size - row_offset);
+
+                auto aligned_rows = (chunk_rows / 8) * 8;
+                if (aligned_rows > 0) {
+                    BitsetType ttl_expired_bitset(aligned_rows);
+                    ttl_expired_bitset
+                        .inplace_compare_val<int64_t,
+                                             milvus::bitset::CompareOpType::LT>(
+                            chunk_data, aligned_rows, physical_us);
+
+                    if (has_valid_data) {
+                        for (int64_t i = 0; i < aligned_rows; ++i) {
+                            if (ttl_expired_bitset[i] &&
+                                valid_data_ptr->is_valid(row_offset + i)) {
+                                bitset_chunk.set(row_offset + i);
+                            }
+                        }
+                    } else {
+                        BitsetTypeView target_view(
+                            bitset_chunk.data(),
+                            bitset_chunk.offset() + row_offset,
+                            aligned_rows);
+                        target_view.inplace_or(ttl_expired_bitset,
+                                               aligned_rows);
+                    }
+                }
+
+                for (int64_t i = aligned_rows; i < chunk_rows; ++i) {
+                    bool is_valid = !has_valid_data ||
+                                    valid_data_ptr->is_valid(row_offset + i);
+                    if (is_valid && physical_us > chunk_data[i]) {
+                        bitset_chunk.set(row_offset + i);
+                    }
+                }
+
+                row_offset += chunk_rows;
+            }
+        }
+    }
 }
 
 void

@@ -634,6 +634,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					MaxSize:                1073741824,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 					JsonParams:             params,
+					TtlFieldID:             common.InvalidFieldID,
 				},
 			},
 		},
@@ -3076,4 +3077,64 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
+	trigger := &compactionTrigger{}
+	ts := time.Now()
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:                         1,
+			CollectionID:               2,
+			PartitionID:                1,
+			LastExpireTime:             100,
+			NumOfRows:                  100,
+			MaxRowNum:                  300,
+			InsertChannel:              "ch1",
+			State:                      commonpb.SegmentState_Flushed,
+			ExpirationTimeByPercentile: []int64{ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
+		},
+	}
+
+	startTime := tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	ct := &compactTime{startTime: startTime, collectionTTL: 0}
+	shouldCompact := trigger.ShouldCompactExpiryWithTTLField(ct, segment)
+	assert.True(t, shouldCompact)
+
+	startTime = tsoutil.ComposeTSByTime(ts.Add(-1*time.Hour), 0)
+	ct = &compactTime{startTime: startTime, collectionTTL: 0}
+	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment)
+	assert.False(t, shouldCompact)
+
+	origin := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue()
+	defer Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, origin)
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.1")
+	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	ct = &compactTime{startTime: startTime, collectionTTL: 0}
+	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment)
+	assert.True(t, shouldCompact)
+
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "5")
+	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	ct = &compactTime{startTime: startTime, collectionTTL: 0}
+	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment)
+	assert.False(t, shouldCompact)
+
+	segment2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+		},
+	}
+
+	startTime = tsoutil.ComposeTSByTime(ts.Add(time.Minute), 0)
+	ct = &compactTime{startTime: startTime, collectionTTL: 0}
+	shouldCompact = trigger.ShouldCompactExpiryWithTTLField(ct, segment2)
+	assert.False(t, shouldCompact)
 }

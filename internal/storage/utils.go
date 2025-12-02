@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -1765,4 +1766,48 @@ func VectorArrayToArrowType(elementType schemapb.DataType, dim int) (arrow.DataT
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("unsupported element type in VectorArray: %s", elementType.String()))
 	}
+}
+
+// calculateExpirationTimeByPercentile computes TTL values at 20%, 40%, 60%, 80%, 100% percentiles.
+// Returns nil if ttlFieldID is not enabled or no rows exist.
+// Precondition: ttlFieldValues must contain only positive values (>0); the caller is responsible
+// for filtering out null/zero TTL values which represent "never expire" rows.
+func calculateExpirationTimeByPercentile(ttlFieldID int64, rowNum int64, ttlFieldValues []int64) []int64 {
+	// If ttl field is not enabled for this writer, do not emit percentile info.
+	if ttlFieldID <= 1 {
+		return nil
+	}
+
+	// If segment is empty, do not emit percentile info.
+	if rowNum <= 0 {
+		return nil
+	}
+
+	sort.Slice(ttlFieldValues, func(i, j int) bool {
+		return ttlFieldValues[i] < ttlFieldValues[j]
+	})
+
+	// Calculate percentile indices for 20%, 40%, 60%, 80%, 100%
+	percentiles := []float64{0.2, 0.4, 0.6, 0.8, 1.0}
+	result := make([]int64, len(percentiles))
+
+	// Treat rows with null/<=0 ttl as "never expire".
+	const neverExpire = int64(^uint64(0) >> 1)
+
+	for i, p := range percentiles {
+		// Calculate index: for n elements, p percentile means ceil(n * p) elements
+		// e.g., for n=5: 20%->idx 0, 40%->idx 1, 60%->idx 2, 80%->idx 3, 100%->idx 4
+		idx := int(math.Ceil(p*float64(rowNum))) - 1
+		if idx < 0 {
+			idx = 0
+		}
+		// If idx exceeds collected ttl values, it falls into "never expire" region.
+		if idx >= len(ttlFieldValues) {
+			result[i] = neverExpire
+			continue
+		}
+		result[i] = ttlFieldValues[idx]
+	}
+
+	return result
 }

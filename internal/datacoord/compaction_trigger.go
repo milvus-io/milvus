@@ -694,6 +694,39 @@ func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *comp
 	return false
 }
 
+func getExpirationPercentileIndexByRatio(ratio float64, percentilesLen int) int {
+	// expirationTimeByPercentile is [20%, 40%, 60%, 80%, 100%] (len = 5).
+	// We map ratio to the nearest lower 20% bucket:
+	// 0~0.39 -> 20%, 0.4~0.59 -> 40%, 0.6~0.79 -> 60%, 0.8~0.99 -> 80%, >=1.0 -> 100%
+	if percentilesLen <= 0 {
+		return 0
+	}
+	step := 0.2
+	idx := int(ratio/step) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= percentilesLen {
+		idx = percentilesLen - 1
+	}
+	return idx
+}
+
+func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *compactTime, segment *SegmentInfo) bool {
+	percentiles := segment.GetExpirationTimeByPercentile()
+	if len(percentiles) == 0 {
+		return false
+	}
+
+	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
+
+	index := getExpirationPercentileIndexByRatio(ratio, len(percentiles))
+	expirationTime := percentiles[index]
+	// If current time (startTime) is greater than the expiration time at this percentile, trigger compaction
+	startTs := tsoutil.PhysicalTime(compactTime.startTime)
+	return startTs.UnixMicro() >= expirationTime && expirationTime > 0
+}
+
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 	log := log.Ctx(context.TODO())
@@ -735,6 +768,14 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	}
 
 	if t.ShouldRebuildSegmentIndex(segment) {
+		return true
+	}
+
+	if t.ShouldCompactExpiryWithTTLField(compactTime, segment) {
+		log.Info("ttl field is expired, trigger compaction", zap.Int64("segmentID", segment.ID),
+			zap.Int64("collectionID", segment.CollectionID),
+			zap.Int64("partitionID", segment.PartitionID),
+			zap.String("channel", segment.InsertChannel))
 		return true
 	}
 

@@ -58,7 +58,6 @@ func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
-	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
 	paramtable.Get().Reset("common.storage.enableV2")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")

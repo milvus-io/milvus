@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -144,6 +145,25 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 func getZeroTime() time.Time {
 	var t time.Time
 	return t
+}
+
+func getTTLField(schema *schemapb.CollectionSchema) UniqueID {
+	ttlFieldName := ""
+	for _, pair := range schema.GetProperties() {
+		if pair.GetKey() == common.CollectionTTLFieldKey {
+			ttlFieldName = pair.GetValue()
+			break
+		}
+	}
+	if ttlFieldName == "" {
+		return common.InvalidFieldID
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetName() == ttlFieldName {
+			return field.GetFieldID()
+		}
+	}
+	return common.InvalidFieldID
 }
 
 func UpdateCompactionSegmentSizeMetrics(segments []*datapb.CompactionSegment) {

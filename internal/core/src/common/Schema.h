@@ -236,6 +236,11 @@ class Schema {
     }
 
     void
+    set_ttl_field_id(FieldId field_id) {
+        this->ttl_field_id_opt_ = field_id;
+    }
+
+    void
     set_dynamic_field_id(FieldId field_id) {
         this->dynamic_field_id_opt_ = field_id;
     }
@@ -325,6 +330,11 @@ class Schema {
     std::optional<FieldId>
     get_dynamic_field_id() const {
         return dynamic_field_id_opt_;
+    }
+
+    std::optional<FieldId>
+    get_ttl_field_id() const {
+        return ttl_field_id_opt_;
     }
 
     const ArrowSchemaPtr
@@ -428,6 +438,7 @@ class Schema {
     std::optional<FieldId> primary_field_id_opt_;
     std::optional<FieldId> dynamic_field_id_opt_;
     std::optional<FieldId> namespace_field_id_opt_;
+    std::optional<FieldId> ttl_field_id_opt_;
 
     // field partial load list
     // work as hint now

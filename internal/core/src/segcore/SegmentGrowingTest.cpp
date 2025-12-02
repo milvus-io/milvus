@@ -11,6 +11,8 @@
 
 #include <gtest/gtest.h>
 
+#include <numeric>
+
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 #include "knowhere/comp/index_param.h"
@@ -24,6 +26,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/TTLTestHelper.h"
 
 using namespace milvus::segcore;
 using namespace milvus;
@@ -971,3 +974,47 @@ TEST(GrowingTest, SearchVectorArray) {
     auto sr_parsed = SearchResultToJson(*sr);
     std::cout << sr_parsed.dump(1) << std::endl;
 }
+
+void RunGrowingTTLTest(bool is_nullable) {
+    using namespace milvus::segcore;
+    int64_t count = 100;
+    uint64_t base_ts = 1000000000ULL << 18;
+    
+    auto schema = TTLTestHelper::CreateTTLSchema(is_nullable);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    
+    std::vector<int64_t> pks, ttls;
+    std::vector<Timestamp> tss;
+    std::vector<bool> valid_data;
+    TTLTestHelper::PrepareTTLData(count, base_ts, is_nullable, pks, tss, ttls, valid_data);
+
+    auto insert_record = std::make_unique<InsertRecordProto>();
+    insert_record->set_num_rows(count);
+
+    // PK Field
+    auto pk_field_data = insert_record->add_fields_data();
+    pk_field_data->set_field_id(schema->get_primary_field_id().get());
+    pk_field_data->set_type(static_cast<int>(DataType::INT64));
+    for (auto v : pks) pk_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
+
+    // TTL Field
+    auto ttl_field_data = insert_record->add_fields_data();
+    ttl_field_data->set_field_id(schema->get_ttl_field_id().value().get());
+    ttl_field_data->set_type(static_cast<int>(DataType::INT64));
+    for (auto v : ttls) ttl_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
+    if (is_nullable) {
+        for (auto v : valid_data) ttl_field_data->add_valid_data(v);
+    }
+
+    auto offset = segment->PreInsert(count);
+    segment->Insert(offset, count, pks.data(), tss.data(), insert_record.get());
+
+    BitsetType bitset(count);
+    BitsetTypeView view(bitset);
+    segment->mask_with_timestamps(view, base_ts + count, 0);
+
+    TTLTestHelper::VerifyTTLMask(view, count, is_nullable);
+}
+
+TEST(Growing, TestTTLNormal) { RunGrowingTTLTest(false); }
+TEST(Growing, TestTTLNullable) { RunGrowingTTLTest(true); }
