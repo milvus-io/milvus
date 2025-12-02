@@ -366,6 +366,10 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 }
 
 func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, replica *meta.Replica) []task.Task {
+	logger := log.Ctx(ctx).WithRateGroup("qcv2.SegmentChecker-createSegmentLoadTasks", 1, 60).With(
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+	)
 	if len(segments) == 0 {
 		return nil
 	}
@@ -383,6 +387,8 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// if channel is not subscribed yet, skip load segments
 		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
 		if leader == nil {
+			logger.RatedInfo(10, "no shard leader for replica to load segment",
+				zap.String("shard", shard))
 			continue
 		}
 
