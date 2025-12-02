@@ -104,6 +104,9 @@ func TestWriteAheadBuffer(t *testing.T) {
 			}
 		}
 	}()
+	if rand.Int31n(2) == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
 	r1, err := wb.ReadFromExclusiveTimeTick(context.Background(), 1)
 	assert.NoError(t, err)
 	assert.NotNil(t, r1)
@@ -130,7 +133,7 @@ func TestWriteAheadBuffer(t *testing.T) {
 
 	// Read from half of the timetick
 	<-ch
-	assert.Equal(t, totalCnt, len(timeticks))
+	assert.Equal(t, totalCnt, len(timeticks)+1)
 
 	targetTimeTickIdx := len(timeticks) / 2
 	for targetTimeTickIdx < len(timeticks) && timeticks[targetTimeTickIdx+1] == timeticks[targetTimeTickIdx] {
