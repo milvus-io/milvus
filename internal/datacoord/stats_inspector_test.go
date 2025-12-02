@@ -99,6 +99,32 @@ func (s *statsInspectorSuite) SetupTest() {
 			},
 		},
 	})
+	collections.Insert(2, &collectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  200,
+					Name:     "pk",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  201,
+					Name:     "var",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key: "enable_match", Value: "true",
+						},
+						{
+							Key: "enable_analyzer", Value: "true",
+						},
+					},
+				},
+			},
+		},
+	})
 
 	s.mt = &meta{
 		collections: collections,
@@ -244,6 +270,28 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	// Simulate duplicate task error
 	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true)
 	s.NoError(err) // Duplicate tasks are handled as success
+}
+
+func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
+	segmentID := UniqueID(200)
+	s.mt.segments.SetSegment(segmentID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           segmentID,
+			CollectionID: 2,
+			PartitionID:  3,
+			IsSorted:     true,
+			State:        commonpb.SegmentState_Flushed,
+			NumOfRows:    1000,
+			MaxRowNum:    2000,
+			Level:        2,
+		},
+	})
+
+	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true)
+	s.NoError(err)
+	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
+	s.Nil(task)
+	s.alloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
 }
 
 func (s *statsInspectorSuite) TestGetStatsTask() {
