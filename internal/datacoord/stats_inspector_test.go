@@ -274,18 +274,19 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
 	segmentID := UniqueID(200)
-	s.mt.segments.SetSegment(segmentID, &SegmentInfo{
+	s.mt.segments.segments[segmentID] = &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
-			ID:           segmentID,
-			CollectionID: 2,
-			PartitionID:  3,
-			IsSorted:     true,
-			State:        commonpb.SegmentState_Flushed,
-			NumOfRows:    1000,
-			MaxRowNum:    2000,
-			Level:        2,
+			ID:            segmentID,
+			CollectionID:  2,
+			PartitionID:   3,
+			InsertChannel: "by-dev-rootcoord-dml-channel",
+			IsSorted:      true,
+			State:         commonpb.SegmentState_Flushed,
+			NumOfRows:     1000,
+			MaxRowNum:     2000,
+			Level:         2,
 		},
-	})
+	}
 
 	err := s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true)
 	s.NoError(err)
