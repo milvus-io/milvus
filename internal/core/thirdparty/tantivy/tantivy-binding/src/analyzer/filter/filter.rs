@@ -2,7 +2,7 @@ use serde_json as json;
 use tantivy::tokenizer::*;
 
 use super::util::*;
-use super::{RegexFilter, RemovePunctFilter};
+use super::{RegexFilter, RemovePunctFilter, PinyinFilter};
 use crate::error::{Result, TantivyBindingError};
 
 pub(crate) enum SystemFilter {
@@ -18,6 +18,7 @@ pub(crate) enum SystemFilter {
     Decompounder(SplitCompoundWords),
     Stemmer(Stemmer),
     Regex(RegexFilter),
+    Pinyin(PinyinFilter),
 }
 
 impl SystemFilter {
@@ -34,6 +35,7 @@ impl SystemFilter {
             Self::Stemmer(filter) => builder.filter(filter).dynamic(),
             Self::RemovePunct(filter) => builder.filter(filter).dynamic(),
             Self::Regex(filter) => builder.filter(filter).dynamic(),
+            Self::Pinyin(filter) => builder.filter(filter).dynamic(),
             Self::Invalid => builder,
         }
     }
@@ -159,6 +161,7 @@ impl From<&str> for SystemFilter {
             "cncharonly" => Self::CnCharOnly(CnCharOnlyFilter),
             "cnalphanumonly" => Self::CnAlphaNumOnly(CnAlphaNumOnlyFilter),
             "removepunct" => Self::RemovePunct(RemovePunctFilter),
+            "pinyin" => Self::Pinyin(PinyinFilter::default()),
             _ => Self::Invalid,
         }
     }
@@ -182,6 +185,7 @@ impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
                     "decompounder" => get_decompounder_filter(params),
                     "stemmer" => get_stemmer_filter(params),
                     "regex" => RegexFilter::from_json(params).map(|f| SystemFilter::Regex(f)),
+                    "pinyin" => PinyinFilter::from_json(params).map(|f| SystemFilter::Pinyin(f)),
                     other => Err(TantivyBindingError::InternalError(format!(
                         "unsupport filter type: {}",
                         other
