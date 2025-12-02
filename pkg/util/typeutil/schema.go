@@ -681,6 +681,11 @@ func IsStringType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsTextType returns true if the field is TEXT type (large object / LOB)
+func IsTextType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Text
+}
+
 func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {
 	if IsArrayType(dataType) {
 		if elementType == schemapb.DataType_String || elementType == schemapb.DataType_VarChar {

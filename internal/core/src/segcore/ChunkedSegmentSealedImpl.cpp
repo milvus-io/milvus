@@ -632,6 +632,225 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             stats_.mem_size += chunked_column_group->memory_size();
         }
     }
+
+    // load LOB columns if there are TEXT fields with LOB files
+    load_lob_columns(load_info);
+}
+
+void
+ChunkedSegmentSealedImpl::load_lob_columns(const LoadFieldDataInfo& load_info) {
+    LOG_INFO("Registering LOB metadata for segment {} (lazy loading)",
+             get_segment_id());
+
+    // check if there are any LOB metadata
+    if (load_info.lob_metadata.empty()) {
+        LOG_DEBUG("No LOB metadata found for segment {}", get_segment_id());
+        return;
+    }
+
+    // determine enable_mmap (use from field_infos if available, otherwise false)
+    bool enable_mmap = false;
+    if (!load_info.field_infos.empty()) {
+        enable_mmap = load_info.field_infos.begin()->second.enable_mmap;
+    }
+
+    // iterate over all LOB metadata and store for lazy loading
+    for (const auto& [field_id, lob_meta] : load_info.lob_metadata) {
+        auto milvus_field_id = FieldId(field_id);
+        auto field_meta = schema_->operator[](milvus_field_id);
+
+        // only process TEXT fields
+        if (field_meta.get_data_type() != DataType::TEXT) {
+            LOG_WARN("Field {} is not TEXT type, skipping LOB registration",
+                     field_id);
+            continue;
+        }
+
+        LOG_DEBUG(
+            "Registering LOB files for field {}: {} files, {} records, {} "
+            "bytes",
+            field_id,
+            lob_meta.lob_files.size(),
+            lob_meta.record_count,
+            lob_meta.total_bytes);
+
+        // store metadata for each LOB file (no file I/O here)
+        for (const auto& lob_file : lob_meta.lob_files) {
+            uint32_t lob_file_id = static_cast<uint32_t>(lob_file.lob_file_id);
+
+            LOBColumnMeta meta;
+            meta.file_info = lob_file;
+            meta.field_id = milvus_field_id;
+            meta.enable_mmap = enable_mmap;
+            meta.load_priority = load_info.load_priority;
+
+            (*lob_metadata_.wlock())[lob_file_id] = std::move(meta);
+
+            LOG_DEBUG(
+                "Registered LOB file metadata: segment={}, field={}, "
+                "lob_file_id={}, path={}, rows={}",
+                get_segment_id(),
+                field_id,
+                lob_file_id,
+                lob_file.file_path,
+                lob_file.row_count);
+        }
+    }
+
+    auto lob_metadata_count = lob_metadata_.rlock()->size();
+    LOG_INFO(
+        "Registered {} LOB file metadata for segment {} (will load on demand)",
+        lob_metadata_count,
+        get_segment_id());
+}
+
+// lazily create LOB column on first access
+std::shared_ptr<ChunkedColumnInterface>
+ChunkedSegmentSealedImpl::GetOrCreateLOBColumn(uint32_t lob_file_id) const {
+    // fast path: check if already created
+    {
+        auto lob_columns_lock = lob_columns_.rlock();
+        auto it = lob_columns_lock->find(lob_file_id);
+        if (it != lob_columns_lock->end()) {
+            return it->second;
+        }
+    }
+
+    // slow path: need to create the column
+    auto lob_metadata_lock = lob_metadata_.rlock();
+    auto meta_it = lob_metadata_lock->find(lob_file_id);
+    if (meta_it == lob_metadata_lock->end()) {
+        LOG_WARN("LOB file {} metadata not found for segment {}",
+                 lob_file_id,
+                 get_segment_id());
+        return nullptr;
+    }
+
+    const auto& meta = meta_it->second;
+    const auto& lob_file = meta.file_info;
+    lob_metadata_lock.unlock();
+
+    LOG_INFO(
+        "Lazily loading LOB column: segment={}, field={}, lob_file_id={}, "
+        "path={}",
+        get_segment_id(),
+        meta.field_id.get(),
+        lob_file_id,
+        lob_file.file_path);
+
+    // get mmap directory path
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
+
+    // create FieldDataInfo for this LOB file
+    auto field_data_info = FieldDataInfo(
+        lob_file_id,  // use lob_file_id as unique column_group_id
+        lob_file.row_count,
+        mmap_dir_path,
+        schema_->ShouldLoadField(meta.field_id));
+
+    // get field metas
+    std::vector<FieldId> milvus_field_ids = {meta.field_id};
+    auto field_metas = schema_->get_field_metas(milvus_field_ids);
+    auto field_meta = schema_->operator[](meta.field_id);
+
+    // create insert_files vector with single LOB file path
+    std::vector<std::string> insert_files = {lob_file.file_path};
+
+    // create GroupChunkTranslator (this will read Parquet metadata)
+    auto translator =
+        std::make_unique<storagev2translator::GroupChunkTranslator>(
+            get_segment_id(),
+            GroupChunkType::DEFAULT,
+            field_metas,
+            field_data_info,
+            std::move(insert_files),
+            meta.enable_mmap,
+            1,
+            meta.load_priority);
+
+    // create ChunkedColumnGroup
+    auto chunked_column_group =
+        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+
+    // create ProxyChunkColumn for the TEXT field
+    auto proxy_column = std::make_shared<ProxyChunkColumn>(
+        chunked_column_group, meta.field_id, field_meta);
+
+    // store in lob_columns_ map (double-check locking)
+    {
+        auto lob_columns_wlock = lob_columns_.wlock();
+        auto it = lob_columns_wlock->find(lob_file_id);
+        if (it != lob_columns_wlock->end()) {
+            // another thread created it, use that one
+            return it->second;
+        }
+        (*lob_columns_wlock)[lob_file_id] = proxy_column;
+    }
+
+    LOG_INFO(
+        "Lazily loaded LOB column: segment={}, field={}, lob_file_id={}, "
+        "rows={}, chunks={}",
+        get_segment_id(),
+        meta.field_id.get(),
+        lob_file_id,
+        lob_file.row_count,
+        chunked_column_group->num_chunks());
+
+    return proxy_column;
+}
+
+// decode LOB reference from 16-byte binary data (little endian)
+// format: [LobFileID:8bytes][RowOffset:4bytes][Reserved:4bytes]
+// uses milvus::LOBReference::decode() from common/Types.h
+milvus::LOBReference
+ChunkedSegmentSealedImpl::DecodeLOBReference(const std::string_view& data) {
+    AssertInfo(data.size() == 16,
+               "invalid LOB reference size: expected 16 bytes, got {} bytes",
+               data.size());
+
+    std::array<uint8_t, 16> bytes;
+    std::memcpy(bytes.data(), data.data(), 16);
+    return milvus::LOBReference::decode(bytes);
+}
+
+// read actual text from LOB file using LOB reference
+std::string
+ChunkedSegmentSealedImpl::ReadLOBText(milvus::OpContext* op_ctx,
+                                      const milvus::LOBReference& ref) const {
+    // 1. get or lazily create the LOB column for this lob_file_id
+    auto lob_column =
+        GetOrCreateLOBColumn(static_cast<uint32_t>(ref.lob_file_id));
+    if (lob_column == nullptr) {
+        LOG_WARN("LOB file {} not found for segment {}",
+                 ref.lob_file_id,
+                 get_segment_id());
+        return "";
+    }
+
+    // 2. convert row_offset to (chunk_id, offset_in_chunk)
+    auto [chunk_id, offset_in_chunk] =
+        lob_column->GetChunkIDByOffset(ref.row_offset);
+
+    // 3. get the chunk (CachingLayer auto-manages loading of 1MB chunk)
+    auto chunk_pin = lob_column->GetChunk(op_ctx, chunk_id);
+    auto* chunk = chunk_pin.get();
+
+    // 4. read the string from the chunk
+    auto* string_chunk = dynamic_cast<StringChunk*>(chunk);
+    if (string_chunk == nullptr) {
+        LOG_ERROR(
+            "invalid chunk type for LOB file {}, expected StringChunk for "
+            "segment {}",
+            ref.lob_file_id,
+            get_segment_id());
+        return "";
+    }
+
+    auto string_view = (*string_chunk)[offset_in_chunk];
+    return std::string(string_view);
 }
 
 void
@@ -1896,12 +2115,45 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         case DataType::VARCHAR:
         case DataType::STRING:
         case DataType::TEXT: {
-            bulk_subscript_ptr_impl<std::string>(
-                op_ctx,
-                column.get(),
-                seg_offsets,
-                count,
-                ret->mutable_scalars()->mutable_string_data()->mutable_data());
+            // check if TEXT field uses LOB storage (check metadata, not columns)
+            bool uses_lob_storage = false;
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                auto lob_lock = lob_metadata_.rlock();
+                uses_lob_storage = !lob_lock->empty();
+                lob_lock.unlock();
+            }
+
+            if (uses_lob_storage) {
+                // TEXT field with LOB storage: read LOB references and resolve to text
+                auto dst = ret->mutable_scalars()
+                               ->mutable_string_data()
+                               ->mutable_data();
+                column->BulkRawStringAt(
+                    op_ctx,
+                    [this, op_ctx, dst](std::string_view lob_ref_data,
+                                        size_t offset,
+                                        bool is_valid) {
+                        if (!is_valid || lob_ref_data.size() != 16) {
+                            dst->at(offset) = "";
+                            return;
+                        }
+                        // decode LOB reference and read actual text
+                        auto lob_ref = DecodeLOBReference(lob_ref_data);
+                        auto text = ReadLOBText(op_ctx, lob_ref);
+                        dst->at(offset) = std::move(text);
+                    },
+                    seg_offsets,
+                    count);
+            } else {
+                // normal VARCHAR/STRING/TEXT: read directly from column
+                bulk_subscript_ptr_impl<std::string>(op_ctx,
+                                                     column.get(),
+                                                     seg_offsets,
+                                                     count,
+                                                     ret->mutable_scalars()
+                                                         ->mutable_string_data()
+                                                         ->mutable_data());
+            }
             break;
         }
 

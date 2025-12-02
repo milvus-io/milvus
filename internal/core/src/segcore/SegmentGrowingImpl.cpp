@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -41,6 +42,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "storage/Util.h"
@@ -168,17 +170,28 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                    fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
         if (!indexing_record_.HasRawData(field_id)) {
-            if (field_meta.is_nullable()) {
-                insert_record_.get_valid_data(field_id)->set_data_raw(
+            // Check if this is a TEXT field - handle via LOB manager
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                // Process TEXT field through LOB manager
+                process_text_field_with_lob(
+                    field_id,
+                    insert_record_proto->fields_data(data_offset),
+                    reserved_offset,
+                    num_rows);
+            } else {
+                // Regular field processing
+                if (field_meta.is_nullable()) {
+                    insert_record_.get_valid_data(field_id)->set_data_raw(
+                        num_rows,
+                        &insert_record_proto->fields_data(data_offset),
+                        field_meta);
+                }
+                insert_record_.get_data_base(field_id)->set_data_raw(
+                    reserved_offset,
                     num_rows,
                     &insert_record_proto->fields_data(data_offset),
                     field_meta);
             }
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                reserved_offset,
-                num_rows,
-                &insert_record_proto->fields_data(data_offset),
-                field_meta);
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -927,8 +940,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                              ->mutable_data());
             break;
         }
-        case DataType::VARCHAR:
-        case DataType::TEXT: {
+        case DataType::VARCHAR: {
             bulk_subscript_ptr_impl<std::string>(op_ctx,
                                                  vec_ptr,
                                                  seg_offsets,
@@ -936,6 +948,16 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                                  result->mutable_scalars()
                                                      ->mutable_string_data()
                                                      ->mutable_data());
+            break;
+        }
+        case DataType::TEXT: {
+            // TEXT fields use LOB manager - retrieve actual TEXT from LOB references
+            retrieve_text_field_with_lob(field_id,
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_string_data()
+                                             ->mutable_data());
             break;
         }
         case DataType::JSON: {
@@ -1666,6 +1688,125 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                   field_id.get(),
                   e.what());
     }
+}
+
+// ============================================================================
+// LOB (Large Object) support for TEXT fields in growing segment
+// ============================================================================
+
+GrowingLOBManager*
+SegmentGrowingImpl::get_lob_manager() {
+    if (!lob_manager_) {
+        // lazy initialization of LOB manager
+        auto chunk_manager = storage::LocalChunkManagerSingleton::GetInstance()
+                                 .GetChunkManager();
+        AssertInfo(chunk_manager != nullptr,
+                   "LocalChunkManager not initialized");
+        std::string local_data_path =
+            (std::filesystem::path(chunk_manager->GetRootPath()) /
+             "growing_blob")
+                .string();
+        lob_manager_ =
+            std::make_unique<GrowingLOBManager>(id_, local_data_path);
+        LOG_INFO("created GrowingLOBManager for segment {}", id_);
+    }
+    return lob_manager_.get();
+}
+
+void
+SegmentGrowingImpl::process_text_field_with_lob(FieldId field_id,
+                                                const DataArray& data_array,
+                                                int64_t reserved_offset,
+                                                int64_t size) {
+    // All TEXT values, regardless of size, are managed by GrowingLOBManager.
+    // InsertRecord stores LOB references as strings (16 bytes each).
+
+    AssertInfo(data_array.has_scalars(), "TEXT field must have scalars data");
+    AssertInfo(data_array.scalars().has_string_data(),
+               "TEXT field must have string_data");
+
+    const auto& string_data = data_array.scalars().string_data();
+    AssertInfo(string_data.data_size() == size,
+               fmt::format("TEXT field data size mismatch: expected {}, got {}",
+                           size,
+                           string_data.data_size()));
+
+    auto* lob_mgr = get_lob_manager();
+
+    std::vector<std::string> lob_ref_strings;
+    lob_ref_strings.reserve(size);
+
+    for (int i = 0; i < size; ++i) {
+        const std::string& text_value = string_data.data(i);
+
+        LOBReference ref = lob_mgr->WriteLOB(field_id, text_value);
+
+        auto ref_bytes = ref.encode();
+        lob_ref_strings.emplace_back(
+            reinterpret_cast<const char*>(ref_bytes.data()), 16);
+    }
+
+    LOG_DEBUG(
+        "process_text_field_with_lob: segment={}, field={}, total={}, "
+        "all stored in LOB manager",
+        id_,
+        field_id.get(),
+        size);
+
+    // write LOB reference column to InsertRecord
+    // InsertRecord has a ConcurrentVector<std::string> for this field
+    auto* field_data = insert_record_.get_data<std::string>(field_id);
+    field_data->set_data_raw(
+        reserved_offset, lob_ref_strings.data(), lob_ref_strings.size());
+}
+
+void
+SegmentGrowingImpl::retrieve_text_field_with_lob(
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<std::string>* output) const {
+    // All TEXT values are stored in GrowingLOBManager.
+    // InsertRecord contains LOB references as strings (16 bytes each).
+
+    LOG_DEBUG("retrieve_text_field_with_lob: segment={}, field={}, count={}",
+              id_,
+              field_id.get(),
+              count);
+
+    AssertInfo(lob_manager_ != nullptr,
+               "LOB manager not initialized for TEXT field retrieval");
+
+    auto* field_data = insert_record_.get_data<std::string>(field_id);
+
+    for (int64_t i = 0; i < count; ++i) {
+        int64_t offset = seg_offsets[i];
+
+        // get LOB reference string at this offset (16 bytes)
+        const std::string& ref_string = (*field_data)[offset];
+
+        AssertInfo(
+            ref_string.size() == 16,
+            fmt::format("Invalid LOB reference size: expected 16, got {}",
+                        ref_string.size()));
+
+        // decode LOB reference from string bytes
+        std::array<uint8_t, 16> ref_bytes;
+        std::memcpy(ref_bytes.data(), ref_string.data(), 16);
+        LOBReference ref = LOBReference::decode(ref_bytes);
+
+        // read TEXT from LOB manager (with field_id to locate correct file)
+        std::string text_data = lob_manager_->ReadLOB(field_id, ref);
+
+        output->Add(std::move(text_data));
+    }
+
+    LOG_DEBUG(
+        "retrieve_text_field_with_lob: segment={}, field={}, "
+        "retrieved {} TEXT values from LOB manager",
+        id_,
+        field_id.get(),
+        count);
 }
 
 }  // namespace milvus::segcore
