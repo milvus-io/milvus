@@ -67,6 +67,10 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	s.mockAlloc = newMockAllocator(s.T())
 	mockHandler := NewNMockHandler(s.T())
 	s.handler = mockHandler
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	}, nil).Maybe()
 	s.singlePolicy = newSingleCompactionPolicy(meta, s.mockAlloc, mockHandler)
 }
 
@@ -278,9 +282,11 @@ func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
 			ExternalSource: "s3://external",
 		},
 	}
-	s.handler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
+	policy := newSingleCompactionPolicy(s.singlePolicy.meta, s.mockAlloc, mockHandler)
 
-	views, sortViews, triggerID, err := s.singlePolicy.triggerOneCollection(context.Background(), collID, false)
+	views, sortViews, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
 	s.NoError(err)
 	s.Nil(views)
 	s.Nil(sortViews)
