@@ -1675,11 +1675,14 @@ The larger the pending length, the more memory is used, the less logging writes 
 
 	l.AsyncWriteBufferSize = ParamItem{
 		Key:          "log.asyncWrite.bufferSize",
-		DefaultValue: "1m",
+		DefaultValue: "4k",
 		Version:      "2.6.7",
 		Doc: `The buffer size of the underlying bufio writer. 
 The larger the buffer size, the more memory is used, 
-but the less the number of writes to the underlying file system.`,
+but the less the number of writes to the underlying file system.
+Because the cpp will print the log message into stdout, 
+when the logging is woring with pipe like tty/docker log driver/k8s,
+PIPE_BUF=4096 may interleave the go log and cpp log together, so 4kb is set as default value to avoid this.`,
 		Export: false,
 	}
 	l.AsyncWriteBufferSize.Init(base.mgr)
