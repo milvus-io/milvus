@@ -51,10 +51,10 @@ func (r *watchBasedGRPCResolver) Update(state VersionedState) error {
 
 	if err := r.cc.UpdateState(state.State); err != nil {
 		// watch based resolver could ignore the error, just log and return nil
-		r.Logger().Warn("fail to update resolver state", zap.Any("state", state.State), zap.Error(err))
+		r.Logger().Warn("fail to update resolver state", zap.Stringer("state", state), zap.Error(err))
 		return nil
 	}
-	r.Logger().Info("update resolver state success", zap.Any("state", state.State))
+	r.Logger().Info("update resolver state success", zap.Stringer("state", state))
 	return nil
 }
 

@@ -48,7 +48,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_WithPartitionKey_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_WithPartitionKey_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchema(collectionName, dim, true, &schemapb.FieldSchema{
 		FieldID:      100,
@@ -218,7 +218,7 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 240*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_WithPartitionKey_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_WithPartitionKey_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchema(collectionName, dim, true, &schemapb.FieldSchema{
 		FieldID:      100,

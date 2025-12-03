@@ -1006,8 +1006,8 @@ func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexR
 func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error) {
 	result := []*querypb.HighlightResult{}
 	for _, task := range req.GetTasks() {
-		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum()) {
-			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), task.GetSearchTextNum()+task.GetCorpusTextNum())
+		if len(task.GetTexts()) != int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()) {
+			return nil, errors.Errorf("package highlight texts error, num of texts not equal the expected num %d:%d", len(task.GetTexts()), int(task.GetSearchTextNum()+task.GetCorpusTextNum())+len(task.GetQueries()))
 		}
 		analyzer, ok := sd.analyzerRunners[task.GetFieldId()]
 		if !ok {
@@ -1032,24 +1032,52 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 
 		// analyze result of search text
 		searchResults := results[0:task.SearchTextNum]
+		// analyze result of query text
+		queryResults := results[task.SearchTextNum : task.SearchTextNum+int64(len(task.Queries))]
 		// analyze result of corpus text
-		corpusResults := results[task.SearchTextNum:]
-		corpusIdx := 0
-		for i, tokens := range searchResults {
-			tokenSet := typeutil.NewSet[string]()
+		corpusStartOffset := int(task.SearchTextNum) + len(task.Queries)
+		corpusResults := results[corpusStartOffset:]
+
+		// query for all corpus texts
+		// only support text match now
+		// build match set for all analyze result of query text
+		// TODO: support more query types
+		queryTokenSet := typeutil.NewSet[string]()
+		for _, tokens := range queryResults {
 			for _, token := range tokens {
-				tokenSet.Insert(token.GetToken())
+				queryTokenSet.Insert(token.GetToken())
+			}
+		}
+
+		corpusIdx := 0
+		for i := range len(topks) {
+			tokenSet := typeutil.NewSet[string]()
+			if len(searchResults) > i {
+				for _, token := range searchResults[i] {
+					tokenSet.Insert(token.GetToken())
+				}
 			}
 
 			for j := 0; j < int(topks[i]); j++ {
 				spans := SpanList{}
 				for _, token := range corpusResults[corpusIdx] {
-					if tokenSet.Contain(token.GetToken()) {
+					if tokenSet.Contain(token.GetToken()) || queryTokenSet.Contain(token.GetToken()) {
 						spans = append(spans, Span{token.GetStartOffset(), token.GetEndOffset()})
 					}
 				}
 				spans = mergeOffsets(spans)
-				frags := fetchFragmentsFromOffsets(task.Texts[int(task.SearchTextNum)+corpusIdx], spans, task.GetOptions().GetFragmentSize(), task.GetOptions().GetNumOfFragments())
+
+				// Convert byte offsets from analyzer to rune (character) offsets
+				corpusText := task.Texts[corpusStartOffset+corpusIdx]
+				err := bytesOffsetToRuneOffset(corpusText, spans)
+				if err != nil {
+					return nil, err
+				}
+
+				frags := fetchFragmentsFromOffsets(corpusText, spans,
+					task.GetOptions().GetFragmentOffset(),
+					task.GetOptions().GetFragmentSize(),
+					task.GetOptions().GetNumOfFragments())
 				result = append(result, &querypb.HighlightResult{Fragments: frags})
 				corpusIdx++
 			}

@@ -289,16 +289,20 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
         }
     }
 
-    bool mmap_enabled = false;
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto use_mmap = IsVectorDataType(field_meta.get_data_type())
+                        ? mmap_config.GetVectorIndexEnableMmap()
+                        : mmap_config.GetScalarIndexEnableMmap();
+
     // Set index params
     for (const auto& kv_pair : field_index_info->index_params()) {
-        if (kv_pair.key() == "mmap.enable") {
+        if (kv_pair.key() == "mmap.enabled") {
             std::string lower;
             std::transform(kv_pair.value().begin(),
                            kv_pair.value().end(),
                            std::back_inserter(lower),
                            ::tolower);
-            mmap_enabled = lower == "true";
+            use_mmap = (lower == "true");
         }
         load_index_info.index_params[kv_pair.key()] = kv_pair.value();
     }
@@ -316,7 +320,7 @@ ChunkedSegmentSealedImpl::ConvertFieldIndexInfoToLoadIndexInfo(
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager()
             ->GetRootPath();
-    load_index_info.enable_mmap = mmap_enabled;
+    load_index_info.enable_mmap = use_mmap;
 
     return load_index_info;
 }
@@ -393,6 +397,46 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
+    // assumption: vector field occupies whole column group
+    bool is_vector = false;
+    bool index_has_rawdata = true;
+    bool has_mmap_setting = false;
+    bool mmap_enabled = false;
+    for (auto& [field_id, field_meta] : field_metas) {
+        if (IsVectorDataType(field_meta.get_data_type())) {
+            is_vector = true;
+        }
+        std::shared_lock lck(mutex_);
+        if (index_has_raw_data_.find(field_id) != index_has_raw_data_.end()) {
+            index_has_rawdata =
+                index_has_raw_data_.at(field_id) && index_has_rawdata;
+        } else {
+            index_has_rawdata = false;
+        }
+
+        // if field has mmap setting, use it
+        // - mmap setting at collection level, then all field are the same
+        // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
+        auto [field_has_setting, field_mmap_enabled] =
+            schema_->MmapEnabled(field_id);
+        has_mmap_setting = has_mmap_setting || field_has_setting;
+        mmap_enabled = mmap_enabled || field_mmap_enabled;
+    }
+
+    if (index_has_rawdata) {
+        LOG_INFO(
+            "[StorageV2] segment {} index(es) provide all raw data for column "
+            "group index {}, skip loading binlog",
+            this->get_segment_id(),
+            index);
+        return;
+    }
+
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
+                                     : mmap_config.GetScalarFieldEnableMmap();
+    auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
+
     auto chunk_reader_result = reader_->get_chunk_reader(index);
     AssertInfo(chunk_reader_result.ok(),
                "get chunk reader failed, segment {}, column group index {}",
@@ -401,11 +445,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
-    LOG_INFO(
-        "[StorageV2] segment {} loads manifest cg index {} with field ids "
-        "{} ",
-        this->get_segment_id(),
-        index);
+    LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
+             this->get_segment_id(),
+             index);
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -413,7 +455,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             index,
             std::move(chunk_reader),
             field_metas,
-            false,  // TODO
+            use_mmap,
             column_group->columns.size(),
             segment_load_info_.priority());
     auto chunked_column_group =
@@ -431,7 +473,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             column,
             segment_load_info_.num_of_rows(),
             data_type,
-            false,  //    info.enable_mmap,
+            use_mmap,
             true,
             std::
                 nullopt);  // manifest cannot provide parquet skip index directly
@@ -532,7 +574,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         std::vector<FieldId> milvus_field_ids;
         milvus_field_ids.reserve(field_id_list.size());
         for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
+            milvus_field_ids.emplace_back(field_id_list.Get(i));
             merged_in_load_list = merged_in_load_list ||
                                   schema_->ShouldLoadField(milvus_field_ids[i]);
         }
@@ -683,7 +725,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
                      field_id.get());
-            load_system_field_internal(field_id, field_data_info);
+            load_system_field_internal(
+                field_id, field_data_info, load_info.load_priority);
             LOG_INFO("segment {} loads system field {} mmap false done",
                      this->get_segment_id(),
                      field_id.get());
@@ -722,8 +765,10 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 }
 
 void
-ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
-                                                     FieldDataInfo& data) {
+ChunkedSegmentSealedImpl::load_system_field_internal(
+    FieldId field_id,
+    FieldDataInfo& data,
+    proto::common::LoadPriority load_priority) {
     SCOPE_CGO_CALL_METRIC();
 
     auto num_rows = data.row_count;
@@ -1431,6 +1476,54 @@ ChunkedSegmentSealedImpl::search_sorted_pk_range(milvus::OpContext* op_ctx,
         case DataType::VARCHAR:
             search_sorted_pk_range_impl<std::string>(
                 op, std::get<std::string>(pk), pk_column, bitset);
+            break;
+        default:
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::pk_binary_range(milvus::OpContext* op_ctx,
+                                          const PkType& lower_pk,
+                                          bool lower_inclusive,
+                                          const PkType& upper_pk,
+                                          bool upper_inclusive,
+                                          BitsetTypeView& bitset) const {
+    if (!is_sorted_by_pk_) {
+        // For unsorted segments, use the InsertRecord's binary range search
+        insert_record_.search_pk_binary_range(
+            lower_pk, lower_inclusive, upper_pk, upper_inclusive, bitset);
+        return;
+    }
+
+    // For sorted segments, use binary search
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = get_column(pk_field_id);
+    AssertInfo(pk_column != nullptr, "primary key column not loaded");
+
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64:
+            search_sorted_pk_binary_range_impl<int64_t>(
+                std::get<int64_t>(lower_pk),
+                lower_inclusive,
+                std::get<int64_t>(upper_pk),
+                upper_inclusive,
+                pk_column,
+                bitset);
+            break;
+        case DataType::VARCHAR:
+            search_sorted_pk_binary_range_impl<std::string>(
+                std::get<std::string>(lower_pk),
+                lower_inclusive,
+                std::get<std::string>(upper_pk),
+                upper_inclusive,
+                pk_column,
+                bitset);
             break;
         default:
             ThrowInfo(
@@ -2910,6 +3003,31 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
             total_entries += binlog.entries_num();
         }
         field_binlog_info.row_count = total_entries;
+
+        bool has_mmap_setting = false;
+        bool mmap_enabled = false;
+        bool is_vector = false;
+        for (const auto& child_field_id : field_binlog.child_fields()) {
+            auto& field_meta = schema_->operator[](FieldId(child_field_id));
+            if (IsVectorDataType(field_meta.get_data_type())) {
+                is_vector = true;
+            }
+
+            // if field has mmap setting, use it
+            // - mmap setting at collection level, then all field are the same
+            // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
+            auto [field_has_setting, field_mmap_enabled] =
+                schema_->MmapEnabled(field_id);
+            has_mmap_setting = has_mmap_setting || field_has_setting;
+            mmap_enabled = mmap_enabled || field_mmap_enabled;
+        }
+
+        auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+        auto global_use_mmap = is_vector
+                                   ? mmap_config.GetVectorFieldEnableMmap()
+                                   : mmap_config.GetScalarFieldEnableMmap();
+        field_binlog_info.enable_mmap =
+            has_mmap_setting ? mmap_enabled : global_use_mmap;
 
         // Store in map
         load_field_data_info.field_infos[field_id.get()] = field_binlog_info;

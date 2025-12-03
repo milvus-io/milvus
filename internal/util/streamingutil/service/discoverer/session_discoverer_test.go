@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"testing"
 
 	"github.com/blang/semver/v4"
@@ -22,32 +23,32 @@ func TestSessionDiscoverer(t *testing.T) {
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	targetVersion := "0.1.0"
 	prefix := funcutil.RandomString(10) + "/"
-	d := NewSessionDiscoverer(etcdClient, prefix, false, ">="+targetVersion)
+	d := NewSessionDiscoverer(etcdClient, OptSDPrefix(prefix), OptSDVersionRange(">="+targetVersion))
 
 	expected := []map[int64]*sessionutil.SessionRaw{
 		{},
 		{
-			1: {ServerID: 1, Version: "0.2.0"},
+			1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
 		},
 		{
-			1: {ServerID: 1, Version: "0.2.0"},
-			2: {ServerID: 2, Version: "0.4.0"},
+			1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
+			2: {ServerID: 2, Address: "127.0.0.1:12346", Version: "0.4.0"},
 		},
 		{
-			1: {ServerID: 1, Version: "0.2.0"},
-			2: {ServerID: 2, Version: "0.4.0"},
-			3: {ServerID: 3, Version: "0.3.0"},
+			1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
+			2: {ServerID: 2, Address: "127.0.0.1:12346", Version: "0.4.0"},
+			3: {ServerID: 3, Address: "127.0.0.1:12347", Version: "0.3.0"},
 		},
 		{
-			1: {ServerID: 1, Version: "0.2.0"},
-			2: {ServerID: 2, Version: "0.4.0"},
-			3: {ServerID: 3, Version: "0.3.0", Stopping: true},
+			1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
+			2: {ServerID: 2, Address: "127.0.0.1:12346", Version: "0.4.0"},
+			3: {ServerID: 3, Address: "127.0.0.1:12347", Version: "0.3.0", Stopping: true},
 		},
 		{
-			1: {ServerID: 1, Version: "0.2.0"},
-			2: {ServerID: 2, Version: "0.4.0"},
-			3: {ServerID: 3, Version: "0.3.0"},
-			4: {ServerID: 4, Version: "0.0.1"}, // version filtering
+			1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
+			2: {ServerID: 2, Address: "127.0.0.1:12346", Version: "0.4.0"},
+			3: {ServerID: 3, Address: "127.0.0.1:12347", Version: "0.3.0"},
+			4: {ServerID: 4, Address: "127.0.0.1:12348", Version: "0.0.1"}, // version filtering
 		},
 	}
 
@@ -89,7 +90,7 @@ func TestSessionDiscoverer(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 
 	// Do a init discover here.
-	d = NewSessionDiscoverer(etcdClient, prefix, false, ">="+targetVersion)
+	d = NewSessionDiscoverer(etcdClient, OptSDPrefix(prefix), OptSDVersionRange(">="+targetVersion))
 	err = d.Discover(ctx, func(state VersionedState) error {
 		// balance attributes
 		sessions := state.Sessions()
@@ -105,6 +106,29 @@ func TestSessionDiscoverer(t *testing.T) {
 		for _, addr := range state.State.Addresses {
 			serverID := attributes.GetServerID(addr.Attributes)
 			assert.NotNil(t, serverID)
+		}
+		return io.EOF
+	})
+	assert.ErrorIs(t, err, io.EOF)
+
+	d = NewSessionDiscoverer(etcdClient, OptSDPrefix(prefix), OptSDVersionRange(">="+targetVersion), OptSDForcePort(12345))
+	err = d.Discover(ctx, func(state VersionedState) error {
+		// balance attributes
+		expectedSessions := make(map[int64]*sessionutil.SessionRaw, len(expected[idx]))
+		for k, v := range expected[idx] {
+			if semver.MustParse(v.Version).GT(semver.MustParse(targetVersion)) {
+				expectedSessions[k] = v
+			}
+		}
+		assert.NotZero(t, len(expectedSessions))
+
+		// resolver attributes
+		for _, addr := range state.State.Addresses {
+			serverID := attributes.GetServerID(addr.Attributes)
+			assert.NotNil(t, serverID)
+			_, port, err := net.SplitHostPort(addr.Addr)
+			assert.NoError(t, err)
+			assert.Equal(t, "12345", port)
 		}
 		return io.EOF
 	})

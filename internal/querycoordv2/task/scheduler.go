@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -507,7 +508,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		taskType := GetTaskType(task)
 
 		if taskType == TaskTypeMove {
-			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 			if leader == nil {
 				return merr.WrapErrServiceInternal("segment's delegator leader not found, stop balancing")
 			}
@@ -588,6 +589,14 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
 	}
 	return nil
+}
+
+func (scheduler *taskScheduler) getReplicaShardLeader(channelName string, replicaID int64) *meta.DmChannel {
+	replica := scheduler.meta.ReplicaManager.Get(scheduler.ctx, replicaID)
+	if replica == nil {
+		return nil
+	}
+	return scheduler.distMgr.ChannelDistManager.GetShardLeader(channelName, replica)
 }
 
 func (scheduler *taskScheduler) tryPromoteAll() {
@@ -854,7 +863,7 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 			if task.replica == nil {
 				continue
 			}
-			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 			if leader == nil {
 				continue
 			}
@@ -883,7 +892,7 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			case *ChannelAction:
 				// wait for new delegator becomes leader, then try to remove old leader
 				task := task.(*ChannelTask)
-				delegator := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+				delegator := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 				log.Ctx(scheduler.ctx).Debug("process channelAction", zap.Bool("delegator is Nil", delegator == nil))
 				if delegator != nil {
 					log.Ctx(scheduler.ctx).Debug("process channelAction", zap.Int64("delegator node", delegator.Node),
@@ -990,6 +999,21 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log.Info("segment in target has been cleaned, trigger force update next target", zap.Int64("collectionID", task.CollectionID()))
 		// Avoid using task.Ctx as it may be canceled before remove is called.
 		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
+	}
+
+	// If task failed due to resource exhaustion (OOM, disk full, GPU OOM, etc.),
+	// mark the node as resource exhausted for a penalty period.
+	// During this period, the balancer will skip this node when assigning new segments/channels.
+	// This prevents continuous failures on the same node and allows it time to recover.
+	if errors.Is(task.Err(), merr.ErrSegmentRequestResourceFailed) {
+		for _, action := range task.Actions() {
+			if action.Type() == ActionTypeGrow {
+				nodeID := action.Node()
+				duration := paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.GetAsDuration(time.Second)
+				scheduler.nodeMgr.MarkResourceExhaustion(nodeID, duration)
+				log.Info("mark resource exhaustion for node", zap.Int64("nodeID", nodeID), zap.Duration("duration", duration), zap.Error(task.Err()))
+			}
+		}
 	}
 
 	task.Cancel(nil)
@@ -1144,7 +1168,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
-			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 			if leader == nil {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task)...)
 				return merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "failed to get shard delegator")
@@ -1198,14 +1222,14 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
-			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 			if leader == nil {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")
 			}
 
 		case ActionTypeReduce:
-			leader := scheduler.distMgr.ChannelDistManager.GetShardLeader(task.Shard(), task.replica)
+			leader := scheduler.getReplicaShardLeader(task.Shard(), task.ReplicaID())
 			if leader == nil {
 				log.Ctx(task.Context()).Warn("task stale due to leader not found", WrapTaskLog(task, zap.Int64("leaderID", task.leaderID))...)
 				return merr.WrapErrChannelNotFound(task.Shard(), "failed to get shard delegator")

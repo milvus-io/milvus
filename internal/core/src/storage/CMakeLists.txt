@@ -16,6 +16,11 @@
 
 add_source_at_current_directory()
 
+add_subdirectory(minio)
+add_subdirectory(aliyun)
+add_subdirectory(tencent)
+add_subdirectory(huawei)
+
 if (ENABLE_GCP_NATIVE)
     add_definitions(-DENABLE_GCP_NATIVE)
     add_subdirectory(gcp-native-storage)

@@ -963,6 +963,45 @@ func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) 
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) ListUpdateExternalCollectionTasks(ctx context.Context) ([]*indexpb.UpdateExternalCollectionTask, error) {
+	tasks := make([]*indexpb.UpdateExternalCollectionTask, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		task := &indexpb.UpdateExternalCollectionTask{}
+		err := proto.Unmarshal(value, task)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, UpdateExternalCollectionTaskPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveUpdateExternalCollectionTask(ctx context.Context, task *indexpb.UpdateExternalCollectionTask) error {
+	key := buildUpdateExternalCollectionTaskKey(task.TaskID)
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+
+	err = kc.MetaKv.Save(ctx, key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildUpdateExternalCollectionTaskKey(taskID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *model.FileResource) error {
 	k := BuildFileResourceKey(resource.ID)
 	v, err := proto.Marshal(resource.Marshal())

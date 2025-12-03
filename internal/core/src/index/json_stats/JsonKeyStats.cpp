@@ -809,8 +809,12 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
             try {
                 auto layout_type_json = nlohmann::json::parse(value);
                 for (const auto& [k, v] : layout_type_json.items()) {
-                    field_layout_type_map_[k] = JsonKeyLayoutTypeFromString(v);
-                    key_data_type_map_[k] = GetJsonTypeFromKeyName(k);
+                    auto layout_type = JsonKeyLayoutTypeFromString(v);
+                    // Only store metadata for shredding columns (TYPED/DYNAMIC),
+                    // skip SHARED keys to save memory
+                    if (layout_type == JsonKeyLayoutType::SHARED) {
+                        continue;
+                    }
                     key_field_map_[GetKeyFromColumnName(k)].insert(k);
                 }
             } catch (const std::exception& e) {
@@ -1009,7 +1013,9 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     LoadShreddingData(shredding_data_files);
 
     // load shared key index
-    bson_inverted_index_->LoadIndex(shared_key_index_files, load_priority_);
+    bson_inverted_index_->LoadIndex(shared_key_index_files,
+                                    load_priority_,
+                                    config.contains(MMAP_FILE_PATH));
 }
 
 IndexStatsPtr

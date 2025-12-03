@@ -160,6 +160,7 @@ func (suite *TaskSuite) SetupTest() {
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager())
+	suite.meta.ReplicaManager.Put(suite.ctx, suite.replica)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
@@ -2013,6 +2014,28 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 	// when try to remove task with ErrSegmentNotFound, should trigger UpdateNextTarget
 	scheduler.remove(task1)
 	mockTarget.AssertExpectations(suite.T())
+
+	// test remove task with ErrSegmentRequestResourceFailed
+	task2, err := NewSegmentTask(
+		ctx,
+		10*time.Second,
+		WrapIDSource(0),
+		coll,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
+	)
+	suite.NoError(err)
+	err = scheduler.Add(task2)
+	suite.NoError(err)
+
+	task2.Fail(merr.ErrSegmentRequestResourceFailed)
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ResourceExhaustionPenaltyDuration.Key, "3")
+	scheduler.remove(task2)
+	suite.True(suite.nodeMgr.IsResourceExhausted(nodeID))
+	// expect the penalty duration is expired
+	time.Sleep(3 * time.Second)
+	suite.False(suite.nodeMgr.IsResourceExhausted(nodeID))
 }
 
 func TestTask(t *testing.T) {

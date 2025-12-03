@@ -40,6 +40,7 @@
 #include "folly/concurrency/ConcurrentHashMap.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "pb/common.pb.h"
 #include "milvus-storage/reader.h"
 
 namespace milvus::segcore {
@@ -226,6 +227,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                            const PkType& pk,
                            BitsetTypeView& bitset) const;
 
+    void
+    pk_binary_range(milvus::OpContext* op_ctx,
+                    const PkType& lower_pk,
+                    bool lower_inclusive,
+                    const PkType& upper_pk,
+                    bool upper_inclusive,
+                    BitsetTypeView& bitset) const override;
+
     std::unique_ptr<DataArray>
     get_vector(milvus::OpContext* op_ctx,
                FieldId field_id,
@@ -385,7 +394,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
  private:
     void
-    load_system_field_internal(FieldId field_id, FieldDataInfo& data);
+    load_system_field_internal(
+        FieldId field_id,
+        FieldDataInfo& data,
+        milvus::proto::common::LoadPriority load_priority);
 
     template <typename PK>
     void
@@ -420,9 +432,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 auto end_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
                                last_in_chunk_offset;
 
-                for (int64_t idx = start_idx; idx <= end_idx; idx++) {
-                    bitset[idx] = true;
-                }
+                bitset.set(start_idx, end_idx - start_idx + 1, true);
             }
         } else if (op == proto::plan::OpType::GreaterEqual ||
                    op == proto::plan::OpType::GreaterThan) {
@@ -476,6 +486,80 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         } else {
             ThrowInfo(ErrorCode::Unsupported,
                       fmt::format("unsupported op type {}", op));
+        }
+    }
+
+    template <typename PK>
+    void
+    search_sorted_pk_binary_range_impl(
+        const PK& lower_val,
+        bool lower_inclusive,
+        const PK& upper_val,
+        bool upper_inclusive,
+        const std::shared_ptr<ChunkedColumnInterface>& pk_column,
+        BitsetTypeView& bitset) const {
+        const auto num_chunk = pk_column->num_chunks();
+        if (num_chunk == 0) {
+            return;
+        }
+        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+
+        // Find the lower bound position (first value >= lower_val or > lower_val)
+        auto [lower_chunk_id, lower_in_chunk_offset, lower_exact_match] =
+            this->pk_lower_bound<PK>(
+                lower_val, pk_column.get(), all_chunk_pins, 0);
+
+        int64_t start_idx = 0;
+        if (lower_chunk_id != -1) {
+            start_idx = pk_column->GetNumRowsUntilChunk(lower_chunk_id) +
+                        lower_in_chunk_offset;
+            // If lower_inclusive is false and we found an exact match, skip all equal values
+            if (!lower_inclusive && lower_exact_match) {
+                auto [last_chunk_id, last_in_chunk_offset] =
+                    this->find_last_pk_position<PK>(lower_val,
+                                                    pk_column.get(),
+                                                    all_chunk_pins,
+                                                    lower_chunk_id,
+                                                    lower_in_chunk_offset);
+                start_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
+                            last_in_chunk_offset + 1;
+            }
+        } else {
+            // lower_val is greater than all values, no results
+            return;
+        }
+
+        // Find the upper bound position (first value >= upper_val or > upper_val)
+        auto [upper_chunk_id, upper_in_chunk_offset, upper_exact_match] =
+            this->pk_lower_bound<PK>(
+                upper_val, pk_column.get(), all_chunk_pins, 0);
+
+        int64_t end_idx = 0;
+        if (upper_chunk_id == -1) {
+            // upper_val is greater than all values, include all from start_idx to end
+            end_idx = bitset.size();
+        } else {
+            // If upper_inclusive is true and we found an exact match, include all equal values
+            if (upper_inclusive && upper_exact_match) {
+                auto [last_chunk_id, last_in_chunk_offset] =
+                    this->find_last_pk_position<PK>(upper_val,
+                                                    pk_column.get(),
+                                                    all_chunk_pins,
+                                                    upper_chunk_id,
+                                                    upper_in_chunk_offset);
+                end_idx = pk_column->GetNumRowsUntilChunk(last_chunk_id) +
+                          last_in_chunk_offset + 1;
+            } else {
+                // upper_inclusive is false or no exact match
+                // In both cases, end at the position of first value >= upper_val
+                end_idx = pk_column->GetNumRowsUntilChunk(upper_chunk_id) +
+                          upper_in_chunk_offset;
+            }
+        }
+
+        // Set bits from start_idx to end_idx - 1
+        if (start_idx < end_idx) {
+            bitset.set(start_idx, end_idx - start_idx, true);
         }
     }
 

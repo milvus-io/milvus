@@ -50,7 +50,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 600*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_MultipleVectorFields_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_MultipleVectorFields_" + funcutil.RandomString(8)
 
 	schema := integration.ConstructSchema(collectionName, 0, true, &schemapb.FieldSchema{
 		FieldID:      100,

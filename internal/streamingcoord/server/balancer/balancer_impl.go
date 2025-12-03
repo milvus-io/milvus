@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -330,7 +331,9 @@ func (b *balancerImpl) checkIfAllNodeGreaterThan260(ctx context.Context) (bool, 
 // checkIfRoleGreaterThan260 check if the role is greater than 2.6.0.
 func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role string) (bool, error) {
 	logger := b.Logger().With(zap.String("role", role))
-	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(),
+		discoverer.OptSDPrefix(sessionutil.GetSessionPrefixByRole(role)),
+		discoverer.OptSDVersionRange(versionChecker260))
 	defer rb.Close()
 
 	r := rb.Resolver()
@@ -363,7 +366,9 @@ func (b *balancerImpl) blockUntilRoleGreaterThanVersion(ctx context.Context, rol
 	logger := b.Logger().With(zap.String("role", role))
 	logger.Info("start to wait that the nodes is greater than version", zap.String("version", versionChecker))
 	// Check if there's any proxy or data node with version < 2.6.0.
-	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker)
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(),
+		discoverer.OptSDPrefix(sessionutil.GetSessionPrefixByRole(role)),
+		discoverer.OptSDVersionRange(versionChecker))
 	defer rb.Close()
 
 	r := rb.Resolver()

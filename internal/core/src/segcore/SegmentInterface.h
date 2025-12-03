@@ -649,6 +649,14 @@ class SegmentInternalInterface : public SegmentInterface {
              const PkType& pk,
              BitsetTypeView& bitset) const = 0;
 
+    virtual void
+    pk_binary_range(milvus::OpContext* op_ctx,
+                    const PkType& lower_pk,
+                    bool lower_inclusive,
+                    const PkType& upper_pk,
+                    bool upper_inclusive,
+                    BitsetTypeView& bitset) const = 0;
+
     virtual GEOSContextHandle_t
     get_ctx() const {
         return ctx_;

@@ -163,8 +163,6 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 		return "", err
 	}
 
-	defer C.transaction_destroy(transationHandle)
-
 	var readVersion C.int64_t
 
 	// TODO: not atomic, need to get version from transaction
