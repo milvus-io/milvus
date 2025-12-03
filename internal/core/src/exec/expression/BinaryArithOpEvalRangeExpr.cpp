@@ -231,6 +231,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             ValueType val,
             ValueType right_operand,
             const std::string& pointer) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // Nothing to do here since the caller has already handled valid_res.
+        if (data == nullptr) {
+            return;
+        }
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
@@ -598,6 +603,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValueType val,
             ValueType right_operand,
             int index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // Nothing to do here since the caller has already handled valid_res.
+        if (data == nullptr) {
+            return;
+        }
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
@@ -1457,6 +1467,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             TargetBitmapView valid_res,
             HighPrecisionType value,
             HighPrecisionType right_operand) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // Nothing to do here since the caller has already handled valid_res.
+        if (data == nullptr) {
+            return;
+        }
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
