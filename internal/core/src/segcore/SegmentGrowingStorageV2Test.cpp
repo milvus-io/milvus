@@ -215,8 +215,12 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
     uint64_t parallel_degree = 2;
 
     // read all row groups
-    auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
-        fs_, paths[0], schema_);
+    auto reader_result =
+        milvus_storage::FileRowGroupReader::Make(fs_, paths[0]);
+    AssertInfo(reader_result.ok(),
+               "[StorageV2] Failed to create file row group reader: " +
+                   reader_result.status().ToString());
+    auto fr = reader_result.ValueOrDie();
     auto row_group_metadata = fr->file_metadata()->GetRowGroupMetadataVector();
     auto status = fr->Close();
     AssertInfo(

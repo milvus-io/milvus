@@ -120,8 +120,12 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         milvus::proto::common::LoadPriority::LOW);
 
     // num cells - get the expected number from the file directly
-    auto fr =
-        std::make_shared<milvus_storage::FileRowGroupReader>(fs_, paths_[0]);
+    auto reader_result =
+        milvus_storage::FileRowGroupReader::Make(fs_, paths_[0]);
+    AssertInfo(reader_result.ok(),
+               "[StorageV2] Failed to create file row group reader: " +
+                   reader_result.status().ToString());
+    auto fr = reader_result.ValueOrDie();
     auto expected_num_cells =
         fr->file_metadata()->GetRowGroupMetadataVector().size();
     auto row_group_metadata_vector =
@@ -239,8 +243,12 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         EXPECT_TRUE(writer->Close().ok());
 
         // Get the number of row groups in this file
-        auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs_, file_path);
+        auto reader_result =
+            milvus_storage::FileRowGroupReader::Make(fs_, file_path);
+        AssertInfo(reader_result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       reader_result.status().ToString());
+        auto fr = reader_result.ValueOrDie();
         expected_row_groups_per_file.push_back(
             fr->file_metadata()->GetRowGroupMetadataVector().size());
         auto status = fr->Close();
@@ -311,8 +319,12 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto usage = translator->estimated_byte_size_of_cell(i).first;
 
         // Get the expected memory size from the corresponding file
-        auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
+        auto reader_result = milvus_storage::FileRowGroupReader::Make(
             fs_, multi_file_paths[file_idx]);
+        AssertInfo(reader_result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       reader_result.status().ToString());
+        auto fr = reader_result.ValueOrDie();
         auto row_group_metadata_vector =
             fr->file_metadata()->GetRowGroupMetadataVector();
         auto expected_size = static_cast<int64_t>(
