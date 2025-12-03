@@ -96,7 +96,7 @@ func fieldDataToPlaceholderValue(fieldData *schemapb.FieldData) (*commonpb.Place
 		placeholderValue := &commonpb.PlaceholderValue{
 			Tag:    "$0",
 			Type:   commonpb.PlaceholderType_BinaryVector,
-			Values: flattenedByteVectorsToByteVectors(x.BinaryVector, int(vectors.Dim)),
+			Values: flattenedBinaryVectorsToByteVectors(x.BinaryVector, int(vectors.Dim)),
 		}
 		return placeholderValue, nil
 	case schemapb.DataType_Float16Vector:
@@ -192,6 +192,15 @@ func flattenedByteVectorsToByteVectors(flattenedVectors []byte, dimension int) [
 	result := make([][]byte, 0)
 	for i := 0; i < len(flattenedVectors); i += dimension {
 		result = append(result, flattenedVectors[i:i+dimension])
+	}
+	return result
+}
+
+func flattenedBinaryVectorsToByteVectors(flattenedVectors []byte, dimension int) [][]byte {
+	result := make([][]byte, 0)
+	vectorBytes := int(dimension / 8)
+	for i := 0; i < len(flattenedVectors); i += vectorBytes {
+		result = append(result, flattenedVectors[i:i+vectorBytes])
 	}
 	return result
 }
