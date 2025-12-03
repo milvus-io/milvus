@@ -15,3 +15,17 @@ type Analyzer interface {
 	Clone() (Analyzer, error)
 	Destroy()
 }
+
+//go:generate mockery --name=MinHash --with-expecter
+type MinHash interface {
+	// Compute computes MinHash signature for the given text
+	// Returns the signature as []uint32
+	Compute(text string) []uint32
+
+	// ComputeBatch computes MinHash signatures for multiple texts
+	// Returns signatures as [][]uint32
+	ComputeBatch(texts []string) [][]uint32
+
+	// Destroy releases resources
+	Destroy()
+}
