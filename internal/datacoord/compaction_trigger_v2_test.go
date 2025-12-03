@@ -174,7 +174,7 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
 	}, nil)
 	s.triggerManager.handler = handler
 
-	_, err := s.triggerManager.ManualTrigger(context.Background(), 1, true, false)
+	_, err := s.triggerManager.ManualTrigger(context.Background(), 1, true, false, 0)
 	s.Error(err)
 	s.ErrorIs(err, merr.ErrServiceUnavailable)
 }
