@@ -45,6 +45,32 @@ RepeatedKeyValToMap(
     return mapping;
 }
 
+/**
+ * @brief Get a boolean value from repeated KeyValuePair by key.
+ *
+ * @param kvs The repeated KeyValuePair field to search.
+ * @param key The key to look for.
+ * @return std::pair<bool, bool> where:
+ *         - first: whether the key was found.
+ *         - second: the parsed boolean value (true if value is "true", case-insensitive).
+ */
+static std::pair<bool, bool>
+GetBoolFromRepeatedKVs(
+    const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs,
+    const std::string& key) {
+    for (auto& kv : kvs) {
+        if (kv.key() == key) {
+            std::string lower;
+            std::transform(kv.value().begin(),
+                           kv.value().end(),
+                           std::back_inserter(lower),
+                           ::tolower);
+            return {true, lower == "true"};
+        }
+    }
+    return {false, false};
+}
+
 class ProtoLayout;
 using ProtoLayoutPtr = std::unique_ptr<ProtoLayout>;
 
