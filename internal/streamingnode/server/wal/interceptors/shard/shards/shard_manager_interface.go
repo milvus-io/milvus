@@ -20,8 +20,6 @@ type ShardManager interface {
 
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
 
-	ListCollections() []int64
-
 	CheckIfPartitionCanBeCreated(uniquePartitionKey PartitionUniqueKey) error
 
 	CheckIfPartitionExists(uniquePartitionKey PartitionUniqueKey) error
@@ -45,6 +43,8 @@ type ShardManager interface {
 	WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error)
 
 	FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error)
+
+	FlushAllAndFenceSegmentAllocUntil(timetick uint64) ([]int64, error)
 
 	AsyncFlushSegment(signal utils.SealSegmentSignal)
 

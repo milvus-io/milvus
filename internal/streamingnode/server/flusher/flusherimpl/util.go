@@ -22,7 +22,8 @@ var broadcastToAllMessageType = map[message.MessageType]struct{}{
 	message.MessageTypeFlushAll: {},
 }
 
-func IsBroadcastToAllMessage(msg message.MessageType) bool {
+// isBroadcastToAllMessage checks if the message need to be broadcast to all data sync services.
+func isBroadcastToAllMessage(msg message.MessageType) bool {
 	_, ok := broadcastToAllMessageType[msg]
 	return ok
 }

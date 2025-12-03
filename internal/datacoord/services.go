@@ -185,8 +185,8 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		}, nil
 	}
 
-	// Create a new broadcaster with shared cluster resource key.
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewSharedClusterResourceKey())
+	// Create a new broadcaster with exclusive cluster resource key.
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
@@ -233,11 +233,10 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}
 	flushAllTss := make(map[string]uint64, len(res.AppendResults))
 	for appendChannel, result := range res.AppendResults {
-		channel := appendChannel
-		if appendChannel == controlChannel {
-			// convert control channel to physical channel in flush all response
-			channel = funcutil.ToPhysicalChannel(appendChannel)
-		}
+		// if is control channel, convert it to physical channel.
+		// it's ok to call ToPhysicalChannel even if it's a physical channel,
+		// so no need to check if it's a control channel here.
+		channel := funcutil.ToPhysicalChannel(appendChannel)
 		flushAllTss[channel] = result.TimeTick
 	}
 	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllTss", flushAllTss))
