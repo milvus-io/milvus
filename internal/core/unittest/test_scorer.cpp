@@ -22,7 +22,8 @@ using namespace milvus::rescores;
 
 class WeightScorerTest : public ::testing::Test {
  protected:
-    void SetUp() override {
+    void
+    SetUp() override {
         // Create a WeightScorer with no filter and weight of 2.0
         scorer_ = std::make_unique<WeightScorer>(nullptr, 2.0f);
     }
@@ -33,23 +34,24 @@ class WeightScorerTest : public ::testing::Test {
 // Test: TargetBitmap batch_score with valid offsets (all within bitmap bounds)
 TEST_F(WeightScorerTest, BatchScoreTargetBitmapValidOffsets) {
     TargetBitmap bitmap(100);
-    bitmap.set(10); 
-    bitmap.set(50);  
-    bitmap.set(90);  
+    bitmap.set(10);
+    bitmap.set(50);
+    bitmap.set(90);
 
     // Offsets that are all within bitmap bounds
     FixedVector<int32_t> offsets = {10, 20, 50, 90};
-    std::vector<std::optional<float>> boost_scores(offsets.size(), std::nullopt);
+    std::vector<std::optional<float>> boost_scores(offsets.size(),
+                                                   std::nullopt);
 
     proto::plan::FunctionMode mode = proto::plan::FunctionMode::FunctionModeSum;
 
     scorer_->batch_score(nullptr, nullptr, mode, offsets, bitmap, boost_scores);
 
     // Positions 10, 50, 90 should have scores (they are set in bitmap)
-    EXPECT_TRUE(boost_scores[0].has_value());  
-    EXPECT_FALSE(boost_scores[1].has_value()); 
-    EXPECT_TRUE(boost_scores[2].has_value());  
-    EXPECT_TRUE(boost_scores[3].has_value());  
+    EXPECT_TRUE(boost_scores[0].has_value());
+    EXPECT_FALSE(boost_scores[1].has_value());
+    EXPECT_TRUE(boost_scores[2].has_value());
+    EXPECT_TRUE(boost_scores[3].has_value());
 }
 
 // Test: TargetBitmap batch_score with out-of-bounds offsets (should NOT crash)
@@ -62,22 +64,21 @@ TEST_F(WeightScorerTest, BatchScoreTargetBitmapOutOfBoundsOffsets) {
     // Offsets where some are OUT OF BOUNDS (>= 50)
     // This simulates the race condition where text index lags behind vector index
     FixedVector<int32_t> offsets = {10, 40, 60, 100, 200};
-    std::vector<std::optional<float>> boost_scores(offsets.size(), std::nullopt);
+    std::vector<std::optional<float>> boost_scores(offsets.size(),
+                                                   std::nullopt);
 
     proto::plan::FunctionMode mode = proto::plan::FunctionMode::FunctionModeSum;
 
     // Should NOT crash! Out-of-bounds offsets should be safely skipped
-    ASSERT_NO_THROW(
-        scorer_->batch_score(nullptr, nullptr, mode, offsets, bitmap, boost_scores)
-    );
+    ASSERT_NO_THROW(scorer_->batch_score(
+        nullptr, nullptr, mode, offsets, bitmap, boost_scores));
 
     // In-bounds offsets should be scored correctly
-    EXPECT_TRUE(boost_scores[0].has_value());   
-    EXPECT_TRUE(boost_scores[1].has_value());  
-    
-    // Out-of-bounds offsets should NOT have scores (safely skipped)
-    EXPECT_FALSE(boost_scores[2].has_value());  
-    EXPECT_FALSE(boost_scores[3].has_value());  
-    EXPECT_FALSE(boost_scores[4].has_value());  
-}
+    EXPECT_TRUE(boost_scores[0].has_value());
+    EXPECT_TRUE(boost_scores[1].has_value());
 
+    // Out-of-bounds offsets should NOT have scores (safely skipped)
+    EXPECT_FALSE(boost_scores[2].has_value());
+    EXPECT_FALSE(boost_scores[3].has_value());
+    EXPECT_FALSE(boost_scores[4].has_value());
+}
