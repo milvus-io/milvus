@@ -1278,16 +1278,6 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	collection := s.meta.GetCollection(req.GetCollectionID())
-	if collection == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID()))
-		return resp, nil
-	}
-	if collection.IsExternal() {
-		resp.Status = merr.Status(merr.WrapErrServiceUnavailable("external collection compaction disabled"))
-		return resp, nil
-	}
-
 	var id int64
 	var err error
 	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
