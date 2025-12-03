@@ -49,6 +49,12 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const TargetBitmap& bitmap,
                           std::vector<std::optional<float>>& boost_scores) {
     for (auto i = 0; i < offsets.size(); i++) {
+        // tantivy index now not strong consistency
+        // so result bitmap may be smaller than segment size
+        // skip if offset is out of bitmap size
+        if (offsets[i] < bitmap.size()) {
+            continue;
+        }
         if (bitmap[offsets[i]] > 0) {
             set_score(boost_scores[i], mode);
         }
@@ -118,6 +124,12 @@ RandomScorer::batch_score(milvus::OpContext* op_ctx,
     idx.reserve(offsets.size());
 
     for (auto i = 0; i < offsets.size(); i++) {
+        // tantivy index now not strong consistency
+        // so result bitmap may be smaller than segment size
+        // skip if offset is out of bitmap size
+        if (offsets[i] < bitmap.size()) {
+            continue;
+        }
         if (bitmap[offsets[i]] > 0) {
             target_offsets.push_back(static_cast<int64_t>(offsets[i]));
             idx.push_back(i);
