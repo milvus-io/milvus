@@ -383,7 +383,7 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 	}
 
 	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
-		interceptor := streaming.ForwardDMLToLegacyProxyUnaryServerInterceptor()
+		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
 		return interceptor(reqCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
 			return handler(ctx, req)
 		})
