@@ -39,13 +39,13 @@ class IArrayOffsets {
     // Convert element ID to row ID
     // returns pair of <row_id, element_index>
     // element id is contiguous between rows
-    virtual std::pair<int64_t, int64_t>
-    ElementIDToRowID(int64_t elem_id) const = 0;
+    virtual std::pair<int32_t, int32_t>
+    ElementIDToRowID(int32_t elem_id) const = 0;
 
     // Convert row ID to element ID range
     // elements with id in [ret.first, ret.last) belong to row_id
-    virtual std::pair<int64_t, int64_t>
-    ElementIDRangeOfRow(int64_t row_id) const = 0;
+    virtual std::pair<int32_t, int32_t>
+    ElementIDRangeOfRow(int32_t row_id) const = 0;
 
     // Convert row-level bitsets to element-level bitsets
     virtual std::pair<TargetBitmap, TargetBitmap>
@@ -58,8 +58,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     friend class ArrayOffsetsTest;
 
  public:
-    ArrayOffsetsSealed()
-        : element_row_ids_(), row_to_element_start_({0}) {
+    ArrayOffsetsSealed() : element_row_ids_(), row_to_element_start_({0}) {
     }
 
     ArrayOffsetsSealed(std::vector<int32_t> element_row_ids,
@@ -80,11 +79,11 @@ class ArrayOffsetsSealed : public IArrayOffsets {
         return element_row_ids_.size();
     }
 
-    std::pair<int64_t, int64_t>
-    ElementIDToRowID(int64_t elem_id) const override;
+    std::pair<int32_t, int32_t>
+    ElementIDToRowID(int32_t elem_id) const override;
 
-    std::pair<int64_t, int64_t>
-    ElementIDRangeOfRow(int64_t row_id) const override;
+    std::pair<int32_t, int32_t>
+    ElementIDRangeOfRow(int32_t row_id) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(
@@ -118,11 +117,11 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
         return element_row_ids_.size();
     }
 
-    std::pair<int64_t, int64_t>
-    ElementIDToRowID(int64_t elem_id) const override;
+    std::pair<int32_t, int32_t>
+    ElementIDToRowID(int32_t elem_id) const override;
 
-    std::pair<int64_t, int64_t>
-    ElementIDRangeOfRow(int64_t row_id) const override;
+    std::pair<int32_t, int32_t>
+    ElementIDRangeOfRow(int32_t row_id) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
     RowBitsetToElementBitset(

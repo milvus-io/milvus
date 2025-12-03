@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -400,6 +401,7 @@ class Schema {
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
 
+    mutable std::shared_mutex struct_array_field_cache_mutex_;
     // Cache for struct_name -> first array field mapping
     mutable std::unordered_map<std::string, FieldId> struct_array_field_cache_;
 };

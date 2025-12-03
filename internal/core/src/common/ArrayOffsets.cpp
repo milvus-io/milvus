@@ -21,8 +21,8 @@
 
 namespace milvus {
 
-std::pair<int64_t, int64_t>
-ArrayOffsetsSealed::ElementIDToRowID(int64_t elem_id) const {
+std::pair<int32_t, int32_t>
+ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
     assert(elem_id >= 0 && elem_id < GetTotalElementCount());
 
     int32_t row_id = element_row_ids_[elem_id];
@@ -31,9 +31,9 @@ ArrayOffsetsSealed::ElementIDToRowID(int64_t elem_id) const {
     return {row_id, elem_idx};
 }
 
-std::pair<int64_t, int64_t>
-ArrayOffsetsSealed::ElementIDRangeOfRow(int64_t row_id) const {
-    int64_t row_count = GetRowCount();
+std::pair<int32_t, int32_t>
+ArrayOffsetsSealed::ElementIDRangeOfRow(int32_t row_id) const {
+    int32_t row_count = GetRowCount();
     assert(row_id >= 0 && row_id <= row_count);
 
     if (row_id == row_count) {
@@ -162,19 +162,19 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                               std::move(row_to_element_start));
 }
 
-std::pair<int64_t, int64_t>
-ArrayOffsetsGrowing::ElementIDToRowID(int64_t elem_id) const {
+std::pair<int32_t, int32_t>
+ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
     std::shared_lock lock(mutex_);
     assert(elem_id >= 0 &&
-           elem_id < static_cast<int64_t>(element_row_ids_.size()));
+           elem_id < static_cast<int32_t>(element_row_ids_.size()));
     int32_t row_id = element_row_ids_[elem_id];
     // Compute elem_idx: elem_idx = elem_id - start_of_this_row
     int32_t elem_idx = elem_id - row_to_element_start_[row_id];
     return {row_id, elem_idx};
 }
 
-std::pair<int64_t, int64_t>
-ArrayOffsetsGrowing::ElementIDRangeOfRow(int64_t row_id) const {
+std::pair<int32_t, int32_t>
+ArrayOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
     std::shared_lock lock(mutex_);
     assert(row_id >= 0 && row_id <= committed_row_count_);
 
