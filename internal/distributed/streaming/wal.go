@@ -65,6 +65,10 @@ type walAccesserImpl struct {
 	forwardService *forwardServiceImpl
 }
 
+func (w *walAccesserImpl) ForwardService() ForwardService {
+	return w.forwardService
+}
+
 func (w *walAccesserImpl) Replicate() ReplicateService {
 	return replicateService{w}
 }

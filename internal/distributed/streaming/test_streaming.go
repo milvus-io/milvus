@@ -238,6 +238,16 @@ func (n *noopWALAccesser) UpdateReplicateConfiguration(ctx context.Context, conf
 	return nil
 }
 
+func (n *noopWALAccesser) ForwardService() ForwardService {
+	return &noopForwardService{}
+}
+
+type noopForwardService struct{}
+
+func (n *noopForwardService) ForwardDMLToLegacyProxy(ctx context.Context, request any) (any, error) {
+	return nil, ErrForwardDisabled
+}
+
 type noopScanner struct{}
 
 func (n *noopScanner) Done() <-chan struct{} {
