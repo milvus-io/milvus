@@ -120,7 +120,9 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                    "[StorageV2] Failed to create packed writer: " +
                        result.status().ToString());
         auto writer = result.ValueOrDie();
-        *c_packed_writer = writer.get();
+        *c_packed_writer =
+            new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
+                std::move(writer));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -192,7 +194,9 @@ NewPackedWriter(struct ArrowSchema* schema,
                    "[StorageV2] Failed to create packed writer: " +
                        result.status().ToString());
         auto writer = result.ValueOrDie();
-        *c_packed_writer = writer.get();
+        *c_packed_writer =
+            new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
+                std::move(writer));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -207,9 +211,9 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto packed_writer =
-            static_cast<milvus_storage::PackedRecordBatchWriter*>(
-                c_packed_writer);
+        auto packed_writer = *static_cast<
+            std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(
+            c_packed_writer);
 
         auto import_schema = arrow::ImportSchema(schema);
         if (!import_schema.ok()) {
@@ -254,10 +258,10 @@ CloseWriter(CPackedWriter c_packed_writer) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
-        auto packed_writer =
-            static_cast<milvus_storage::PackedRecordBatchWriter*>(
-                c_packed_writer);
-        auto status = packed_writer->Close();
+        auto packed_writer = static_cast<
+            std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(
+            c_packed_writer);
+        auto status = (*packed_writer)->Close();
         delete packed_writer;
         if (!status.ok()) {
             return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,

@@ -44,8 +44,6 @@ func NewFFIPackedReader(manifestPath string, schema *arrow.Schema, neededColumns
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get manifest")
 	}
-	// cManifest := C.CString(manifest)
-	// defer C.free(unsafe.Pointer(cManifest))
 
 	var cas cdata.CArrowSchema
 	cdata.ExportArrowSchema(schema, &cas)
