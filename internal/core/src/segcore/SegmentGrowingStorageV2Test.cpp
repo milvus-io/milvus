@@ -372,7 +372,7 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     auto result = milvus_storage::PackedRecordBatchWriter::Make(
         fs_,
         paths,
-        schema_,
+        arrow_schema,
         storage_config,
         column_groups,
         writer_memory,
