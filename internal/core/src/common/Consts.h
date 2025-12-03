@@ -128,3 +128,5 @@ const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
 
 // EPSILON value for comparing float numbers
 const float EPSILON = 0.0000000119;
+const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
+const std::string MMAP_ENABLED_KEY = "mmap.enabled";
