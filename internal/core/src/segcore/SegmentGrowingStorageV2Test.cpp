@@ -143,12 +143,20 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     auto column_groups = std::vector<std::vector<int>>{{2}, {0, 1}};
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
-    milvus_storage::PackedRecordBatchWriter writer(
-        fs_, paths, schema_, storage_config, column_groups, writer_memory);
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        paths,
+        schema_,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
     for (int i = 0; i < batch_size; ++i) {
-        EXPECT_TRUE(writer.Write(record_batch_).ok());
+        EXPECT_TRUE(writer->Write(record_batch_).ok());
     }
-    EXPECT_TRUE(writer.Close().ok());
+    EXPECT_TRUE(writer->Close().ok());
 
     auto schema = std::make_shared<milvus::Schema>();
     auto ts_fid = schema->AddDebugField("ts", milvus::DataType::INT64, true);
@@ -187,12 +195,20 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
     auto column_groups = std::vector<std::vector<int>>{{2}, {0, 1}};
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
-    milvus_storage::PackedRecordBatchWriter writer(
-        fs_, paths, schema_, storage_config, column_groups, writer_memory);
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        paths,
+        schema_,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
     for (int i = 0; i < batch_size; ++i) {
-        EXPECT_TRUE(writer.Write(record_batch_).ok());
+        EXPECT_TRUE(writer->Write(record_batch_).ok());
     }
-    EXPECT_TRUE(writer.Close().ok());
+    EXPECT_TRUE(writer->Close().ok());
 
     auto channel = std::make_shared<milvus::ArrowReaderChannel>();
     int64_t memory_limit = 1024 * 1024 * 1024;  // 1GB
@@ -349,8 +365,16 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
     auto arrow_schema = schema->ConvertToArrowSchema();
-    milvus_storage::PackedRecordBatchWriter writer(
-        fs_, paths, arrow_schema, storage_config, column_groups, writer_memory);
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        paths,
+        schema_,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
     int64_t total_rows = 0;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
@@ -358,9 +382,9 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
         total_rows += record_batch->num_rows();
 
-        EXPECT_TRUE(writer.Write(record_batch).ok());
+        EXPECT_TRUE(writer->Write(record_batch).ok());
     }
-    EXPECT_TRUE(writer.Close().ok());
+    EXPECT_TRUE(writer->Close().ok());
 
     // Load data back from storage v2
     LoadFieldDataInfo load_info;

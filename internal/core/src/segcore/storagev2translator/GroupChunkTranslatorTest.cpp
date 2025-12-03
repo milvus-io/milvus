@@ -59,12 +59,16 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
-        milvus_storage::PackedRecordBatchWriter writer(fs_,
-                                                       paths_,
-                                                       arrow_schema_,
-                                                       storage_config,
-                                                       column_groups,
-                                                       writer_memory);
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
+            fs_,
+            paths_,
+            arrow_schema_,
+            storage_config,
+            column_groups,
+            writer_memory,
+            ::parquet::default_writer_properties());
+        EXPECT_TRUE(result.ok());
+        auto writer = result.ValueOrDie();
         int64_t total_rows = 0;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema_, per_batch);
@@ -72,9 +76,9 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
                 ConvertToArrowRecordBatch(dataset, dim, arrow_schema_);
             total_rows += record_batch->num_rows();
 
-            EXPECT_TRUE(writer.Write(record_batch).ok());
+            EXPECT_TRUE(writer->Write(record_batch).ok());
         }
-        EXPECT_TRUE(writer.Close().ok());
+        EXPECT_TRUE(writer->Close().ok());
     }
 
  protected:
@@ -214,21 +218,25 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
         std::vector<std::string> single_file_paths{file_path};
-        milvus_storage::PackedRecordBatchWriter writer(fs_,
-                                                       single_file_paths,
-                                                       arrow_schema_,
-                                                       storage_config,
-                                                       column_groups,
-                                                       writer_memory);
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
+            fs_,
+            single_file_paths,
+            arrow_schema_,
+            storage_config,
+            column_groups,
+            writer_memory,
+            ::parquet::default_writer_properties());
+        EXPECT_TRUE(result.ok());
+        auto writer = result.ValueOrDie();
 
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema_, per_batch);
             auto record_batch =
                 ConvertToArrowRecordBatch(dataset, dim, arrow_schema_);
             total_rows += record_batch->num_rows();
-            EXPECT_TRUE(writer.Write(record_batch).ok());
+            EXPECT_TRUE(writer->Write(record_batch).ok());
         }
-        EXPECT_TRUE(writer.Close().ok());
+        EXPECT_TRUE(writer->Close().ok());
 
         // Get the number of row groups in this file
         auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
