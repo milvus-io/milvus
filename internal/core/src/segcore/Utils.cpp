@@ -1003,10 +1003,10 @@ ReverseDataFromIndex(const index::IndexBase* index,
                     valid_data[i] = true;
                 }
                 raw_data[i] = raw.value();
-                auto obj = scalar_array->mutable_timestamptz_data();
-                *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
-                break;
             }
+            auto obj = scalar_array->mutable_timestamptz_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
         }
         case DataType::VARCHAR: {
             using IndexType = index::ScalarIndex<std::string>;
