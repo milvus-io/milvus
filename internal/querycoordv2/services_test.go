@@ -280,7 +280,6 @@ func (suite *ServiceSuite) SetupTest() {
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
-		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
@@ -295,7 +294,6 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.nodeMgr,
 		suite.taskScheduler,
 		suite.broker,
-		suite.server.getBalancerFunc,
 	)
 
 	suite.server.registerMetricsRequest()

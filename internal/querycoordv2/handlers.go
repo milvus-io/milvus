@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -104,7 +105,9 @@ func (s *Server) balanceSegments(ctx context.Context,
 	copyMode bool,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
-	plans := s.getBalancerFunc().AssignSegment(ctx, collectionID, segments, dstNodes, true)
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	policy := balancer.GetAssignPolicy()
+	plans := policy.AssignSegment(ctx, collectionID, segments, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -184,7 +187,9 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.getBalancerFunc().AssignChannel(ctx, collectionID, channels, dstNodes, true)
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	policy := balancer.GetAssignPolicy()
+	plans := policy.AssignChannel(ctx, collectionID, channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
