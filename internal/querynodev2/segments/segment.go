@@ -88,7 +88,8 @@ type baseSegment struct {
 	version    *atomic.Int64
 
 	segmentType    SegmentType
-	bloomFilterSet *pkoracle.BloomFilterSet
+	bloomFilterSet *pkoracle.BloomFilterSet // For regular collections with bloom filter
+	pkCandidate    pkoracle.Candidate       // Generic PK candidate interface (points to bloomFilterSet or ExternalSegmentCandidate)
 	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
 	isLazyLoad     bool
 	skipGrowingBF  bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
@@ -106,12 +107,14 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 	if err != nil {
 		return baseSegment{}, err
 	}
+	bloomFilterSet := pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType)
 	bs := baseSegment{
 		collection:     collection,
 		loadInfo:       atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
 		version:        atomic.NewInt64(version),
 		segmentType:    segmentType,
-		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
+		bloomFilterSet: bloomFilterSet,
+		pkCandidate:    bloomFilterSet, // Default: pkCandidate points to bloomFilterSet
 		bm25Stats:      make(map[int64]*storage.BM25Stats),
 		channel:        channel,
 		isLazyLoad:     isLazyLoad(collection, segmentType),
@@ -190,14 +193,30 @@ func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
 
 func (s *baseSegment) SetBloomFilter(bf *pkoracle.BloomFilterSet) {
 	s.bloomFilterSet = bf
+	s.pkCandidate = bf
+}
+
+// SetPKCandidate sets the PK candidate for external collections.
+// Use this for external collections that use ExternalSegmentCandidate instead of BloomFilterSet.
+func (s *baseSegment) SetPKCandidate(candidate pkoracle.Candidate) {
+	s.pkCandidate = candidate
+	// Note: bloomFilterSet remains nil for external collections
 }
 
 func (s *baseSegment) BloomFilterExist() bool {
+	if s.bloomFilterSet == nil {
+		// External collections don't have bloom filters but have PK checking capability
+		return s.pkCandidate != nil
+	}
 	return s.bloomFilterSet.BloomFilterExist()
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 	if s.skipGrowingBF {
+		return
+	}
+	// External collections don't have bloom filters, skip update
+	if s.bloomFilterSet == nil {
 		return
 	}
 	s.bloomFilterSet.UpdateBloomFilter(pks)
@@ -224,18 +243,23 @@ func (s *baseSegment) MayPkExist(pk *storage.LocationsCache) bool {
 	if s.skipGrowingBF {
 		return true
 	}
-	return s.bloomFilterSet.MayPkExist(pk)
+	if s.pkCandidate == nil {
+		return true // No candidate, assume PK might exist
+	}
+	return s.pkCandidate.MayPkExist(pk)
 }
 
 func (s *baseSegment) GetMinPk() *storage.PrimaryKey {
-	if s.bloomFilterSet.Stats() == nil {
+	// External collections don't have bloom filter stats
+	if s.bloomFilterSet == nil || s.bloomFilterSet.Stats() == nil {
 		return nil
 	}
 	return &s.bloomFilterSet.Stats().MinPK
 }
 
 func (s *baseSegment) GetMaxPk() *storage.PrimaryKey {
-	if s.bloomFilterSet.Stats() == nil {
+	// External collections don't have bloom filter stats
+	if s.bloomFilterSet == nil || s.bloomFilterSet.Stats() == nil {
 		return nil
 	}
 	return &s.bloomFilterSet.Stats().MaxPK
@@ -249,7 +273,15 @@ func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 		}
 		return allPositive
 	}
-	return s.bloomFilterSet.BatchPkExist(lc)
+	if s.pkCandidate == nil {
+		// No candidate, assume all PKs might exist
+		allPositive := make([]bool, lc.Size())
+		for i := 0; i < lc.Size(); i++ {
+			allPositive[i] = true
+		}
+		return allPositive
+	}
+	return s.pkCandidate.BatchPkExist(lc)
 }
 
 // ResourceUsageEstimate returns the final estimated resource usage of the segment.

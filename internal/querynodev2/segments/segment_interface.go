@@ -89,8 +89,9 @@ type Segment interface {
 	FinishLoad() error
 	Release(ctx context.Context, opts ...releaseOption)
 
-	// Bloom filter related
+	// Bloom filter / PK candidate related
 	SetBloomFilter(bf *pkoracle.BloomFilterSet)
+	SetPKCandidate(candidate pkoracle.Candidate) // For external collections using ExternalSegmentCandidate
 	BloomFilterExist() bool
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(lc *storage.LocationsCache) bool
