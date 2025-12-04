@@ -24,14 +24,15 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestPackedSerde(t *testing.T) {
 	t.Run("test binlog packed serde v2", func(t *testing.T) {
-		t.Skip("storage v2 cgo not ready yet")
+		paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 		initcore.InitLocalArrowFileSystem("/tmp")
 		size := 10
-		bucketName := "a-bucket"
+		bucketName := ""
 		paths := [][]string{{"/tmp/0"}, {"/tmp/1"}}
 		bufferSize := int64(10 * 1024 * 1024) // 10MB
 		schema := generateTestSchema()
@@ -70,16 +71,18 @@ func TestPackedSerde(t *testing.T) {
 			prepareChunkData(chunkPaths, size)
 		}
 
-		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize, false)
-		assert.NoError(t, err)
+		reader := newIterativePackedRecordReader(paths, schema, bufferSize, nil, nil)
 		defer reader.Close()
 
-		for i := 0; i < size*len(paths); i++ {
-			value, err := reader.NextValue()
+		nRows := 0
+		for {
+			rec, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
 			assert.NoError(t, err)
-			assertTestData(t, i%10+1, *value)
+			nRows += rec.Len()
 		}
-		_, err = reader.NextValue()
-		assert.Equal(t, err, io.EOF)
+		assert.Equal(t, size*len(paths), nRows)
 	})
 }

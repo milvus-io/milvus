@@ -2077,7 +2077,7 @@ class TestUpsertInvalid(TestcaseBase):
             log.debug(f"dirty_i: {dirty_i}")
             for i in range(len(data)):
                 if data[i][dirty_i].__class__ is int:
-                    tmp = data[i][0]
+                    tmp = data[i][dirty_i]
                     data[i][dirty_i] = "iamstring"
                     error = {ct.err_code: 999, ct.err_msg: "The Input data type is inconsistent with defined schema"}
                     collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)

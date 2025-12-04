@@ -7,7 +7,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
 	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
@@ -848,16 +847,11 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 		msg := fmt.Sprintf("geometry field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need geometry array", "got nil", msg)
 	}
-
+	var err error
 	for index, wktdata := range geometryArray {
 		// ignore parsed geom, the check is during insert task pre execute,so geo data became wkb
 		// fmt.Println(strings.Trim(string(wktdata), "\""))
-		geomT, err := wkt.Unmarshal(wktdata)
-		if err != nil {
-			log.Warn("insert invalid Geometry data!! The wkt data has errors", zap.Error(err))
-			return merr.WrapErrIoFailedReason(err.Error())
-		}
-		wkbArray[index], err = wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+		wkbArray[index], err = common.ConvertWKTToWKB(wktdata)
 		if err != nil {
 			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
 			return merr.WrapErrIoFailedReason(err.Error())

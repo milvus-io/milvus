@@ -730,6 +730,7 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
@@ -1009,6 +1010,7 @@ common:
       splitByAvgSize:
         enabled: false # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
+    useLoonFFI: false
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data

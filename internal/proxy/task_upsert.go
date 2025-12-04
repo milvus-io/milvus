@@ -897,11 +897,15 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// set field ID to insert field data
-	err = fillFieldPropertiesBySchema(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.CollectionSchema)
+	// Validate and set field ID to insert field data
+	err = validateFieldDataColumns(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
-		log.Warn("insert set fieldID to fieldData failed when upsert",
-			zap.Error(err))
+		log.Warn("validate field data columns failed when upsert", zap.Error(err))
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
+	}
+	err = fillFieldPropertiesOnly(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	if err != nil {
+		log.Warn("fill field properties failed when upsert", zap.Error(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
 
@@ -1059,6 +1063,21 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 			}
 			it.req.PartitionName = pinfo.name
 		}
+	}
+
+	// deduplicate upsert data to handle duplicate primary keys in the same batch
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
+	if err != nil {
+		log.Warn("fail to get primary field schema", zap.Error(err))
+		return err
+	}
+	duplicate, err := CheckDuplicatePkExist(primaryFieldSchema, it.req.GetFieldsData())
+	if err != nil {
+		log.Warn("fail to check duplicate primary keys", zap.Error(err))
+		return err
+	}
+	if duplicate {
+		return merr.WrapErrParameterInvalidMsg("duplicate primary keys are not allowed in the same batch")
 	}
 
 	it.upsertMsg = &msgstream.UpsertMsg{

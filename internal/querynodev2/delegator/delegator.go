@@ -104,6 +104,7 @@ type ShardDelegator interface {
 
 	// analyzer
 	RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error)
+	GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) ([]*querypb.HighlightResult, error)
 
 	// control
 	Serviceable() bool

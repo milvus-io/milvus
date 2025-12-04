@@ -68,12 +68,10 @@ type rwOptions struct {
 	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 	neededFields        typeutil.Set[int64]
+	useLoonFFI          bool
 }
 
 func (o *rwOptions) validate() error {
-	if o.storageConfig == nil {
-		return merr.WrapErrServiceInternal("storage config is nil")
-	}
 	if o.collectionID == 0 {
 		log.Warn("storage config collection id is empty when init BinlogReader")
 		// return merr.WrapErrServiceInternal("storage config collection id is empty")
@@ -87,6 +85,9 @@ func (o *rwOptions) validate() error {
 			return merr.WrapErrServiceInternal("downloader is nil for v1 reader")
 		}
 	case StorageV2:
+		if o.storageConfig == nil {
+			return merr.WrapErrServiceInternal("storage config is nil")
+		}
 	default:
 		return merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", o.version))
 	}
@@ -161,6 +162,12 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
 	return func(options *rwOptions) {
 		options.neededFields = neededFields
+	}
+}
+
+func WithUseLoonFFI(useLoonFFI bool) RwOption {
+	return func(options *rwOptions) {
+		options.useLoonFFI = useLoonFFI
 	}
 }
 
@@ -267,7 +274,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		if err != nil {
 			return nil, err
 		}
-		rr, err = newCompositeBinlogRecordReader(schema, blobsReader, binlogReaderOpts...)
+		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
 	case StorageV2:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
@@ -275,6 +282,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		sort.Slice(binlogs, func(i, j int) bool {
 			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
 		})
+
 		binlogLists := lo.Map(binlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
 			return fieldBinlog.GetBinlogs()
 		})
@@ -289,17 +297,40 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		rr, err = newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
+		// FIXME: add needed fields support
+		rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if rwOptions.neededFields != nil {
-		rr.SetNeededFields(rwOptions.neededFields)
-	}
 	return rr, nil
+}
+
+func NewManifestRecordReader(ctx context.Context, manifestPath string, schema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	var pluginContext *indexcgopb.StoragePluginContext
+	if hookutil.IsClusterEncyptionEnabled() {
+		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
+			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			if len(unsafe) > 0 {
+				pluginContext = &indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    string(unsafe),
+				}
+			}
+		}
+	}
+	return NewRecordReaderFromManifest(manifestPath, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
@@ -353,12 +384,53 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
 		)
 	case StorageV2:
-		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, maxRowNum,
-			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
-			rwOptions.storageConfig,
-			pluginContext,
-		)
+		if rwOptions.useLoonFFI {
+			return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				pluginContext)
+		} else {
+			return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
+				blobsWriter, allocator, maxRowNum,
+				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+				rwOptions.storageConfig,
+				pluginContext,
+			)
+		}
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+}
+
+func NewDeltalogWriter(
+	ctx context.Context,
+	collectionID, partitionID, segmentID, logID UniqueID,
+	pkType schemapb.DataType,
+	path string,
+	option ...RwOption,
+) (RecordWriter, error) {
+	rwOptions := DefaultWriterOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	return NewLegacyDeltalogWriter(collectionID, partitionID, segmentID, logID, pkType, rwOptions.uploader, path)
+}
+
+func NewDeltalogReader(
+	pkField *schemapb.FieldSchema,
+	paths []string,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+
+	return NewLegacyDeltalogReader(pkField, rwOptions.downloader, paths)
 }
