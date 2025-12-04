@@ -63,6 +63,19 @@ func (m *mockRerankServer) Rerank(ctx context.Context, req *modelservicepb.TextR
 	return m.response, nil
 }
 
+type mockHighlightServer struct {
+	modelservicepb.UnimplementedHighlightServiceServer
+	response *modelservicepb.HighlightResponse
+	err      error
+}
+
+func (m *mockHighlightServer) Highlight(ctx context.Context, req *modelservicepb.HighlightRequest) (*modelservicepb.HighlightResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.response, nil
+}
+
 func TestLoadConfig(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -558,4 +571,104 @@ func TestZillizClient_Embedding_EmptyResponse(t *testing.T) {
 	embeddings, err := client.Embedding(ctx, texts, params)
 	assert.NoError(t, err)
 	assert.Empty(t, embeddings)
+}
+
+func TestZillizClient_Highlight(t *testing.T) {
+	// Setup mock server
+	s, lis, dialer := setupMockServer(t)
+	defer lis.Close()
+	defer s.Stop()
+
+	mockServer := &mockHighlightServer{
+		response: &modelservicepb.HighlightResponse{
+			Status: &modelservicepb.Status{Code: 0, Msg: "success"},
+			Results: []*modelservicepb.HighlightResult{
+				{
+					Sentences: []string{"highlight1", "highlight2"},
+				},
+				{
+					Sentences: []string{"highlight3", "highlight4"},
+				},
+			},
+		},
+	}
+
+	modelservicepb.RegisterHighlightServiceServer(s, mockServer)
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			fmt.Printf("Server exited with error: %v\n", err)
+		}
+	}()
+
+	// Create connection
+	conn, err := grpc.DialContext(
+		context.Background(),
+		"bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	client := &ZillizClient{
+		modelDeploymentID: "test-deployment",
+		clusterID:         "test-cluster",
+		conn:              conn,
+	}
+
+	// Test successful highlight
+	ctx := context.Background()
+	query := "test query"
+	texts := []string{"doc1", "doc2", "doc3"}
+	params := map[string]string{"param1": "value1"}
+	highlights, err := client.Highlight(ctx, query, texts, params)
+	assert.NoError(t, err)
+	assert.Equal(t, [][]string{{"highlight1", "highlight2"}, {"highlight3", "highlight4"}}, highlights)
+}
+
+func TestZillizClient_Highlight_Error(t *testing.T) {
+	// Setup mock server with error
+	s, lis, dialer := setupMockServer(t)
+	defer lis.Close()
+	defer s.Stop()
+
+	mockServer := &mockHighlightServer{
+		err: assert.AnError,
+	}
+
+	modelservicepb.RegisterHighlightServiceServer(s, mockServer)
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			fmt.Printf("Server exited with error: %v\n", err)
+		}
+	}()
+
+	// Create connection
+	conn, err := grpc.DialContext(
+		context.Background(),
+		"bufnet",
+		grpc.WithContextDialer(dialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	client := &ZillizClient{
+		modelDeploymentID: "test-deployment",
+		clusterID:         "test-cluster",
+		conn:              conn,
+	}
+
+	// Test highlight with error
+	ctx := context.Background()
+	query := "test query"
+	texts := []string{"doc1", "doc2", "doc3"}
+	params := map[string]string{"param1": "value1"}
+	highlights, err := client.Highlight(ctx, query, texts, params)
+	assert.Error(t, err)
+	assert.Nil(t, highlights)
 }

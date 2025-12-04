@@ -14,9 +14,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
@@ -412,4 +415,59 @@ func buildStringFragments(task *highlightTask, idx int, frags []*querypb.Highlig
 		result.Fragments = append(result.Fragments, fragString.String())
 	}
 	return result
+}
+
+type SemanticHighlighter struct {
+	highlight *highlight.SemanticHighlight
+}
+
+func newSemanticHighlighter(t *searchTask, extraInfo *models.ModelExtraInfo) (*SemanticHighlighter, error) {
+	conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
+	highlight, err := highlight.NewSemanticHighlight(t.schema.CollectionSchema, t.request.GetHighlighter().GetParams(), conf, extraInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &SemanticHighlighter{highlight: highlight}, nil
+}
+
+func (h *SemanticHighlighter) FieldIDs() []int64 {
+	return h.highlight.FieldIDs()
+}
+
+func (h *SemanticHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+	return &semanticHighlightOperator{highlight: h.highlight}, nil
+}
+
+type semanticHighlightOperator struct {
+	highlight *highlight.SemanticHighlight
+}
+
+func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].(*milvuspb.SearchResults)
+	datas := result.Results.GetFieldsData()
+	if len(datas) == 0 {
+		return []any{result}, nil
+	}
+	highlightResults := []*commonpb.HighlightResult{}
+	for _, fieldID := range op.highlight.FieldIDs() {
+		fieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == fieldID })
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
+		}
+		texts := fieldDatas.GetScalars().GetStringData().GetData()
+		highlights, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts, nil)
+		if err != nil {
+			return nil, err
+		}
+		singeFieldHighlights := &commonpb.HighlightResult{
+			FieldName: fieldDatas.FieldName,
+			Datas:     make([]*commonpb.HighlightData, 0, len(highlights)),
+		}
+		for _, highlight := range highlights {
+			singeFieldHighlights.Datas = append(singeFieldHighlights.Datas, &commonpb.HighlightData{Fragments: highlight})
+		}
+		highlightResults = append(highlightResults, singeFieldHighlights)
+	}
+	result.Results.HighlightResults = highlightResults
+	return []any{result}, nil
 }
