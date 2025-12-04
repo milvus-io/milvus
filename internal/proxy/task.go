@@ -117,10 +117,10 @@ const (
 	TransferReplicaTaskName       = "TransferReplicaTask"
 	ListResourceGroupsTaskName    = "ListResourceGroupsTask"
 	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
-	RunAnalyzerTaskName           = "RunAnalyzer"
-	HighlightTaskName             = "Highlight"
+	RunAnalyzerTaskName = "RunAnalyzer"
+	HighlightTaskName   = "Highlight"
 
-	CreateDatabaseTaskName   = "CreateCollectionTask"
+	CreateDatabaseTaskName = "CreateCollectionTask"
 	DropDatabaseTaskName     = "DropDatabaseTaskName"
 	ListDatabaseTaskName     = "ListDatabaseTaskName"
 	AlterDatabaseTaskName    = "AlterDatabaseTaskName"
@@ -3256,3 +3256,4 @@ func isIgnoreGrowing(params []*commonpb.KeyValuePair) (bool, error) {
 	}
 	return false, nil
 }
+

@@ -507,4 +507,9 @@ RustResult tantivy_set_analyzer_options(const char *params);
 
 bool tantivy_index_exist(const char *path);
 
+RustResult tantivy_compute_phrase_match_slop(const char *tokenizer_params,
+                                             const char *query,
+                                             const char *data,
+                                             uint32_t *slop);
+
 }  // extern "C"

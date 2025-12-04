@@ -55,6 +55,7 @@ type Cluster interface {
 	DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)
+	ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)
 	Start()
 	Stop()
 }
@@ -308,6 +309,21 @@ func (c *QueryCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *
 
 	sendErr := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		resp, err = cli.ValidateAnalyzer(ctx, req)
+	})
+	if sendErr != nil {
+		return nil, sendErr
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	var (
+		resp *querypb.ComputePhraseMatchSlopResponse
+		err  error
+	)
+
+	sendErr := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.ComputePhraseMatchSlop(ctx, req)
 	})
 	if sendErr != nil {
 		return nil, sendErr
