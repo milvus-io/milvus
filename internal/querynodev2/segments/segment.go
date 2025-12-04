@@ -370,6 +370,7 @@ func NewSegment(ctx context.Context,
 			SegmentID:   loadInfo.GetSegmentID(),
 			SegmentType: segmentType,
 			IsSorted:    loadInfo.GetIsSorted(),
+			LoadInfo:    loadInfo,
 		})
 		return nil, err
 	}).Await(); err != nil {
@@ -1365,6 +1366,10 @@ func (s *LocalSegment) FinishLoad() error {
 	s.manager.AddLoadedBinlogSize(binlogSize)
 	s.binlogSize.Store(binlogSize)
 	return nil
+}
+
+func (s *LocalSegment) Load(ctx context.Context) error {
+	return s.csegment.Load(ctx)
 }
 
 type ReleaseScope int

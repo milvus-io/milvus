@@ -205,6 +205,8 @@ ToProtoDataType(DataType data_type) {
             return proto::schema::DataType::Int8Vector;
         case DataType::VECTOR_ARRAY:
             return proto::schema::DataType::ArrayOfVector;
+        case DataType::GEOMETRY:
+            return proto::schema::DataType::Geometry;
 
         // Internal-only or unsupported mappings
         case DataType::ROW:

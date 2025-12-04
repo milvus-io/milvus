@@ -96,26 +96,32 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 		{
 			GroupID: 0,
 			Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+			Fields:  []int64{0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 101},
 		},
 		{
 			GroupID: 102,
 			Columns: []int{13},
+			Fields:  []int64{102},
 		},
 		{
 			GroupID: 103,
 			Columns: []int{14},
+			Fields:  []int64{103},
 		},
 		{
 			GroupID: 104,
 			Columns: []int{15},
+			Fields:  []int64{104},
 		},
 		{
 			GroupID: 105,
 			Columns: []int{16},
+			Fields:  []int64{105},
 		},
 		{
 			GroupID: 106,
 			Columns: []int{17},
+			Fields:  []int64{106},
 		},
 	}
 	wOption := []RwOption{
@@ -155,7 +161,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	rowNum := w.GetRowNum()
 	s.Equal(rowNum, int64(rows))
 
-	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
+	fieldBinlogs, statsLog, bm25StatsLog, _ := w.GetLogs()
 	s.Equal(len(fieldBinlogs), len(columnGroups))
 	for _, columnGroup := range fieldBinlogs {
 		s.Equal(len(columnGroup.Binlogs), 1)
@@ -234,7 +240,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	s.NoError(err)
 	err = w.Close()
 	s.NoError(err)
-	fieldBinlogs, statsLog, bm25StatsLog := w.GetLogs()
+	fieldBinlogs, statsLog, bm25StatsLog, _ := w.GetLogs()
 	s.Equal(len(fieldBinlogs), len(columnGroups))
 
 	s.Equal(statsLog.Binlogs[0].EntriesNum, int64(1))

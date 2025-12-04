@@ -954,6 +954,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100}}}, true),
+			UpdateManifest(1, "files/binlogs/1/2/1000/manifest_0"),
 		)
 		assert.NoError(t, err)
 
@@ -969,6 +970,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, len(updated.Bm25Statslogs[0].Binlogs), 1)
 		assert.Equal(t, updated.State, commonpb.SegmentState_Growing)
 		assert.Equal(t, updated.NumOfRows, int64(10))
+		assert.Equal(t, updated.ManifestPath, "files/binlogs/1/2/1000/manifest_0")
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
@@ -991,6 +993,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
+			UpdateManifest(1, "files/binlogs/1/2/1000/manifest_2"),
 		)
 		assert.NoError(t, err)
 
@@ -1002,6 +1005,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, len(updated.Deltalogs), 0)
 		assert.Equal(t, len(updated.Bm25Statslogs), 0)
 		assert.Equal(t, updated.State, commonpb.SegmentState_Flushed)
+		assert.Equal(t, updated.ManifestPath, "files/binlogs/1/2/1000/manifest_2")
 
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
@@ -1121,6 +1125,12 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			context.TODO(),
 			UpdateIsImporting(1, true),
+		)
+		assert.NoError(t, err)
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateManifest(1, "files/binlogs/1/2/1000/manifest_0"),
 		)
 		assert.NoError(t, err)
 

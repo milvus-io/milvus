@@ -92,6 +92,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		zap.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
 		zap.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
 		zap.Int("bm25logNum", lo.SumBy(deltaBm25StatsBinlogs, getBinlogNum)),
+		zap.String("manifestPath", pack.manifestPath),
 		zap.String("vChannelName", pack.channelName),
 	)
 
@@ -118,6 +119,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		SegLevel:        pack.level,
 		StorageVersion:  segment.GetStorageVersion(),
 		WithFullBinlogs: true,
+		ManifestPath:    pack.manifestPath,
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)

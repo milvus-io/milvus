@@ -344,7 +344,8 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
 		if err != nil {
 			return err
 		}
@@ -367,7 +368,8 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
 		if err != nil {
 			return err
 		}
@@ -427,7 +429,8 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
 			storage.WithBufferSize(t.bufferSize),
-			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
 		if err != nil {
 			return err
 		}
@@ -497,6 +500,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 			Deltalogs:      segment.Deltalogs,
 			FieldBinlogs:   segment.FieldBinlogs,
 			StorageVersion: segment.StorageVersion,
+			Manifest:       segment.GetManifest(),
 		}
 		future := t.mappingPool.Submit(func() (any, error) {
 			err := t.mappingSegment(ctx, segmentClone)
@@ -605,17 +609,33 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return merr.WrapErrIllegalCompactionPlan()
 	}
 
-	rr, err := storage.NewBinlogRecordReader(ctx,
-		segment.GetFieldBinlogs(),
-		t.plan.Schema,
-		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-			return t.binlogIO.Download(ctx, paths)
-		}),
-		storage.WithCollectionID(t.GetCollection()),
-		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.bufferSize),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-	)
+	var rr storage.RecordReader
+	if segment.GetManifest() != "" {
+		rr, err = storage.NewManifestRecordReader(ctx,
+			segment.GetManifest(),
+			t.plan.Schema,
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return t.binlogIO.Download(ctx, paths)
+			}),
+			storage.WithCollectionID(t.GetCollection()),
+			storage.WithVersion(segment.StorageVersion),
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	} else {
+		rr, err = storage.NewBinlogRecordReader(ctx,
+			segment.GetFieldBinlogs(),
+			t.plan.Schema,
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return t.binlogIO.Download(ctx, paths)
+			}),
+			storage.WithCollectionID(t.GetCollection()),
+			storage.WithVersion(segment.StorageVersion),
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	}
+
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
@@ -902,18 +922,35 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))
 		return nil, fmt.Errorf("unsupported storage version %d", segment.GetStorageVersion())
 	}
-	rr, err := storage.NewBinlogRecordReader(ctx,
-		binlogs,
-		t.plan.GetSchema(),
-		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-			return t.binlogIO.Download(ctx, paths)
-		}),
-		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.bufferSize),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithNeededFields(requiredFields),
-		storage.WithCollectionID(t.GetCollection()),
-	)
+	var rr storage.RecordReader
+	var err error
+	if segment.GetManifest() != "" {
+		rr, err = storage.NewManifestRecordReader(ctx,
+			segment.GetManifest(),
+			t.plan.GetSchema(),
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return t.binlogIO.Download(ctx, paths)
+			}),
+			storage.WithVersion(segment.StorageVersion),
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithNeededFields(requiredFields),
+			storage.WithCollectionID(t.GetCollection()),
+		)
+	} else {
+		rr, err = storage.NewBinlogRecordReader(ctx,
+			binlogs,
+			t.plan.GetSchema(),
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return t.binlogIO.Download(ctx, paths)
+			}),
+			storage.WithVersion(segment.StorageVersion),
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithNeededFields(requiredFields),
+			storage.WithCollectionID(t.GetCollection()),
+		)
+	}
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return make(map[interface{}]int64), err

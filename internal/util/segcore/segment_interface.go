@@ -80,6 +80,9 @@ type basicSegmentMethodSet interface {
 	// FinishLoad wraps up the load process and let segcore do the leftover jobs.
 	FinishLoad() error
 
+	// Load invokes segment managed loading.
+	Load(ctx context.Context) error
+
 	// Release releases the segment.
 	Release()
 }

@@ -150,7 +150,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig), storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
 	if err != nil {
 		return nil, err
 	}
@@ -217,14 +217,26 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewBinlogRecordReader(ctx,
-		seg.GetFieldBinlogs(),
-		t.plan.GetSchema(),
-		storage.WithCollectionID(t.collectionID),
-		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithVersion(seg.GetStorageVersion()),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-	)
+	var reader storage.RecordReader
+	if seg.GetManifest() != "" {
+		reader, err = storage.NewManifestRecordReader(ctx,
+			seg.GetManifest(),
+			t.plan.GetSchema(),
+			storage.WithCollectionID(t.collectionID),
+			storage.WithDownloader(t.binlogIO.Download),
+			storage.WithVersion(seg.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	} else {
+		reader, err = storage.NewBinlogRecordReader(ctx,
+			seg.GetFieldBinlogs(),
+			t.plan.GetSchema(),
+			storage.WithCollectionID(t.collectionID),
+			storage.WithDownloader(t.binlogIO.Download),
+			storage.WithVersion(seg.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	}
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return

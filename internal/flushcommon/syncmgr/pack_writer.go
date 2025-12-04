@@ -18,8 +18,12 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"path"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -306,22 +310,100 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 	if pack.deltaData == nil {
 		return &datapb.FieldBinlog{}, nil
 	}
-	s, err := NewStorageSerializer(bw.metaCache, bw.schema)
-	if err != nil {
-		return nil, err
+
+	pkField := func() *schemapb.FieldSchema {
+		for _, field := range bw.schema.Fields {
+			if field.IsPrimaryKey {
+				return field
+			}
+		}
+		return nil
+	}()
+	if pkField == nil {
+		return nil, fmt.Errorf("primary key field not found")
 	}
-	deltaBlob, err := s.serializeDeltalog(pack)
+
+	logID := bw.nextID()
+	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, logID)
+	path := path.Join(bw.chunkManager.RootPath(), common.SegmentDeltaLogPath, k)
+	writer, err := storage.NewDeltalogWriter(
+		ctx, pack.collectionID, pack.partitionID, pack.segmentID, logID, pkField.DataType, path,
+		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			// Get the only blob in the map
+			if len(kvs) != 1 {
+				return fmt.Errorf("expected 1 blob, got %d", len(kvs))
+			}
+			for _, blob := range kvs {
+				return bw.chunkManager.Write(ctx, path, blob)
+			}
+			return nil
+		}),
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, bw.nextID())
-	deltalog, err := bw.writeLog(ctx, deltaBlob, common.SegmentDeltaLogPath, k, pack)
+	pkType := func() arrow.DataType {
+		switch pkField.DataType {
+		case schemapb.DataType_Int64:
+			return arrow.PrimitiveTypes.Int64
+		case schemapb.DataType_VarChar:
+			return arrow.BinaryTypes.String
+		default:
+			return nil
+		}
+	}()
+	if pkType == nil {
+		return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
+	}
+
+	pkBuilder := array.NewBuilder(memory.DefaultAllocator, pkType)
+	tsBuilder := array.NewBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+	defer pkBuilder.Release()
+	defer tsBuilder.Release()
+
+	for i := int64(0); i < pack.deltaData.RowCount; i++ {
+		switch pkField.DataType {
+		case schemapb.DataType_Int64:
+			pkBuilder.(*array.Int64Builder).Append(pack.deltaData.Pks[i].GetValue().(int64))
+		case schemapb.DataType_VarChar:
+			pkBuilder.(*array.StringBuilder).Append(pack.deltaData.Pks[i].GetValue().(string))
+		default:
+			return nil, fmt.Errorf("unexpected pk type %v", pkField.DataType)
+		}
+		tsBuilder.(*array.Int64Builder).Append(int64(pack.deltaData.Tss[i]))
+	}
+
+	pkArray := pkBuilder.NewArray()
+	tsArray := tsBuilder.NewArray()
+	record := storage.NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: pkType},
+		{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+	}, nil), []arrow.Array{pkArray, tsArray}, pack.deltaData.RowCount), map[storage.FieldID]int{
+		common.RowIDField:     0,
+		common.TimeStampField: 1,
+	})
+	err = writer.Write(record)
 	if err != nil {
 		return nil, err
 	}
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	deltalog := &datapb.Binlog{
+		EntriesNum:    pack.deltaData.RowCount,
+		TimestampFrom: pack.tsFrom,
+		TimestampTo:   pack.tsTo,
+		LogPath:       path,
+		LogSize:       pack.deltaData.Size() / 4, // Not used
+		MemorySize:    pack.deltaData.Size(),
+	}
+	bw.sizeWritten += deltalog.LogSize
+
 	return &datapb.FieldBinlog{
-		FieldID: s.pkField.GetFieldID(),
+		FieldID: pkField.GetFieldID(),
 		Binlogs: []*datapb.Binlog{deltalog},
 	}, nil
 }

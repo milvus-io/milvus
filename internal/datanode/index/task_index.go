@@ -310,6 +310,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 			it.req.GetCollectionID(),
 			it.req.GetPartitionID(),
 			it.req.GetSegmentID())
+		buildIndexParams.Manifest = it.req.GetManifest()
 	}
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
 

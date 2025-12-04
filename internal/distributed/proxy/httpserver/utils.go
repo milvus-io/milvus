@@ -1725,6 +1725,18 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		}
 		return data, nil
 
+	case schemapb.DataType_Geometry:
+		v, ok := value.(string)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as geometry default value`, value, value)
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{
+				StringData: v,
+			},
+		}
+		return data, nil
+
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		v, ok := value.(string)
 		if !ok {

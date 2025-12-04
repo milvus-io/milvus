@@ -22,6 +22,7 @@
 #include "index/Index.h"
 #include "cachinglayer/Utils.h"
 #include "segcore/ConcurrentVector.h"
+#include "segcore/Types.h"
 
 namespace milvus::segcore {
 
@@ -142,5 +143,9 @@ getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
 
 milvus::cachinglayer::CellDataType
 getCellDataType(bool is_vector, bool is_index);
+
+void
+LoadIndexData(milvus::tracer::TraceContext& ctx,
+              milvus::segcore::LoadIndexInfo* load_index_info);
 
 }  // namespace milvus::segcore

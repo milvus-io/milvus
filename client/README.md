@@ -10,7 +10,7 @@ Go MilvusClient for [Milvus](https://github.com/milvus-io/milvus). To contribute
 
 ### Prerequisites
 
-Go 1.24.9 or higher
+Go 1.24.11 or higher
 
 ### Install Milvus Go SDK
 
