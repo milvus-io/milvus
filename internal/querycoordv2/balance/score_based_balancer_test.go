@@ -282,7 +282,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			for i := range c.collectionIDs {
 				plans := balancer.AssignSegment(ctx, c.collectionIDs[i], c.assignments[i], c.nodes, false)
 				if c.unstableAssignment {
-					suite.Len(plans, len(c.expectPlans[i]))
+					assertSegmentPlanNumAndTargetNodeMatch(&suite.Suite, c.expectPlans[i], plans)
 				} else {
 					assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans[i], plans)
 				}
@@ -1699,8 +1699,9 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignChannel() {
 				{CollectionID: 1, ChannelName: "channel1"},
 				{CollectionID: 1, ChannelName: "channel2"},
 			},
-			states:        []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
-			distributions: map[int64][]*meta.DmChannel{},
+			states:             []session.State{session.NodeStateNormal, session.NodeStateNormal, session.NodeStateNormal},
+			distributions:      map[int64][]*meta.DmChannel{},
+			unstableAssignment: true,
 			expectPlans: []ChannelAssignPlan{
 				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}}, From: -1, To: 2},
 				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}}, From: -1, To: 3},
@@ -1771,7 +1772,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignChannel() {
 			// Test channel assignment
 			plans := balancer.AssignChannel(ctx, c.collectionID, dmChannels, c.nodes, true)
 			if c.unstableAssignment {
-				suite.Len(plans, len(c.expectPlans))
+				assertChannelPlanNumAndTargetNodeMatch(&suite.Suite, c.expectPlans, plans)
 			} else {
 				assertChannelAssignPlanElementMatch(&suite.Suite, c.expectPlans, plans)
 			}

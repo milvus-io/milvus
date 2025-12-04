@@ -2002,6 +2002,7 @@ const (
 	DataNode_DropImport_FullMethodName                    = "/milvus.proto.data.DataNode/DropImport"
 	DataNode_QuerySlot_FullMethodName                     = "/milvus.proto.data.DataNode/QuerySlot"
 	DataNode_DropCompactionPlan_FullMethodName            = "/milvus.proto.data.DataNode/DropCompactionPlan"
+	DataNode_SyncFileResource_FullMethodName              = "/milvus.proto.data.DataNode/SyncFileResource"
 )
 
 // DataNodeClient is the client API for DataNode service.
@@ -2031,6 +2032,8 @@ type DataNodeClient interface {
 	DropImport(ctx context.Context, in *DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	QuerySlot(ctx context.Context, in *QuerySlotRequest, opts ...grpc.CallOption) (*QuerySlotResponse, error)
 	DropCompactionPlan(ctx context.Context, in *DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// file resource
+	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type dataNodeClient struct {
@@ -2221,6 +2224,15 @@ func (c *dataNodeClient) DropCompactionPlan(ctx context.Context, in *DropCompact
 	return out, nil
 }
 
+func (c *dataNodeClient) SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataNode_SyncFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataNodeServer is the server API for DataNode service.
 // All implementations should embed UnimplementedDataNodeServer
 // for forward compatibility
@@ -2248,6 +2260,8 @@ type DataNodeServer interface {
 	DropImport(context.Context, *DropImportRequest) (*commonpb.Status, error)
 	QuerySlot(context.Context, *QuerySlotRequest) (*QuerySlotResponse, error)
 	DropCompactionPlan(context.Context, *DropCompactionPlanRequest) (*commonpb.Status, error)
+	// file resource
+	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedDataNodeServer should be embedded to have forward compatible implementations.
@@ -2313,6 +2327,9 @@ func (UnimplementedDataNodeServer) QuerySlot(context.Context, *QuerySlotRequest)
 }
 func (UnimplementedDataNodeServer) DropCompactionPlan(context.Context, *DropCompactionPlanRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropCompactionPlan not implemented")
+}
+func (UnimplementedDataNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
 }
 
 // UnsafeDataNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -2686,6 +2703,24 @@ func _DataNode_DropCompactionPlan_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataNode_SyncFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.SyncFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataNodeServer).SyncFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataNode_SyncFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataNodeServer).SyncFileResource(ctx, req.(*internalpb.SyncFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataNode_ServiceDesc is the grpc.ServiceDesc for DataNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2772,6 +2807,10 @@ var DataNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DropCompactionPlan",
 			Handler:    _DataNode_DropCompactionPlan_Handler,
+		},
+		{
+			MethodName: "SyncFileResource",
+			Handler:    _DataNode_SyncFileResource_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

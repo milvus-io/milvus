@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -772,4 +773,20 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		log.Ctx(ctx).Warn("DropTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
+}
+
+func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Uint64("version", req.GetVersion()))
+	log.Info("sync file resource", zap.Any("resources", req.Resources))
+
+	if !node.isHealthy() {
+		log.Warn("failed to sync file resource, DataNode is not healthy")
+		return merr.Status(merr.ErrServiceNotReady), nil
+	}
+
+	err := fileresource.Sync(req.GetResources())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
 }

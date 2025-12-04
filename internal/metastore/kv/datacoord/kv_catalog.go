@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -1002,46 +1003,69 @@ func (kc *Catalog) DropUpdateExternalCollectionTask(ctx context.Context, taskID 
 	return kc.MetaKv.Remove(ctx, key)
 }
 
-func (kc *Catalog) SaveFileResource(ctx context.Context, resource *model.FileResource) error {
-	k := BuildFileResourceKey(resource.ID)
-	v, err := proto.Marshal(resource.Marshal())
+func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
+	kvs := make(map[string]string)
+
+	k := BuildFileResourceKey(resource.Id)
+	v, err := proto.Marshal(resource)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
 		return err
 	}
-	if err = kc.MetaKv.Save(ctx, k, string(v)); err != nil {
+	kvs[k] = string(v)
+	kvs[FileResourceVersionKey] = fmt.Sprint(version)
+
+	if err = kc.MetaKv.MultiSave(ctx, kvs); err != nil {
 		log.Ctx(ctx).Warn("fail to save resource info", zap.String("key", k), zap.Error(err))
 		return err
 	}
 	return nil
 }
 
-func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64) error {
+func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error {
 	k := BuildFileResourceKey(resourceID)
-	if err := kc.MetaKv.Remove(ctx, k); err != nil {
+	if err := kc.MetaKv.MultiSaveAndRemove(ctx, map[string]string{FileResourceVersionKey: fmt.Sprint(version)}, []string{k}); err != nil {
 		log.Ctx(ctx).Warn("fail to remove resource info", zap.String("key", k), zap.Error(err))
 		return err
 	}
 	return nil
 }
 
-func (kc *Catalog) ListFileResource(ctx context.Context) ([]*model.FileResource, error) {
+func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
 	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	infos := make([]*model.FileResource, 0, len(values))
+	var version uint64 = 0
+	exist, err := kc.MetaKv.Has(ctx, FileResourceVersionKey)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if exist {
+		strVersion, err := kc.MetaKv.Load(ctx, FileResourceVersionKey)
+		if err != nil {
+			return nil, 0, err
+		}
+		v, err := strconv.ParseUint(strVersion, 10, 64)
+		if err != nil {
+			return nil, 0, err
+		}
+		version = v
+	}
+
+	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
 	for _, v := range values {
-		info := &datapb.FileResourceInfo{}
+		info := &internalpb.FileResourceInfo{}
 		err := proto.Unmarshal([]byte(v), info)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		infos = append(infos, model.UnmarshalFileResourceInfo(info))
+		infos = append(infos, info)
 	}
 
-	return infos, nil
+	return infos, version, nil
 }
 
 func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
