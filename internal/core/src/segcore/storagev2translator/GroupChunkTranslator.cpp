@@ -108,11 +108,16 @@ GroupChunkTranslator::GroupChunkTranslator(
     // Get row group metadata from files
     row_group_meta_list_.reserve(insert_files_.size());
     for (const auto& file : insert_files_) {
-        auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+        auto result = milvus_storage::FileRowGroupReader::Make(
             fs,
             file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             storage::GetReaderProperties());
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       result.status().ToString());
+        auto reader = result.ValueOrDie();
+
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
         auto status = reader->Close();

@@ -22,14 +22,14 @@
 #include "monitor/scope_metric.h"
 
 ReaderHandle
-createFFIReader(char* manifest,
+createFFIReader(ColumnGroupsHandle column_groups_handle,
                 struct ArrowSchema* schema,
                 char** needed_columns,
                 int64_t needed_columns_size,
                 const std::shared_ptr<Properties>& properties) {
     ReaderHandle reader_handler = 0;
 
-    FFIResult result = reader_new(manifest,
+    FFIResult result = reader_new(column_groups_handle,
                                   schema,
                                   needed_columns,
                                   needed_columns_size,
@@ -97,7 +97,7 @@ NewPackedFFIReader(const char* manifest_path,
 }
 
 CStatus
-NewPackedFFIReaderWithManifest(const char* manifest_content,
+NewPackedFFIReaderWithManifest(const ColumnGroupsHandle column_groups_handle,
                                struct ArrowSchema* schema,
                                char** needed_columns,
                                int64_t needed_columns_size,
@@ -109,12 +109,10 @@ NewPackedFFIReaderWithManifest(const char* manifest_content,
     try {
         auto properties =
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
-        // Parse the column groups, the column groups is a JSON string
-        auto cpp_column_groups =
-            std::make_shared<milvus_storage::api::ColumnGroups>();
-        auto des_result =
-            cpp_column_groups->deserialize(std::string_view(manifest_content));
-        AssertInfo(des_result.ok(), "failed to deserialize column groups");
+        auto* cg_ptr = reinterpret_cast<
+            std::shared_ptr<milvus_storage::api::ColumnGroups>*>(
+            column_groups_handle);
+        auto cpp_column_groups = *cg_ptr;
 
         auto reader = GetLoonReader(cpp_column_groups,
                                     schema,
