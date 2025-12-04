@@ -985,6 +985,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return res;
     }
 
+    // decode LOB reference from 16-byte binary data (little endian)
+    // uses milvus::LOBReference from common/Types.h
+    static milvus::LOBReference
+    DecodeLOBReference(const std::string_view& data);
+
+    // read actual text from LOB file using LOB reference
+    std::string
+    ReadLOBText(milvus::OpContext* op_ctx,
+                const milvus::LOBReference& ref) const;
+
+    // load LOB columns for TEXT fields
+    void
+    load_lob_columns(const LoadFieldDataInfo& load_info);
+
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -1042,6 +1056,27 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 
     SegmentStats stats_{};
+
+    // LOB metadata: stored during load, no file I/O
+    // lob_file_id -> (LOBFileInfo, field_id, enable_mmap, load_priority)
+    struct LOBColumnMeta {
+        LOBFileInfo file_info;
+        FieldId field_id;
+        bool enable_mmap;
+        milvus::proto::common::LoadPriority load_priority;
+    };
+    folly::Synchronized<std::unordered_map<uint32_t, LOBColumnMeta>>
+        lob_metadata_;
+
+    // LOB columns: lazily created on first access during retrieve
+    // lob_file_id -> ChunkedColumn mapping
+    mutable folly::Synchronized<
+        std::unordered_map<uint32_t, std::shared_ptr<ChunkedColumnInterface>>>
+        lob_columns_;
+
+    // helper to get or create LOB column lazily
+    std::shared_ptr<ChunkedColumnInterface>
+    GetOrCreateLOBColumn(uint32_t lob_file_id) const;
 
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field

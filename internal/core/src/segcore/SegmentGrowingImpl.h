@@ -29,6 +29,7 @@
 #include "InsertRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
+#include "GrowingLOBManager.h"
 #include "common/EasyAssert.h"
 #include "common/IndexMeta.h"
 #include "common/Types.h"
@@ -586,6 +587,26 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index);
 
+    // LOB-related helper methods
+    // get or create LOB manager (lazy initialization)
+    GrowingLOBManager*
+    get_lob_manager();
+
+    // process TEXT field data during insert, converting large TEXT to LOB references
+    void
+    process_text_field_with_lob(FieldId field_id,
+                                const DataArray& data_array,
+                                int64_t reserved_offset,
+                                int64_t size);
+
+    // retrieve TEXT field data, resolving LOB references
+    void
+    retrieve_text_field_with_lob(
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<std::string>* output) const;
+
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
@@ -602,6 +623,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // deleted pks
     mutable DeletedRecord<false> deleted_record_;
+
+    // LOB manager for TEXT fields in growing segment
+    std::unique_ptr<GrowingLOBManager> lob_manager_;
 
     int64_t id_;
 

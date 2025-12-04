@@ -856,6 +856,92 @@ vector_bytes_per_element(const DataType data_type, int64_t dim) {
     }
 }
 
+// LOB (Large Object) Reference structure for TEXT fields
+// This is a 16-byte reference that points to a LOB entry in either:
+// - Sealed segments: LOB file in object storage (lob_file_id=file_id, row_offset=row_index)
+// - Growing segments: flat file with offset/size (lob_file_id=byte_offset, row_offset=size)
+#pragma pack(push, 1)
+struct LOBReference {
+    uint64_t
+        lob_file_id;  // For sealed: LOB file ID; For growing: byte offset in file
+    uint32_t
+        row_offset;  // For sealed: row index; For growing: data size in bytes
+    uint32_t reserved;  // reserved for future use
+
+    // default constructor
+    LOBReference() : lob_file_id(0), row_offset(0), reserved(0) {
+    }
+
+    // constructor with values
+    LOBReference(uint64_t file_id, uint32_t offset, uint32_t res = 0)
+        : lob_file_id(file_id), row_offset(offset), reserved(res) {
+    }
+
+    // constructor for growing segment (offset + size)
+    static LOBReference
+    ForGrowing(uint64_t byte_offset, uint32_t size) {
+        return LOBReference(byte_offset, size, 0);
+    }
+
+    // getters for growing segment interpretation
+    uint64_t
+    GetOffset() const {
+        return lob_file_id;
+    }
+    uint32_t
+    GetSize() const {
+        return row_offset;
+    }
+
+    // encode to 16 bytes (little-endian)
+    std::array<uint8_t, 16>
+    encode() const {
+        std::array<uint8_t, 16> bytes{};
+        // write lob_file_id (8 bytes)
+        for (int i = 0; i < 8; ++i) {
+            bytes[i] = (lob_file_id >> (i * 8)) & 0xFF;
+        }
+        // write row_offset (4 bytes)
+        for (int i = 0; i < 4; ++i) {
+            bytes[8 + i] = (row_offset >> (i * 8)) & 0xFF;
+        }
+        // write reserved (4 bytes)
+        for (int i = 0; i < 4; ++i) {
+            bytes[12 + i] = (reserved >> (i * 8)) & 0xFF;
+        }
+        return bytes;
+    }
+
+    // decode from 16 bytes (little-endian)
+    static LOBReference
+    decode(const std::array<uint8_t, 16>& bytes) {
+        LOBReference ref;
+        // read lob_file_id (8 bytes)
+        ref.lob_file_id = 0;
+        for (int i = 0; i < 8; ++i) {
+            ref.lob_file_id |= (static_cast<uint64_t>(bytes[i]) << (i * 8));
+        }
+        // read row_offset (4 bytes)
+        ref.row_offset = 0;
+        for (int i = 0; i < 4; ++i) {
+            ref.row_offset |= (static_cast<uint32_t>(bytes[8 + i]) << (i * 8));
+        }
+        // read reserved (4 bytes)
+        ref.reserved = 0;
+        for (int i = 0; i < 4; ++i) {
+            ref.reserved |= (static_cast<uint32_t>(bytes[12 + i]) << (i * 8));
+        }
+        return ref;
+    }
+
+    // check if this is an inline reference (all zeros)
+    bool
+    is_inline() const {
+        return lob_file_id == 0 && row_offset == 0 && reserved == 0;
+    }
+};
+#pragma pack(pop)
+
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {
