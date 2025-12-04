@@ -595,7 +595,7 @@ class ResponseChecker:
                 log.error(f"Query result {query_res} is not list")
                 return False
 
-        log.warning(f'Expected query result is {exp_res}')
+        # log.warning(f'Expected query result is {exp_res}')
 
     @staticmethod
     def check_query_iterator(query_res, func_name, check_items):
