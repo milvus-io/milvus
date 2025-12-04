@@ -112,6 +112,7 @@ const (
 	organizeOp           = "organize"
 	endOp                = "end"
 	lambdaOp             = "lambda"
+	highlightOp          = "highlight"
 )
 
 const (
@@ -128,6 +129,7 @@ var opFactory = map[string]func(t *searchTask, params map[string]any) (operator,
 	requeryOp:            newRequeryOperator,
 	lambdaOp:             newLambdaOperator,
 	endOp:                newEndOperator,
+	highlightOp:          newHighlightOperator,
 }
 
 func NewNode(info *nodeDef, t *searchTask) (*Node, error) {
@@ -596,6 +598,10 @@ func (op *endOperator) run(ctx context.Context, span trace.Span, inputs ...any) 
 	return []any{result}, nil
 }
 
+func newHighlightOperator(t *searchTask, _ map[string]any) (operator, error) {
+	return t.highlighter.AsSearchPipelineOperator(t)
+}
+
 func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	multipleMilvusResults := inputs[0].([]*milvuspb.SearchResults)
 	idInt64Type := false
@@ -652,6 +658,17 @@ func newPipeline(pipeDef *pipelineDef, t *searchTask) (*pipeline, error) {
 	return &pipeline{name: pipeDef.name, nodes: nodes}, nil
 }
 
+func (p *pipeline) AddNodes(t *searchTask, nodes ...*nodeDef) error {
+	for _, def := range nodes {
+		node, err := NewNode(def, t)
+		if err != nil {
+			return err
+		}
+		p.nodes = append(p.nodes, node)
+	}
+	return nil
+}
+
 func (p *pipeline) Run(ctx context.Context, span trace.Span, toReduceResults []*internalpb.SearchResults, storageCost segcore.StorageCost) (*milvuspb.SearchResults, segcore.StorageCost, error) {
 	log.Ctx(ctx).Debug("SearchPipeline run", zap.String("pipeline", p.String()))
 	msg := opMsg{}
@@ -682,6 +699,20 @@ type pipelineDef struct {
 	nodes []*nodeDef
 }
 
+var filterFieldNode = &nodeDef{
+	name:    "filter_field",
+	inputs:  []string{"result", "reduced"},
+	outputs: []string{"output"},
+	opName:  endOp,
+}
+
+var highlightNode = &nodeDef{
+	name:    "highlight",
+	inputs:  []string{"result"},
+	outputs: []string{"output"},
+	opName:  highlightOp,
+}
+
 var searchPipe = &pipelineDef{
 	name: "search",
 	nodes: []*nodeDef{
@@ -702,12 +733,6 @@ var searchPipe = &pipelineDef{
 				},
 			},
 			opName: lambdaOp,
-		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
 		},
 	},
 }
@@ -767,12 +792,6 @@ var searchWithRequeryPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
-		},
 	},
 }
 
@@ -824,12 +843,6 @@ var searchWithRerankPipe = &pipelineDef{
 				},
 			},
 			opName: lambdaOp,
-		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
 		},
 	},
 }
@@ -899,12 +912,6 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
-		},
 	},
 }
 
@@ -922,12 +929,6 @@ var hybridSearchPipe = &pipelineDef{
 			inputs:  []string{"reduced", "metrics"},
 			outputs: []string{"result"},
 			opName:  rerankOp,
-		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
 		},
 	},
 }
@@ -1030,12 +1031,6 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
-		},
 	},
 }
 
@@ -1093,12 +1088,6 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 			},
 			opName: lambdaOp,
 		},
-		{
-			name:    "filter_field",
-			inputs:  []string{"result", "reduced"},
-			outputs: []string{pipelineOutput},
-			opName:  endOp,
-		},
 	},
 }
 
@@ -1141,4 +1130,24 @@ func aggregatedAllSearchCount(searchResults []*milvuspb.SearchResults) int64 {
 		}
 	}
 	return allSearchCount
+}
+
+func newSearchPipeline(t *searchTask) (*pipeline, error) {
+	p, err := newBuiltInPipeline(t)
+	if err != nil {
+		return nil, err
+	}
+
+	if t.highlighter != nil {
+		err := p.AddNodes(t, highlightNode, filterFieldNode)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err := p.AddNodes(t, filterFieldNode)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
 }
