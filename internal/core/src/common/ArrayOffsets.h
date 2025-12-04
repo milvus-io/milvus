@@ -20,6 +20,7 @@
 #include <utility>
 #include <map>
 #include <shared_mutex>
+#include "cachinglayer/Manager.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -67,6 +68,13 @@ class ArrayOffsetsSealed : public IArrayOffsets {
           row_to_element_start_(std::move(row_to_element_start)) {
         AssertInfo(!row_to_element_start_.empty(),
                    "row_to_element_start must have at least one element");
+    }
+
+    ~ArrayOffsetsSealed() {
+        cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            {static_cast<int64_t>(4 * GetRowCount() +
+                                  4 * GetTotalElementCount()),
+             0});
     }
 
     int64_t

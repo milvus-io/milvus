@@ -158,6 +158,9 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         row_count,
         total_elements);
 
+    cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+        {static_cast<int64_t>(4 * row_count + 4 * total_elements), 0});
+
     return ArrayOffsetsSealed(std::move(element_row_ids),
                               std::move(row_to_element_start));
 }
