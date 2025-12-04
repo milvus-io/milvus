@@ -51,6 +51,7 @@ type Collection struct {
 	EnableDynamicField   bool
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
+	DoPhysicalBackfill   bool
 }
 
 func (c *Collection) Available() bool {
@@ -82,6 +83,7 @@ func (c *Collection) ShallowClone() *Collection {
 		Functions:            c.Functions,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
+		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -110,6 +112,7 @@ func (c *Collection) Clone() *Collection {
 		Functions:            CloneFunctions(c.Functions),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
+		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -158,6 +161,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
+			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
 		}
 	}
 }
@@ -198,6 +202,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
+		DoPhysicalBackfill:   coll.Schema.DoPhysicalBackfill,
 	}
 }
 
@@ -249,6 +254,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		EnableDynamicField: coll.EnableDynamicField,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
+		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	if c.withFields {

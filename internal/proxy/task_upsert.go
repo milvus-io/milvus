@@ -71,6 +71,7 @@ type upsertTask struct {
 	// delete task need use the oldIDs
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
+	schemaVersion   int32
 
 	// write after read, generate write part by queryPreExecute
 	node types.ProxyComponent

@@ -39,6 +39,9 @@ type clusteringCompactionPolicy struct {
 	handler   Handler
 }
 
+// Ensure clusteringCompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*clusteringCompactionPolicy)(nil)
+
 func newClusteringCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *clusteringCompactionPolicy {
 	return &clusteringCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
@@ -47,6 +50,10 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() &&
 		Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() &&
 		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool()
+}
+
+func (policy *clusteringCompactionPolicy) Name() string {
+	return "ClusteringCompactionPolicy"
 }
 
 func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {

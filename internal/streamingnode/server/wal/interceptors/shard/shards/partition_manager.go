@@ -211,6 +211,6 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment()
+	m.asyncAllocSegment(req.SchemaVersion)
 	return nil, ErrWaitForNewSegment
 }

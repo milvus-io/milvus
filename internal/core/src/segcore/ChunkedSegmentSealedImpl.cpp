@@ -1068,10 +1068,6 @@ ChunkedSegmentSealedImpl::get_deleted_count() const {
     return deleted_record_.size();
 }
 
-const Schema&
-ChunkedSegmentSealedImpl::get_schema() const {
-    return *schema_;
-}
 
 void
 ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
@@ -1582,7 +1578,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       scalar_indexings_(std::unordered_map<FieldId, index::CacheIndexBasePtr>(
           schema->size())),
       insert_record_(*schema, MAX_ROW_COUNT),
-      schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
@@ -1599,6 +1594,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                   callback);
           },
           segment_id) {
+    schema_ = std::move(schema);
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     mmap_descriptor_ = mcm->Register();
 }
@@ -2599,7 +2595,7 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 
 void
 ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
-    if (sch->get_schema_version() > schema_->get_schema_version()) {
+    if (sch->get_schema_version() > schema_->get_schema_version() && !sch->get_do_physical_backfill()) {
         LOG_INFO(
             "lazy check schema segment {} found newer schema version, "
             "current "

@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -45,6 +46,16 @@ const (
 	TriggerTypeSort
 	TriggerTypePartitionKeySort
 	TriggerTypeClusteringPartitionKeySort
+	TriggerTypeBackfill
+)
+
+type TickerType int8
+
+const (
+	L0Ticker TickerType = iota + 1
+	ClusteringTicker
+	SingleTicker
+	BackfillTicker
 )
 
 func (t CompactionTriggerType) String() string {
@@ -67,9 +78,21 @@ func (t CompactionTriggerType) String() string {
 		return "PartitionKeySort"
 	case TriggerTypeClusteringPartitionKeySort:
 		return "ClusteringPartitionKeySort"
+	case TriggerTypeBackfill:
+		return "Backfill"
 	default:
 		return ""
 	}
+}
+
+// CompactionPolicy defines the interface for different compaction policies
+type CompactionPolicy interface {
+	// Enable returns whether this compaction policy is enabled
+	Enable() bool
+	// Trigger triggers compaction for all collections and returns compaction views grouped by trigger type
+	Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error)
+	// Name returns the name of this compaction policy
+	Name() string
 }
 
 type TriggerManager interface {
@@ -98,8 +121,11 @@ type CompactionTriggerManager struct {
 	handler   Handler
 	allocator allocator.Allocator
 
-	meta             *meta
-	importMeta       ImportMeta
+	meta       *meta
+	importMeta ImportMeta
+	policies   map[TickerType]CompactionPolicy
+
+	// Keep separate pointers to avoid frequent type casting
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
 	singlePolicy     *singleCompactionPolicy
@@ -116,7 +142,8 @@ type CompactionTriggerManager struct {
 	compactionChanLock      sync.Mutex
 }
 
-func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta, importMeta ImportMeta) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, inspector CompactionInspector, meta *meta,
+	importMeta ImportMeta, broker broker.Broker) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
 		allocator:               alloc,
 		handler:                 handler,
@@ -125,12 +152,23 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 		importMeta:              importMeta,
 		pauseCompactionChanMap:  make(map[int64]chan struct{}),
 		resumeCompactionChanMap: make(map[int64]chan struct{}),
+		policies:                make(map[TickerType]CompactionPolicy),
 	}
 	m.l0SigLock = &sync.Mutex{}
 	m.l0TickSig = sync.NewCond(m.l0SigLock)
+
+	// Initialize policies and keep separate pointers for frequently accessed ones
 	m.l0Policy = newL0CompactionPolicy(meta, alloc)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	backfillPolicy := newBackfillCompactionPolicy(meta, m.allocator, m.handler, broker)
+
+	// Initialize policies map for ticker handling
+	m.policies[L0Ticker] = m.l0Policy
+	m.policies[ClusteringTicker] = m.clusteringPolicy
+	m.policies[SingleTicker] = m.singlePolicy
+	m.policies[BackfillTicker] = backfillPolicy
+
 	return m
 }
 
@@ -225,6 +263,8 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	defer clusteringTicker.Stop()
 	singleTicker := time.NewTicker(Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second))
 	defer singleTicker.Stop()
+	backfillTicker := time.NewTicker(Params.DataCoordCfg.BackfillCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer backfillTicker.Stop()
 	log.Info("Compaction trigger manager start")
 	for {
 		select {
@@ -232,62 +272,13 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			log.Info("Compaction trigger manager checkLoop quit")
 			return
 		case <-l0Ticker.C:
-			if !m.l0Policy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger l0 compaction since inspector is full")
-				continue
-			}
-			m.setL0Triggering(true)
-			events, err := m.l0Policy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger L0 policy", zap.Error(err))
-				m.setL0Triggering(false)
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
-			m.setL0Triggering(false)
+			m.handleTicker(ctx, L0Ticker)
 		case <-clusteringTicker.C:
-			if !m.clusteringPolicy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger clustering compaction since inspector is full")
-				continue
-			}
-			events, err := m.clusteringPolicy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger clustering policy", zap.Error(err))
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
+			m.handleTicker(ctx, ClusteringTicker)
 		case <-singleTicker.C:
-			if !m.singlePolicy.Enable() {
-				continue
-			}
-			if m.inspector.isFull() {
-				log.RatedInfo(10, "Skip trigger single compaction since inspector is full")
-				continue
-			}
-			events, err := m.singlePolicy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger single policy", zap.Error(err))
-				continue
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
-				}
-			}
+			m.handleTicker(ctx, SingleTicker)
+		case <-backfillTicker.C:
+			m.handleTicker(ctx, BackfillTicker)
 		case segID := <-getStatsTaskChSingleton():
 			log.Info("receive new segment to trigger sort compaction", zap.Int64("segmentID", segID))
 			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
@@ -306,6 +297,41 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			} else {
 				m.notify(ctx, TriggerTypePartitionKeySort, []CompactionView{view})
 			}
+		}
+	}
+}
+
+func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType TickerType) {
+	policy, exists := m.policies[tickerType]
+	if !exists {
+		log.Warn("Policy not found for ticker type", zap.Any("tickerType", tickerType))
+		return
+	}
+
+	if !policy.Enable() {
+		return
+	}
+
+	if m.inspector.isFull() {
+		log.RatedInfo(10, "Skip trigger compaction since inspector is full", zap.String("policy", policy.Name()))
+		return
+	}
+
+	// Special handling for L0 policy
+	if tickerType == L0Ticker {
+		m.setL0Triggering(true)
+		defer m.setL0Triggering(false)
+	}
+
+	events, err := policy.Trigger(ctx)
+	if err != nil {
+		log.Warn("Fail to trigger policy", zap.String("policy", policy.Name()), zap.Error(err))
+		return
+	}
+
+	if len(events) > 0 {
+		for triggerType, views := range events {
+			m.notify(ctx, triggerType, views)
 		}
 	}
 }
@@ -378,6 +404,8 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_PartitionKeySortCompaction)
 				case TriggerTypeClusteringPartitionKeySort:
 					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_ClusteringPartitionKeySortCompaction)
+				case TriggerTypeBackfill:
+					m.SubmitBackfillViewToScheduler(ctx, outView)
 				}
 			}
 		}
@@ -641,12 +669,65 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
+		return
 	}
 	log.Info("Finish to submit a single compaction task",
 		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
 	)
+}
+
+func (m *CompactionTriggerManager) SubmitBackfillViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.Ctx(ctx).With(zap.String("view", view.String()))
+	planID, _, err := m.allocator.AllocN(1)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because get collection fail", zap.Error(err))
+		return
+	}
+	var totalRows int64 = 0
+	for _, s := range view.GetSegmentsView() {
+		totalRows += s.NumOfRows
+	}
+	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
+	task := &datapb.CompactionTask{
+		PlanID:             planID,
+		TriggerID:          view.(*BackfillSegmentsView).triggerID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		CollectionTtl:      view.(*BackfillSegmentsView).collectionTTL.Nanoseconds(),
+		Type:               datapb.CompactionType_BackfillCompaction,
+		CollectionID:       view.GetGroupLabel().CollectionID,
+		PartitionID:        view.GetGroupLabel().PartitionID,
+		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
+		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:     []int64{},
+		TotalRows:          totalRows,
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            expectedSize,
+		Functions:          view.(*BackfillSegmentsView).funcDiff.Added,
+	}
+	err = m.inspector.enqueueCompaction(task)
+	if err != nil {
+		log.Warn("Failed to execute compaction task",
+			zap.Int64("triggerID", task.GetTriggerID()),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+		return
+	}
+	log.Info("Finish to submit a backfill compaction task",
+		zap.Int64("triggerID", task.GetTriggerID()),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.String("type", task.GetType().String()),
+	)
+	return
 }
 
 func getExpectedSegmentSize(meta *meta, collectionID int64, schema *schemapb.CollectionSchema) int64 {

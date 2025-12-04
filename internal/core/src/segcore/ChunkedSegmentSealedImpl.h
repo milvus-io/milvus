@@ -212,9 +212,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     int64_t
     get_deleted_count() const override;
 
-    const Schema&
-    get_schema() const override;
-
     void
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
@@ -1028,7 +1025,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadFieldDataInfo field_data_info_;
     milvus::proto::segcore::SegmentLoadInfo segment_load_info_;
 
-    SchemaPtr schema_;
     int64_t id_;
     mutable folly::Synchronized<
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
