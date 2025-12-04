@@ -372,7 +372,7 @@ func getSortStatus(sorted bool) string {
 func calculateIndexTaskSlot(segmentSize int64, isVectorIndex bool) int64 {
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
 	if !isVectorIndex {
-		defaultSlots = max(1, defaultSlots/8)
+		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
 	}
 	if segmentSize > 512*1024*1024 {
 		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
