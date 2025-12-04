@@ -215,12 +215,8 @@ func NewManifestReader(manifest string,
 	neededColumns := make([]string, 0, len(allFields))
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
-		// Use field id here or external field
-		if field.ExternalField != "" {
-			neededColumns = append(neededColumns, field.ExternalField)
-		} else {
-			neededColumns = append(neededColumns, strconv.FormatInt(field.FieldID, 10))
-		}
+		// Use field id here
+		neededColumns = append(neededColumns, strconv.FormatInt(field.FieldID, 10))
 	}
 	prr := &ManifestReader{
 		manifest:             manifest,
