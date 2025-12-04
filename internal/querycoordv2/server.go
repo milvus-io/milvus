@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -111,11 +112,12 @@ type Server struct {
 	checkerController *checkers.CheckerController
 
 	// Observers
-	collectionObserver  *observers.CollectionObserver
-	targetObserver      *observers.TargetObserver
-	replicaObserver     *observers.ReplicaObserver
-	resourceObserver    *observers.ResourceObserver
-	leaderCacheObserver *observers.LeaderCacheObserver
+	collectionObserver   *observers.CollectionObserver
+	targetObserver       *observers.TargetObserver
+	replicaObserver      *observers.ReplicaObserver
+	resourceObserver     *observers.ResourceObserver
+	leaderCacheObserver  *observers.LeaderCacheObserver
+	fileResourceObserver *observers.FileResourceObserver
 
 	getBalancerFunc checkers.GetBalancerFunc
 	balancerMap     map[string]balance.Balance
@@ -467,6 +469,8 @@ func (s *Server) initObserver() {
 	s.leaderCacheObserver = observers.NewLeaderCacheObserver(
 		s.proxyClientManager,
 	)
+
+	s.fileResourceObserver = observers.NewFileResourceObserver(s.ctx, s.nodeMgr, s.cluster)
 }
 
 func (s *Server) afterStart() {}
@@ -530,6 +534,7 @@ func (s *Server) startServerLoop() {
 	s.targetObserver.Start()
 	s.replicaObserver.Start()
 	s.resourceObserver.Start()
+	s.fileResourceObserver.Start()
 
 	log.Info("start task scheduler...")
 	s.taskScheduler.Start()
@@ -584,6 +589,9 @@ func (s *Server) Stop() error {
 	}
 	if s.leaderCacheObserver != nil {
 		s.leaderCacheObserver.Stop()
+	}
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.Stop()
 	}
 
 	if s.distController != nil {
@@ -687,6 +695,7 @@ func (s *Server) watchNodes(revision int64) {
 					Labels:   event.Session.GetServerLabel(),
 				}))
 				s.handleNodeUp(nodeID)
+				s.fileResourceObserver.Notify()
 
 			case sessionutil.SessionUpdateEvent:
 				log.Info("stopping the node")
@@ -933,4 +942,9 @@ func (s *Server) watchLoadConfigChanges() {
 		s.applyLoadConfigChanges(s.ctx, int32(replicaNum), rgs)
 	})
 	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+}
+
+func (s *Server) SyncFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	s.fileResourceObserver.UpdateResources(resources, version)
+	return nil
 }

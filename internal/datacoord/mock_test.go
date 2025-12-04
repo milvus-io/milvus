@@ -252,6 +252,10 @@ func (m *mockMixCoord) GetComponentStates(ctx context.Context, req *milvuspb.Get
 	}, nil
 }
 
+func (h *mockMixCoord) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, verion uint64) error {
+	return nil
+}
+
 func (m *mockMixCoord) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	panic("not implemented") // TODO: Implement
 }

@@ -34,11 +34,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -193,6 +195,19 @@ func (node *DataNode) Init() error {
 
 		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
+
+		fileMode := fileresource.ParseMode(paramtable.Get().DataCoordCfg.FileResourceMode.GetValue())
+		if fileMode == fileresource.SyncMode {
+			cm, err := node.storageFactory.NewChunkManager(node.ctx, compaction.CreateStorageConfig())
+			if err != nil {
+				log.Error("Init chunk manager for file resource manager failed", zap.Error(err))
+				initError = err
+				return
+			}
+			fileresource.InitManager(cm, fileMode)
+		} else {
+			fileresource.InitManager(nil, fileMode)
+		}
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)

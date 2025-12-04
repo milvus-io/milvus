@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
@@ -352,6 +353,8 @@ func (node *QueryNode) Init() error {
 		node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
+
+		fileresource.InitManager(node.chunkManager, fileresource.ParseMode(paramtable.Get().QueryCoordCfg.FileResourceMode.GetValue()))
 
 		err = initcore.InitQueryNode(node.ctx)
 		if err != nil {

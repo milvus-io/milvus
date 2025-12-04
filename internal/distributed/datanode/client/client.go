@@ -359,3 +359,9 @@ func (c *Client) DropTask(ctx context.Context, in *workerpb.DropTaskRequest, opt
 		return client.DropTask(ctx, in)
 	})
 }
+
+func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client DataNodeClient) (*commonpb.Status, error) {
+		return client.SyncFileResource(ctx, req)
+	})
+}
