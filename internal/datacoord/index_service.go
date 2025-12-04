@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -66,7 +67,10 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 	if err != nil {
 		return err
 	}
-	taskSlot := calculateIndexTaskSlot(segment.getSegmentSize())
+	indexParams := s.meta.indexMeta.GetIndexParams(segment.CollectionID, indexID)
+	indexType := GetIndexType(indexParams)
+	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+	taskSlot := calculateIndexTaskSlot(segment.getSegmentSize(), isVectorIndex)
 	segIndex := &model.SegmentIndex{
 		SegmentID:      segment.ID,
 		CollectionID:   segment.CollectionID,
