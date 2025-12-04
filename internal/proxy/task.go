@@ -865,6 +865,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Aliases = result.Aliases
 	t.result.Properties = result.Properties
 	t.result.DbName = result.GetDbName()
+	t.result.DbId = result.GetDbId()
 	t.result.NumPartitions = result.NumPartitions
 	t.result.UpdateTimestamp = result.UpdateTimestamp
 	t.result.UpdateTimestampStr = result.UpdateTimestampStr
