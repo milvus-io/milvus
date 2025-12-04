@@ -1078,18 +1078,13 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		log.Warn("fail to get primary field schema", zap.Error(err))
 		return err
 	}
-	deduplicatedFieldsData, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, it.req.GetFieldsData(), schema)
+	duplicate, err := CheckDuplicatePkExist(primaryFieldSchema, it.req.GetFieldsData())
 	if err != nil {
-		log.Warn("fail to deduplicate upsert data", zap.Error(err))
+		log.Warn("fail to check duplicate primary keys", zap.Error(err))
+		return err
 	}
-
-	// dedup won't decrease numOfRows to 0
-	if newNumRows > 0 && newNumRows != it.req.NumRows {
-		log.Info("upsert data deduplicated",
-			zap.Uint32("original_num_rows", it.req.NumRows),
-			zap.Uint32("deduplicated_num_rows", newNumRows))
-		it.req.FieldsData = deduplicatedFieldsData
-		it.req.NumRows = newNumRows
+	if duplicate {
+		return merr.WrapErrParameterInvalidMsg("duplicate primary keys are not allowed in the same batch")
 	}
 
 	it.upsertMsg = &msgstream.UpsertMsg{
