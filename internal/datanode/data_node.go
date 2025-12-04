@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -85,6 +86,8 @@ type DataNode struct {
 	taskScheduler  *index.TaskScheduler
 	taskManager    *index.TaskManager
 
+	externalCollectionManager *external.ExternalCollectionManager
+
 	compactionExecutor compactor.Executor
 
 	etcdCli *clientv3.Client
@@ -125,6 +128,7 @@ func NewDataNode(ctx context.Context) *DataNode {
 	node.storageFactory = NewChunkMgrFactory()
 	node.taskScheduler = sc
 	node.taskManager = index.NewTaskManager(ctx2)
+	node.externalCollectionManager = external.NewExternalCollectionManager(ctx2, 8)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	expr.Register("datanode", node)
 	return node
@@ -286,6 +290,10 @@ func (node *DataNode) Stop() error {
 
 		if node.importScheduler != nil {
 			node.importScheduler.Close()
+		}
+
+		if node.externalCollectionManager != nil {
+			node.externalCollectionManager.Close()
 		}
 
 		// cleanup all running tasks
