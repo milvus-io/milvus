@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -38,16 +38,18 @@ func (s *PartitionSuite) TestListPartitions() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, spr *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+		mockShowPartitions := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ShowPartitions).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, spr *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 			s.Equal(collectionName, spr.GetCollectionName())
 			return &milvuspb.ShowPartitionsResponse{
 				Status:         merr.Success(),
 				PartitionNames: []string{"_default", "part_1"},
 				PartitionIDs:   []int64{100, 101},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockShowPartitions.UnPatch()
 
 		names, err := s.client.ListPartitions(ctx, NewListPartitionOption(collectionName))
 		s.NoError(err)
@@ -55,9 +57,11 @@ func (s *PartitionSuite) TestListPartitions() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockShowPartitions := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ShowPartitions).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockShowPartitions.UnPatch()
 
 		_, err := s.client.ListPartitions(ctx, NewListPartitionOption(collectionName))
 		s.Error(err)
@@ -69,24 +73,28 @@ func (s *PartitionSuite) TestCreatePartition() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 
-		s.mock.EXPECT().CreatePartition(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cpr *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+		mockCreatePartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreatePartition).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, cpr *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, cpr.GetCollectionName())
 			s.Equal(partitionName, cpr.GetPartitionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockCreatePartition.UnPatch()
 
 		err := s.client.CreatePartition(ctx, NewCreatePartitionOption(collectionName, partitionName))
 		s.NoError(err)
 	})
 
-	s.Run("success", func() {
+	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 
-		s.mock.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockCreatePartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreatePartition).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreatePartition.UnPatch()
 
 		err := s.client.CreatePartition(ctx, NewCreatePartitionOption(collectionName, partitionName))
 		s.Error(err)
@@ -98,37 +106,48 @@ func (s *PartitionSuite) TestHasPartition() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 
-		s.mock.EXPECT().HasPartition(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, hpr *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+		mockHasPartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).HasPartition).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, hpr *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 			s.Equal(collectionName, hpr.GetCollectionName())
 			s.Equal(partitionName, hpr.GetPartitionName())
 			return &milvuspb.BoolResponse{Status: merr.Success()}, nil
-		}).Once()
+		}).Build()
+		defer mockHasPartition.UnPatch()
 
 		has, err := s.client.HasPartition(ctx, NewHasPartitionOption(collectionName, partitionName))
 		s.NoError(err)
 		s.False(has)
+	})
 
-		s.mock.EXPECT().HasPartition(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, hpr *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+	s.Run("success_true", func() {
+		defer mockey.UnPatchAll()
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+
+		mockHasPartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).HasPartition).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, hpr *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 			s.Equal(collectionName, hpr.GetCollectionName())
 			s.Equal(partitionName, hpr.GetPartitionName())
 			return &milvuspb.BoolResponse{
 				Status: merr.Success(),
 				Value:  true,
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockHasPartition.UnPatch()
 
-		has, err = s.client.HasPartition(ctx, NewHasPartitionOption(collectionName, partitionName))
+		has, err := s.client.HasPartition(ctx, NewHasPartitionOption(collectionName, partitionName))
 		s.NoError(err)
 		s.True(has)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().HasPartition(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockHasPartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).HasPartition).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockHasPartition.UnPatch()
 
 		_, err := s.client.HasPartition(ctx, NewHasPartitionOption(collectionName, partitionName))
 		s.Error(err)
@@ -140,22 +159,26 @@ func (s *PartitionSuite) TestDropPartition() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().DropPartition(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dpr *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+		mockDropPartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropPartition).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dpr *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, dpr.GetCollectionName())
 			s.Equal(partitionName, dpr.GetPartitionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockDropPartition.UnPatch()
 
 		err := s.client.DropPartition(ctx, NewDropPartitionOption(collectionName, partitionName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().DropPartition(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockDropPartition := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropPartition).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropPartition.UnPatch()
 
 		err := s.client.DropPartition(ctx, NewDropPartitionOption(collectionName, partitionName))
 		s.Error(err)
@@ -167,9 +190,10 @@ func (s *PartitionSuite) TestGetPartitionStats() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gpsr *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
+		mockGetPartitionStatistics := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetPartitionStatistics).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, gpsr *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 			s.Equal(collectionName, gpsr.GetCollectionName())
 			s.Equal(partitionName, gpsr.GetPartitionName())
 			return &milvuspb.GetPartitionStatisticsResponse{
@@ -178,7 +202,8 @@ func (s *PartitionSuite) TestGetPartitionStats() {
 					{Key: "rows", Value: "100"},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetPartitionStatistics.UnPatch()
 
 		stats, err := s.client.GetPartitionStats(ctx, NewGetPartitionStatsOption(collectionName, partitionName))
 		s.NoError(err)
@@ -186,9 +211,11 @@ func (s *PartitionSuite) TestGetPartitionStats() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockGetPartitionStatistics := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetPartitionStatistics).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockGetPartitionStatistics.UnPatch()
 
 		_, err := s.client.GetPartitionStats(ctx, NewGetPartitionStatsOption(collectionName, partitionName))
 		s.Error(err)

@@ -4180,8 +4180,7 @@ func TestSearchTask_Requery(t *testing.T) {
 		collSchema := &schemapb.CollectionSchema{}
 		schema := newSchemaInfo(collSchema)
 
-		node := mocks.NewMockProxy(t)
-
+		mockProxy := &Proxy{}
 		qt := &searchTask{
 			ctx: ctx,
 			SearchRequest: &internalpb.SearchRequest{
@@ -4193,7 +4192,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			request: &milvuspb.SearchRequest{},
 			schema:  schema,
 			tr:      timerecord.NewTimeRecorder("search"),
-			node:    node,
+			node:    mockProxy,
 		}
 
 		_, err := newRequeryOperator(qt, nil)

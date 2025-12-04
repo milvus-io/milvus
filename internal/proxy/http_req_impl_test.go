@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -312,12 +313,13 @@ func TestListDatabase(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
-		mockProxy.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		mockProxy := &Proxy{}
+		mockListDatabases := mockey.Mock((*Proxy).ListDatabases).Return(&milvuspb.ListDatabasesResponse{
 			Status:           &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			DbNames:          []string{"db1", "db2"},
 			CreatedTimestamp: []uint64{1633046400000, 1633132800000},
-		}, nil)
+		}, nil).Build()
+		defer mockListDatabases.UnPatch()
 
 		handler := listDatabase(mockProxy)
 		handler(c)
@@ -332,8 +334,9 @@ func TestListDatabase(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
-		mockProxy.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockProxy := &Proxy{}
+		mockListDatabases := mockey.Mock((*Proxy).ListDatabases).Return(nil, errors.New("error")).Build()
+		defer mockListDatabases.UnPatch()
 
 		handler := listDatabase(mockProxy)
 		handler(c)
@@ -349,14 +352,15 @@ func TestDescribeDatabase(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=db1", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
-		mockProxy.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{
+		mockProxy := &Proxy{}
+		mockDescribeDatabase := mockey.Mock((*Proxy).DescribeDatabase).Return(&milvuspb.DescribeDatabaseResponse{
 			Status:           &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			DbName:           "db1",
 			DbID:             1,
 			CreatedTimestamp: 1633046400000,
 			Properties:       []*commonpb.KeyValuePair{{Key: "key", Value: "value"}},
-		}, nil)
+		}, nil).Build()
+		defer mockDescribeDatabase.UnPatch()
 
 		handler := describeDatabase(mockProxy)
 		handler(c)
@@ -372,8 +376,9 @@ func TestDescribeDatabase(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/?db_name=db1", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
-		mockProxy.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
+		mockProxy := &Proxy{}
+		mockDescribeDatabase := mockey.Mock((*Proxy).DescribeDatabase).Return(nil, errors.New("error")).Build()
+		defer mockDescribeDatabase.UnPatch()
 
 		handler := describeDatabase(mockProxy)
 		handler(c)
@@ -387,7 +392,7 @@ func TestDescribeDatabase(t *testing.T) {
 		c, _ := gin.CreateTestContext(w)
 		c.Request, _ = http.NewRequest("GET", "/", nil)
 
-		mockProxy := mocks.NewMockProxy(t)
+		mockProxy := &Proxy{}
 
 		handler := describeDatabase(mockProxy)
 		handler(c)

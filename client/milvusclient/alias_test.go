@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -41,18 +41,22 @@ func (s *AliasSuite) TestCreateAlias() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().CreateAlias(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, car *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockCreateAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateAlias).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, car *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 			s.Equal(aliasName, car.GetAlias())
 			s.Equal(collectionName, car.GetCollectionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockCreateAlias.UnPatch()
 
 		err := s.client.CreateAlias(ctx, NewCreateAliasOption(collectionName, aliasName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockCreateAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateAlias).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreateAlias.UnPatch()
 
 		err := s.client.CreateAlias(ctx, NewCreateAliasOption(collectionName, aliasName))
 		s.Error(err)
@@ -66,17 +70,21 @@ func (s *AliasSuite) TestDropAlias() {
 	aliasName := fmt.Sprintf("test_alias_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().DropAlias(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dar *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockDropAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropAlias).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dar *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 			s.Equal(aliasName, dar.GetAlias())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockDropAlias.UnPatch()
 
 		err := s.client.DropAlias(ctx, NewDropAliasOption(aliasName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DropAlias(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDropAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropAlias).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropAlias.UnPatch()
 
 		err := s.client.DropAlias(ctx, NewDropAliasOption(aliasName))
 		s.Error(err)
@@ -91,13 +99,15 @@ func (s *AliasSuite) TestDescribeAlias() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().DescribeAlias(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, car *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
+		defer mockey.UnPatchAll()
+		mockDescribeAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeAlias).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, car *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error) {
 			s.Equal(aliasName, car.GetAlias())
 			return &milvuspb.DescribeAliasResponse{
 				Alias:      aliasName,
 				Collection: collectionName,
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockDescribeAlias.UnPatch()
 
 		alias, err := s.client.DescribeAlias(ctx, NewDescribeAliasOption(aliasName))
 		s.NoError(err)
@@ -106,7 +116,9 @@ func (s *AliasSuite) TestDescribeAlias() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DescribeAlias(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDescribeAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeAlias).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDescribeAlias.UnPatch()
 
 		_, err := s.client.DescribeAlias(ctx, NewDescribeAliasOption(aliasName))
 		s.Error(err)
@@ -121,18 +133,22 @@ func (s *AliasSuite) TestAlterAlias() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().AlterAlias(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dar *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockAlterAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterAlias).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dar *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 			s.Equal(aliasName, dar.GetAlias())
 			s.Equal(collectionName, dar.GetCollectionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterAlias.UnPatch()
 
 		err := s.client.AlterAlias(ctx, NewAlterAliasOption(aliasName, collectionName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockAlterAlias := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterAlias).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterAlias.UnPatch()
 
 		err := s.client.AlterAlias(ctx, NewAlterAliasOption(aliasName, collectionName))
 		s.Error(err)
@@ -146,12 +162,14 @@ func (s *AliasSuite) TestListAliases() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().ListAliases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, lar *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
+		defer mockey.UnPatchAll()
+		mockListAliases := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListAliases).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, lar *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error) {
 			s.Equal(collectionName, lar.GetCollectionName())
 			return &milvuspb.ListAliasesResponse{
 				Aliases: []string{"test1", "test2", "test3"},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockListAliases.UnPatch()
 
 		names, err := s.client.ListAliases(ctx, NewListAliasesOption(collectionName))
 		s.NoError(err)
@@ -159,7 +177,9 @@ func (s *AliasSuite) TestListAliases() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockListAliases := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListAliases).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockListAliases.UnPatch()
 
 		_, err := s.client.ListAliases(ctx, NewListAliasesOption(collectionName))
 		s.Error(err)

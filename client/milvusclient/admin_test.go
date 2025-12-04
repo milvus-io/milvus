@@ -22,8 +22,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -41,14 +41,16 @@ func (s *AdminSuite) TestGetServerVersion() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		version := fmt.Sprintf("v%s", s.randString(6))
 
-		s.mock.EXPECT().GetVersion(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gvr *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
+		mockGetVersion := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetVersion).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, gvr *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
 			return &milvuspb.GetVersionResponse{
 				Status:  merr.Success(),
 				Version: version,
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetVersion.UnPatch()
 
 		v, err := s.client.GetServerVersion(ctx, NewGetServerVersionOption())
 		s.NoError(err)
@@ -56,7 +58,9 @@ func (s *AdminSuite) TestGetServerVersion() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().GetVersion(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockGetVersion := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetVersion).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockGetVersion.UnPatch()
 
 		_, err := s.client.GetServerVersion(ctx, NewGetServerVersionOption())
 		s.Error(err)
@@ -68,13 +72,14 @@ func (s *AdminSuite) TestGetPersistentSegmentInfo() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		segments := []*entity.Segment{
 			{ID: rand.Int63(), CollectionID: rand.Int63(), ParititionID: rand.Int63(), NumRows: rand.Int63(), State: commonpb.SegmentState_Flushed},
 			{ID: rand.Int63(), CollectionID: rand.Int63(), ParititionID: rand.Int63(), NumRows: rand.Int63(), State: commonpb.SegmentState_Flushed},
 		}
 
-		s.mock.EXPECT().GetPersistentSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gpsi *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+		mockGetPersistentSegmentInfo := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetPersistentSegmentInfo).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, gpsi *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 			return &milvuspb.GetPersistentSegmentInfoResponse{
 				Status: merr.Success(),
 				Infos: lo.Map(segments, func(segment *entity.Segment, _ int) *milvuspb.PersistentSegmentInfo {
@@ -87,7 +92,8 @@ func (s *AdminSuite) TestGetPersistentSegmentInfo() {
 					}
 				}),
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetPersistentSegmentInfo.UnPatch()
 
 		segments, err := s.client.GetPersistentSegmentInfo(ctx, NewGetPersistentSegmentInfoOption(collectionName))
 		s.NoError(err)
@@ -95,7 +101,9 @@ func (s *AdminSuite) TestGetPersistentSegmentInfo() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().GetPersistentSegmentInfo(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockGetPersistentSegmentInfo := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetPersistentSegmentInfo).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockGetPersistentSegmentInfo.UnPatch()
 
 		_, err := s.client.GetPersistentSegmentInfo(ctx, &getPersistentSegmentInfoOption{collectionName: "coll"})
 		s.Error(err)
@@ -107,7 +115,8 @@ func (s *AdminSuite) TestBackupRBAC() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().BackupRBAC(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, brr *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
+		defer mockey.UnPatchAll()
+		mockBackupRBAC := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).BackupRBAC).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, brr *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
 			return &milvuspb.BackupRBACMetaResponse{
 				Status: merr.Success(),
 				RBACMeta: &milvuspb.RBACMeta{
@@ -153,7 +162,8 @@ func (s *AdminSuite) TestBackupRBAC() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockBackupRBAC.UnPatch()
 
 		meta, err := s.client.BackupRBAC(ctx, NewBackupRBACOption())
 		s.NoError(err)
@@ -164,7 +174,9 @@ func (s *AdminSuite) TestBackupRBAC() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().BackupRBAC(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockBackupRBAC := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).BackupRBAC).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockBackupRBAC.UnPatch()
 
 		_, err := s.client.BackupRBAC(ctx, NewBackupRBACOption())
 		s.Error(err)
@@ -176,6 +188,7 @@ func (s *AdminSuite) TestRestoreRBAC() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		meta := &entity.RBACMeta{
 			Users: []*entity.UserInfo{
 				{
@@ -207,16 +220,19 @@ func (s *AdminSuite) TestRestoreRBAC() {
 			},
 		}
 
-		s.mock.EXPECT().RestoreRBAC(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rrr *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
+		mockRestoreRBAC := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).RestoreRBAC).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, rrr *milvuspb.RestoreRBACMetaRequest) (*commonpb.Status, error) {
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockRestoreRBAC.UnPatch()
 
 		err := s.client.RestoreRBAC(ctx, NewRestoreRBACOption(meta))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().RestoreRBAC(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockRestoreRBAC := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).RestoreRBAC).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockRestoreRBAC.UnPatch()
 
 		err := s.client.RestoreRBAC(ctx, NewRestoreRBACOption(&entity.RBACMeta{}))
 		s.Error(err)

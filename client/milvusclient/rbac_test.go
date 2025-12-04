@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -39,11 +39,13 @@ func (s *UserSuite) TestListUsers() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().ListCredUsers(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+		defer mockey.UnPatchAll()
+		mockListCredUsers := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListCredUsers).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 			return &milvuspb.ListCredUsersResponse{
 				Usernames: []string{"user1", "user2"},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockListCredUsers.UnPatch()
 
 		users, err := s.client.ListUsers(ctx, NewListUserOption())
 		s.NoError(err)
@@ -51,7 +53,9 @@ func (s *UserSuite) TestListUsers() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().ListCredUsers(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockListCredUsers := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListCredUsers).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockListCredUsers.UnPatch()
 
 		_, err := s.client.ListUsers(ctx, NewListUserOption())
 		s.Error(err)
@@ -65,7 +69,8 @@ func (s *UserSuite) TestDescribeUser() {
 	userName := fmt.Sprintf("user_%s", s.randString(5))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().SelectUser(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+		defer mockey.UnPatchAll()
+		mockSelectUser := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectUser).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
 			s.Equal(userName, r.GetUser().GetName())
 			return &milvuspb.SelectUserResponse{
 				Results: []*milvuspb.UserResult{
@@ -78,7 +83,8 @@ func (s *UserSuite) TestDescribeUser() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSelectUser.UnPatch()
 
 		user, err := s.client.DescribeUser(ctx, NewDescribeUserOption(userName))
 		s.NoError(err)
@@ -87,7 +93,9 @@ func (s *UserSuite) TestDescribeUser() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().SelectUser(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockSelectUser := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectUser).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockSelectUser.UnPatch()
 
 		_, err := s.client.DescribeUser(ctx, NewDescribeUserOption(userName))
 		s.Error(err)
@@ -99,13 +107,15 @@ func (s *UserSuite) TestCreateUser() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		userName := fmt.Sprintf("user_%s", s.randString(5))
 		password := s.randString(12)
-		s.mock.EXPECT().CreateCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ccr *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+		mockCreateCredential := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateCredential).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ccr *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, ccr.GetUsername())
 			s.Equal(crypto.Base64Encode(password), ccr.GetPassword())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockCreateCredential.UnPatch()
 
 		err := s.client.CreateUser(ctx, NewCreateUserOption(userName, password))
 		s.NoError(err)
@@ -117,22 +127,26 @@ func (s *UserSuite) TestUpdatePassword() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		userName := fmt.Sprintf("user_%s", s.randString(5))
 		oldPassword := s.randString(12)
 		newPassword := s.randString(12)
-		s.mock.EXPECT().UpdateCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ucr *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
+		mockUpdateCredential := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).UpdateCredential).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ucr *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, ucr.GetUsername())
 			s.Equal(crypto.Base64Encode(oldPassword), ucr.GetOldPassword())
 			s.Equal(crypto.Base64Encode(newPassword), ucr.GetNewPassword())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockUpdateCredential.UnPatch()
 
 		err := s.client.UpdatePassword(ctx, NewUpdatePasswordOption(userName, oldPassword, newPassword))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().UpdateCredential(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockUpdateCredential := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).UpdateCredential).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockUpdateCredential.UnPatch()
 
 		err := s.client.UpdatePassword(ctx, NewUpdatePasswordOption("user", "old", "new"))
 		s.Error(err)
@@ -144,18 +158,22 @@ func (s *UserSuite) TestDropUser() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		userName := fmt.Sprintf("user_%s", s.randString(5))
-		s.mock.EXPECT().DeleteCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dcr *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+		mockDeleteCredential := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DeleteCredential).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dcr *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
 			s.Equal(userName, dcr.GetUsername())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockDeleteCredential.UnPatch()
 
 		err := s.client.DropUser(ctx, NewDropUserOption(userName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DeleteCredential(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDeleteCredential := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DeleteCredential).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDeleteCredential.UnPatch()
 
 		err := s.client.DropUser(ctx, NewDropUserOption("user"))
 		s.Error(err)
@@ -175,14 +193,16 @@ func (s *RoleSuite) TestListRoles() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+		defer mockey.UnPatchAll()
+		mockSelectRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectRole).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
 			return &milvuspb.SelectRoleResponse{
 				Results: []*milvuspb.RoleResult{
 					{Role: &milvuspb.RoleEntity{Name: "role1"}},
 					{Role: &milvuspb.RoleEntity{Name: "role2"}},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSelectRole.UnPatch()
 
 		roles, err := s.client.ListRoles(ctx, NewListRoleOption())
 		s.NoError(err)
@@ -190,7 +210,9 @@ func (s *RoleSuite) TestListRoles() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockSelectRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectRole).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockSelectRole.UnPatch()
 
 		_, err := s.client.ListRoles(ctx, NewListRoleOption())
 		s.Error(err)
@@ -202,18 +224,22 @@ func (s *RoleSuite) TestCreateRole() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
-		s.mock.EXPECT().CreateRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+		mockCreateRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateRole).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 			s.Equal(roleName, r.GetEntity().GetName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockCreateRole.UnPatch()
 
 		err := s.client.CreateRole(ctx, NewCreateRoleOption(roleName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockCreateRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateRole).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreateRole.UnPatch()
 
 		err := s.client.CreateRole(ctx, NewCreateRoleOption("role"))
 		s.Error(err)
@@ -225,20 +251,24 @@ func (s *RoleSuite) TestGrantRole() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		userName := fmt.Sprintf("user_%s", s.randString(5))
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
-		s.mock.EXPECT().OperateUserRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+		mockOperateUserRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperateUserRole).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
 			s.Equal(userName, r.GetUsername())
 			s.Equal(roleName, r.GetRoleName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperateUserRole.UnPatch()
 
 		err := s.client.GrantRole(ctx, NewGrantRoleOption(userName, roleName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperateUserRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperateUserRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperateUserRole).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperateUserRole.UnPatch()
 
 		err := s.client.GrantRole(ctx, NewGrantRoleOption("user", "role"))
 		s.Error(err)
@@ -250,20 +280,24 @@ func (s *RoleSuite) TestRevokeRole() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		userName := fmt.Sprintf("user_%s", s.randString(5))
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
-		s.mock.EXPECT().OperateUserRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+		mockOperateUserRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperateUserRole).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
 			s.Equal(userName, r.GetUsername())
 			s.Equal(roleName, r.GetRoleName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperateUserRole.UnPatch()
 
 		err := s.client.RevokeRole(ctx, NewRevokeRoleOption(userName, roleName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperateUserRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperateUserRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperateUserRole).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperateUserRole.UnPatch()
 
 		err := s.client.RevokeRole(ctx, NewRevokeRoleOption("user", "role"))
 		s.Error(err)
@@ -275,18 +309,22 @@ func (s *RoleSuite) TestDropRole() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
-		s.mock.EXPECT().DropRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+		mockDropRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropRole).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
 			s.Equal(roleName, r.GetRoleName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockDropRole.UnPatch()
 
 		err := s.client.DropRole(ctx, NewDropRoleOption(roleName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DropRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDropRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropRole).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropRole.UnPatch()
 
 		err := s.client.DropRole(ctx, NewDropRoleOption("role"))
 		s.Error(err)
@@ -298,8 +336,9 @@ func (s *RoleSuite) TestDescribeRole() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
-		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+		mockSelectRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectRole).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
 			s.Equal(roleName, r.GetRole().GetName())
 			return &milvuspb.SelectRoleResponse{
 				Results: []*milvuspb.RoleResult{
@@ -308,8 +347,9 @@ func (s *RoleSuite) TestDescribeRole() {
 					},
 				},
 			}, nil
-		}).Once()
-		s.mock.EXPECT().SelectGrant(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+		}).Build()
+		defer mockSelectRole.UnPatch()
+		mockSelectGrant := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectGrant).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
 			s.Equal(roleName, r.GetEntity().GetRole().GetName())
 			return &milvuspb.SelectGrantResponse{
 				Entities: []*milvuspb.GrantEntity{
@@ -332,7 +372,8 @@ func (s *RoleSuite) TestDescribeRole() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSelectGrant.UnPatch()
 
 		role, err := s.client.DescribeRole(ctx, NewDescribeRoleOption(roleName))
 		s.NoError(err)
@@ -340,7 +381,9 @@ func (s *RoleSuite) TestDescribeRole() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockSelectRole := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).SelectRole).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockSelectRole.UnPatch()
 
 		_, err := s.client.DescribeRole(ctx, NewDescribeRoleOption("role"))
 		s.Error(err)
@@ -352,25 +395,29 @@ func (s *RoleSuite) TestGrantPrivilege() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
 		privilegeName := "Insert"
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
-		s.mock.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+		mockOperatePrivilege := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilege).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 			s.Equal(roleName, r.GetEntity().GetRole().GetName())
 			s.Equal("collection", r.GetEntity().GetObject().GetName())
 			s.Equal(privilegeName, r.GetEntity().GetGrantor().GetPrivilege().GetName())
 			s.Equal(collectionName, r.GetEntity().GetObjectName())
 			s.Equal(milvuspb.OperatePrivilegeType_Grant, r.GetType())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilege.UnPatch()
 
 		err := s.client.GrantPrivilege(ctx, NewGrantPrivilegeOption(roleName, "collection", privilegeName, collectionName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilege := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilege).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilege.UnPatch()
 
 		err := s.client.GrantPrivilege(ctx, NewGrantPrivilegeOption("role", "collection", "privilege", "coll_1"))
 		s.Error(err)
@@ -382,25 +429,29 @@ func (s *RoleSuite) TestRevokePrivilege() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		roleName := fmt.Sprintf("role_%s", s.randString(5))
 		privilegeName := "Insert"
 		collectionName := fmt.Sprintf("collection_%s", s.randString(6))
 
-		s.mock.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+		mockOperatePrivilege := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilege).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 			s.Equal(roleName, r.GetEntity().GetRole().GetName())
 			s.Equal("collection", r.GetEntity().GetObject().GetName())
 			s.Equal(privilegeName, r.GetEntity().GetGrantor().GetPrivilege().GetName())
 			s.Equal(collectionName, r.GetEntity().GetObjectName())
 			s.Equal(milvuspb.OperatePrivilegeType_Revoke, r.GetType())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilege.UnPatch()
 
 		err := s.client.RevokePrivilege(ctx, NewRevokePrivilegeOption(roleName, "collection", privilegeName, collectionName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilege := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilege).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilege.UnPatch()
 
 		err := s.client.RevokePrivilege(ctx, NewRevokePrivilegeOption("role", "collection", "privilege", "coll_1"))
 		s.Error(err)
@@ -425,20 +476,24 @@ func (s *PrivilegeGroupSuite) TestGrantV2() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeV2 := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeV2).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
 			s.Equal(roleName, r.GetRole().GetName())
 			s.Equal(privilegeName, r.GetGrantor().GetPrivilege().GetName())
 			s.Equal(dbName, r.GetDbName())
 			s.Equal(collectionName, r.GetCollectionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilegeV2.UnPatch()
 
 		err := s.client.GrantPrivilegeV2(ctx, NewGrantPrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeV2 := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeV2).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilegeV2.UnPatch()
 
 		err := s.client.GrantPrivilegeV2(ctx, NewGrantPrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.Error(err)
@@ -455,20 +510,24 @@ func (s *PrivilegeGroupSuite) TestRevokeV2() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeV2 := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeV2).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeV2Request) (*commonpb.Status, error) {
 			s.Equal(roleName, r.GetRole().GetName())
 			s.Equal(privilegeName, r.GetGrantor().GetPrivilege().GetName())
 			s.Equal(dbName, r.GetDbName())
 			s.Equal(collectionName, r.GetCollectionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilegeV2.UnPatch()
 
 		err := s.client.RevokePrivilegeV2(ctx, NewRevokePrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeV2 := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeV2).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilegeV2.UnPatch()
 
 		err := s.client.RevokePrivilegeV2(ctx, NewRevokePrivilegeV2Option(roleName, privilegeName, collectionName).WithDbName(dbName))
 		s.Error(err)
@@ -482,17 +541,21 @@ func (s *PrivilegeGroupSuite) TestCreatePrivilegeGroup() {
 	groupName := fmt.Sprintf("test_pg_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().CreatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockCreatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreatePrivilegeGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.CreatePrivilegeGroupRequest) (*commonpb.Status, error) {
 			s.Equal(groupName, r.GetGroupName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockCreatePrivilegeGroup.UnPatch()
 
 		err := s.client.CreatePrivilegeGroup(ctx, NewCreatePrivilegeGroupOption(groupName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().CreatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockCreatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreatePrivilegeGroup).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreatePrivilegeGroup.UnPatch()
 
 		err := s.client.CreatePrivilegeGroup(ctx, NewCreatePrivilegeGroupOption(groupName))
 		s.Error(err)
@@ -506,17 +569,21 @@ func (s *PrivilegeGroupSuite) TestDropPrivilegeGroup() {
 	groupName := fmt.Sprintf("test_pg_%s", s.randString(6))
 
 	s.Run("success", func() {
-		s.mock.EXPECT().DropPrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockDropPrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropPrivilegeGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.DropPrivilegeGroupRequest) (*commonpb.Status, error) {
 			s.Equal(groupName, r.GetGroupName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockDropPrivilegeGroup.UnPatch()
 
 		err := s.client.DropPrivilegeGroup(ctx, NewDropPrivilegeGroupOption(groupName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DropPrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDropPrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropPrivilegeGroup).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropPrivilegeGroup.UnPatch()
 
 		err := s.client.DropPrivilegeGroup(ctx, NewDropPrivilegeGroupOption(groupName))
 		s.Error(err)
@@ -528,7 +595,8 @@ func (s *PrivilegeGroupSuite) TestListPrivilegeGroups() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().ListPrivilegeGroups(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
+		defer mockey.UnPatchAll()
+		mockListPrivilegeGroups := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListPrivilegeGroups).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.ListPrivilegeGroupsRequest) (*milvuspb.ListPrivilegeGroupsResponse, error) {
 			return &milvuspb.ListPrivilegeGroupsResponse{
 				PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{
 					{
@@ -541,7 +609,8 @@ func (s *PrivilegeGroupSuite) TestListPrivilegeGroups() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockListPrivilegeGroups.UnPatch()
 
 		pgs, err := s.client.ListPrivilegeGroups(ctx, NewListPrivilegeGroupsOption())
 		s.NoError(err)
@@ -553,7 +622,9 @@ func (s *PrivilegeGroupSuite) TestListPrivilegeGroups() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().ListPrivilegeGroups(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockListPrivilegeGroups := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListPrivilegeGroups).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockListPrivilegeGroups.UnPatch()
 
 		_, err := s.client.ListPrivilegeGroups(ctx, NewListPrivilegeGroupsOption())
 		s.Error(err)
@@ -569,17 +640,21 @@ func (s *PrivilegeGroupSuite) TestOperatePrivilegeGroup() {
 	operateType := milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup
 
 	s.Run("success", func() {
-		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 			s.Equal(groupName, r.GetGroupName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilegeGroup.UnPatch()
 
 		err := s.client.OperatePrivilegeGroup(ctx, NewOperatePrivilegeGroupOption(groupName, privileges, operateType))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeGroup).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilegeGroup.UnPatch()
 
 		err := s.client.OperatePrivilegeGroup(ctx, NewOperatePrivilegeGroupOption(groupName, privileges, operateType))
 		s.Error(err)
@@ -594,18 +669,22 @@ func (s *PrivilegeGroupSuite) TestAddPrivilegesToGroup() {
 	privileges := []string{"Insert", "Query"}
 
 	s.Run("success", func() {
-		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 			s.Equal(groupName, r.GetGroupName())
 			s.Equal(milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, r.GetType())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilegeGroup.UnPatch()
 
 		err := s.client.AddPrivilegesToGroup(ctx, NewAddPrivilegesToGroupOption(groupName, privileges...))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeGroup).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilegeGroup.UnPatch()
 
 		err := s.client.AddPrivilegesToGroup(ctx, NewAddPrivilegesToGroupOption(groupName, privileges...))
 		s.Error(err)
@@ -620,18 +699,22 @@ func (s *PrivilegeGroupSuite) TestRemovePrivilegesFromGroup() {
 	privileges := []string{"Insert", "Query"}
 
 	s.Run("success", func() {
-		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, r *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 			s.Equal(groupName, r.GetGroupName())
 			s.Equal(milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup, r.GetType())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockOperatePrivilegeGroup.UnPatch()
 
 		err := s.client.RemovePrivilegesFromGroup(ctx, NewRemovePrivilegesFromGroupOption(groupName, privileges...))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockOperatePrivilegeGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).OperatePrivilegeGroup).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockOperatePrivilegeGroup.UnPatch()
 
 		err := s.client.RemovePrivilegesFromGroup(ctx, NewRemovePrivilegesFromGroupOption(groupName, privileges...))
 		s.Error(err)

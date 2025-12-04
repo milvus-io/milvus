@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -40,10 +40,11 @@ func (s *ReadSuite) TestSearch() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
-		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			s.Equal(collectionName, sr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, sr.GetPartitionNames())
 
@@ -67,7 +68,8 @@ func (s *ReadSuite) TestSearch() {
 					Recalls: []float32{0.9},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSearch.UnPatch()
 
 		ap := index.NewCustomAnnParam()
 		ap.WithExtraParam("custom_level", 1)
@@ -86,10 +88,11 @@ func (s *ReadSuite) TestSearch() {
 	})
 
 	s.Run("dynamic_schema", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collectionName, s.schemaDyn)
-		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			return &milvuspb.SearchResults{
 				Status: merr.Success(),
 				Results: &schemapb.SearchResultData{
@@ -113,7 +116,8 @@ func (s *ReadSuite) TestSearch() {
 					Topks:  []int64{2},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSearch.UnPatch()
 
 		_, err := s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{
 			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
@@ -124,10 +128,11 @@ func (s *ReadSuite) TestSearch() {
 	})
 
 	s.Run("bad_result", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
-		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			s.Equal(collectionName, sr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, sr.GetPartitionNames())
 
@@ -150,7 +155,8 @@ func (s *ReadSuite) TestSearch() {
 					Topks:  []int64{},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSearch.UnPatch()
 
 		ap := index.NewCustomAnnParam()
 		ap.WithExtraParam("custom_level", 1)
@@ -172,15 +178,17 @@ func (s *ReadSuite) TestSearch() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schemaDyn)
 
 		_, err := s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{nonSupportData{}}))
 		s.Error(err)
 
-		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			return nil, merr.WrapErrServiceInternal("mocked")
-		}).Once()
+		}).Build()
+		defer mockSearch.UnPatch()
 
 		_, err = s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{
 			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
@@ -198,10 +206,11 @@ func (s *ReadSuite) TestSearch_TextMatch() {
 	defer cancel()
 
 	s.Run("min_should_match_in_expr", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
 
-		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			// ensure the expression contains minimum_should_match and both fields
 			s.Contains(sr.GetDsl(), "minimum_should_match=2")
 			s.Contains(sr.GetDsl(), "text_match(")
@@ -218,7 +227,8 @@ func (s *ReadSuite) TestSearch_TextMatch() {
 					Topks:  []int64{1},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSearch.UnPatch()
 
 		q := "artificial intelligence"
 		expr := "text_match(title, \"" + q + "\", minimum_should_match=2) OR text_match(document_text, \"" + q + "\", minimum_should_match=2)"
@@ -236,11 +246,12 @@ func (s *ReadSuite) TestHybridSearch() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
 
-		s.mock.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+		mockHybridSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).HybridSearch).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 			s.Equal(collectionName, hsr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, hsr.GetPartitionNames())
 			s.ElementsMatch([]string{"*"}, hsr.GetOutputFields())
@@ -267,7 +278,8 @@ func (s *ReadSuite) TestHybridSearch() {
 					Topks:  []int64{2},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockHybridSearch.UnPatch()
 
 		_, err := s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, 5, NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
@@ -278,15 +290,17 @@ func (s *ReadSuite) TestHybridSearch() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collectionName, s.schemaDyn)
 
 		_, err := s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, 5, NewAnnRequest("vector", 10, nonSupportData{})))
 		s.Error(err)
 
-		s.mock.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+		mockHybridSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).HybridSearch).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
 			return nil, merr.WrapErrServiceInternal("mocked")
-		}).Once()
+		}).Build()
+		defer mockHybridSearch.UnPatch()
 
 		_, err = s.client.HybridSearch(ctx, NewHybridSearchOption(collectionName, 5, NewAnnRequest("vector", 10, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
@@ -302,15 +316,17 @@ func (s *ReadSuite) TestQuery() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collectionName, s.schema)
 
-		s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		mockQuery := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Query).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 			s.Equal(collectionName, qr.GetCollectionName())
 
 			return &milvuspb.QueryResults{}, nil
-		}).Once()
+		}).Build()
+		defer mockQuery.UnPatch()
 
 		rs, err := s.client.Query(ctx, NewQueryOption(collectionName).WithPartitions(partitionName))
 		s.NoError(err)

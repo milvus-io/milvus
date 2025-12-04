@@ -26,17 +26,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -184,13 +183,11 @@ func CheckErrCode(errorStr string, err error) bool {
 func TestVectorAuthenticate(t *testing.T) {
 	paramtable.Init()
 
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().
-		ShowCollections(mock.Anything, mock.Anything).
-		Return(&DefaultShowCollectionsResp, nil).
-		Twice()
+	mockProxy := &proxy.Proxy{}
+	mockShowCollections := mockey.Mock((*proxy.Proxy).ShowCollections).Return(&DefaultShowCollectionsResp, nil).Build()
+	defer mockShowCollections.UnPatch()
 
-	testEngine := initHTTPServer(mp, true)
+	testEngine := initHTTPServer(mockProxy, true)
 
 	t.Run("need authentication", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
@@ -230,39 +227,47 @@ func TestVectorAuthenticate(t *testing.T) {
 
 func TestVectorListCollection(t *testing.T) {
 	paramtable.Init()
-	testCases := []testCase{}
-	mp0 := mocks.NewMockProxy(t)
-	mp0.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "show collections fail",
-		mp:           mp0,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	mp1 := mocks.NewMockProxy(t)
+	mp := &proxy.Proxy{}
 	err := merr.WrapErrIoFailedReason("cannot create folder")
-	mp1.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-		Status: merr.Status(err),
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "show collections fail",
-		mp:           mp1,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
 
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&DefaultShowCollectionsResp, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "list collections success",
-		mp:           mp,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":[\"" + DefaultCollectionName + "\"]}",
-	})
+	testCases := []testCase{
+		{
+			name:       "show collections fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).ShowCollections).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "show collections fail with status",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).ShowCollections).Return(&milvuspb.ShowCollectionsResponse{
+					Status: merr.Status(err),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(err),
+		},
+		{
+			name:       "list collections success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).ShowCollections).Return(&DefaultShowCollectionsResp, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":[\"" + DefaultCollectionName + "\"]}",
+		},
+	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath), nil)
 			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
@@ -280,7 +285,8 @@ func TestVectorListCollection(t *testing.T) {
 
 type testCase struct {
 	name         string
-	mp           *mocks.MockProxy
+	mp           types.ProxyComponent
+	mockSetup    func()
 	exceptCode   int
 	expectedBody string
 	expectedErr  error
@@ -288,45 +294,71 @@ type testCase struct {
 
 func TestVectorCollectionsDescribe(t *testing.T) {
 	paramtable.Init()
-	testCases := []testCase{}
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnFail, 1, testCases)
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnWrongStatus, 1, testCases)
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp2 := mocks.NewMockProxy(t)
-	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
-	mp2.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	mp2, _ = wrapWithDescribeIndex(t, mp2, ReturnSuccess, 1, nil)
-	testCases = append(testCases, testCase{
-		name:         "get load status fail",
-		mp:           mp2,
-		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_id\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"word_count\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_intro\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"COSINE\"}],\"load\":\"\",\"shardsNum\":1}}",
-	})
-
-	mp3 := mocks.NewMockProxy(t)
-	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
-	mp3.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Once()
-	mp3, _ = wrapWithDescribeIndex(t, mp3, ReturnFail, 1, nil)
-	testCases = append(testCases, testCase{
-		name:         "get indexes fail",
-		mp:           mp3,
-		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_id\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"word_count\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_intro\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
-	mp4.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Once()
-	mp4, _ = wrapWithDescribeIndex(t, mp4, ReturnSuccess, 1, nil)
-	testCases = append(testCases, testCase{
-		name:         "show collection details success",
-		mp:           mp4,
-		exceptCode:   http.StatusOK,
-		expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_id\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"word_count\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_intro\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"COSINE\"}],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
-	})
+	testCases := []testCase{
+		{
+			name:       "[share] describe coll fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "[share] collection not found",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "get load status fail",
+			mp:         mp,
+			exceptCode: http.StatusOK,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).GetLoadState).Return(nil, ErrDefault).Build()
+				mockey.Mock((*proxy.Proxy).DescribeIndex).Return(&DefaultDescIndexesReqp, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_id\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"word_count\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_intro\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"COSINE\"}],\"load\":\"\",\"shardsNum\":1}}",
+		},
+		{
+			name:       "get indexes fail",
+			mp:         mp,
+			exceptCode: http.StatusOK,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).GetLoadState).Return(&DefaultLoadStateResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).DescribeIndex).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_id\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"word_count\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_intro\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
+		},
+		{
+			name:       "show collection details success",
+			mp:         mp,
+			exceptCode: http.StatusOK,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).GetLoadState).Return(&DefaultLoadStateResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).DescribeIndex).Return(&DefaultDescIndexesReqp, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"collectionName\":\"" + DefaultCollectionName + "\",\"description\":\"\",\"enableDynamicField\":true,\"fields\":[{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_id\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":true,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"word_count\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"Int64\"},{\"autoId\":false,\"clusteringKey\":false,\"description\":\"\",\"name\":\"book_intro\",\"nullable\":false,\"partitionKey\":false,\"primaryKey\":false,\"type\":\"FloatVector(2)\"}],\"indexes\":[{\"fieldName\":\"book_intro\",\"indexName\":\"" + DefaultIndexName + "\",\"metricType\":\"COSINE\"}],\"load\":\"LoadStateLoaded\",\"shardsNum\":1}}",
+		},
+	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsDescribePath)+"?collectionName="+DefaultCollectionName, nil)
 			req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
@@ -341,7 +373,7 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 		})
 	}
 	t.Run("need collectionName", func(t *testing.T) {
-		testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
+		testEngine := initHTTPServer(&proxy.Proxy{}, true)
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsDescribePath)+"?"+DefaultCollectionName, nil)
 		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
@@ -353,61 +385,68 @@ func TestVectorCollectionsDescribe(t *testing.T) {
 
 func TestVectorCreateCollection(t *testing.T) {
 	paramtable.Init()
-	testCases := []testCase{}
+	mp := &proxy.Proxy{}
+	errLimit := merr.WrapErrCollectionNumLimitExceeded("default", 65535)
 
-	mp1 := mocks.NewMockProxy(t)
-	mp1.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "create collection fail",
-		mp:           mp1,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNumLimitExceeded("default", 65535)
-	mp2 := mocks.NewMockProxy(t)
-	mp2.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Status(err), nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "create collection fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp3 := mocks.NewMockProxy(t)
-	mp3.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	mp3.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "create index fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	mp4.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	mp4.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "load collection fail",
-		mp:           mp4,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	mp5 := mocks.NewMockProxy(t)
-	mp5.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	mp5.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	mp5.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "create collection success",
-		mp:           mp5,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{}}",
-	})
+	testCases := []testCase{
+		{
+			name:       "create collection fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).CreateCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "create collection fail with status",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).CreateCollection).Return(merr.Status(errLimit), nil).Build()
+			},
+			expectedBody: PrintErr(errLimit),
+		},
+		{
+			name:       "create index fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).CreateCollection).Return(&StatusSuccess, nil).Build()
+				mockey.Mock((*proxy.Proxy).CreateIndex).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "load collection fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).CreateCollection).Return(&StatusSuccess, nil).Build()
+				mockey.Mock((*proxy.Proxy).CreateIndex).Return(&StatusSuccess, nil).Build()
+				mockey.Mock((*proxy.Proxy).LoadCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "create collection success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).CreateCollection).Return(&StatusSuccess, nil).Build()
+				mockey.Mock((*proxy.Proxy).CreateIndex).Return(&StatusSuccess, nil).Build()
+				mockey.Mock((*proxy.Proxy).LoadCollection).Return(&StatusSuccess, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{}}",
+		},
+	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2}`)
 			bodyReader := bytes.NewReader(jsonBody)
@@ -427,44 +466,77 @@ func TestVectorCreateCollection(t *testing.T) {
 
 func TestVectorDropCollection(t *testing.T) {
 	paramtable.Init()
-	testCases := []testCase{}
-	_, testCases = wrapWithHasCollection(t, nil, ReturnFail, 1, testCases)
-	_, testCases = wrapWithHasCollection(t, nil, ReturnWrongStatus, 1, testCases)
-	_, testCases = wrapWithHasCollection(t, nil, ReturnFalse, 1, testCases)
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp1 := mocks.NewMockProxy(t)
-	mp1, _ = wrapWithHasCollection(t, mp1, ReturnTrue, 1, nil)
-	mp1.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "drop collection fail",
-		mp:           mp1,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-	mp2 := mocks.NewMockProxy(t)
-	mp2, _ = wrapWithHasCollection(t, mp2, ReturnTrue, 1, nil)
-	mp2.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(merr.Status(err), nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "drop collection fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp3 := mocks.NewMockProxy(t)
-	mp3, _ = wrapWithHasCollection(t, mp3, ReturnTrue, 1, nil)
-	mp3.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(&StatusSuccess, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "create collection fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{}}",
-	})
+	testCases := []testCase{
+		{
+			name:       "[share] check collection fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).HasCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "[share] unexpected error",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).HasCollection).Return(&milvuspb.BoolResponse{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:        "[share] collection not found",
+			mp:          mp,
+			exceptCode:  200,
+			expectedErr: merr.ErrCollectionNotFound,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).HasCollection).Return(&DefaultFalseResp, nil).Build()
+			},
+		},
+		{
+			name:       "drop collection fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).HasCollection).Return(&DefaultTrueResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).DropCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "drop collection fail with status",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).HasCollection).Return(&DefaultTrueResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).DropCollection).Return(merr.Status(errCollNotFound), nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "drop collection success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).HasCollection).Return(&DefaultTrueResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).DropCollection).Return(&StatusSuccess, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{}}",
+		},
+	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `"}`)
 			bodyReader := bytes.NewReader(jsonBody)
@@ -485,60 +557,63 @@ func TestVectorDropCollection(t *testing.T) {
 func TestQuery(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
-	testCases := []testCase{}
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp2 := mocks.NewMockProxy(t)
-	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
-	mp2.EXPECT().Query(mock.Anything, mock.Anything).Return(nil, ErrDefault).Twice()
-	testCases = append(testCases, testCase{
-		name:         "query fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-	mp3 := mocks.NewMockProxy(t)
-	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
-	mp3.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
-		Status: merr.Status(err),
-	}, nil).Twice()
-	testCases = append(testCases, testCase{
-		name:         "query fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
-	mp4.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
-		Status:         &StatusSuccess,
-		FieldsData:     newFieldData([]*schemapb.FieldData{}, 1000),
-		CollectionName: DefaultCollectionName,
-		OutputFields:   []string{FieldBookID, FieldWordCount, FieldBookIntro},
-	}, nil).Twice()
-	testCases = append(testCases, testCase{
-		name:        "query fail",
-		mp:          mp4,
-		exceptCode:  200,
-		expectedErr: merr.ErrInvalidSearchResult,
-	})
-
-	mp5 := mocks.NewMockProxy(t)
-	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
-	mp5.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
-		Status:         &StatusSuccess,
-		FieldsData:     generateFieldData(),
-		CollectionName: DefaultCollectionName,
-		OutputFields:   []string{FieldBookID, FieldWordCount, FieldBookIntro},
-	}, nil).Twice()
-	testCases = append(testCases, testCase{
-		name:         "query success",
-		mp:           mp5,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":[{\"book_id\":1,\"book_intro\":[0.1,0.11],\"word_count\":1000},{\"book_id\":2,\"book_intro\":[0.2,0.22],\"word_count\":2000},{\"book_id\":3,\"book_intro\":[0.3,0.33],\"word_count\":3000}]}\n",
-	})
+	testCases := []testCase{
+		{
+			name:       "query fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Query).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "query fail with status",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Query).Return(&milvuspb.QueryResults{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:        "query invalid result",
+			mp:          mp,
+			exceptCode:  200,
+			expectedErr: merr.ErrInvalidSearchResult,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Query).Return(&milvuspb.QueryResults{
+					Status:         &StatusSuccess,
+					FieldsData:     newFieldData([]*schemapb.FieldData{}, 1000),
+					CollectionName: DefaultCollectionName,
+					OutputFields:   []string{FieldBookID, FieldWordCount, FieldBookIntro},
+				}, nil).Build()
+			},
+		},
+		{
+			name:       "query success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Query).Return(&milvuspb.QueryResults{
+					Status:         &StatusSuccess,
+					FieldsData:     generateFieldData(),
+					CollectionName: DefaultCollectionName,
+					OutputFields:   []string{FieldBookID, FieldWordCount, FieldBookIntro},
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":[{\"book_id\":1,\"book_intro\":[0.1,0.11],\"word_count\":1000},{\"book_id\":2,\"book_intro\":[0.2,0.22],\"word_count\":2000},{\"book_id\":3,\"book_intro\":[0.3,0.33],\"word_count\":3000}]}\n",
+		},
+	}
 
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -547,6 +622,10 @@ func TestQuery(t *testing.T) {
 	for _, tt := range testCases {
 		reqs := []*http.Request{genQueryRequest(), genGetRequest()}
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			for _, req := range reqs {
 				req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
@@ -589,44 +668,65 @@ func genGetRequest() *http.Request {
 
 func TestDelete(t *testing.T) {
 	paramtable.Init()
-	testCases := []testCase{}
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnFail, 1, testCases)
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnWrongStatus, 1, testCases)
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp2 := mocks.NewMockProxy(t)
-	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
-	mp2.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "delete fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-	mp3 := mocks.NewMockProxy(t)
-	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
-	mp3.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status: merr.Status(err),
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "delete fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
-	mp4.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status: &StatusSuccess,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "delete success",
-		mp:           mp4,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{}}",
-	})
+	testCases := []testCase{
+		{
+			name:       "[share] describe coll fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "[share] collection not found",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "delete fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Delete).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "delete fail with status",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Delete).Return(&milvuspb.MutationResult{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "delete success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Delete).Return(&milvuspb.MutationResult{
+					Status: &StatusSuccess,
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{}}",
+		},
+	}
 
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -634,6 +734,10 @@ func TestDelete(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "id": [1,2,3]}`)
 			bodyReader := bytes.NewReader(jsonBody)
@@ -666,11 +770,12 @@ func TestDeleteForFilter(t *testing.T) {
 	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for _, jsonBody := range jsonBodyList {
 		t.Run("delete success", func(t *testing.T) {
-			mp := mocks.NewMockProxy(t)
-			mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
-			mp.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+			mockey.Mock((*proxy.Proxy).Delete).Return(&milvuspb.MutationResult{
 				Status: &StatusSuccess,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			bodyReader := bytes.NewReader(jsonBody)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorDeletePath), bodyReader)
@@ -689,72 +794,93 @@ func TestDeleteForFilter(t *testing.T) {
 func TestInsert(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
-	testCases := []testCase{}
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnFail, 1, testCases)
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnWrongStatus, 1, testCases)
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp2 := mocks.NewMockProxy(t)
-	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
-	mp2.EXPECT().Insert(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "insert fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-	mp3 := mocks.NewMockProxy(t)
-	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
-	mp3.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status: merr.Status(err),
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "insert fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
-	mp4.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status: &StatusSuccess,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:        "id type invalid",
-		mp:          mp4,
-		exceptCode:  200,
-		expectedErr: merr.ErrCheckPrimaryKey,
-	})
-
-	mp5 := mocks.NewMockProxy(t)
-	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
-	mp5.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status:    &StatusSuccess,
-		IDs:       genIDs(schemapb.DataType_Int64),
-		InsertCnt: 3,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "insert success",
-		mp:           mp5,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{\"insertCount\":3,\"insertIds\":[1,2,3]}}",
-	})
-
-	mp6 := mocks.NewMockProxy(t)
-	mp6, _ = wrapWithDescribeColl(t, mp6, ReturnSuccess, 1, nil)
-	mp6.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status:    &StatusSuccess,
-		IDs:       genIDs(schemapb.DataType_VarChar),
-		InsertCnt: 3,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "insert success",
-		mp:           mp6,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{\"insertCount\":3,\"insertIds\":[\"1\",\"2\",\"3\"]}}",
-	})
+	testCases := []testCase{
+		{
+			name:       "[share] describe coll fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "[share] collection not found",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "insert fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Insert).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "insert fail with status",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:        "id type invalid",
+			mp:          mp,
+			exceptCode:  200,
+			expectedErr: merr.ErrCheckPrimaryKey,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
+					Status: &StatusSuccess,
+				}, nil).Build()
+			},
+		},
+		{
+			name:       "insert success int64",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
+					Status:    &StatusSuccess,
+					IDs:       genIDs(schemapb.DataType_Int64),
+					InsertCnt: 3,
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"insertCount\":3,\"insertIds\":[1,2,3]}}",
+		},
+		{
+			name:       "insert success varchar",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
+					Status:    &StatusSuccess,
+					IDs:       genIDs(schemapb.DataType_VarChar),
+					InsertCnt: 3,
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"insertCount\":3,\"insertIds\":[\"1\",\"2\",\"3\"]}}",
+		},
+	}
 
 	rows := generateSearchResult(schemapb.DataType_Int64)
 	data, _ := json.Marshal(map[string]interface{}{
@@ -767,6 +893,10 @@ func TestInsert(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
@@ -786,8 +916,8 @@ func TestInsert(t *testing.T) {
 	}
 
 	t.Run("wrong request body", func(t *testing.T) {
-		mp := mocks.NewMockProxy(t)
-		mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
+		mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+		defer mockey.UnPatchAll()
 		testEngine := initHTTPServer(mp, true)
 		bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "data": {}}`))
 		req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
@@ -815,18 +945,20 @@ func TestInsertForDataType(t *testing.T) {
 	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			schemaLocal := schema
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
-				Schema:         schema,
+				Schema:         schemaLocal,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(schemapb.DataType_Int64),
 				InsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(schemapb.DataType_Int64))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -845,13 +977,15 @@ func TestInsertForDataType(t *testing.T) {
 	schemas = map[string]*schemapb.CollectionSchema{}
 	for name, schema := range schemas {
 		t.Run(name, func(t *testing.T) {
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			schemaLocal := schema
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
-				Schema:         schema,
+				Schema:         schemaLocal,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(schemapb.DataType_Int64))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -886,18 +1020,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				InsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -917,18 +1052,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: false", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -948,18 +1084,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: false, Accept-Type-Allow-Int64: true", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				InsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -980,18 +1117,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: false, Accept-Type-Allow-Int64: true", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -1013,18 +1151,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: true", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				InsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -1044,18 +1183,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: true", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -1075,18 +1215,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[insert]httpCfg.allow: true, Accept-Type-Allow-Int64: false", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				InsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -1107,18 +1248,19 @@ func TestReturnInt64(t *testing.T) {
 	for _, dataType := range schemas {
 		t.Run("[upsert]httpCfg.allow: true, Accept-Type-Allow-Int64: false", func(t *testing.T) {
 			schema := newCollectionSchema(generateCollectionSchema(dataType, false, true))
-			mp := mocks.NewMockProxy(t)
-			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mp := &proxy.Proxy{}
+			mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionName: DefaultCollectionName,
 				Schema:         schema,
 				ShardsNum:      ShardNumDefault,
 				Status:         &StatusSuccess,
-			}, nil).Once()
-			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+			}, nil).Build()
+			mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
 				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
-			}, nil).Once()
+			}, nil).Build()
+			defer mockey.UnPatchAll()
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
@@ -1140,72 +1282,93 @@ func TestReturnInt64(t *testing.T) {
 func TestUpsert(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
-	testCases := []testCase{}
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnFail, 1, testCases)
-	_, testCases = wrapWithDescribeColl(t, nil, ReturnWrongStatus, 1, testCases)
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp2 := mocks.NewMockProxy(t)
-	mp2, _ = wrapWithDescribeColl(t, mp2, ReturnSuccess, 1, nil)
-	mp2.EXPECT().Upsert(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "upsert fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-	mp3 := mocks.NewMockProxy(t)
-	mp3, _ = wrapWithDescribeColl(t, mp3, ReturnSuccess, 1, nil)
-	mp3.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status: merr.Status(err),
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "upsert fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4, _ = wrapWithDescribeColl(t, mp4, ReturnSuccess, 1, nil)
-	mp4.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status: &StatusSuccess,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:        "id type invalid",
-		mp:          mp4,
-		exceptCode:  200,
-		expectedErr: merr.ErrCheckPrimaryKey,
-	})
-
-	mp5 := mocks.NewMockProxy(t)
-	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
-	mp5.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status:    &StatusSuccess,
-		IDs:       genIDs(schemapb.DataType_Int64),
-		UpsertCnt: 3,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "upsert success",
-		mp:           mp5,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{\"upsertCount\":3,\"upsertIds\":[1,2,3]}}",
-	})
-
-	mp6 := mocks.NewMockProxy(t)
-	mp6, _ = wrapWithDescribeColl(t, mp6, ReturnSuccess, 1, nil)
-	mp6.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
-		Status:    &StatusSuccess,
-		IDs:       genIDs(schemapb.DataType_VarChar),
-		UpsertCnt: 3,
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "upsert success",
-		mp:           mp6,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":{\"upsertCount\":3,\"upsertIds\":[\"1\",\"2\",\"3\"]}}",
-	})
+	testCases := []testCase{
+		{
+			name:       "[share] describe coll fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "[share] collection not found",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "upsert fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Upsert).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
+		},
+		{
+			name:       "upsert fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
+		},
+		{
+			name:       "id type invalid",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
+					Status: &StatusSuccess,
+				}, nil).Build()
+			},
+			expectedErr: merr.ErrCheckPrimaryKey,
+		},
+		{
+			name:       "upsert success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
+					Status:    &StatusSuccess,
+					IDs:       genIDs(schemapb.DataType_Int64),
+					UpsertCnt: 3,
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"upsertCount\":3,\"upsertIds\":[1,2,3]}}",
+		},
+		{
+			name:       "upsert success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+				mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{
+					Status:    &StatusSuccess,
+					IDs:       genIDs(schemapb.DataType_VarChar),
+					UpsertCnt: 3,
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":{\"upsertCount\":3,\"upsertIds\":[\"1\",\"2\",\"3\"]}}",
+		},
+	}
 
 	rows := generateSearchResult(schemapb.DataType_Int64)
 	data, _ := json.Marshal(map[string]interface{}{
@@ -1217,6 +1380,10 @@ func TestUpsert(t *testing.T) {
 	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
@@ -1236,8 +1403,8 @@ func TestUpsert(t *testing.T) {
 	}
 
 	t.Run("wrong request body", func(t *testing.T) {
-		mp := mocks.NewMockProxy(t)
-		mp, _ = wrapWithDescribeColl(t, mp, ReturnSuccess, 1, nil)
+		mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&DefaultDescCollectionResp, nil).Build()
+		defer mockey.UnPatchAll()
 		testEngine := initHTTPServer(mp, true)
 		bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "data": {}}`))
 		req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
@@ -1255,7 +1422,7 @@ func TestUpsert(t *testing.T) {
 func TestFp16Bf16VectorsV1(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
-	mp := mocks.NewMockProxy(t)
+	mp := &proxy.Proxy{}
 	collSchema := generateCollectionSchemaWithVectorFields()
 	testEngine := initHTTPServer(mp, true)
 	queryTestCases := []requestBodyTestCase{}
@@ -1413,14 +1580,15 @@ func TestFp16Bf16VectorsV1(t *testing.T) {
 				errCode: 200,
 			})
 	}
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(len(queryTestCases))
-	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
-	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
+	}, nil).Build()
+	mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	defer mockey.UnPatchAll()
 	for i, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader(testcase.requestBody)
@@ -1448,66 +1616,73 @@ func genIDs(dataType schemapb.DataType) *schemapb.IDs {
 func TestSearch(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(proxy.Params.HTTPCfg.AcceptTypeAllowInt64.Key, "true")
-	testCases := []testCase{}
+	mp := &proxy.Proxy{}
+	errCollNotFound := merr.WrapErrCollectionNotFound(DefaultCollectionName)
 
-	mp2 := mocks.NewMockProxy(t)
-	mp2.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
-	testCases = append(testCases, testCase{
-		name:         "search fail",
-		mp:           mp2,
-		exceptCode:   200,
-		expectedBody: PrintErr(ErrDefault),
-	})
-
-	err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-	mp3 := mocks.NewMockProxy(t)
-	mp3.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
-		Status: merr.Status(err),
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "search fail",
-		mp:           mp3,
-		exceptCode:   200,
-		expectedBody: PrintErr(err),
-	})
-
-	mp4 := mocks.NewMockProxy(t)
-	mp4.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
-		Status: &StatusSuccess,
-		Results: &schemapb.SearchResultData{
-			FieldsData: []*schemapb.FieldData{},
-			Scores:     []float32{},
-			TopK:       0,
+	testCases := []testCase{
+		{
+			name:       "search fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).Search).Return(nil, ErrDefault).Build()
+			},
+			expectedBody: PrintErr(ErrDefault),
 		},
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "search success",
-		mp:           mp4,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":[]}",
-	})
-
-	mp5 := mocks.NewMockProxy(t)
-	mp5.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
-		Status: &StatusSuccess,
-		Results: &schemapb.SearchResultData{
-			FieldsData: generateFieldData(),
-			Scores:     []float32{0.01, 0.04, 0.09},
-			TopK:       3,
+		{
+			name:       "search fail",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).Search).Return(&milvuspb.SearchResults{
+					Status: merr.Status(errCollNotFound),
+				}, nil).Build()
+			},
+			expectedBody: PrintErr(errCollNotFound),
 		},
-	}, nil).Once()
-	testCases = append(testCases, testCase{
-		name:         "search success",
-		mp:           mp5,
-		exceptCode:   200,
-		expectedBody: "{\"code\":200,\"data\":[{\"book_id\":1,\"book_intro\":[0.1,0.11],\"distance\":0.01,\"word_count\":1000},{\"book_id\":2,\"book_intro\":[0.2,0.22],\"distance\":0.04,\"word_count\":2000},{\"book_id\":3,\"book_intro\":[0.3,0.33],\"distance\":0.09,\"word_count\":3000}]}\n",
-	})
+		{
+			name:       "search success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).Search).Return(&milvuspb.SearchResults{
+					Status: &StatusSuccess,
+					Results: &schemapb.SearchResultData{
+						FieldsData: []*schemapb.FieldData{},
+						Scores:     []float32{},
+						TopK:       0,
+					},
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":[]}",
+		},
+		{
+			name:       "search success",
+			mp:         mp,
+			exceptCode: 200,
+			mockSetup: func() {
+				mockey.Mock((*proxy.Proxy).Search).Return(&milvuspb.SearchResults{
+					Status: &StatusSuccess,
+					Results: &schemapb.SearchResultData{
+						FieldsData: generateFieldData(),
+						Scores:     []float32{0.01, 0.04, 0.09},
+						TopK:       3,
+					},
+				}, nil).Build()
+			},
+			expectedBody: "{\"code\":200,\"data\":[{\"book_id\":1,\"book_intro\":[0.1,0.11],\"distance\":0.01,\"word_count\":1000},{\"book_id\":2,\"book_intro\":[0.2,0.22],\"distance\":0.04,\"word_count\":2000},{\"book_id\":3,\"book_intro\":[0.3,0.33],\"distance\":0.09,\"word_count\":3000}]}\n",
+		},
+	}
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.mockSetup != nil {
+				tt.mockSetup()
+				defer mockey.UnPatchAll()
+			}
 			testEngine := initHTTPServer(tt.mp, true)
 			rows := []float32{0.0, 0.0}
 			data, _ := json.Marshal(map[string]interface{}{
@@ -1537,22 +1712,18 @@ func TestSearch(t *testing.T) {
 			}
 		})
 	}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
-		Status: &StatusSuccess,
-		Results: &schemapb.SearchResultData{
-			FieldsData: generateFieldData(),
-			Scores:     []float32{0.01, 0.04, 0.09},
-			TopK:       3,
-		},
-	}, nil).Once()
-	tt := testCase{
-		name:       "search success with params",
-		mp:         mp,
-		exceptCode: 200,
-	}
-	t.Run(tt.name, func(t *testing.T) {
-		testEngine := initHTTPServer(tt.mp, true)
+
+	t.Run("search success with params", func(t *testing.T) {
+		mockey.Mock((*proxy.Proxy).Search).Return(&milvuspb.SearchResults{
+			Status: &StatusSuccess,
+			Results: &schemapb.SearchResultData{
+				FieldsData: generateFieldData(),
+				Scores:     []float32{0.01, 0.04, 0.09},
+				TopK:       3,
+			},
+		}, nil).Build()
+		defer mockey.UnPatchAll()
+		testEngine := initHTTPServer(mp, true)
 		rows := []float32{0.0, 0.0}
 		data, _ := json.Marshal(map[string]interface{}{
 			HTTPCollectionName: DefaultCollectionName,
@@ -1567,110 +1738,8 @@ func TestSearch(t *testing.T) {
 		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
 		w := httptest.NewRecorder()
 		testEngine.ServeHTTP(w, req)
-		assert.Equal(t, tt.exceptCode, w.Code)
+		assert.Equal(t, 200, w.Code)
 	})
-}
-
-type ReturnType int
-
-func wrapWithDescribeColl(t *testing.T, mp *mocks.MockProxy, returnType ReturnType, times int, testCases []testCase) (*mocks.MockProxy, []testCase) {
-	if mp == nil {
-		mp = mocks.NewMockProxy(t)
-	}
-	var call *mocks.MockProxy_DescribeCollection_Call
-	var testcase testCase
-	switch returnType {
-	case ReturnSuccess:
-		call = mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&DefaultDescCollectionResp, nil)
-		testcase = testCase{
-			name:         "[share] describe coll success",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: "{\"code\":200,\"data\":{}}",
-		}
-	case ReturnFail:
-		call = mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault)
-		testcase = testCase{
-			name:         "[share] describe coll fail",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: PrintErr(ErrDefault),
-		}
-	case ReturnWrongStatus:
-		err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-		call = mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			Status: merr.Status(err),
-		}, nil)
-		testcase = testCase{
-			name:         "[share] collection not found",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: PrintErr(err),
-		}
-	}
-	if times == 2 {
-		call.Twice()
-	} else {
-		call.Once()
-	}
-	if testCases != nil {
-		testCases = append(testCases, testcase)
-	}
-	return mp, testCases
-}
-
-func wrapWithHasCollection(t *testing.T, mp *mocks.MockProxy, returnType ReturnType, times int, testCases []testCase) (*mocks.MockProxy, []testCase) {
-	if mp == nil {
-		mp = mocks.NewMockProxy(t)
-	}
-	var call *mocks.MockProxy_HasCollection_Call
-	var testcase testCase
-	switch returnType {
-	case ReturnTrue:
-		call = mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&DefaultTrueResp, nil)
-		testcase = testCase{
-			name:         "[share] collection already exists",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: "{\"code\":200,\"message\":\"collection " + DefaultCollectionName + " already exist.\"}",
-		}
-	case ReturnFalse:
-		call = mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&DefaultFalseResp, nil)
-		testcase = testCase{
-			name:        "[share] collection not found",
-			mp:          mp,
-			exceptCode:  200,
-			expectedErr: merr.ErrCollectionNotFound,
-		}
-	case ReturnFail:
-		call = mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(nil, ErrDefault)
-		testcase = testCase{
-			name:         "[share] check collection fail",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: PrintErr(ErrDefault),
-		}
-	case ReturnWrongStatus:
-		err := merr.WrapErrCollectionNotFound(DefaultCollectionName)
-		call = mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{
-			Status: merr.Status(err),
-		}, nil)
-		testcase = testCase{
-			name:         "[share] unexpected error",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: PrintErr(err),
-		}
-	}
-	if times == 2 {
-		call.Twice()
-	} else {
-		call.Once()
-	}
-	if testCases != nil {
-		testCases = append(testCases, testcase)
-	}
-	return mp, testCases
 }
 
 func TestHttpRequestFormat(t *testing.T) {
@@ -1720,10 +1789,11 @@ func TestHttpRequestFormat(t *testing.T) {
 			versional(VectorSearchPath),
 		},
 	}
+	mp := &proxy.Proxy{}
 	for i, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("request parameters wrong", func(t *testing.T) {
-				testEngine := initHTTPServer(mocks.NewMockProxy(t), true)
+				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(requestJsons[i])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
 				req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
@@ -1743,6 +1813,7 @@ func TestAuthorization(t *testing.T) {
 	jsons := map[string][]byte{
 		errorStr: []byte(`{"collectionName": "` + DefaultCollectionName + `", "vector": [0.1, 0.2], "filter": "id in [2]", "id": [2], "dimension": 2, "data":[{"book_id":1,"book_intro":[0.1,0.11],"distance":0.01,"word_count":1000},{"book_id":2,"book_intro":[0.2,0.22],"distance":0.04,"word_count":2000},{"book_id":3,"book_intro":[0.3,0.33],"distance":0.09,"word_count":3000}]}`),
 	}
+	mp := &proxy.Proxy{}
 	paths := map[string][]string{
 		errorStr: {
 			versional(VectorGetPath),
@@ -1754,7 +1825,6 @@ func TestAuthorization(t *testing.T) {
 	for res, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(jsons[res])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
@@ -1774,7 +1844,6 @@ func TestAuthorization(t *testing.T) {
 	for res, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(jsons[res])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
@@ -1794,7 +1863,6 @@ func TestAuthorization(t *testing.T) {
 	for res, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(jsons[res])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
@@ -1814,7 +1882,6 @@ func TestAuthorization(t *testing.T) {
 	for _, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
 				testEngine := initHTTPServer(mp, true)
 				req := httptest.NewRequest(http.MethodGet, path, nil)
 				req.Header.Set("authorization", "Bearer test:test")
@@ -1833,7 +1900,6 @@ func TestAuthorization(t *testing.T) {
 	for res, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("proxy is not ready", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader(jsons[res])
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
@@ -1848,10 +1914,11 @@ func TestAuthorization(t *testing.T) {
 
 func TestDatabaseNotFound(t *testing.T) {
 	paramtable.Init()
+	mp := &proxy.Proxy{}
 
 	t.Run("list database fail", func(t *testing.T) {
-		mp := mocks.NewMockProxy(t)
-		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, ErrDefault).Once()
+		mockey.Mock((*proxy.Proxy).ListDatabases).Return(nil, ErrDefault).Build()
+		defer mockey.UnPatchAll()
 		testEngine := initHTTPServer(mp, true)
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath)+"?dbName=test", nil)
 		req.Header.Set("authorization", "Bearer root:Milvus")
@@ -1862,11 +1929,11 @@ func TestDatabaseNotFound(t *testing.T) {
 	})
 
 	t.Run("list database without success code", func(t *testing.T) {
-		mp := mocks.NewMockProxy(t)
 		err := errors.New("unexpected error")
-		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		mockey.Mock((*proxy.Proxy).ListDatabases).Return(&milvuspb.ListDatabasesResponse{
 			Status: merr.Status(err),
-		}, nil).Once()
+		}, nil).Build()
+		defer mockey.UnPatchAll()
 		testEngine := initHTTPServer(mp, true)
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath)+"?dbName=test", nil)
 		req.Header.Set("authorization", "Bearer root:Milvus")
@@ -1877,17 +1944,15 @@ func TestDatabaseNotFound(t *testing.T) {
 	})
 
 	t.Run("list database success", func(t *testing.T) {
-		mp := mocks.NewMockProxy(t)
-		mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		mockey.Mock((*proxy.Proxy).ListDatabases).Return(&milvuspb.ListDatabasesResponse{
 			Status:  &StatusSuccess,
 			DbNames: []string{"default", "test"},
-		}, nil).Once()
-		mp.EXPECT().
-			ShowCollections(mock.Anything, mock.Anything).
-			Return(&milvuspb.ShowCollectionsResponse{
-				Status:          &StatusSuccess,
-				CollectionNames: nil,
-			}, nil).Once()
+		}, nil).Build()
+		mockey.Mock((*proxy.Proxy).ShowCollections).Return(&milvuspb.ShowCollectionsResponse{
+			Status:          &StatusSuccess,
+			CollectionNames: nil,
+		}, nil).Build()
+		defer mockey.UnPatchAll()
 		testEngine := initHTTPServer(mp, true)
 		req := httptest.NewRequest(http.MethodGet, versional(VectorCollectionsPath)+"?dbName=test", nil)
 		req.Header.Set("authorization", "Bearer root:Milvus")
@@ -1907,11 +1972,11 @@ func TestDatabaseNotFound(t *testing.T) {
 	for res, pathArr := range paths {
 		for _, path := range pathArr {
 			t.Run("GET dbName", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
-				mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+				mockey.Mock((*proxy.Proxy).ListDatabases).Return(&milvuspb.ListDatabasesResponse{
 					Status:  &StatusSuccess,
 					DbNames: []string{"default"},
-				}, nil).Once()
+				}, nil).Build()
+				defer mockey.UnPatchAll()
 				testEngine := initHTTPServer(mp, true)
 				req := httptest.NewRequest(http.MethodGet, path, nil)
 				req.Header.Set("authorization", "Bearer root:Milvus")
@@ -1939,11 +2004,11 @@ func TestDatabaseNotFound(t *testing.T) {
 	for request, pathArr := range pathArray {
 		for _, path := range pathArr {
 			t.Run("POST dbName", func(t *testing.T) {
-				mp := mocks.NewMockProxy(t)
-				mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+				mockey.Mock((*proxy.Proxy).ListDatabases).Return(&milvuspb.ListDatabasesResponse{
 					Status:  &StatusSuccess,
 					DbNames: []string{"default"},
-				}, nil).Once()
+				}, nil).Build()
+				defer mockey.UnPatchAll()
 				testEngine := initHTTPServer(mp, true)
 				bodyReader := bytes.NewReader([]byte(request))
 				req := httptest.NewRequest(http.MethodPost, path, bodyReader)
@@ -1955,53 +2020,6 @@ func TestDatabaseNotFound(t *testing.T) {
 			})
 		}
 	}
-}
-
-func wrapWithDescribeIndex(t *testing.T, mp *mocks.MockProxy, returnType int, times int, testCases []testCase) (*mocks.MockProxy, []testCase) {
-	if mp == nil {
-		mp = mocks.NewMockProxy(t)
-	}
-	var call *mocks.MockProxy_DescribeIndex_Call
-	var testcase testCase
-	switch returnType {
-	case ReturnSuccess:
-		call = mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil)
-		testcase = testCase{
-			name:         "[share] describe coll success",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: "{\"code\":200,\"data\":{}}",
-		}
-	case ReturnFail:
-		call = mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, ErrDefault)
-		testcase = testCase{
-			name:         "[share] describe index fail",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: PrintErr(ErrDefault),
-		}
-	case ReturnWrongStatus:
-		reason := "index is not exists"
-		call = mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_IndexNotExist,
-			Reason:    reason,
-		}}, nil)
-		testcase = testCase{
-			name:         "[share] describe index fail",
-			mp:           mp,
-			exceptCode:   200,
-			expectedBody: Print(int32(commonpb.ErrorCode_IndexNotExist), reason),
-		}
-	}
-	if times == 2 {
-		call.Twice()
-	} else {
-		call.Once()
-	}
-	if testCases != nil {
-		testCases = append(testCases, testcase)
-	}
-	return mp, testCases
 }
 
 func TestInterceptor(t *testing.T) {

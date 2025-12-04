@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -420,9 +419,10 @@ func TestDocInDocOutCreateCollection(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(1)
-	testEngine := initHTTPServerV2(mp, false)
+	mockProxy := &proxy.Proxy{}
+	mockCreateCollection := mockey.Mock((*proxy.Proxy).CreateCollection).Return(commonSuccessStatus, nil).Build()
+	defer mockCreateCollection.UnPatch()
+	testEngine := initHTTPServerV2(mockProxy, false)
 	path := versionalV2(CollectionCategory, CreateAction)
 
 	const baseRequestBody = `{
@@ -502,7 +502,7 @@ func TestDocInDocOutCreateCollectionQuickDisallowFunction(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
+	mp := &proxy.Proxy{}
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, CreateAction)
 
@@ -536,19 +536,23 @@ func TestDocInDocOutCreateCollectionQuickDisallowFunction(t *testing.T) {
 
 func TestDocInDocOutDescribeCollection(t *testing.T) {
 	paramtable.Init()
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+	mockDescribeCollection := mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Once()
-	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil).Once()
-	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+	mockGetLoadState := mockey.Mock((*proxy.Proxy).GetLoadState).Return(&DefaultLoadStateResp, nil).Build()
+	defer mockGetLoadState.UnPatch()
+	mockDescribeIndex := mockey.Mock((*proxy.Proxy).DescribeIndex).Return(&DefaultDescIndexesReqp, nil).Build()
+	defer mockDescribeIndex.UnPatch()
+	mockListAliases := mockey.Mock((*proxy.Proxy).ListAliases).Return(&milvuspb.ListAliasesResponse{
 		Status:  &StatusSuccess,
 		Aliases: []string{DefaultAliasName},
-	}, nil).Once()
+	}, nil).Build()
+	defer mockListAliases.UnPatch()
 	testEngine := initHTTPServerV2(mp, false)
 	testcase := requestBodyTestCase{
 		path:        versionalV2(CollectionCategory, DescribeAction),
@@ -563,16 +567,18 @@ func TestDocInDocOutInsert(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	testEngine := initHTTPServerV2(mp, false)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+	mockDescribeCollection := mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+	mockInsert := mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	defer mockInsert.UnPatch()
 
+	testEngine := initHTTPServerV2(mp, false)
 	testcase := requestBodyTestCase{
 		path:        versionalV2(EntityCategory, InsertAction),
 		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "varchar_field": "some text"}]}`),
@@ -587,14 +593,15 @@ func TestDocInDocOutInsertInvalid(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	testEngine := initHTTPServerV2(mp, false)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+	mockDescribeCollection := mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+	testEngine := initHTTPServerV2(mp, false)
 	// invlaid insert request, will not be sent to proxy
 
 	testcase := requestBodyTestCase{
@@ -613,22 +620,23 @@ func TestSearchWithRerank(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	testEngine := initHTTPServerV2(mp, false)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+	mockDescribeCollection := mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+	mockSearch := mockey.Mock((*proxy.Proxy).Search).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: []string{FieldWordCount},
 		FieldsData:   generateFieldData(),
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
-	}}, nil).Once()
-
+	}}, nil).Build()
+	defer mockSearch.UnPatch()
+	testEngine := initHTTPServerV2(mp, false)
 	testcase := requestBodyTestCase{
 		path: versionalV2(EntityCategory, SearchAction),
 		requestBody: []byte(`{
@@ -654,22 +662,23 @@ func TestHybridSearchWithRerank(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	testEngine := initHTTPServerV2(mp, false)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+	mockDescribeCollection := mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
-
-	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+	mockHybridSearch := mockey.Mock((*proxy.Proxy).HybridSearch).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: []string{FieldWordCount},
 		FieldsData:   generateFieldData(),
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
-	}}, nil).Once()
+	}}, nil).Build()
+	defer mockHybridSearch.UnPatch()
+	testEngine := initHTTPServerV2(mp, false)
 
 	queryTestCases := requestBodyTestCase{
 		path:        versionalV2(EntityCategory, HybridSearchAction),
@@ -684,21 +693,23 @@ func TestDocInDocOutSearch(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
-	mp := mocks.NewMockProxy(t)
-	testEngine := initHTTPServerV2(mp, false)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+	mockDescribeCollection := mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateDocInDocOutCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+	mockSearch := mockey.Mock((*proxy.Proxy).Search).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
 		TopK:         int64(3),
 		OutputFields: []string{FieldWordCount},
 		FieldsData:   generateFieldData(),
 		Ids:          generateIDs(schemapb.DataType_Int64, 3),
 		Scores:       DefaultScores,
-	}}, nil).Once()
+	}}, nil).Build()
+	defer mockSearch.UnPatch()
+	testEngine := initHTTPServerV2(mp, false)
 
 	testcase := requestBodyTestCase{
 		path:        versionalV2(EntityCategory, SearchAction),
@@ -715,8 +726,9 @@ func TestCreateIndex(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
+	mp := &proxy.Proxy{}
+	mockCreateIndex := mockey.Mock((*proxy.Proxy).CreateIndex).Return(commonSuccessStatus, nil).Build()
+	defer mockCreateIndex.UnPatch()
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(IndexCategory, CreateAction)
 	// the previous format
@@ -755,16 +767,28 @@ func TestCompact(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(&milvuspb.ManualCompactionResponse{CompactionID: 1}, nil).Once()
-	mp.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(
-		&milvuspb.ManualCompactionResponse{
+	mp := &proxy.Proxy{}
+	seqManualCompaction := mockey.Sequence(&milvuspb.ManualCompactionResponse{CompactionID: 1}, nil).
+		Then(&milvuspb.ManualCompactionResponse{
 			Status: &commonpb.Status{
 				Code:   1100,
 				Reason: "mock",
 			},
-		}, nil).Once()
+		}, nil)
+	mockey.Mock((*proxy.Proxy).ManualCompaction).Return(seqManualCompaction).Build()
+
+	seqGetCompactionState := mockey.Sequence(&milvuspb.GetCompactionStateResponse{}, nil).
+		Then(&milvuspb.GetCompactionStateResponse{
+			Status: &commonpb.Status{
+				Code:   1100,
+				Reason: "mock",
+			},
+		}, nil)
+	mockey.Mock((*proxy.Proxy).GetCompactionState).Return(seqGetCompactionState).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
+
 	path := versionalV2(CollectionCategory, CompactAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -779,14 +803,6 @@ func TestCompact(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(&milvuspb.GetCompactionStateResponse{}, nil).Once()
-	mp.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(
-		&milvuspb.GetCompactionStateResponse{
-			Status: &commonpb.Status{
-				Code:   1100,
-				Reason: "mock",
-			},
-		}, nil).Once()
 	path = versionalV2(CollectionCategory, CompactionStateAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -826,15 +842,17 @@ func TestFlush(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(&milvuspb.FlushResponse{}, nil).Once()
-	mp.EXPECT().Flush(mock.Anything, mock.Anything).Return(
-		&milvuspb.FlushResponse{
+	mp := &proxy.Proxy{}
+	seqFlush := mockey.Sequence(&milvuspb.FlushResponse{}, nil).
+		Then(&milvuspb.FlushResponse{
 			Status: &commonpb.Status{
 				Code:   1100,
 				Reason: "mock",
 			},
-		}, nil).Once()
+		}, nil)
+	mockey.Mock((*proxy.Proxy).Flush).Return(seqFlush).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, FlushAction)
 	// success
@@ -875,13 +893,36 @@ func TestDatabase(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
+	mp := &proxy.Proxy{}
+
+	errorStatus := &commonpb.Status{Code: 1100, Reason: "mock"}
+
+	// CreateDatabase: success -> error
+	seqCreateDB := mockey.Sequence(commonSuccessStatus, nil).Then(errorStatus, nil)
+	mockey.Mock((*proxy.Proxy).CreateDatabase).Return(seqCreateDB).Build()
+
+	// DropDatabase: success -> error
+	seqDropDB := mockey.Sequence(commonSuccessStatus, nil).Then(errorStatus, nil)
+	mockey.Mock((*proxy.Proxy).DropDatabase).Return(seqDropDB).Build()
+
+	// ListDatabases: success -> error
+	seqListDB := mockey.Sequence(&milvuspb.ListDatabasesResponse{DbNames: []string{"a", "b", "c"}, DbIds: []int64{100, 101, 102}}, nil).
+		Then(&milvuspb.ListDatabasesResponse{Status: errorStatus}, nil)
+	mockey.Mock((*proxy.Proxy).ListDatabases).Return(seqListDB).Build()
+
+	// DescribeDatabase: success -> error
+	seqDescDB := mockey.Sequence(&milvuspb.DescribeDatabaseResponse{DbName: "test", DbID: 100}, nil).
+		Then(&milvuspb.DescribeDatabaseResponse{Status: errorStatus}, nil)
+	mockey.Mock((*proxy.Proxy).DescribeDatabase).Return(seqDescDB).Build()
+
+	// AlterDatabase: 3 pairs of (success -> error) for AlterAction, DropPropertiesAction, AlterPropertiesAction
+	seqAlterDB := mockey.Sequence(commonSuccessStatus, nil).Then(errorStatus, nil).
+		Then(commonSuccessStatus, nil).Then(errorStatus, nil).
+		Then(commonSuccessStatus, nil).Then(errorStatus, nil)
+	mockey.Mock((*proxy.Proxy).AlterDatabase).Return(seqAlterDB).Build()
+
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(DataBaseCategory, CreateAction)
 	// success
@@ -897,12 +938,6 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
 	path = versionalV2(DataBaseCategory, DropAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -917,13 +952,6 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"a", "b", "c"}, DbIds: []int64{100, 101, 102}}, nil).Once()
-	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-		Status: &commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		},
-	}, nil).Once()
 	path = versionalV2(DataBaseCategory, ListAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -938,13 +966,6 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{DbName: "test", DbID: 100}, nil).Once()
-	mp.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{
-		Status: &commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		},
-	}, nil).Once()
 	path = versionalV2(DataBaseCategory, DescribeAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -959,12 +980,6 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
 	path = versionalV2(DataBaseCategory, AlterAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -979,12 +994,6 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
 	path = versionalV2(DataBaseCategory, DropPropertiesAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -999,12 +1008,6 @@ func TestDatabase(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
 	path = versionalV2(DataBaseCategory, AlterPropertiesAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -1044,13 +1047,15 @@ func TestColletcionProperties(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
+	mp := &proxy.Proxy{}
+
+	errorStatus := &commonpb.Status{Code: 1100, Reason: "mock"}
+	// AlterCollection: 2 pairs of (success -> error) for AlterPropertiesAction and DropPropertiesAction
+	seqAlterColl := mockey.Sequence(commonSuccessStatus, nil).Then(errorStatus, nil).
+		Then(commonSuccessStatus, nil).Then(errorStatus, nil)
+	mockey.Mock((*proxy.Proxy).AlterCollection).Return(seqAlterColl).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, AlterPropertiesAction)
 	// success
@@ -1066,12 +1071,6 @@ func TestColletcionProperties(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
 	path = versionalV2(CollectionCategory, DropPropertiesAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -1111,13 +1110,15 @@ func TestIndexProperties(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
+	mp := &proxy.Proxy{}
+
+	errorStatus := &commonpb.Status{Code: 1100, Reason: "mock"}
+	// AlterIndex: 2 pairs of (success -> error) for AlterPropertiesAction and DropPropertiesAction
+	seqAlterIndex := mockey.Sequence(commonSuccessStatus, nil).Then(errorStatus, nil).
+		Then(commonSuccessStatus, nil).Then(errorStatus, nil)
+	mockey.Mock((*proxy.Proxy).AlterIndex).Return(seqAlterIndex).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(IndexCategory, AlterPropertiesAction)
 	// success
@@ -1133,12 +1134,6 @@ func TestIndexProperties(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 
-	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
 	path = versionalV2(IndexCategory, DropPropertiesAction)
 	// success
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -1178,13 +1173,14 @@ func TestCollectionFieldProperties(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(
-		&commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		}, nil).Once()
+	mp := &proxy.Proxy{}
+
+	errorStatus := &commonpb.Status{Code: 1100, Reason: "mock"}
+	// AlterCollectionField: success -> error
+	seqAlterField := mockey.Sequence(commonSuccessStatus, nil).Then(errorStatus, nil)
+	mockey.Mock((*proxy.Proxy).AlterCollectionField).Return(seqAlterField).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionFieldCategory, AlterPropertiesAction)
 	// success
@@ -1225,12 +1221,21 @@ func TestCreateCollection(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	postTestCases := []requestBodyTestCase{}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(13)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
+	mp := &proxy.Proxy{}
+
+	// CreateCollection: 13 times success + 2 times error
+	seqCreateColl := mockey.Sequence(commonSuccessStatus, nil).Times(13).Then(commonErrorStatus, nil).Times(2)
+	mockey.Mock((*proxy.Proxy).CreateCollection).Return(seqCreateColl).Build()
+
+	// CreateIndex: 6 times success + 2 times error
+	seqCreateIndex := mockey.Sequence(commonSuccessStatus, nil).Times(6).Then(commonErrorStatus, nil).Times(2)
+	mockey.Mock((*proxy.Proxy).CreateIndex).Return(seqCreateIndex).Build()
+
+	// LoadCollection: 6 times success
+	mockey.Mock((*proxy.Proxy).LoadCollection).Return(commonSuccessStatus, nil).Build()
+
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, CreateAction)
 	// quickly create collection
@@ -1583,96 +1588,94 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 
 func TestMethodGet(t *testing.T) {
 	paramtable.Init()
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-		Status: &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-		Status:          &StatusSuccess,
-		CollectionNames: []string{DefaultCollectionName},
-	}, nil).Once()
-	mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{
-		Status: &StatusSuccess,
-		Value:  true,
-	}, nil).Once()
-	mp.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	mp := &proxy.Proxy{}
+
+	// ShowCollections: 2 different returns
+	seqShowColl := mockey.Sequence(&milvuspb.ShowCollectionsResponse{Status: &StatusSuccess}, nil).
+		Then(&milvuspb.ShowCollectionsResponse{Status: &StatusSuccess, CollectionNames: []string{DefaultCollectionName}}, nil)
+	mockey.Mock((*proxy.Proxy).ShowCollections).Return(seqShowColl).Build()
+
+	// HasCollection: success -> error
+	seqHasColl := mockey.Sequence(&milvuspb.BoolResponse{Status: &StatusSuccess, Value: true}, nil).
+		Then(&milvuspb.BoolResponse{Status: commonErrorStatus}, nil)
+	mockey.Mock((*proxy.Proxy).HasCollection).Return(seqHasColl).Build()
+
+	// DescribeCollection: 2 success + 1 error
+	seqDescColl := mockey.Sequence(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Twice()
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Times(4)
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{
-		Status: &StatusSuccess,
-		State:  commonpb.LoadState_LoadStateNotExist,
-	}, nil).Once()
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{
-		Status: &StatusSuccess,
-		State:  commonpb.LoadState_LoadStateNotLoad,
-	}, nil).Once()
-	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil).Times(3)
-	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)).Once()
-	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
-		Status: merr.Status(merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)),
-	}, nil).Once()
-	mp.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&milvuspb.GetCollectionStatisticsResponse{
+	}, nil).Times(2).Then(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil)
+	mockey.Mock((*proxy.Proxy).DescribeCollection).Return(seqDescColl).Build()
+
+	// GetLoadState: complex sequence
+	seqGetLoadState := mockey.Sequence(&milvuspb.GetLoadStateResponse{Status: commonErrorStatus}, nil).
+		Then(&DefaultLoadStateResp, nil).Times(4).
+		Then(&milvuspb.GetLoadStateResponse{Status: &StatusSuccess, State: commonpb.LoadState_LoadStateNotExist}, nil).
+		Then(&milvuspb.GetLoadStateResponse{Status: &StatusSuccess, State: commonpb.LoadState_LoadStateNotLoad}, nil)
+	mockey.Mock((*proxy.Proxy).GetLoadState).Return(seqGetLoadState).Build()
+
+	// DescribeIndex: complex sequence
+	seqDescIndex := mockey.Sequence(&milvuspb.DescribeIndexResponse{Status: commonErrorStatus}, nil).
+		Then(&DefaultDescIndexesReqp, nil).Times(3).
+		Then(nil, merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)).
+		Then(&milvuspb.DescribeIndexResponse{Status: merr.Status(merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName))}, nil)
+	mockey.Mock((*proxy.Proxy).DescribeIndex).Return(seqDescIndex).Build()
+
+	// GetCollectionStatistics: 2 different returns
+	seqGetCollStats := mockey.Sequence(&milvuspb.GetCollectionStatisticsResponse{
 		Status: commonSuccessStatus,
-		Stats: []*commonpb.KeyValuePair{
-			{Key: "row_count", Value: "0"},
-		},
-	}, nil).Once()
-	mp.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(&milvuspb.GetCollectionStatisticsResponse{
+		Stats:  []*commonpb.KeyValuePair{{Key: "row_count", Value: "0"}},
+	}, nil).Then(&milvuspb.GetCollectionStatisticsResponse{
 		Status: commonSuccessStatus,
-		Stats: []*commonpb.KeyValuePair{
-			{Key: "row_count", Value: "abc"},
-		},
-	}, nil).Once()
-	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
-		Status:   commonSuccessStatus,
-		Progress: int64(77),
-	}, nil).Once()
-	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
-		Status:   commonSuccessStatus,
-		Progress: int64(100),
-	}, nil).Once()
-	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Stats:  []*commonpb.KeyValuePair{{Key: "row_count", Value: "abc"}},
+	}, nil)
+	mockey.Mock((*proxy.Proxy).GetCollectionStatistics).Return(seqGetCollStats).Build()
+
+	// GetLoadingProgress: 3 different returns
+	seqGetLoadProgress := mockey.Sequence(&milvuspb.GetLoadingProgressResponse{Status: commonSuccessStatus, Progress: int64(77)}, nil).
+		Then(&milvuspb.GetLoadingProgressResponse{Status: commonSuccessStatus, Progress: int64(100)}, nil).
+		Then(&milvuspb.GetLoadingProgressResponse{Status: commonErrorStatus}, nil)
+	mockey.Mock((*proxy.Proxy).GetLoadingProgress).Return(seqGetLoadProgress).Build()
+
+	// ShowPartitions
+	mockey.Mock((*proxy.Proxy).ShowPartitions).Return(&milvuspb.ShowPartitionsResponse{
 		Status:         &StatusSuccess,
 		PartitionNames: []string{DefaultPartitionName},
-	}, nil).Once()
-	mp.EXPECT().HasPartition(mock.Anything, mock.Anything).Return(&milvuspb.BoolResponse{
-		Status: &StatusSuccess,
-		Value:  true,
-	}, nil).Once()
-	mp.EXPECT().GetPartitionStatistics(mock.Anything, mock.Anything).Return(&milvuspb.GetPartitionStatisticsResponse{
+	}, nil).Build()
+
+	// HasPartition
+	mockey.Mock((*proxy.Proxy).HasPartition).Return(&milvuspb.BoolResponse{Status: &StatusSuccess, Value: true}, nil).Build()
+
+	// GetPartitionStatistics
+	mockey.Mock((*proxy.Proxy).GetPartitionStatistics).Return(&milvuspb.GetPartitionStatisticsResponse{
 		Status: commonSuccessStatus,
-		Stats: []*commonpb.KeyValuePair{
-			{Key: "row_count", Value: "0"},
-		},
-	}, nil).Once()
-	mp.EXPECT().ListCredUsers(mock.Anything, mock.Anything).Return(&milvuspb.ListCredUsersResponse{
+		Stats:  []*commonpb.KeyValuePair{{Key: "row_count", Value: "0"}},
+	}, nil).Build()
+
+	// ListCredUsers
+	mockey.Mock((*proxy.Proxy).ListCredUsers).Return(&milvuspb.ListCredUsersResponse{
 		Status:    &StatusSuccess,
 		Usernames: []string{util.UserRoot},
-	}, nil).Once()
-	mp.EXPECT().SelectUser(mock.Anything, mock.Anything).Return(&milvuspb.SelectUserResponse{
+	}, nil).Build()
+
+	// SelectUser
+	mockey.Mock((*proxy.Proxy).SelectUser).Return(&milvuspb.SelectUserResponse{
 		Status: &StatusSuccess,
 		Results: []*milvuspb.UserResult{
-			{User: &milvuspb.UserEntity{Name: util.UserRoot}, Roles: []*milvuspb.RoleEntity{
-				{Name: util.RoleAdmin},
-			}},
+			{User: &milvuspb.UserEntity{Name: util.UserRoot}, Roles: []*milvuspb.RoleEntity{{Name: util.RoleAdmin}}},
 		},
-	}, nil).Once()
-	mp.EXPECT().SelectRole(mock.Anything, mock.Anything).Return(&milvuspb.SelectRoleResponse{
-		Status: &StatusSuccess,
-		Results: []*milvuspb.RoleResult{
-			{Role: &milvuspb.RoleEntity{Name: util.RoleAdmin}},
-		},
-	}, nil).Once()
-	mp.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(&milvuspb.SelectGrantResponse{
+	}, nil).Build()
+
+	// SelectRole
+	mockey.Mock((*proxy.Proxy).SelectRole).Return(&milvuspb.SelectRoleResponse{
+		Status:  &StatusSuccess,
+		Results: []*milvuspb.RoleResult{{Role: &milvuspb.RoleEntity{Name: util.RoleAdmin}}},
+	}, nil).Build()
+
+	// SelectGrant
+	mockey.Mock((*proxy.Proxy).SelectGrant).Return(&milvuspb.SelectGrantResponse{
 		Status: &StatusSuccess,
 		Entities: []*milvuspb.GrantEntity{
 			{
@@ -1686,23 +1689,27 @@ func TestMethodGet(t *testing.T) {
 				},
 			},
 		},
-	}, nil).Once()
-	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
-		Status: &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
-		Status:  &StatusSuccess,
-		Aliases: []string{DefaultAliasName},
-	}, nil).Once()
-	mp.EXPECT().DescribeAlias(mock.Anything, mock.Anything).Return(&milvuspb.DescribeAliasResponse{
+	}, nil).Build()
+
+	// ListAliases: error -> empty -> with alias
+	seqListAliases := mockey.Sequence(&milvuspb.ListAliasesResponse{Status: commonErrorStatus}, nil).
+		Then(&milvuspb.ListAliasesResponse{Status: &StatusSuccess}, nil).
+		Then(&milvuspb.ListAliasesResponse{Status: &StatusSuccess, Aliases: []string{DefaultAliasName}}, nil)
+	mockey.Mock((*proxy.Proxy).ListAliases).Return(seqListAliases).Build()
+
+	// DescribeAlias
+	mockey.Mock((*proxy.Proxy).DescribeAlias).Return(&milvuspb.DescribeAliasResponse{
 		Status: &StatusSuccess,
 		Alias:  DefaultAliasName,
-	}, nil).Once()
-	mp.EXPECT().ListPrivilegeGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListPrivilegeGroupsResponse{
+	}, nil).Build()
+
+	// ListPrivilegeGroups
+	mockey.Mock((*proxy.Proxy).ListPrivilegeGroups).Return(&milvuspb.ListPrivilegeGroupsResponse{
 		Status:          &StatusSuccess,
 		PrivilegeGroups: []*milvuspb.PrivilegeGroupInfo{{GroupName: "group1", Privileges: []*milvuspb.PrivilegeEntity{{Name: "*"}}}},
-	}, nil).Once()
+	}, nil).Build()
+
+	defer mockey.UnPatchAll()
 
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
@@ -1839,14 +1846,17 @@ func TestMethodDelete(t *testing.T) {
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DropPartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DeleteCredential(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DropRole(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DropAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().DropPrivilegeGroup(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
+	mp := &proxy.Proxy{}
+
+	mockey.Mock((*proxy.Proxy).DropCollection).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).DropPartition).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).DeleteCredential).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).DropRole).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).DropIndex).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).DropAlias).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).DropPrivilegeGroup).Return(commonSuccessStatus, nil).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -1895,30 +1905,32 @@ func TestMethodPost(t *testing.T) {
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(3)
-	mp.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().CreateCredential(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().UpdateCredential(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().OperateUserRole(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
-	mp.EXPECT().CreateRole(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().OperatePrivilege(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(2)
-	mp.EXPECT().OperatePrivilegeV2(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(2)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
-	mp.EXPECT().CreateAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().AlterAlias(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().CreatePrivilegeGroup(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Once()
-	mp.EXPECT().OperatePrivilegeGroup(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Twice()
-	mp.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(&internalpb.ImportResponse{
+	mp := &proxy.Proxy{}
+
+	mockey.Mock((*proxy.Proxy).CreateCollection).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).RenameCollection).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).LoadCollection).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).ReleaseCollection).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).CreatePartition).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).LoadPartitions).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).ReleasePartitions).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).CreateCredential).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).UpdateCredential).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).OperateUserRole).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).CreateRole).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).OperatePrivilege).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).OperatePrivilegeV2).Return(commonSuccessStatus, nil).Build()
+	// CreateIndex: 2 success + 1 error
+	seqCreateIndex := mockey.Sequence(commonSuccessStatus, nil).Times(2).Then(commonErrorStatus, nil)
+	mockey.Mock((*proxy.Proxy).CreateIndex).Return(seqCreateIndex).Build()
+	mockey.Mock((*proxy.Proxy).CreateAlias).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).AlterAlias).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).CreatePrivilegeGroup).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).OperatePrivilegeGroup).Return(commonSuccessStatus, nil).Build()
+	mockey.Mock((*proxy.Proxy).ImportV2).Return(&internalpb.ImportResponse{
 		Status: commonSuccessStatus, JobID: "1234567890",
-	}, nil).Once()
-	mp.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{
+	}, nil).Build()
+	mockey.Mock((*proxy.Proxy).ListImports).Return(&internalpb.ListImportsResponse{
 		Status: &StatusSuccess,
 		JobIDs: []string{"1", "2", "3", "4"},
 		States: []internalpb.ImportJobState{
@@ -1930,14 +1942,14 @@ func TestMethodPost(t *testing.T) {
 		Reasons:         []string{"", "", "mock reason", ""},
 		Progresses:      []int64{0, 30, 0, 100},
 		CollectionNames: []string{"AAA", "BBB", "CCC", "DDD"},
-	}, nil).Once()
-	mp.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{
+	}, nil).Build()
+	mockey.Mock((*proxy.Proxy).GetImportProgress).Return(&internalpb.GetImportProgressResponse{
 		Status:   &StatusSuccess,
 		State:    internalpb.ImportJobState_Completed,
 		Reason:   "",
 		Progress: 100,
-	}, nil).Twice()
-	mp.EXPECT().GetSegmentsInfo(mock.Anything, mock.Anything).Return(&internalpb.GetSegmentsInfoResponse{
+	}, nil).Build()
+	mockey.Mock((*proxy.Proxy).GetSegmentsInfo).Return(&internalpb.GetSegmentsInfoResponse{
 		Status: &StatusSuccess,
 		SegmentInfos: []*internalpb.SegmentInfo{
 			{
@@ -1950,38 +1962,23 @@ func TestMethodPost(t *testing.T) {
 				Level:        commonpb.SegmentLevel_L1,
 				IsSorted:     true,
 				InsertLogs: []*internalpb.FieldBinlog{
-					{
-						FieldID: 0,
-						LogIDs:  []int64{1, 5, 9},
-					},
-					{
-						FieldID: 1,
-						LogIDs:  []int64{2, 6, 10},
-					},
-					{
-						FieldID: 100,
-						LogIDs:  []int64{3, 7, 11},
-					},
-					{
-						FieldID: 101,
-						LogIDs:  []int64{4, 8, 12},
-					},
+					{FieldID: 0, LogIDs: []int64{1, 5, 9}},
+					{FieldID: 1, LogIDs: []int64{2, 6, 10}},
+					{FieldID: 100, LogIDs: []int64{3, 7, 11}},
+					{FieldID: 101, LogIDs: []int64{4, 8, 12}},
 				},
 				DeltaLogs: []*internalpb.FieldBinlog{
-					{
-						FieldID: 100,
-						LogIDs:  []int64{13, 14, 15},
-					},
+					{FieldID: 100, LogIDs: []int64{13, 14, 15}},
 				},
 				StatsLogs: []*internalpb.FieldBinlog{
-					{
-						FieldID: 100,
-						LogIDs:  []int64{16},
-					},
+					{FieldID: 100, LogIDs: []int64{16}},
 				},
 			},
 		},
-	}, nil).Once()
+	}, nil).Build()
+
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []rawTestCase{}
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -2132,27 +2129,30 @@ func TestDML(t *testing.T) {
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(2)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(3)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(6)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
-	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	mp := &proxy.Proxy{}
+
+	// DescribeCollection: 2 + 3 + 6 = 11 success, then 4 error, then 1 success (autoID=true)
+	seqDescribeColl := mockey.Sequence(
+		&milvuspb.DescribeCollectionResponse{
+			CollectionName: DefaultCollectionName,
+			Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil,
+	).Times(11).Then(
+		&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil,
+	).Times(4).Then(
+		&milvuspb.DescribeCollectionResponse{
+			CollectionName: DefaultCollectionName,
+			Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil,
+	)
+	mockey.Mock((*proxy.Proxy).DescribeCollection).Return(seqDescribeColl).Build()
+
+	// Query: custom logic with RunAndReturn -> use .To()
+	mockey.Mock((*proxy.Proxy).Query).To(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 		if matchCountRule(req.OutputFields) {
 			for _, pair := range req.QueryParams {
 				if pair.GetKey() == proxy.LimitKey {
@@ -2161,19 +2161,30 @@ func TestDML(t *testing.T) {
 			}
 		}
 		return &milvuspb.QueryResults{Status: commonSuccessStatus, OutputFields: []string{}, FieldsData: []*schemapb.FieldData{}}, nil
-	}).Times(4)
-	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
-	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil).Once()
-	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
-	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil).Once()
-	mp.EXPECT().Delete(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, true, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Once()
-	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
+	}).Build()
+
+	// Insert: IntId -> StrId
+	seqInsert := mockey.Sequence(
+		&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil,
+	).Then(
+		&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil,
+	)
+	mockey.Mock((*proxy.Proxy).Insert).Return(seqInsert).Build()
+
+	// Upsert: IntId -> StrId -> IntId (for autoID=true case)
+	seqUpsert := mockey.Sequence(
+		&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil,
+	).Then(
+		&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{}}}}}, nil,
+	).Then(
+		&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil,
+	)
+	mockey.Mock((*proxy.Proxy).Upsert).Return(seqUpsert).Build()
+
+	// Delete
+	mockey.Mock((*proxy.Proxy).Delete).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Build()
+
+	defer mockey.UnPatchAll()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -2274,7 +2285,18 @@ func TestAllowInt64(t *testing.T) {
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	mp := mocks.NewMockProxy(t)
+	mp := &proxy.Proxy{}
+
+	mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Build()
+	mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -2285,14 +2307,6 @@ func TestAllowInt64(t *testing.T) {
 		path:        UpsertAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": [0.11825, 0.6]}]}`),
 	})
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Twice()
-	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
-	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
 
 	validateTestCases(t, testEngine, queryTestCases, true)
 }
@@ -2322,8 +2336,19 @@ func TestFp16Bf16VectorsV2(t *testing.T) {
 	// disable rate limit
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	mp := mocks.NewMockProxy(t)
+	mp := &proxy.Proxy{}
 	collSchema := generateCollectionSchemaWithVectorFields()
+
+	mockey.Mock((*proxy.Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         collSchema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Build()
+	mockey.Mock((*proxy.Proxy).Insert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	mockey.Mock((*proxy.Proxy).Upsert).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Build()
+	defer mockey.UnPatchAll()
+
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	for _, path := range []string{InsertAction, UpsertAction} {
@@ -2473,14 +2498,6 @@ func TestFp16Bf16VectorsV2(t *testing.T) {
 				}`),
 			})
 	}
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         collSchema,
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(len(queryTestCases))
-	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
-	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Times(4)
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
@@ -2490,47 +2507,70 @@ func TestSearchV2(t *testing.T) {
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 	outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(11)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
-		TopK:         int64(3),
-		OutputFields: outputFields,
-		FieldsData:   generateFieldData(),
-		Ids:          generateIDs(schemapb.DataType_Int64, 3),
-		Scores:       DefaultScores,
-	}}, nil).Once()
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: &commonpb.Status{
-		ErrorCode: 1700, // ErrFieldNotFound
-		Reason:    "groupBy field not found in schema: field not found[field=test]",
-	}}, nil).Once()
-	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
-		TopK:         int64(3),
-		OutputFields: outputFields,
-		FieldsData:   generateFieldData(),
-		Ids:          generateIDs(schemapb.DataType_Int64, 3),
-		Scores:       DefaultScores,
-	}}, nil).Once()
-	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(5)
+	mp := &proxy.Proxy{}
 	collSchema := generateCollectionSchemaWithVectorFields()
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionName: DefaultCollectionName,
-		Schema:         collSchema,
-		ShardsNum:      ShardNumDefault,
-		Status:         &StatusSuccess,
-	}, nil).Times(15)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
-	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status: &commonpb.Status{
-			Code:   1100,
-			Reason: "mock",
-		},
-	}, nil).Once()
+
+	// DescribeCollection: 11 success (simple schema) -> 15 success (vector fields schema) -> 1 error
+	seqDescribeColl := mockey.Sequence(
+		&milvuspb.DescribeCollectionResponse{
+			CollectionName: DefaultCollectionName,
+			Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil,
+	).Times(11).Then(
+		&milvuspb.DescribeCollectionResponse{
+			CollectionName: DefaultCollectionName,
+			Schema:         collSchema,
+			ShardsNum:      ShardNumDefault,
+			Status:         &StatusSuccess,
+		}, nil,
+	).Times(15).Then(
+		&milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				Code:   1100,
+				Reason: "mock",
+			},
+		}, nil,
+	)
+	mockey.Mock((*proxy.Proxy).DescribeCollection).Return(seqDescribeColl).Build()
+
+	// Search: 1 success with data -> 3 empty -> 1 error -> 3 empty
+	seqSearch := mockey.Sequence(
+		&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+			TopK:         int64(3),
+			OutputFields: outputFields,
+			FieldsData:   generateFieldData(),
+			Ids:          generateIDs(schemapb.DataType_Int64, 3),
+			Scores:       DefaultScores,
+		}}, nil,
+	).Then(
+		&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil,
+	).Times(3).Then(
+		&milvuspb.SearchResults{Status: &commonpb.Status{
+			ErrorCode: 1700, // ErrFieldNotFound
+			Reason:    "groupBy field not found in schema: field not found[field=test]",
+		}}, nil,
+	).Then(
+		&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil,
+	).Times(3)
+	mockey.Mock((*proxy.Proxy).Search).Return(seqSearch).Build()
+
+	// HybridSearch: 1 success with data -> 5 empty
+	seqHybridSearch := mockey.Sequence(
+		&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+			TopK:         int64(3),
+			OutputFields: outputFields,
+			FieldsData:   generateFieldData(),
+			Ids:          generateIDs(schemapb.DataType_Int64, 3),
+			Scores:       DefaultScores,
+		}}, nil,
+	).Then(
+		&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil,
+	).Times(5)
+	mockey.Mock((*proxy.Proxy).HybridSearch).Return(seqHybridSearch).Build()
+
+	defer mockey.UnPatchAll()
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -2743,11 +2783,13 @@ func TestSearchV2(t *testing.T) {
 func TestGetQuotaMetrics(t *testing.T) {
 	paramtable.Init()
 
-	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().GetQuotaMetrics(mock.Anything, mock.Anything).Return(&internalpb.GetQuotaMetricsResponse{
+	mp := &proxy.Proxy{}
+	mockGetQuotaMetrics := mockey.Mock((*proxy.Proxy).GetQuotaMetrics).Return(&internalpb.GetQuotaMetricsResponse{
 		Status:      &StatusSuccess,
 		MetricsInfo: `{"proxy1": "1000", "proxy2": "2000"}`,
-	}, nil)
+	}, nil).Build()
+	defer mockGetQuotaMetrics.UnPatch()
+
 	testEngine := initHTTPServerV2(mp, false)
 	testcase := requestBodyTestCase{
 		path:        DescribeAction,
@@ -2772,7 +2814,7 @@ func TestGetQuotaMetrics(t *testing.T) {
 type AddCollectionFieldSuite struct {
 	suite.Suite
 	testEngine *gin.Engine
-	mp         *mocks.MockProxy
+	mp         *proxy.Proxy
 }
 
 func (s *AddCollectionFieldSuite) SetupSuite() {
@@ -2786,7 +2828,7 @@ func (s *AddCollectionFieldSuite) TearDownSuite() {
 }
 
 func (s *AddCollectionFieldSuite) SetupTest() {
-	s.mp = mocks.NewMockProxy(s.T())
+	s.mp = &proxy.Proxy{}
 	s.testEngine = initHTTPServerV2(s.mp, false)
 }
 
@@ -2809,7 +2851,8 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldNormal() {
 			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Array", "elementDataType": "Int64", "nullable": true}}`),
 		},
 	}
-	s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockey.Mock((*proxy.Proxy).AddCollectionField).Return(merr.Success(), nil).Build()
+	defer mockey.UnPatchAll()
 	validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
 }
 
@@ -2865,7 +2908,8 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 				errMsg:      "service internal error: mock error",
 			},
 		}
-		s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Status(merr.WrapErrServiceInternal("mock error")), nil).Maybe()
+		mockey.Mock((*proxy.Proxy).AddCollectionField).Return(merr.Status(merr.WrapErrServiceInternal("mock error")), nil).Build()
+		defer mockey.UnPatchAll()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
 	})
@@ -2882,7 +2926,7 @@ func TestCollectionFunctionSuite(t *testing.T) {
 type CollectionFunctionSuite struct {
 	suite.Suite
 	testEngine *gin.Engine
-	mp         *mocks.MockProxy
+	mp         *proxy.Proxy
 }
 
 func (s *CollectionFunctionSuite) SetupSuite() {
@@ -2896,7 +2940,7 @@ func (s *CollectionFunctionSuite) TearDownSuite() {
 }
 
 func (s *CollectionFunctionSuite) SetupTest() {
-	s.mp = mocks.NewMockProxy(s.T())
+	s.mp = &proxy.Proxy{}
 	s.testEngine = initHTTPServerV2(s.mp, false)
 }
 
@@ -2910,7 +2954,8 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionNormal() {
 				errMsg:      "",
 			},
 		}
-		s.mp.EXPECT().AddCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
+		mockey.Mock((*proxy.Proxy).AddCollectionFunction).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Build()
+		defer mockey.UnPatchAll()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
 	})
@@ -2944,7 +2989,8 @@ func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 				errMsg:      "",
 			},
 		}
-		s.mp.EXPECT().AlterCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
+		mockey.Mock((*proxy.Proxy).AlterCollectionFunction).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Build()
+		defer mockey.UnPatchAll()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
 	})
@@ -2978,7 +3024,8 @@ func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
 				errMsg:      "",
 			},
 		}
-		s.mp.EXPECT().DropCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
+		mockey.Mock((*proxy.Proxy).DropCollectionFunction).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Build()
+		defer mockey.UnPatchAll()
 
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
 	})

@@ -23,8 +23,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -50,13 +50,15 @@ func (s *SearchIteratorSuite) SetupSuite() {
 func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	ctx := context.Background()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 			CollectionID: 1,
 			Schema:       s.schema.ProtoMessage(),
-		}, nil).Once()
-		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
+		mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 			s.Equal(collectionName, sr.GetCollectionName())
 			checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
 				for _, kv := range kvs {
@@ -92,7 +94,8 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockSearch.UnPatch()
 
 		iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 			return rand.Float32()
@@ -114,9 +117,11 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 		})
 
 		s.Run("describe_fail", func() {
+			defer mockey.UnPatchAll()
 			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error")).Once()
+			mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(nil, fmt.Errorf("mock error")).Build()
+			defer mockDescribeCollection.UnPatch()
 			_, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 				return rand.Float32()
 			}))))
@@ -124,12 +129,14 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 		})
 
 		s.Run("not_v2_result", func() {
+			defer mockey.UnPatchAll()
 			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 				CollectionID: 1,
 				Schema:       s.schema.ProtoMessage(),
-			}, nil).Once()
-			s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			}, nil).Build()
+			defer mockDescribeCollection.UnPatch()
+			mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				s.Equal(collectionName, sr.GetCollectionName())
 				return &milvuspb.SearchResults{
 					Status: merr.Success(),
@@ -152,7 +159,8 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 						SearchIteratorV2Results: nil, // nil v2 results
 					},
 				}, nil
-			}).Once()
+			}).Build()
+			defer mockSearch.UnPatch()
 
 			_, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 				return rand.Float32()
@@ -169,11 +177,16 @@ func (s *SearchIteratorSuite) TestNext() {
 
 	token := fmt.Sprintf("iter_token_%s", s.randString(8))
 
-	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	defer mockey.UnPatchAll()
+	mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionID: 1,
 		Schema:       s.schema.ProtoMessage(),
-	}, nil).Once()
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+
+	searchCallCount := 0
+	mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		searchCallCount++
 		s.Equal(collectionName, sr.GetCollectionName())
 		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
 			for _, kv := range kvs {
@@ -186,6 +199,66 @@ func (s *SearchIteratorSuite) TestNext() {
 
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
+
+		// Third call should return empty results
+		if searchCallCount >= 3 {
+			s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchIDKey, token))
+			s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchLastBoundKey, "0.5"))
+			return &milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					FieldsData: []*schemapb.FieldData{
+						s.getInt64FieldData("ID", []int64{}),
+					},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{},
+							},
+						},
+					},
+					Scores:  []float32{},
+					Topks:   []int64{0},
+					Recalls: []float32{1.0},
+					SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
+						Token:     token,
+						LastBound: 0.5,
+					},
+				},
+			}, nil
+		}
+
+		// Second call returns results with lastBound
+		if searchCallCount == 2 {
+			return &milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					FieldsData: []*schemapb.FieldData{
+						s.getInt64FieldData("ID", []int64{1}),
+					},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1},
+							},
+						},
+					},
+					Scores:  []float32{0.5},
+					Topks:   []int64{1},
+					Recalls: []float32{1},
+					SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
+						Token:     token,
+						LastBound: 0.5,
+					},
+				},
+			}, nil
+		}
+
+		// First call (init)
 		return &milvuspb.SearchResults{
 			Status: merr.Success(),
 			Results: &schemapb.SearchResultData{
@@ -209,7 +282,8 @@ func (s *SearchIteratorSuite) TestNext() {
 				},
 			},
 		}, nil
-	}).Once()
+	}).Build()
+	defer mockSearch.UnPatch()
 
 	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
 		return rand.Float32()
@@ -217,90 +291,9 @@ func (s *SearchIteratorSuite) TestNext() {
 	s.Require().NoError(err)
 	s.Require().NotNil(iter)
 
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
-
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{1}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1},
-						},
-					},
-				},
-				Scores:  []float32{0.5},
-				Topks:   []int64{1},
-				Recalls: []float32{1},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token:     token,
-					LastBound: 0.5,
-				},
-			},
-		}, nil
-	}).Once()
-
 	rs, err := iter.Next(ctx)
 	s.NoError(err)
 	s.EqualValues(1, rs.IDs.Len())
-
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
-
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchIDKey, token))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchLastBoundKey, "0.5"))
-
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{},
-						},
-					},
-				},
-				Scores:  []float32{},
-				Topks:   []int64{0},
-				Recalls: []float32{1.0},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token:     token,
-					LastBound: 0.5,
-				},
-			},
-		}, nil
-	}).Once()
 
 	_, err = iter.Next(ctx)
 	s.Error(err)
@@ -313,11 +306,16 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 
 	token := fmt.Sprintf("iter_token_%s", s.randString(8))
 
-	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+	defer mockey.UnPatchAll()
+	mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionID: 1,
 		Schema:       s.schema.ProtoMessage(),
-	}, nil).Once()
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	}, nil).Build()
+	defer mockDescribeCollection.UnPatch()
+
+	searchCallCount := 0
+	mockSearch := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Search).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		searchCallCount++
 		s.Equal(collectionName, sr.GetCollectionName())
 		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
 			for _, kv := range kvs {
@@ -330,50 +328,35 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
 		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{1}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1},
+
+		// First call (init)
+		if searchCallCount == 1 {
+			return &milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					FieldsData: []*schemapb.FieldData{
+						s.getInt64FieldData("ID", []int64{1}),
+					},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1},
+							},
 						},
 					},
+					Scores:  make([]float32, 1),
+					Topks:   []int64{5},
+					Recalls: []float32{1},
+					SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
+						Token: token,
+					},
 				},
-				Scores:  make([]float32, 1),
-				Topks:   []int64{5},
-				Recalls: []float32{1},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token: token,
-				},
-			},
-		}, nil
-	}).Once()
-
-	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
-		return rand.Float32()
-	}))).WithIteratorLimit(6).WithBatchSize(5))
-	s.Require().NoError(err)
-	s.Require().NotNil(iter)
-
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
+			}, nil
 		}
 
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
+		// Subsequent calls return 5 results each
 		return &milvuspb.SearchResults{
 			Status: merr.Success(),
 			Results: &schemapb.SearchResultData{
@@ -398,7 +381,14 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 				},
 			},
 		}, nil
-	}).Times(2)
+	}).Build()
+	defer mockSearch.UnPatch()
+
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		return rand.Float32()
+	}))).WithIteratorLimit(6).WithBatchSize(5))
+	s.Require().NoError(err)
+	s.Require().NotNil(iter)
 
 	rs, err := iter.Next(ctx)
 	s.NoError(err)

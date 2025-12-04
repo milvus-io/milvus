@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -42,21 +42,23 @@ func (s *MaintenanceSuite) TestLoadCollection() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		fieldNames := []string{"id", "part", "vector"}
 		replicaNum := rand.Intn(3) + 1
 		rgs := []string{"rg1", "rg2"}
 
 		done := atomic.NewBool(false)
-		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, lcr *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+		mockLoadCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadCollection).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, lcr *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, lcr.GetCollectionName())
 			s.ElementsMatch(fieldNames, lcr.GetLoadFields())
 			s.True(lcr.SkipLoadDynamicField)
 			s.EqualValues(replicaNum, lcr.GetReplicaNumber())
 			s.ElementsMatch(rgs, lcr.GetResourceGroups())
 			return merr.Success(), nil
-		}).Once()
-		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+		}).Build()
+		defer mockLoadCollection.UnPatch()
+		mockGetLoadingProgress := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadingProgress).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 			s.Equal(collectionName, glpr.GetCollectionName())
 
 			progress := int64(50)
@@ -68,8 +70,8 @@ func (s *MaintenanceSuite) TestLoadCollection() {
 				Status:   merr.Success(),
 				Progress: progress,
 			}, nil
-		})
-		defer s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Unset()
+		}).Build()
+		defer mockGetLoadingProgress.UnPatch()
 
 		task, err := s.client.LoadCollection(ctx, NewLoadCollectionOption(collectionName).
 			WithReplica(replicaNum).
@@ -101,9 +103,11 @@ func (s *MaintenanceSuite) TestLoadCollection() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockLoadCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockLoadCollection.UnPatch()
 
 		_, err := s.client.LoadCollection(ctx, NewLoadCollectionOption(collectionName))
 		s.Error(err)
@@ -114,6 +118,7 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 		fieldNames := []string{"id", "part", "vector"}
@@ -121,7 +126,7 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 		rgs := []string{"rg1", "rg2"}
 
 		done := atomic.NewBool(false)
-		s.mock.EXPECT().LoadPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, lpr *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
+		mockLoadPartitions := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadPartitions).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, lpr *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, lpr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, lpr.GetPartitionNames())
 			s.ElementsMatch(fieldNames, lpr.GetLoadFields())
@@ -129,8 +134,9 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 			s.EqualValues(replicaNum, lpr.GetReplicaNumber())
 			s.ElementsMatch(rgs, lpr.GetResourceGroups())
 			return merr.Success(), nil
-		}).Once()
-		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+		}).Build()
+		defer mockLoadPartitions.UnPatch()
+		mockGetLoadingProgress := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadingProgress).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 			s.Equal(collectionName, glpr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, glpr.GetPartitionNames())
 
@@ -143,8 +149,8 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 				Status:   merr.Success(),
 				Progress: progress,
 			}, nil
-		})
-		defer s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Unset()
+		}).Build()
+		defer mockGetLoadingProgress.UnPatch()
 
 		task, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, partitionName).
 			WithReplica(replicaNum).
@@ -176,10 +182,12 @@ func (s *MaintenanceSuite) TestLoadPartitions() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
 
-		s.mock.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockLoadPartitions := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadPartitions).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockLoadPartitions.UnPatch()
 
 		_, err := s.client.LoadPartitions(ctx, NewLoadPartitionsOption(collectionName, partitionName))
 		s.Error(err)
@@ -191,19 +199,23 @@ func (s *MaintenanceSuite) TestReleaseCollection() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rcr *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+		mockReleaseCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ReleaseCollection).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, rcr *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, rcr.GetCollectionName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockReleaseCollection.UnPatch()
 
 		err := s.client.ReleaseCollection(ctx, NewReleaseCollectionOption(collectionName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockReleaseCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ReleaseCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockReleaseCollection.UnPatch()
 
 		err := s.client.ReleaseCollection(ctx, NewReleaseCollectionOption(collectionName))
 		s.Error(err)
@@ -215,22 +227,26 @@ func (s *MaintenanceSuite) TestReleasePartitions() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rpr *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+		mockReleasePartitions := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ReleasePartitions).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, rpr *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, rpr.GetCollectionName())
 			s.ElementsMatch([]string{partitionName}, rpr.GetPartitionNames())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockReleasePartitions.UnPatch()
 
 		err := s.client.ReleasePartitions(ctx, NewReleasePartitionsOptions(collectionName, partitionName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		partitionName := fmt.Sprintf("part_%s", s.randString(6))
-		s.mock.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockReleasePartitions := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ReleasePartitions).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockReleasePartitions.UnPatch()
 
 		err := s.client.ReleasePartitions(ctx, NewReleasePartitionsOptions(collectionName, partitionName))
 		s.Error(err)
@@ -241,10 +257,11 @@ func (s *MaintenanceSuite) TestFlush() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
 		done := atomic.NewBool(false)
-		s.mock.EXPECT().Flush(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, fr *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
+		mockFlush := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Flush).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, fr *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 			s.ElementsMatch([]string{collectionName}, fr.GetCollectionNames())
 			return &milvuspb.FlushResponse{
 				Status: merr.Success(),
@@ -253,8 +270,9 @@ func (s *MaintenanceSuite) TestFlush() {
 				},
 				CollFlushTs: map[string]uint64{collectionName: 321},
 			}, nil
-		}).Once()
-		s.mock.EXPECT().GetFlushState(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gfsr *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+		}).Build()
+		defer mockFlush.UnPatch()
+		mockGetFlushState := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetFlushState).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, gfsr *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 			s.Equal(collectionName, gfsr.GetCollectionName())
 			s.ElementsMatch([]int64{1, 2, 3}, gfsr.GetSegmentIDs())
 			s.EqualValues(321, gfsr.GetFlushTs())
@@ -262,8 +280,8 @@ func (s *MaintenanceSuite) TestFlush() {
 				Status:  merr.Success(),
 				Flushed: done.Load(),
 			}, nil
-		})
-		defer s.mock.EXPECT().GetFlushState(mock.Anything, mock.Anything).Unset()
+		}).Build()
+		defer mockGetFlushState.UnPatch()
 
 		task, err := s.client.Flush(ctx, NewFlushOption(collectionName))
 		s.NoError(err)
@@ -291,9 +309,11 @@ func (s *MaintenanceSuite) TestFlush() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().Flush(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockFlush := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Flush).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockFlush.UnPatch()
 
 		_, err := s.client.Flush(ctx, NewFlushOption(collectionName))
 		s.Error(err)
@@ -304,15 +324,17 @@ func (s *MaintenanceSuite) TestRefreshLoad() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
 		done := atomic.NewBool(false)
-		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, lcr *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+		mockLoadCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadCollection).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, lcr *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, lcr.GetCollectionName())
 			s.True(lcr.GetRefresh())
 			return merr.Success(), nil
-		}).Once()
-		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+		}).Build()
+		defer mockLoadCollection.UnPatch()
+		mockGetLoadingProgress := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadingProgress).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 			s.Equal(collectionName, glpr.GetCollectionName())
 
 			progress := int64(50)
@@ -324,8 +346,8 @@ func (s *MaintenanceSuite) TestRefreshLoad() {
 				Status:          merr.Success(),
 				RefreshProgress: progress,
 			}, nil
-		})
-		defer s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Unset()
+		}).Build()
+		defer mockGetLoadingProgress.UnPatch()
 
 		task, err := s.client.RefreshLoad(ctx, NewRefreshLoadOption(collectionName))
 		s.NoError(err)
@@ -353,9 +375,11 @@ func (s *MaintenanceSuite) TestRefreshLoad() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockLoadCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockLoadCollection.UnPatch()
 
 		_, err := s.client.RefreshLoad(ctx, NewRefreshLoadOption(collectionName))
 		s.Error(err)
@@ -367,15 +391,17 @@ func (s *MaintenanceSuite) TestCompact() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		compactID := rand.Int63()
 
-		s.mock.EXPECT().ManualCompaction(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cr *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+		mockManualCompaction := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ManualCompaction).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, cr *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 			s.Equal(collectionName, cr.GetCollectionName())
 			return &milvuspb.ManualCompactionResponse{
 				CompactionID: compactID,
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockManualCompaction.UnPatch()
 
 		id, err := s.client.Compact(ctx, NewCompactOption(collectionName))
 		s.NoError(err)
@@ -383,9 +409,11 @@ func (s *MaintenanceSuite) TestCompact() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().ManualCompaction(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockManualCompaction := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ManualCompaction).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockManualCompaction.UnPatch()
 
 		_, err := s.client.Compact(ctx, NewCompactOption(collectionName))
 		s.Error(err)
@@ -397,15 +425,17 @@ func (s *MaintenanceSuite) TestGetCompactionState() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		compactID := rand.Int63()
 
-		s.mock.EXPECT().GetCompactionState(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gcsr *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+		mockGetCompactionState := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetCompactionState).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, gcsr *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 			s.Equal(compactID, gcsr.GetCompactionID())
 			return &milvuspb.GetCompactionStateResponse{
 				Status: merr.Success(),
 				State:  commonpb.CompactionState_Completed,
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetCompactionState.UnPatch()
 
 		state, err := s.client.GetCompactionState(ctx, NewGetCompactionStateOption(compactID))
 		s.NoError(err)
@@ -413,9 +443,11 @@ func (s *MaintenanceSuite) TestGetCompactionState() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		compactID := rand.Int63()
 
-		s.mock.EXPECT().GetCompactionState(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockGetCompactionState := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetCompactionState).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockGetCompactionState.UnPatch()
 
 		_, err := s.client.GetCompactionState(ctx, NewGetCompactionStateOption(compactID))
 		s.Error(err)
@@ -427,23 +459,26 @@ func (s *MaintenanceSuite) TestGetLoadState() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		progress := rand.Int63n(100)
 
-		s.mock.EXPECT().GetLoadState(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glsr *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+		mockGetLoadState := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadState).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, glsr *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
 			s.Equal(collectionName, glsr.GetCollectionName())
 			return &milvuspb.GetLoadStateResponse{
 				Status: merr.Success(),
 				State:  commonpb.LoadState_LoadStateLoading,
 			}, nil
-		}).Once()
-		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+		}).Build()
+		defer mockGetLoadState.UnPatch()
+		mockGetLoadingProgress := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadingProgress).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, glpr *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 			s.Equal(collectionName, glpr.GetCollectionName())
 			return &milvuspb.GetLoadingProgressResponse{
 				Status:   merr.Success(),
 				Progress: progress,
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetLoadingProgress.UnPatch()
 
 		state, err := s.client.GetLoadState(ctx, NewGetLoadStateOption(collectionName))
 		s.NoError(err)
@@ -452,9 +487,11 @@ func (s *MaintenanceSuite) TestGetLoadState() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
-		s.mock.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockGetLoadState := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadState).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockGetLoadState.UnPatch()
 
 		_, err := s.client.GetLoadState(ctx, NewGetLoadStateOption(collectionName))
 		s.Error(err)

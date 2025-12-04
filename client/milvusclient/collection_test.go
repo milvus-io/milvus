@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -43,9 +43,11 @@ func (s *CollectionSuite) TestListCollection() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
-		s.mock.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+		defer mockey.UnPatchAll()
+		mockShowCollections := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ShowCollections).Return(&milvuspb.ShowCollectionsResponse{
 			CollectionNames: []string{"test1", "test2", "test3"},
-		}, nil).Once()
+		}, nil).Build()
+		defer mockShowCollections.UnPatch()
 
 		names, err := s.client.ListCollections(ctx, NewListCollectionOption())
 		s.NoError(err)
@@ -53,7 +55,9 @@ func (s *CollectionSuite) TestListCollection() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockShowCollections := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ShowCollections).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockShowCollections.UnPatch()
 
 		_, err := s.client.ListCollections(ctx, NewListCollectionOption())
 		s.Error(err)
@@ -65,26 +69,34 @@ func (s *CollectionSuite) TestCreateCollection() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
-		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
-		s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
+		defer mockey.UnPatchAll()
+		mockCreateCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateCollection).Return(merr.Success(), nil).Build()
+		defer mockCreateCollection.UnPatch()
+		mockCreateIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateIndex).Return(merr.Success(), nil).Build()
+		defer mockCreateIndex.UnPatch()
+		mockLoadCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).LoadCollection).Return(merr.Success(), nil).Build()
+		defer mockLoadCollection.UnPatch()
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).Return(&milvuspb.DescribeIndexResponse{
 			Status: merr.Success(),
 			IndexDescriptions: []*milvuspb.IndexDescription{
 				{FieldName: "vector", State: commonpb.IndexState_Finished},
 			},
-		}, nil).Once()
-		s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
+		}, nil).Build()
+		defer mockDescribeIndex.UnPatch()
+		mockGetLoadingProgress := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetLoadingProgress).Return(&milvuspb.GetLoadingProgressResponse{
 			Status:   merr.Success(),
 			Progress: 100,
-		}, nil).Once()
+		}, nil).Build()
+		defer mockGetLoadingProgress.UnPatch()
 
 		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockCreateCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreateCollection.UnPatch()
 
 		err := s.client.CreateCollection(ctx, SimpleCreateCollectionOptions("test_collection", 128))
 		s.Error(err)
@@ -146,7 +158,8 @@ func (s *CollectionSuite) TestDescribeCollection() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		defer mockey.UnPatchAll()
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 			Status: merr.Success(),
 			Schema: &schemapb.CollectionSchema{
 				Name: "test_collection",
@@ -162,7 +175,8 @@ func (s *CollectionSuite) TestDescribeCollection() {
 			},
 			CollectionID:   1000,
 			CollectionName: "test_collection",
-		}, nil).Once()
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
 
 		coll, err := s.client.DescribeCollection(ctx, NewDescribeCollectionOption("test_collection"))
 		s.NoError(err)
@@ -187,7 +201,9 @@ func (s *CollectionSuite) TestDescribeCollection() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDescribeCollection.UnPatch()
 
 		_, err := s.client.DescribeCollection(ctx, NewDescribeCollectionOption("test_collection"))
 		s.Error(err)
@@ -199,7 +215,8 @@ func (s *CollectionSuite) TestHasCollection() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		defer mockey.UnPatchAll()
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 			Status: merr.Success(),
 			Schema: &schemapb.CollectionSchema{
 				Name: "test_collection",
@@ -215,7 +232,8 @@ func (s *CollectionSuite) TestHasCollection() {
 			},
 			CollectionID:   1000,
 			CollectionName: "test_collection",
-		}, nil).Once()
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
 
 		has, err := s.client.HasCollection(ctx, NewHasCollectionOption("test_collection"))
 		s.NoError(err)
@@ -224,9 +242,11 @@ func (s *CollectionSuite) TestHasCollection() {
 	})
 
 	s.Run("collection_not_exist", func() {
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		defer mockey.UnPatchAll()
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(merr.WrapErrCollectionNotFound("test_collection")),
-		}, nil).Once()
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
 
 		has, err := s.client.HasCollection(ctx, NewHasCollectionOption("test_collection"))
 		s.NoError(err)
@@ -235,7 +255,9 @@ func (s *CollectionSuite) TestHasCollection() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDescribeCollection.UnPatch()
 
 		_, err := s.client.HasCollection(ctx, NewHasCollectionOption("test_collection"))
 		s.Error(err)
@@ -247,14 +269,18 @@ func (s *CollectionSuite) TestDropCollection() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		defer mockey.UnPatchAll()
+		mockDropCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropCollection).Return(merr.Success(), nil).Build()
+		defer mockDropCollection.UnPatch()
 
 		err := s.client.DropCollection(ctx, NewDropCollectionOption("test_collection"))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDropCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropCollection.UnPatch()
 
 		err := s.client.DropCollection(ctx, NewDropCollectionOption("test_collection"))
 		s.Error(err)
@@ -269,18 +295,22 @@ func (s *CollectionSuite) TestRenameCollection() {
 	newName := fmt.Sprintf("%s_new", oldName)
 
 	s.Run("success", func() {
-		s.mock.EXPECT().RenameCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, rcr *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockRenameCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).RenameCollection).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, rcr *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 			s.Equal(oldName, rcr.GetOldName())
 			s.Equal(newName, rcr.GetNewName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockRenameCollection.UnPatch()
 
 		err := s.client.RenameCollection(ctx, NewRenameCollectionOption(oldName, newName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockRenameCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).RenameCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockRenameCollection.UnPatch()
 
 		err := s.client.RenameCollection(ctx, NewRenameCollectionOption(oldName, newName))
 		s.Error(err)
@@ -296,7 +326,8 @@ func (s *CollectionSuite) TestAlterCollectionProperties() {
 	value := s.randString(6)
 
 	s.Run("success", func() {
-		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acr *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockAlterCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterCollection).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, acr *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 			s.Equal(collName, acr.GetCollectionName())
 			if s.Len(acr.GetProperties(), 1) {
 				item := acr.GetProperties()[0]
@@ -304,14 +335,17 @@ func (s *CollectionSuite) TestAlterCollectionProperties() {
 				s.Equal(value, item.GetValue())
 			}
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterCollection.UnPatch()
 
 		err := s.client.AlterCollectionProperties(ctx, NewAlterCollectionPropertiesOption(collName).WithProperty(key, value))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockAlterCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterCollection.UnPatch()
 
 		err := s.client.AlterCollectionProperties(ctx, NewAlterCollectionPropertiesOption(collName).WithProperty(key, value))
 		s.Error(err)
@@ -323,20 +357,24 @@ func (s *CollectionSuite) TestDropCollectionProperties() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
 		key := fmt.Sprintf("key_%s", s.randString(4))
-		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, adr *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+		mockAlterCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterCollection).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, adr *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 			s.Equal([]string{key}, adr.GetDeleteKeys())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterCollection.UnPatch()
 
 		err := s.client.DropCollectionProperties(ctx, NewDropCollectionPropertiesOption(dbName, key))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockAlterCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterCollection).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterCollection.UnPatch()
 
 		err := s.client.DropCollectionProperties(ctx, NewDropCollectionPropertiesOption(dbName, "key"))
 		s.Error(err)
@@ -353,7 +391,8 @@ func (s *CollectionSuite) TestAlterCollectionFieldProperties() {
 	value := s.randString(6)
 
 	s.Run("success", func() {
-		s.mock.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acr *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
+		defer mockey.UnPatchAll()
+		mockAlterCollectionField := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterCollectionField).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, acr *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 			s.Equal(collName, acr.GetCollectionName())
 			s.Equal(fieldName, acr.GetFieldName())
 			if s.Len(acr.GetProperties(), 1) {
@@ -362,14 +401,17 @@ func (s *CollectionSuite) TestAlterCollectionFieldProperties() {
 				s.Equal(value, item.GetValue())
 			}
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterCollectionField.UnPatch()
 
 		err := s.client.AlterCollectionFieldProperty(ctx, NewAlterCollectionFieldPropertiesOption(collName, fieldName).WithProperty(key, value))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().AlterCollectionField(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockAlterCollectionField := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterCollectionField).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterCollectionField.UnPatch()
 
 		err := s.client.AlterCollectionFieldProperty(ctx, NewAlterCollectionFieldPropertiesOption("coll", "field").WithProperty(key, value))
 		s.Error(err)
@@ -381,8 +423,9 @@ func (s *CollectionSuite) TestGetCollectionStats() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gcsr *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+		mockGetCollectionStatistics := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetCollectionStatistics).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, gcsr *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 			s.Equal(collName, gcsr.GetCollectionName())
 			return &milvuspb.GetCollectionStatisticsResponse{
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -390,7 +433,8 @@ func (s *CollectionSuite) TestGetCollectionStats() {
 					{Key: "row_count", Value: "1000"},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetCollectionStatistics.UnPatch()
 
 		stats, err := s.client.GetCollectionStats(ctx, NewGetCollectionStatsOption(collName))
 		s.NoError(err)
@@ -400,8 +444,10 @@ func (s *CollectionSuite) TestGetCollectionStats() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		mockGetCollectionStatistics := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetCollectionStatistics).Return(nil, errors.New("mocked")).Build()
+		defer mockGetCollectionStatistics.UnPatch()
 
 		_, err := s.client.GetCollectionStats(ctx, NewGetCollectionStatsOption(collName))
 		s.Error(err)
@@ -413,9 +459,10 @@ func (s *CollectionSuite) TestAddCollectionField() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		fieldName := fmt.Sprintf("field_%s", s.randString(6))
-		s.mock.EXPECT().AddCollectionField(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acfr *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+		mockAddCollectionField := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AddCollectionField).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, acfr *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 			fieldProto := &schemapb.FieldSchema{}
 			err := proto.Unmarshal(acfr.GetSchema(), fieldProto)
 			s.Require().NoError(err)
@@ -423,7 +470,8 @@ func (s *CollectionSuite) TestAddCollectionField() {
 			s.Equal(schemapb.DataType_Int64, fieldProto.GetDataType())
 			s.True(fieldProto.GetNullable())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAddCollectionField.UnPatch()
 
 		field := entity.NewField().WithName(fieldName).WithDataType(entity.FieldTypeInt64).WithNullable(true)
 
@@ -432,9 +480,11 @@ func (s *CollectionSuite) TestAddCollectionField() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		fieldName := fmt.Sprintf("field_%s", s.randString(6))
-		s.mock.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Status(errors.New("mocked")), nil).Once()
+		mockAddCollectionField := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AddCollectionField).Return(merr.Status(errors.New("mocked")), nil).Build()
+		defer mockAddCollectionField.UnPatch()
 
 		field := entity.NewField().WithName(fieldName).WithDataType(entity.FieldTypeInt64).WithNullable(true)
 
