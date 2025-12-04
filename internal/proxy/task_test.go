@@ -2593,7 +2593,11 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		hash := testutils.GenerateHashKeys(nb)
+		// upsert require pk unique in same batch
+		hash := make([]uint32, nb)
+		for i := 0; i < nb; i++ {
+			hash[i] = uint32(i)
+		}
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
