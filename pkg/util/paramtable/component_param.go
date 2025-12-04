@@ -1666,11 +1666,14 @@ The larger the pending length, the more memory is used, the less logging writes 
 
 	l.AsyncWriteBufferSize = ParamItem{
 		Key:          "log.asyncWrite.bufferSize",
-		DefaultValue: "1m",
+		DefaultValue: "4k",
 		Version:      "2.6.7",
 		Doc: `The buffer size of the underlying bufio writer. 
 The larger the buffer size, the more memory is used, 
-but the less the number of writes to the underlying file system.`,
+but the less the number of writes to the underlying file system.
+Because the cpp will print the log message into stdout, 
+when the logging is woring with pipe like tty/docker log driver/k8s,
+PIPE_BUF=4096 may interleave the go log and cpp log together, so 4kb is set as default value to avoid this.`,
 		Export: false,
 	}
 	l.AsyncWriteBufferSize.Init(base.mgr)
@@ -4584,6 +4587,7 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
+	ScalarIndexTaskSlotUsage      ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
@@ -5600,6 +5604,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.IndexTaskSlotUsage.Init(base.mgr)
+
+	p.ScalarIndexTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.scalarIndexTaskSlotUsage",
+		Version:      "2.6.8",
+		Doc:          "slot usage of scalar index task per 512mb",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ScalarIndexTaskSlotUsage.Init(base.mgr)
 
 	p.StatsTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.statsTaskSlotUsage",

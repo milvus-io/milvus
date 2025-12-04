@@ -288,6 +288,53 @@ func (_c *MockWALAccesser_ControlChannel_Call) RunAndReturn(run func() string) *
 	return _c
 }
 
+// ForwardService provides a mock function with no fields
+func (_m *MockWALAccesser) ForwardService() streaming.ForwardService {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ForwardService")
+	}
+
+	var r0 streaming.ForwardService
+	if rf, ok := ret.Get(0).(func() streaming.ForwardService); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.ForwardService)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_ForwardService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForwardService'
+type MockWALAccesser_ForwardService_Call struct {
+	*mock.Call
+}
+
+// ForwardService is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) ForwardService() *MockWALAccesser_ForwardService_Call {
+	return &MockWALAccesser_ForwardService_Call{Call: _e.mock.On("ForwardService")}
+}
+
+func (_c *MockWALAccesser_ForwardService_Call) Run(run func()) *MockWALAccesser_ForwardService_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_ForwardService_Call) Return(_a0 streaming.ForwardService) *MockWALAccesser_ForwardService_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_ForwardService_Call) RunAndReturn(run func() streaming.ForwardService) *MockWALAccesser_ForwardService_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Local provides a mock function with no fields
 func (_m *MockWALAccesser) Local() streaming.Local {
 	ret := _m.Called()

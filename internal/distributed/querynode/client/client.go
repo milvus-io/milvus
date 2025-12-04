@@ -394,3 +394,14 @@ func (c *Client) DropIndex(ctx context.Context, req *querypb.DropIndexRequest, _
 		return client.DropIndex(ctx, req)
 	})
 }
+
+func (c *Client) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest, _ ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.GetHighlightResponse, error) {
+		return client.GetHighlight(ctx, req)
+	})
+}

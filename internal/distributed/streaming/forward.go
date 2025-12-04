@@ -59,6 +59,10 @@ func newForwardService(streamingCoordClient client.Client) *forwardServiceImpl {
 	return fs
 }
 
+type ForwardService interface {
+	ForwardDMLToLegacyProxy(ctx context.Context, request any) (any, error)
+}
+
 // forwardServiceImpl is the implementation of FallbackService.
 type forwardServiceImpl struct {
 	log.Binder
@@ -246,7 +250,7 @@ func ForwardDMLToLegacyProxyUnaryServerInterceptor() grpc.UnaryServerInterceptor
 		}
 
 		// try to forward the request to the legacy proxy.
-		resp, err := WAL().(*walAccesserImpl).forwardService.ForwardDMLToLegacyProxy(ctx, req)
+		resp, err := WAL().ForwardService().ForwardDMLToLegacyProxy(ctx, req)
 		if err == nil {
 			return resp, nil
 		}

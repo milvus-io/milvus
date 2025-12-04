@@ -163,7 +163,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "error", Params.AsyncWriteNonDroppableLevel.GetValue())
 		assert.Equal(t, 1*time.Second, Params.AsyncWriteStopTimeout.GetAsDurationByParse())
 		assert.Equal(t, 1024, Params.AsyncWritePendingLength.GetAsInt())
-		assert.Equal(t, int64(1024*1024), Params.AsyncWriteBufferSize.GetAsSize())
+		assert.Equal(t, int64(4*1024), Params.AsyncWriteBufferSize.GetAsSize())
 		assert.Equal(t, int64(1024*1024), Params.AsyncWriteMaxBytesPerLog.GetAsSize())
 	})
 

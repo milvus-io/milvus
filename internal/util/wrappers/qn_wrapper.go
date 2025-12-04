@@ -160,6 +160,10 @@ func (qn *qnServerWrapper) RunAnalyzer(ctx context.Context, in *querypb.RunAnaly
 	return qn.QueryNode.RunAnalyzer(ctx, in)
 }
 
+func (qn *qnServerWrapper) GetHighlight(ctx context.Context, in *querypb.GetHighlightRequest, _ ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
+	return qn.QueryNode.GetHighlight(ctx, in)
+}
+
 func (qn *qnServerWrapper) DropIndex(ctx context.Context, in *querypb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return qn.QueryNode.DropIndex(ctx, in)
 }

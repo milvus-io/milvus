@@ -1478,6 +1478,7 @@ const (
 	QueryNode_DeleteBatch_FullMethodName          = "/milvus.proto.query.QueryNode/DeleteBatch"
 	QueryNode_UpdateSchema_FullMethodName         = "/milvus.proto.query.QueryNode/UpdateSchema"
 	QueryNode_RunAnalyzer_FullMethodName          = "/milvus.proto.query.QueryNode/RunAnalyzer"
+	QueryNode_GetHighlight_FullMethodName         = "/milvus.proto.query.QueryNode/GetHighlight"
 	QueryNode_DropIndex_FullMethodName            = "/milvus.proto.query.QueryNode/DropIndex"
 )
 
@@ -1515,6 +1516,7 @@ type QueryNodeClient interface {
 	DeleteBatch(ctx context.Context, in *DeleteBatchRequest, opts ...grpc.CallOption) (*DeleteBatchResponse, error)
 	UpdateSchema(ctx context.Context, in *UpdateSchemaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
+	GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
@@ -1815,6 +1817,15 @@ func (c *queryNodeClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerReques
 	return out, nil
 }
 
+func (c *queryNodeClient) GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error) {
+	out := new(GetHighlightResponse)
+	err := c.cc.Invoke(ctx, QueryNode_GetHighlight_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryNodeClient) DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, QueryNode_DropIndex_FullMethodName, in, out, opts...)
@@ -1858,6 +1869,7 @@ type QueryNodeServer interface {
 	DeleteBatch(context.Context, *DeleteBatchRequest) (*DeleteBatchResponse, error)
 	UpdateSchema(context.Context, *UpdateSchemaRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
+	GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
 }
 
@@ -1945,6 +1957,9 @@ func (UnimplementedQueryNodeServer) UpdateSchema(context.Context, *UpdateSchemaR
 }
 func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
+}
+func (UnimplementedQueryNodeServer) GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetHighlight not implemented")
 }
 func (UnimplementedQueryNodeServer) DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropIndex not implemented")
@@ -2453,6 +2468,24 @@ func _QueryNode_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_GetHighlight_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetHighlightRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).GetHighlight(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_GetHighlight_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).GetHighlight(ctx, req.(*GetHighlightRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryNode_DropIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DropIndexRequest)
 	if err := dec(in); err != nil {
@@ -2577,6 +2610,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunAnalyzer",
 			Handler:    _QueryNode_RunAnalyzer_Handler,
+		},
+		{
+			MethodName: "GetHighlight",
+			Handler:    _QueryNode_GetHighlight_Handler,
 		},
 		{
 			MethodName: "DropIndex",

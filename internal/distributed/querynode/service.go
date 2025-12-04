@@ -407,3 +407,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 func (s *Server) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.querynode.DropIndex(ctx, req)
 }
+
+func (s *Server) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {
+	return s.querynode.GetHighlight(ctx, req)
+}

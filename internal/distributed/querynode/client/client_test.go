@@ -111,6 +111,12 @@ func Test_NewClient(t *testing.T) {
 		r21, err := client.DeleteBatch(ctx, nil)
 		retCheck(retNotNil, r21, err)
 
+		r22, err := client.RunAnalyzer(ctx, nil)
+		retCheck(retNotNil, r22, err)
+
+		r24, err := client.GetHighlight(ctx, nil)
+		retCheck(retNotNil, r24, err)
+
 		// stream rpc
 		client, err := client.QueryStream(ctx, nil)
 		retCheck(retNotNil, client, err)
