@@ -207,7 +207,7 @@ var (
 	ErrKMSKeyRevoked = newMilvusError("KMS key has been revoked, access denied", 2300, false)
 
 	// Compaction
-	ErrCompactionReadDeltaLogErr = newMilvusError("fail to read delta log", 2301, false)
+	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2301, false)
 	ErrIllegalCompactionPlan                      = newMilvusError("compaction plan illegal", 2302, false)
 	ErrCompactionPlanConflict                     = newMilvusError("compaction plan conflict", 2303, false)
 	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2304, false)
