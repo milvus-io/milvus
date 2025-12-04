@@ -36,6 +36,7 @@ const (
 
 type Highlighter interface {
 	AsSearchPipelineOperator(t *searchTask) (operator, error)
+	FieldIDs() []int64
 }
 
 // highlight task for one field
@@ -114,16 +115,24 @@ func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQue
 	})
 }
 
-func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+func (h *LexicalHighlighter) initHighlightQueries(t *searchTask) error {
 	// add query to highlight tasks
 	for _, query := range h.queries {
 		fieldID, ok := t.schema.MapFieldID(query.fieldName)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
+			return merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
 		}
 		h.addTaskWithQuery(fieldID, query)
 	}
+	return nil
+}
+
+func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
 	return newLexicalHighlightOperator(t, lo.Values(h.tasks))
+}
+
+func (h *LexicalHighlighter) FieldIDs() []int64 {
+	return lo.Keys(h.tasks)
 }
 
 func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlighter, error) {

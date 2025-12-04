@@ -108,16 +108,19 @@ JsonStatsParquetWriter::Init(const ParquetWriteContext& context) {
     schema_ = context.schema;
     builders_ = context.builders;
     builders_map_ = context.builders_map;
-    kv_metadata_ = std::move(context.kv_metadata);
+    kv_metadata_ = context.kv_metadata;
     column_groups_ = context.column_groups;
     file_paths_ = context.file_paths;
-    packed_writer_ = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
-        fs_,
-        file_paths_,
-        schema_,
-        storage_config_,
-        column_groups_,
-        buffer_size_);
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(fs_,
+                                                                file_paths_,
+                                                                schema_,
+                                                                storage_config_,
+                                                                column_groups_,
+                                                                buffer_size_);
+    AssertInfo(result.ok(),
+               "[StorageV2] Failed to create packed writer: " +
+                   result.status().ToString());
+    packed_writer_ = result.ValueOrDie();
     for (const auto& [key, value] : kv_metadata_) {
         packed_writer_->AddUserMetadata(key, value);
     }

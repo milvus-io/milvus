@@ -46,6 +46,7 @@ class MilvusConan(ConanFile):
         "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01",
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
+        "libavrocpp/1.12.1@milvus/dev",
     )
 
     generators = ("cmake", "cmake_find_package")

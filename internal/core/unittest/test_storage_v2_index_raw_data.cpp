@@ -75,8 +75,16 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
     auto arrow_schema = schema->ConvertToArrowSchema();
-    milvus_storage::PackedRecordBatchWriter writer(
-        fs_, paths, arrow_schema, storage_config, column_groups, writer_memory);
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        paths,
+        arrow_schema,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
     int64_t total_rows = 0;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
@@ -84,9 +92,9 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
         total_rows += record_batch->num_rows();
 
-        EXPECT_TRUE(writer.Write(record_batch).ok());
+        EXPECT_TRUE(writer->Write(record_batch).ok());
     }
-    EXPECT_TRUE(writer.Close().ok());
+    EXPECT_TRUE(writer->Close().ok());
 
     {
         // test memory file manager

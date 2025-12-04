@@ -257,12 +257,10 @@ GetManifest(const std::string& path,
         // Parse the JSON string
         json j = json::parse(path);
 
-        // Extract base_path and ver fields
+        // Extract base_path
         std::string base_path = j.at("base_path").get<std::string>();
-        int64_t ver = j.at("ver").get<int64_t>();
 
-        // return std::make_pair(base_path, ver);
-        char* out_column_groups = nullptr;
+        ColumnGroupsHandle out_column_groups = 0;
         int64_t out_read_version = 0;
         FFIResult result = get_latest_column_groups(base_path.c_str(),
                                                     properties.get(),
@@ -298,9 +296,8 @@ GetColumnGroups(
         // Parse the JSON string
         json j = json::parse(path);
 
-        // Extract base_path and ver fields
+        // Extract base_path
         std::string base_path = j.at("base_path").get<std::string>();
-        int64_t ver = j.at("ver").get<int64_t>();
 
         // TODO fetch manifest based on version after api supported
         auto transaction =

@@ -1049,31 +1049,25 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 	return primaryData, nil
 }
 
-// findLastOccurrenceIndices finds indices of last occurrences for each unique ID
-func findLastOccurrenceIndices[T comparable](ids []T) []int {
-	lastOccurrence := make(map[T]int, len(ids))
-	for idx, id := range ids {
-		lastOccurrence[id] = idx
-	}
-
-	keepIndices := make([]int, 0, len(lastOccurrence))
-	for idx, id := range ids {
-		if lastOccurrence[id] == idx {
-			keepIndices = append(keepIndices, idx)
+// hasDuplicates checks if there are any duplicate values in the slice.
+// Returns true immediately when the first duplicate is found (early exit).
+func hasDuplicates[T comparable](ids []T) bool {
+	seen := make(map[T]struct{}, len(ids))
+	for _, id := range ids {
+		if _, exists := seen[id]; exists {
+			return true
 		}
+		seen[id] = struct{}{}
 	}
-	return keepIndices
+	return false
 }
 
-// DeduplicateFieldData removes duplicate primary keys from field data,
-// keeping the last occurrence of each ID
-func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData []*schemapb.FieldData, schema *schemaInfo) ([]*schemapb.FieldData, uint32, error) {
+// CheckDuplicatePkExist checks if there are duplicate primary keys in the field data.
+// Returns (true, nil) if duplicates exist, (false, nil) if no duplicates.
+// Returns (false, error) if there's an error during checking.
+func CheckDuplicatePkExist(primaryFieldSchema *schemapb.FieldSchema, fieldsData []*schemapb.FieldData) (bool, error) {
 	if len(fieldsData) == 0 {
-		return fieldsData, 0, nil
-	}
-
-	if err := fillFieldPropertiesOnly(fieldsData, schema); err != nil {
-		return nil, 0, err
+		return false, nil
 	}
 
 	// find primary field data
@@ -1086,64 +1080,26 @@ func DeduplicateFieldData(primaryFieldSchema *schemapb.FieldSchema, fieldsData [
 	}
 
 	if primaryFieldData == nil {
-		return nil, 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.GetName()))
+		return false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.GetName()))
 	}
 
-	// get row count
-	var numRows int
+	// check for duplicates based on primary key type
 	switch primaryFieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		scalarField := primaryFieldData.GetScalars()
 		switch scalarField.Data.(type) {
 		case *schemapb.ScalarField_LongData:
-			numRows = len(scalarField.GetLongData().GetData())
+			intIDs := scalarField.GetLongData().GetData()
+			return hasDuplicates(intIDs), nil
 		case *schemapb.ScalarField_StringData:
-			numRows = len(scalarField.GetStringData().GetData())
+			strIDs := scalarField.GetStringData().GetData()
+			return hasDuplicates(strIDs), nil
 		default:
-			return nil, 0, merr.WrapErrParameterInvalidMsg("unsupported primary key type")
+			return false, merr.WrapErrParameterInvalidMsg("unsupported primary key type")
 		}
 	default:
-		return nil, 0, merr.WrapErrParameterInvalidMsg("primary field must be scalar type")
+		return false, merr.WrapErrParameterInvalidMsg("primary field must be scalar type")
 	}
-
-	if numRows == 0 {
-		return fieldsData, 0, nil
-	}
-
-	// build map to track last occurrence of each primary key
-	var keepIndices []int
-	switch primaryFieldData.Field.(type) {
-	case *schemapb.FieldData_Scalars:
-		scalarField := primaryFieldData.GetScalars()
-		switch scalarField.Data.(type) {
-		case *schemapb.ScalarField_LongData:
-			// for Int64 primary keys
-			intIDs := scalarField.GetLongData().GetData()
-			keepIndices = findLastOccurrenceIndices(intIDs)
-
-		case *schemapb.ScalarField_StringData:
-			// for VarChar primary keys
-			strIDs := scalarField.GetStringData().GetData()
-			keepIndices = findLastOccurrenceIndices(strIDs)
-		}
-	}
-
-	// if no duplicates found, return original data
-	if len(keepIndices) == numRows {
-		return fieldsData, uint32(numRows), nil
-	}
-
-	log.Info("duplicate primary keys detected in upsert request, deduplicating",
-		zap.Int("original_rows", numRows),
-		zap.Int("deduplicated_rows", len(keepIndices)))
-
-	// use typeutil.AppendFieldData to rebuild field data with deduplicated rows
-	result := typeutil.PrepareResultFieldData(fieldsData, int64(len(keepIndices)))
-	for _, idx := range keepIndices {
-		typeutil.AppendFieldData(result, fieldsData, int64(idx))
-	}
-
-	return result, uint32(len(keepIndices)), nil
 }
 
 // autoGenPrimaryFieldData generate primary data when autoID == true
@@ -1214,12 +1170,12 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 	expectColumnNum := 0
 
 	// Count expected columns
-	for _, field := range schema.GetFields() {
+	for _, field := range schema.CollectionSchema.GetFields() {
 		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
-	for _, structField := range schema.GetStructArrayFields() {
+	for _, structField := range schema.CollectionSchema.GetStructArrayFields() {
 		expectColumnNum += len(structField.GetFields())
 	}
 

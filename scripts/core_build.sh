@@ -212,6 +212,9 @@ make rebuild_cache >/dev/null 2>&1
 
 CPU_ARCH=$(get_cpu_arch $CPU_TARGET)
 
+# In case any 3rdparty (e.g. libavrocpp) requires a minimum version of CMake lower than 3.5
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
 arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
