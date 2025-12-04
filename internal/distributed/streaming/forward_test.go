@@ -66,13 +66,19 @@ func TestForwardDMLToLegacyProxy(t *testing.T) {
 		&milvuspb.DeleteRequest{},
 		&milvuspb.InsertRequest{},
 		&milvuspb.UpsertRequest{},
+		&milvuspb.SearchRequest{},
+		&milvuspb.HybridSearchRequest{},
+		&milvuspb.QueryRequest{},
 	}
 	methods := []string{
 		milvuspb.MilvusService_Delete_FullMethodName,
 		milvuspb.MilvusService_Insert_FullMethodName,
 		milvuspb.MilvusService_Upsert_FullMethodName,
+		milvuspb.MilvusService_Search_FullMethodName,
+		milvuspb.MilvusService_HybridSearch_FullMethodName,
+		milvuspb.MilvusService_Query_FullMethodName,
 	}
-	interceptor := ForwardDMLToLegacyProxyUnaryServerInterceptor()
+	interceptor := ForwardLegacyProxyUnaryServerInterceptor()
 
 	for idx, req := range reqs {
 		method := methods[idx]

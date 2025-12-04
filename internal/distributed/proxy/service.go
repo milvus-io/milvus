@@ -240,7 +240,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			streaming.ForwardDMLToLegacyProxyUnaryServerInterceptor(),
+			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
 			proxy.DatabaseInterceptor(),
 			UnaryRequestStatsInterceptor,
 			accesslog.UnaryAccessLogInterceptor,
