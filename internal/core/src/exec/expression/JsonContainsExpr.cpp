@@ -224,6 +224,12 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             const auto& array = data[i];
             for (int j = 0; j < array.length(); ++j) {
@@ -317,6 +323,12 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::shared_ptr<MultiElement>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -498,6 +510,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) -> bool {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -685,6 +703,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::set<GetType>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             std::set<GetType> tmp_elements(elements);
             // Note: array can only be iterated once
@@ -778,6 +802,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::set<GetType>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](const size_t i) -> bool {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -967,6 +997,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements,
             const std::set<int> elements_index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) -> bool {
             const auto& json = data[i];
             auto doc = json.dom_doc();
@@ -1273,6 +1309,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](const size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -1472,6 +1514,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](const size_t i) {
             auto& json = data[i];
             auto doc = json.dom_doc();

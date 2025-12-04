@@ -146,17 +146,17 @@ class PhyCompareFilterExpr : public Expr {
             left_num_chunk_ =
                 is_left_indexed_
                     ? segment->num_chunk_index(expr_->left_field_id_)
-                : segment->type() == SegmentType::Growing
-                    ? upper_div(segment_chunk_reader_.active_count_,
-                                segment_chunk_reader_.SizePerChunk())
-                    : segment->num_chunk_data(left_field_);
+                    : segment->type() == SegmentType::Growing
+                          ? upper_div(segment_chunk_reader_.active_count_,
+                                      segment_chunk_reader_.SizePerChunk())
+                          : segment->num_chunk_data(left_field_);
             right_num_chunk_ =
                 is_right_indexed_
                     ? segment->num_chunk_index(expr_->right_field_id_)
-                : segment->type() == SegmentType::Growing
-                    ? upper_div(segment_chunk_reader_.active_count_,
-                                segment_chunk_reader_.SizePerChunk())
-                    : segment->num_chunk_data(right_field_);
+                    : segment->type() == SegmentType::Growing
+                          ? upper_div(segment_chunk_reader_.active_count_,
+                                      segment_chunk_reader_.SizePerChunk())
+                          : segment->num_chunk_data(right_field_);
             num_chunk_ = left_num_chunk_;
         } else {
             num_chunk_ = is_left_indexed_
