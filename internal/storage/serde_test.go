@@ -436,7 +436,7 @@ func TestArrayOfVectorIntegration(t *testing.T) {
 		},
 	}
 
-	arrowSchema, err := ConvertToArrowSchema(schema)
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	assert.NoError(t, err)
 	assert.NotNil(t, arrowSchema)
 

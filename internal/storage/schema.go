@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -11,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
+func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useFieldID bool) (*arrow.Schema, error) {
 	fieldCount := typeutil.GetTotalFieldsNum(schema)
 	arrowFields := make([]arrow.Field, 0, fieldCount)
 	appendArrowField := func(field *schemapb.FieldSchema) error {
@@ -37,7 +38,7 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 		}
 
 		arrowType := serdeMap[field.DataType].arrowType(dim, elementType)
-		arrowField := ConvertToArrowField(field, arrowType)
+		arrowField := ConvertToArrowField(field, arrowType, useFieldID)
 
 		// Add extra metadata for ArrayOfVector
 		if field.DataType == schemapb.DataType_ArrayOfVector {
@@ -67,11 +68,16 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 	return arrow.NewSchema(arrowFields, nil), nil
 }
 
-func ConvertToArrowField(field *schemapb.FieldSchema, dataType arrow.DataType) arrow.Field {
-	return arrow.Field{
-		Name:     field.GetName(),
+func ConvertToArrowField(field *schemapb.FieldSchema, dataType arrow.DataType, useFieldID bool) arrow.Field {
+	f := arrow.Field{
 		Type:     dataType,
 		Metadata: arrow.NewMetadata([]string{packed.ArrowFieldIdMetadataKey}, []string{strconv.Itoa(int(field.GetFieldID()))}),
 		Nullable: field.GetNullable(),
 	}
+	if useFieldID { // use fieldID as name when specified
+		f.Name = fmt.Sprintf("%d", field.GetFieldID())
+	} else {
+		f.Name = field.GetName()
+	}
+	return f
 }

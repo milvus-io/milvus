@@ -110,6 +110,7 @@ message CreateJobRequest {
   int64 lack_binlog_rows = 30;
   repeated data.FieldBinlog insert_logs = 31;
   repeated common.KeyValuePair plugin_context = 32;
+  string manifest = 33;
 }
 
 message QueryJobsRequest {
