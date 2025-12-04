@@ -244,13 +244,7 @@ func NewManifestReader(manifest string,
 }
 
 func (mr *ManifestReader) init() error {
-	// TODO add needed column option
-	manifest, err := packed.GetManifest(mr.manifest, mr.storageConfig)
-	if err != nil {
-		return err
-	}
-
-	reader, err := packed.NewFFIPackedReader(manifest, mr.arrowSchema, mr.neededColumns, mr.bufferSize, mr.storageConfig, mr.storagePluginContext)
+	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns, mr.bufferSize, mr.storageConfig, mr.storagePluginContext)
 	if err != nil {
 		return err
 	}

@@ -440,11 +440,15 @@ SegmentGrowingImpl::load_column_group_data_internal(
         std::vector<std::vector<int64_t>> row_group_lists;
         row_group_lists.reserve(insert_files.size());
         for (const auto& file : insert_files) {
-            auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+            auto result = milvus_storage::FileRowGroupReader::Make(
                 fs,
                 file,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
                 storage::GetReaderProperties());
+            AssertInfo(result.ok(),
+                       "[StorageV2] Failed to create file row group reader: " +
+                           result.status().ToString());
+            auto reader = result.ValueOrDie();
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
             std::vector<int64_t> all_row_groups(row_group_num);
