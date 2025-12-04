@@ -137,11 +137,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return chunk_mutex_;
     }
 
-    const Schema&
-    get_schema() const override {
-        return *schema_;
-    }
-
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
     int64_t
     num_chunk_index(FieldId field_id) const {
@@ -313,12 +308,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
                                .GetMmapChunkManager()
                                ->Register()),
           segcore_config_(segcore_config),
-          schema_(std::move(schema)),
           index_meta_(indexMeta),
           insert_record_(
-              *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
+              *schema, segcore_config.get_chunk_rows(), mmap_descriptor_),
           indexing_record_(
-              *schema_, index_meta_, segcore_config_, &insert_record_),
+              *schema, index_meta_, segcore_config_, &insert_record_),
           id_(segment_id),
           deleted_record_(
               &insert_record_,
@@ -329,6 +323,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {
+        schema_ = std::move(schema);
         this->CreateTextIndexes();
     }
 
@@ -588,7 +583,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
-    SchemaPtr schema_;
     IndexMetaPtr index_meta_;
 
     // inserted fields data and row_ids, timestamps

@@ -659,6 +659,27 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
 }
 
 CStatus
+SyncSchema(CSegmentInterface c_segment,
+           const uint8_t* schema_blob,
+           const int64_t schema_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        AssertInfo(segment_interface != nullptr, "segment conversion failed");
+        milvus::proto::schema::CollectionSchema schema_proto;
+        auto suc = schema_proto.ParseFromArray(schema_blob, schema_length);
+        AssertInfo(suc, "failed to parse schema from blob");
+        auto schema = milvus::Schema::ParseFrom(schema_proto);
+        segment_interface->SyncSchema(schema);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
     SCOPE_CGO_CALL_METRIC();
 

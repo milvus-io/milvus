@@ -1372,6 +1372,10 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 	return s.csegment.Load(ctx)
 }
 
+func (s *LocalSegment) SyncSchema(colSchmea *schemapb.CollectionSchema) error {
+	return s.csegment.SyncSchema(colSchmea)
+}
+
 type ReleaseScope int
 
 const (
