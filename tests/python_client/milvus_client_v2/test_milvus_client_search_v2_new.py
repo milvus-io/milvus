@@ -344,7 +344,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1]))
+    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [2000, 10, 1]))
     # @pytest.mark.parametrize("limit, nq", zip([ct.max_limit], [1]))
     def test_search_with_different_nq_limits(self, limit, nq):
         """

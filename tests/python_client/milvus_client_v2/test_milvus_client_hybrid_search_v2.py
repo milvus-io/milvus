@@ -668,7 +668,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         vector_name_list = [self.float_vector_field_name1, self.float_vector_field_name2]
         # 3. prepare search params for each vector field
         req_list = []
-        nq = 1    # only works for nq=1, as the limitation of get_hybrid_search_base_results_rrf()
+        nq = 1  # only works for nq=1, as the limitation of get_hybrid_search_base_results_rrf()
         search_res_dict_array = []
         for field_name in vector_name_list:
             search_data = cf.gen_vectors(nq, self.float_vector_dim, vector_data_type=DataType.FLOAT_VECTOR)
@@ -797,7 +797,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
         limit = 200
 
         field_names = [self.sparse_vector_field_name1, self.sparse_vector_field_name2]
-        nq = len(field_names)    # nq should equal to number of filed names, as it would search nq by nq next
+        nq = len(field_names)  # nq should equal to number of filed names, as it would search nq by nq next
         search_data = cf.gen_varchar_data(length=10, nb=nq, text_mode=True)
 
         # 0. search
@@ -854,7 +854,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                                                    "output_fields": [self.primary_key_field_name,
                                                                      self.string_field_name]})[0]
             hit_rate = len(set(res2[0].ids).intersection(set(res1[i].ids[:limit // 2]))) / len(res2[0].ids)
-            # log.debug(f"hybrid search with range nq={i} hit hybrid search without rage, hit rate: {hit_rate}")
+            # log.debug(f"hybrid search with range nq={i} hit hybrid search without range, hit rate: {hit_rate}")
             assert hit_rate >= 0.7, f"failed in nq={i}"
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -879,7 +879,7 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
             })
             req_list.append(req)
 
-        # output * fields   
+        # output all fields with wildcard '*'
         output_fields = ["*"]
         # sparse fields cannot be output, so specify the expected output fields
         expected_output_fields = [field_name for field_name in self.all_fields
@@ -902,33 +902,33 @@ class TestMilvusClientHybridSearch(TestMilvusClientV2Base):
                            check_items=err_msg)
         # output all listed fields
         output_fields = expected_output_fields
-        res2 = self.hybrid_search(client, self.collection_name, reqs=req_list,
-                                  ranker=WeightedRanker(0.5, 0.5),
-                                  limit=limit, output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
-                                               "pk_name": self.primary_key_field_name,
-                                               "output_fields": expected_output_fields})[0]
+        self.hybrid_search(client, self.collection_name, reqs=req_list,
+                           ranker=WeightedRanker(0.5, 0.5),
+                           limit=limit, output_fields=output_fields,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
+                                        "pk_name": self.primary_key_field_name,
+                                        "output_fields": expected_output_fields})
         # output some fields
         output_fields = [self.primary_key_field_name, self.string_field_name, self.float_vector_field_name1,
                          self.float_vector_field_name2]
-        res3 = self.hybrid_search(client, self.collection_name, reqs=req_list,
-                                  ranker=WeightedRanker(0.5, 0.5),
-                                  limit=limit, output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
-                                               "pk_name": self.primary_key_field_name,
-                                               "output_fields": output_fields})[0]
+        self.hybrid_search(client, self.collection_name, reqs=req_list,
+                           ranker=WeightedRanker(0.5, 0.5),
+                           limit=limit, output_fields=output_fields,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
+                                        "pk_name": self.primary_key_field_name,
+                                        "output_fields": output_fields})
         # output with dynamic field
         output_fields = [self.primary_key_field_name, self.string_field_name, self.dynamic_field_name1,
                          self.dynamic_field_name2]
-        res4 = self.hybrid_search(client, self.collection_name, reqs=req_list,
-                                  ranker=WeightedRanker(0.5, 0.5),
-                                  limit=limit, output_fields=output_fields,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
-                                               "pk_name": self.primary_key_field_name,
-                                               "output_fields": output_fields})[0]
+        self.hybrid_search(client, self.collection_name, reqs=req_list,
+                           ranker=WeightedRanker(0.5, 0.5),
+                           limit=limit, output_fields=output_fields,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"nq": nq, "ids": self.primary_keys, "limit": limit,
+                                        "pk_name": self.primary_key_field_name,
+                                        "output_fields": output_fields})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_result_always_descending_order(self):

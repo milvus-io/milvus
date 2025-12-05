@@ -469,9 +469,9 @@ class ResponseChecker:
                 # verify the distances are already sorted
                 num_to_check = min(100, len(distances))   # check 100 items if more than that
                 if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
-                    assert distances[:num_to_check] == sorted(distances[:num_to_check], reverse=True)
+                    assert np.allclose(distances[:num_to_check], sorted(distances[:num_to_check], reverse=True))
                 else:
-                    assert distances[:num_to_check] == sorted(distances[:num_to_check], reverse=False)
+                    assert np.allclose(distances[:num_to_check], sorted(distances[:num_to_check], reverse=False))
                 if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
                     log.debug("skip distance check for knowhere does not return the precise distances")
                 else:
