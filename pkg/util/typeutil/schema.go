@@ -2460,3 +2460,30 @@ func ExtractStructFieldName(fieldName string) (string, error) {
 		return "", fmt.Errorf("invalid struct field name: %s, more than one [ found", fieldName)
 	}
 }
+
+func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
+	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
+		return false
+	}
+
+	for _, fSchema := range collSchema.Functions {
+		if fSchema.Type == schemapb.FunctionType_BM25 {
+			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
+				return true
+			}
+			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func IsBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	for _, fn := range coll.GetFunctions() {
+		if fn.GetType() == schemapb.FunctionType_BM25 && field.GetName() == fn.GetInputFieldNames()[0] {
+			return true
+		}
+	}
+	return false
+}

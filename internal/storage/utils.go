@@ -398,7 +398,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	for _, field := range collSchema.Fields {
-		if skipFunction && IsBM25FunctionOutputField(field, collSchema) {
+		if skipFunction && typeutil.IsBM25FunctionOutputField(field, collSchema) {
 			continue
 		}
 
@@ -779,7 +779,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 
 	handleFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
-		if IsBM25FunctionOutputField(field, collSchema) {
+		if typeutil.IsBM25FunctionOutputField(field, collSchema) {
 			return nil, nil
 		}
 
@@ -1568,25 +1568,6 @@ func (ni NullableInt) GetValue() int {
 // IsNull checks if the NullableInt is null
 func (ni NullableInt) IsNull() bool {
 	return ni.Value == nil
-}
-
-// TODO: unify the function implementation, storage/utils.go & proxy/util.go
-func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
-		return false
-	}
-
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_BM25 {
-			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
-				return true
-			}
-			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {

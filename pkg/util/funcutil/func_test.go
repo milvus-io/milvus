@@ -199,12 +199,12 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 	collectionID := GetCollectionIDFromVChannel(vChannel1)
 	assert.Equal(t, int64(449684528748778322), collectionID)
 
-	invailedVChannel := "06b84fe16780ed1-rootcoord-dm_3_v0"
-	collectionID = GetCollectionIDFromVChannel(invailedVChannel)
+	invaildVChannel := "06b84fe16780ed1-rootcoord-dm_3_v0"
+	collectionID = GetCollectionIDFromVChannel(invaildVChannel)
 	assert.Equal(t, int64(-1), collectionID)
 
-	invailedVChannel = "06b84fe16780ed1-rootcoord-dm_3_-1v0"
-	collectionID = GetCollectionIDFromVChannel(invailedVChannel)
+	invaildVChannel = "06b84fe16780ed1-rootcoord-dm_3_-1v0"
+	collectionID = GetCollectionIDFromVChannel(invaildVChannel)
 	assert.Equal(t, int64(-1), collectionID)
 }
 

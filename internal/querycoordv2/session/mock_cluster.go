@@ -506,6 +506,66 @@ func (_c *MockCluster_ReleaseSegments_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// RunAnalyzer provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunAnalyzer")
+	}
+
+	var r0 *milvuspb.RunAnalyzerResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.RunAnalyzerRequest) *milvuspb.RunAnalyzerResponse); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.RunAnalyzerResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *querypb.RunAnalyzerRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_RunAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunAnalyzer'
+type MockCluster_RunAnalyzer_Call struct {
+	*mock.Call
+}
+
+// RunAnalyzer is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.RunAnalyzerRequest
+func (_e *MockCluster_Expecter) RunAnalyzer(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_RunAnalyzer_Call {
+	return &MockCluster_RunAnalyzer_Call{Call: _e.mock.On("RunAnalyzer", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_RunAnalyzer_Call) Run(run func(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest)) *MockCluster_RunAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*querypb.RunAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_RunAnalyzer_Call) Return(_a0 *milvuspb.RunAnalyzerResponse, _a1 error) *MockCluster_RunAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_RunAnalyzer_Call) RunAndReturn(run func(context.Context, int64, *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)) *MockCluster_RunAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Start provides a mock function with no fields
 func (_m *MockCluster) Start() {
 	_m.Called()
@@ -686,6 +746,66 @@ func (_c *MockCluster_UnsubDmChannel_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *MockCluster_UnsubDmChannel_Call) RunAndReturn(run func(context.Context, int64, *querypb.UnsubDmChannelRequest) (*commonpb.Status, error)) *MockCluster_UnsubDmChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ValidateAnalyzer provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAnalyzer")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_ValidateAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAnalyzer'
+type MockCluster_ValidateAnalyzer_Call struct {
+	*mock.Call
+}
+
+// ValidateAnalyzer is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.ValidateAnalyzerRequest
+func (_e *MockCluster_Expecter) ValidateAnalyzer(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_ValidateAnalyzer_Call {
+	return &MockCluster_ValidateAnalyzer_Call{Call: _e.mock.On("ValidateAnalyzer", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_ValidateAnalyzer_Call) Run(run func(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest)) *MockCluster_ValidateAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*querypb.ValidateAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockCluster_ValidateAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, int64, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MockCluster_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

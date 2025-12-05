@@ -2460,6 +2460,60 @@ func (suite *ServiceSuite) TestGetHighlight() {
 	})
 }
 
+func (suite *ServiceSuite) TestValidateAnalyzer() {
+	ctx := context.Background()
+
+	suite.Run("normal validate", func() {
+		req := &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Name:   "test_analyzer",
+					Params: `{}`,
+				},
+			},
+		}
+
+		resp, err := suite.node.ValidateAnalyzer(ctx, req)
+		suite.Require().NoError(err)
+		suite.Require().Equal(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	suite.Run("invalid analyzer params", func() {
+		req := &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Name:   "test_analyzer",
+					Params: `{"invalid": "params"}`,
+				},
+			},
+		}
+
+		resp, err := suite.node.ValidateAnalyzer(ctx, req)
+		suite.Require().NoError(err)
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	suite.Run("abnormal node", func() {
+		suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		req := &querypb.ValidateAnalyzerRequest{
+			AnalyzerInfos: []*querypb.AnalyzerInfo{
+				{
+					Field:  "test_field",
+					Params: `{}`,
+				},
+			},
+		}
+
+		resp, err := suite.node.ValidateAnalyzer(ctx, req)
+		suite.Require().NoError(err)
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
 func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)

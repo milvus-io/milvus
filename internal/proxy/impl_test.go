@@ -1664,19 +1664,26 @@ func TestRunAnalyzer(t *testing.T) {
 	})
 
 	p.UpdateStateCode(commonpb.StateCode_Healthy)
-	t.Run("run analyzer with default params", func(t *testing.T) {
+	t.Run("run analyzer with mixcoord success", func(t *testing.T) {
+		mockMixcoord := mocks.NewMockMixCoordClient(t)
+		p.mixCoord = mockMixcoord
+		mockMixcoord.EXPECT().RunAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.RunAnalyzerResponse{Status: merr.Status(nil)}, nil)
+
 		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
 			Placeholder: [][]byte{[]byte("test doc")},
 		})
+
 		require.NoError(t, err)
 		require.NoError(t, merr.Error(resp.GetStatus()))
-		assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
 	})
 
-	t.Run("run analyzer with invalid params", func(t *testing.T) {
+	t.Run("run analyzer with mixcoord failed", func(t *testing.T) {
+		mockMixcoord := mocks.NewMockMixCoordClient(t)
+		p.mixCoord = mockMixcoord
+		mockMixcoord.EXPECT().RunAnalyzer(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.RunAnalyzerResponse{Status: merr.Status(fmt.Errorf("mock error"))}, nil)
+
 		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-			Placeholder:    [][]byte{[]byte("test doc")},
-			AnalyzerParams: "invalid json",
+			Placeholder: [][]byte{[]byte("test doc")},
 		})
 		require.NoError(t, err)
 		require.Error(t, merr.Error(resp.GetStatus()))

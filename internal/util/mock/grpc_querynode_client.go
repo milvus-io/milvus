@@ -146,6 +146,10 @@ func (m *GrpcQueryNodeClient) GetHighlight(ctx context.Context, in *querypb.GetH
 	return &querypb.GetHighlightResponse{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) Close() error {
 	return m.Err
 }
