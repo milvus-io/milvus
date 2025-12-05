@@ -394,21 +394,37 @@ func (opt *rowBasedDataOption) WithKeepAutoIDPk(keepPk bool) *rowBasedDataOption
 }
 
 type DeleteOption interface {
-	Request() *milvuspb.DeleteRequest
+	Request() (*milvuspb.DeleteRequest, error)
 }
 
 type deleteOption struct {
-	collectionName string
-	partitionName  string
-	expr           string
+	collectionName   string
+	partitionName    string
+	expr             string
+	templateParams   map[string]any
+	hashKeys         []uint32
+	consistencyLevel entity.ConsistencyLevel
 }
 
-func (opt *deleteOption) Request() *milvuspb.DeleteRequest {
-	return &milvuspb.DeleteRequest{
+func (opt *deleteOption) Request() (*milvuspb.DeleteRequest, error) {
+	req := &milvuspb.DeleteRequest{
 		CollectionName: opt.collectionName,
 		PartitionName:  opt.partitionName,
 		Expr:           opt.expr,
 	}
+	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue)
+	for key, value := range opt.templateParams {
+		tmplVal, err := any2TmplValue(value)
+		if err != nil {
+			return nil, err
+		}
+		req.ExprTemplateValues[key] = tmplVal
+	}
+	if len(opt.hashKeys) > 0 {
+		req.HashKeys = opt.hashKeys
+	}
+	req.ConsistencyLevel = opt.consistencyLevel.CommonConsistencyLevel()
+	return req, nil
 }
 
 func (opt *deleteOption) WithExpr(expr string) *deleteOption {
@@ -431,6 +447,24 @@ func (opt *deleteOption) WithPartition(partitionName string) *deleteOption {
 	return opt
 }
 
+func (opt *deleteOption) WithTemplateParam(key string, val any) *deleteOption {
+	opt.templateParams[key] = val
+	return opt
+}
+
+func (opt *deleteOption) WithHashKeys(hashKeys []uint32) *deleteOption {
+	opt.hashKeys = hashKeys
+	return opt
+}
+
+func (opt *deleteOption) WithConsistencyLevel(consistencyLevel entity.ConsistencyLevel) *deleteOption {
+	opt.consistencyLevel = consistencyLevel
+	return opt
+}
+
 func NewDeleteOption(collectionName string) *deleteOption {
-	return &deleteOption{collectionName: collectionName}
+	return &deleteOption{
+		collectionName: collectionName,
+		templateParams: make(map[string]any),
+	}
 }
