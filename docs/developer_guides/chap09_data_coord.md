@@ -11,9 +11,9 @@ type DataCoord interface {
 	Component
 	TimeTickProvider
 
-  // Flush notifies DataCoord to flush all current growing segments of specified Collection
+  // Flush notifies DataCoord to flush all current growing segments of a specified Collection
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
-	// AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
+  // AssignSegmentID applies allocations for a specified Collection/Partition and related channel name (virtual channel)
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
   // GetSegmentStates requests segment state information
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
@@ -23,7 +23,7 @@ type DataCoord interface {
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
   // GetCollectionStatistics requests collection statistics
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
-  // GetParititonStatistics requests partition statistics
+  // GetPartitionStatistics requests partition statistics
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
   // GetSegmentInfo requests segment info
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
@@ -31,7 +31,7 @@ type DataCoord interface {
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
 	// SaveBinlogPaths updates segments binlogs(including insert binlogs, stats logs and delta logs)
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
-	// GetFlushedSegments returns flushed segment list of requested collection/parition
+  // GetFlushedSegments returns the flushed segment list of the requested collection/partition
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
   // GetMetrics gets the metrics about DataCoord
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

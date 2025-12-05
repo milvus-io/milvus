@@ -28,11 +28,11 @@ comment:
   require_changes: false
   branches: # branch names that can post comment
     - master
- 
+
 component_management:
   default_rules:  # default rules that will be inherited by all components
     statuses:
-      - type: project # in this case every component that doens't have a status defined will have a project type one
+      - type: project # in this case every component that doesn't have a status defined will have a project type one
         target: auto
         branches:
           - "!main"
@@ -66,8 +66,3 @@ ignore:
   - "**/*.proto"
   - "internal/metastore/db/dbmodel/mocks/.*"
   - "**/mock_*.go"
-
-
-
-
-
