@@ -226,6 +226,84 @@ func TestProxyRenameCollection(t *testing.T) {
 	})
 }
 
+func TestProxyFunctionEdit(t *testing.T) {
+	mockey.PatchConvey("TestProxy_AddFunction", t, func() {
+		m1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
+			return nil
+		}).Build()
+		m2 := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+		defer m1.UnPatch()
+		defer m2.UnPatch()
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		_, err := node.AddCollectionFunction(context.Background(), &milvuspb.AddCollectionFunctionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AddCollectionFunction,
+			},
+			CollectionName: "test_collection",
+			CollectionID:   1,
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{},
+				OutputFieldNames: []string{},
+				Params:           []*commonpb.KeyValuePair{},
+			},
+		})
+		assert.NoError(t, err)
+	})
+
+	mockey.PatchConvey("TestProxy_DropFunction", t, func() {
+		m1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
+			return nil
+		}).Build()
+		m2 := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+		defer m1.UnPatch()
+		defer m2.UnPatch()
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		_, err := node.DropCollectionFunction(context.Background(), &milvuspb.DropCollectionFunctionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AddCollectionFunction,
+			},
+			CollectionName: "test_collection",
+			CollectionID:   1,
+			FunctionName:   "test",
+		})
+		assert.NoError(t, err)
+	})
+
+	mockey.PatchConvey("TestProxy_AlterFunction", t, func() {
+		m1 := mockey.Mock((*ddTaskQueue).Enqueue).To(func(t task) error {
+			return nil
+		}).Build()
+		m2 := mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
+		defer m1.UnPatch()
+		defer m2.UnPatch()
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		_, err := node.AlterCollectionFunction(context.Background(), &milvuspb.AlterCollectionFunctionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_AddCollectionFunction,
+			},
+			CollectionName: "test_collection",
+			CollectionID:   1,
+			FunctionName:   "test",
+			FunctionSchema: &schemapb.FunctionSchema{
+				Name:             "test_function",
+				Type:             schemapb.FunctionType_TextEmbedding,
+				InputFieldNames:  []string{},
+				OutputFieldNames: []string{},
+				Params:           []*commonpb.KeyValuePair{},
+			},
+		})
+		assert.NoError(t, err)
+	})
+}
+
 func TestProxy_ResourceGroup(t *testing.T) {
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()

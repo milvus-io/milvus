@@ -107,7 +107,6 @@ func NewTextEmbeddingFunction(coll *schemapb.CollectionSchema, functionSchema *s
 	if err := TextEmbeddingOutputsCheck(base.outputFields); err != nil {
 		return nil, err
 	}
-
 	var embP textEmbeddingProvider
 	var newProviderErr error
 	conf := paramtable.Get().FunctionCfg.GetTextEmbeddingProviderConfig(base.provider)
