@@ -87,6 +87,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddJsonSharedIndexLog(const std::string& filename) noexcept;
 
+    bool
+    AddJsonStatsMetaLog(const std::string& filename) noexcept;
+
  public:
     std::string
     GetName() const override {
@@ -143,6 +146,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
                                       int64_t slice_num);
 
     std::string
+    GetRemoteJsonStatsMetaPath(const std::string& file_name);
+
+    std::string
+    GetLocalJsonStatsMetaPrefix();
+
+    std::string
     GetLocalRawDataObjectPrefix();
 
     std::map<std::string, int64_t>
@@ -183,6 +192,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheJsonStatsSharedIndexToDisk(
         const std::vector<std::string>& remote_files,
         milvus::proto::common::LoadPriority priority);
+
+    // Cache meta file to local disk
+    // Returns local file path
+    std::string
+    CacheJsonStatsMetaToDisk(const std::string& remote_file,
+                             milvus::proto::common::LoadPriority priority);
 
     void
     RemoveNgramIndexFiles();

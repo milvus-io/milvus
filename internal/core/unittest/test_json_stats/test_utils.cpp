@@ -46,25 +46,4 @@ TEST_F(UtilsTest, CreateArrowBuildersTest) {
     EXPECT_EQ(schema->num_fields(), column_map.size());
 }
 
-TEST_F(UtilsTest, CreateParquetKVMetadataTest) {
-    std::map<JsonKey, JsonKeyLayoutType> column_map = {
-        {JsonKey("int_key", JSONType::INT64), JsonKeyLayoutType::TYPED},
-        {JsonKey("string_key", JSONType::STRING), JsonKeyLayoutType::DYNAMIC},
-        {JsonKey("double_key", JSONType::DOUBLE), JsonKeyLayoutType::TYPED},
-        {JsonKey("bool_key", JSONType::BOOL), JsonKeyLayoutType::TYPED},
-        {JsonKey("shared_key", JSONType::STRING), JsonKeyLayoutType::SHARED}};
-
-    auto metadata = CreateParquetKVMetadata(column_map);
-    EXPECT_FALSE(metadata.empty());
-    EXPECT_EQ(metadata.size(), 1);  // layout_type
-
-    // Parse and verify layout_type
-    auto layout_type_json = nlohmann::json::parse(metadata[0].second);
-    for (const auto& [key, type] : column_map) {
-        std::string key_with_type = key.key_ + "_" + ToString(key.type_);
-        EXPECT_TRUE(layout_type_json.contains(key_with_type));
-        EXPECT_EQ(layout_type_json[key_with_type], ToString(type));
-    }
-}
-
 }  // namespace milvus::index
