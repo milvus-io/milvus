@@ -202,8 +202,8 @@ func (m *specializedMutableMessageImpl[H, B]) MustBody() B {
 }
 
 // OverwriteMessageHeader overwrites the message header.
-func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
-	m.header = header
+func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header any) {
+	m.header = header.(H)
 	newHeader, err := EncodeProto(m.header)
 	if err != nil {
 		panic(fmt.Sprintf("failed to encode insert header, there's a bug, %+v, %s", m.header, err.Error()))

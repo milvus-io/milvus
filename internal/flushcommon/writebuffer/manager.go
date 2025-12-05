@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
@@ -27,7 +28,7 @@ type BufferManager interface {
 	// Register adds a WriteBuffer with provided schema & options.
 	Register(channel string, metacache metacache.MetaCache, opts ...WriteBufferOption) error
 	// CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-	CreateNewGrowingSegment(ctx context.Context, channel string, partition int64, segmentID int64) error
+	CreateNewGrowingSegment(ctx context.Context, msg message.ImmutableCreateSegmentMessageV2) error
 	// SealSegments notifies writeBuffer corresponding to provided channel to seal segments.
 	// which will cause segment start flush procedure.
 	SealSegments(ctx context.Context, channel string, segmentIDs []int64) error
@@ -173,16 +174,16 @@ func (m *bufferManager) Register(channel string, metacache metacache.MetaCache, 
 }
 
 // CreateNewGrowingSegment notifies writeBuffer to create a new growing segment.
-func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, channel string, partitionID int64, segmentID int64) error {
-	buf, loaded := m.buffers.Get(channel)
+func (m *bufferManager) CreateNewGrowingSegment(ctx context.Context, msg message.ImmutableCreateSegmentMessageV2) error {
+	buf, loaded := m.buffers.Get(msg.VChannel())
 	if !loaded {
 		log.Ctx(ctx).Warn("write buffer not found when create new growing segment",
-			zap.String("channel", channel),
-			zap.Int64("partitionID", partitionID),
-			zap.Int64("segmentID", segmentID))
-		return merr.WrapErrChannelNotFound(channel)
+			zap.String("channel", msg.VChannel()),
+			zap.Int64("partitionID", msg.Header().PartitionId),
+			zap.Int64("segmentID", msg.Header().SegmentId))
+		return merr.WrapErrChannelNotFound(msg.VChannel())
 	}
-	buf.CreateNewGrowingSegment(partitionID, segmentID, nil)
+	buf.CreateNewGrowingSegment(msg)
 	return nil
 }
 

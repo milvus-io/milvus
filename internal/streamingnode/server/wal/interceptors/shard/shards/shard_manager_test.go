@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -105,6 +107,7 @@ func TestShardManager(t *testing.T) {
 						MaxBinarySize:         100,
 						ModifiedBinarySize:    0,
 						CreateSegmentTimeTick: 100,
+						Level:                 datapb.SegmentLevel_L1,
 					},
 				},
 			},
@@ -204,8 +207,22 @@ func TestShardManager(t *testing.T) {
 		WithTimeTick(600).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(3))
-	m.partitionManagers[PartitionUniqueKey{CollectionID: 7, PartitionID: 10}].onAllocating = make(chan struct{})
-	ch, err := m.WaitUntilGrowingSegmentReady(PartitionUniqueKey{CollectionID: 7, PartitionID: 10})
+	m.partitionManagers[PartitionUniqueKey{CollectionID: 7, PartitionID: 10}].onAllocatingNotifier.Start(datapb.SegmentLevel_L1)
+
+	insertMsg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v3").
+		WithHeader(&message.InsertMessageHeader{
+			CollectionId: 7,
+			Partitions: []*messagespb.PartitionSegmentAssignment{
+				{
+					PartitionId: 10,
+				},
+			},
+		}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable()
+
+	ch, err := m.WaitUntilGrowingSegmentReady(insertMsg)
 	assert.NoError(t, err)
 	select {
 	case <-time.After(10 * time.Millisecond):
@@ -215,7 +232,7 @@ func TestShardManager(t *testing.T) {
 	m.CreateSegment(message.MustAsImmutableCreateSegmentMessageV2(createSegmentMsg))
 	assert.ErrorIs(t, m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 7, PartitionID: 10}, 1003), ErrSegmentOnGrowing)
 	<-ch
-	ch, err = m.WaitUntilGrowingSegmentReady(PartitionUniqueKey{CollectionID: 7, PartitionID: 10})
+	ch, err = m.WaitUntilGrowingSegmentReady(insertMsg)
 	assert.NoError(t, err)
 	<-ch
 
@@ -277,6 +294,7 @@ func TestShardManager(t *testing.T) {
 			Rows:       1,
 			BinarySize: 20,
 		},
+		Level: datapb.SegmentLevel_L1,
 	})
 	assert.NoError(t, err)
 	result.Ack()

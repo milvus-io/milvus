@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -20,6 +21,9 @@ import (
 func newSegmentAllocManagerFromProto(pchannel types.PChannelInfo, inner *streamingpb.SegmentAssignmentMeta) *segmentAllocManager {
 	if inner.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
 		panic("segment state should be growing")
+	}
+	if inner.Stat.Level == datapb.SegmentLevel_Legacy {
+		inner.Stat.Level = datapb.SegmentLevel_L0
 	}
 	return &segmentAllocManager{
 		pchannel: pchannel,
@@ -136,6 +140,11 @@ func (s *segmentAllocManager) IsFlushed() bool {
 	return s.inner.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
 }
 
+// Level returns the level of the segment assignment meta.
+func (s *segmentAllocManager) Level() datapb.SegmentLevel {
+	return s.inner.Stat.Level
+}
+
 // AllocRows ask for rows from current segment.
 // Only growing and not fenced segment can alloc rows.
 func (s *segmentAllocManager) AllocRows(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
@@ -148,7 +157,12 @@ func (s *segmentAllocManager) AllocRows(req *AssignSegmentRequest) (*AssignSegme
 		// The segment is not growing, return ErrWaitForNewSegment.
 		return nil, ErrNotGrowing
 	}
-
+	if req.Level != s.inner.Stat.Level {
+		// segment level not match, return ErrSegmentLevelNotMatch.
+		// delete request can only be assigned to L0 segment.
+		// insert request can only be assigned to L1 segment.
+		return nil, ErrSegmentLevelNotMatch
+	}
 	err := resource.Resource().SegmentStatsManager().AllocRows(s.GetSegmentID(), req.ModifiedMetrics)
 	if err != nil {
 		return nil, err
