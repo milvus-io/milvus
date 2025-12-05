@@ -83,6 +83,13 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 	s.NoError(err)
 }
 
+func (s *WriteBufferSuite) TestSealAllSegments() {
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
+	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithIDAllocator(allocator.NewMockAllocator(s.T())))
+	s.NoError(err)
+	wb.SealAllSegments(context.Background())
+}
+
 func (s *WriteBufferSuite) TestGetCheckpoint() {
 	s.Run("use_consume_cp", func() {
 		s.wb.checkpoint = &msgpb.MsgPosition{

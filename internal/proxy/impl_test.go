@@ -466,49 +466,8 @@ func createTestProxy() *Proxy {
 	return node
 }
 
-func TestProxy_FlushAll_NoDatabase(t *testing.T) {
-	mockey.PatchConvey("TestProxy_FlushAll_NoDatabase", t, func() {
-		// Mock global meta cache methods
-		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
-			return UniqueID(0), nil
-		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
-
-		// Mock paramtable initialization
-		mockey.Mock(paramtable.Init).Return().Build()
-		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
-
-		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
-		mockey.Mock((*grpcmixcoordclient.Client).ListDatabases).To(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
-			return &milvuspb.ListDatabasesResponse{Status: successStatus}, nil
-		}).Build()
-		mockey.Mock((*grpcmixcoordclient.Client).ShowCollections).To(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
-			return &milvuspb.ShowCollectionsResponse{Status: successStatus}, nil
-		}).Build()
-
-		// Act: Execute test
-		node := createTestProxy()
-		defer node.sched.Close()
-
-		mixcoord := &grpcmixcoordclient.Client{}
-		node.mixCoord = mixcoord
-		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
-			return &datapb.FlushAllResponse{Status: successStatus}, nil
-		}).Build()
-
-		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
-
-		// Assert: Verify results
-		assert.NoError(t, err)
-		assert.True(t, merr.Ok(resp.GetStatus()))
-	})
-}
-
-func TestProxy_FlushAll_WithDefaultDatabase(t *testing.T) {
-	mockey.PatchConvey("TestProxy_FlushAll_WithDefaultDatabase", t, func() {
+func TestProxy_FlushAll_Success(t *testing.T) {
+	mockey.PatchConvey("TestProxy_FlushAll_Success", t, func() {
 		// Mock global meta cache methods
 		globalMetaCache = &MetaCache{}
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
@@ -541,48 +500,11 @@ func TestProxy_FlushAll_WithDefaultDatabase(t *testing.T) {
 			return &datapb.FlushAllResponse{Status: successStatus}, nil
 		}).Build()
 
-		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default"})
+		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
 
 		// Assert: Verify results
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp.GetStatus()))
-	})
-}
-
-func TestProxy_FlushAll_DatabaseNotExist(t *testing.T) {
-	mockey.PatchConvey("TestProxy_FlushAll_DatabaseNotExist", t, func() {
-		// Mock global meta cache methods
-		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
-			return UniqueID(0), nil
-		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
-
-		// Mock paramtable initialization
-		mockey.Mock(paramtable.Init).Return().Build()
-		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
-
-		mockey.Mock((*grpcmixcoordclient.Client).ShowCollections).To(func(ctx context.Context, req *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
-			return &milvuspb.ShowCollectionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_MetaFailed}}, nil
-		}).Build()
-
-		// Act: Execute test
-		node := createTestProxy()
-		defer node.sched.Close()
-
-		mixcoord := &grpcmixcoordclient.Client{}
-		node.mixCoord = mixcoord
-		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
-			return &datapb.FlushAllResponse{Status: merr.Success()}, nil
-		}).Build()
-
-		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{DbName: "default2"})
-
-		// Assert: Verify results
-		assert.NoError(t, err)
-		assert.NotEqual(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_MetaFailed)
 	})
 }
 

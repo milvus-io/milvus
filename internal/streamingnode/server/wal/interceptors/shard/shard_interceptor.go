@@ -43,6 +43,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeAlterCollection:  impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
 		message.MessageTypeFlush:            impl.handleFlushSegment,
+		message.MessageTypeFlushAll:         impl.handleFlushAllMessage,
 	}
 }
 
@@ -295,6 +296,15 @@ func (impl *shardInterceptor) handleFlushSegment(ctx context.Context, msg messag
 	}
 	impl.shardManager.FlushSegment(message.MustAsImmutableFlushMessageV2(msg.IntoImmutableMessage(msgID)))
 	return msgID, nil
+}
+
+// handleFlushAllMessage handles the flush all message.
+func (impl *shardInterceptor) handleFlushAllMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	_, err := impl.shardManager.FlushAllAndFenceSegmentAllocUntil(msg.TimeTick())
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	return appendOp(ctx, msg)
 }
 
 // Close closes the segment interceptor.
