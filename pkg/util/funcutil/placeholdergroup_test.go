@@ -6,11 +6,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_flattenedByteVectorsToByteVectors(t *testing.T) {
+func Test_flattenedBinaryVectorsToByteVectors(t *testing.T) {
 	flattenedVectors := []byte{0, 1, 2, 3, 4, 5}
-	dimension := 3
+	dimension := 24
 
-	actual := flattenedByteVectorsToByteVectors(flattenedVectors, dimension)
+	actual := flattenedBinaryVectorsToByteVectors(flattenedVectors, dimension)
 	expected := [][]byte{
 		{0, 1, 2},
 		{3, 4, 5},

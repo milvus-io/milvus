@@ -1082,7 +1082,9 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 					{Key: AnnsFieldKey, Value: "vector1"},
 					{Key: TopKKey, Value: "10"},
 				},
-				PlaceholderGroup: holderByte,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+					PlaceholderGroup: holderByte,
+				},
 			},
 			mixCoord: qc,
 			tr:       timerecord.NewTimeRecorder("test-search"),
@@ -4857,7 +4859,9 @@ func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
 						{Key: common.MetricTypeKey, Value: metric.L2},
 						{Key: ParamsKey, Value: `{"nprobe": 10}`},
 					},
-					PlaceholderGroup: nil,
+					SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+						PlaceholderGroup: nil,
+					},
 					ConsistencyLevel: commonpb.ConsistencyLevel_Session,
 				},
 				schema:                 schemaInfo,

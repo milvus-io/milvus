@@ -483,7 +483,9 @@ func (s *HelloMilvusSuite) TestSparse_invalid_search_request() {
 		if err != nil {
 			panic(err)
 		}
-		searchReq.PlaceholderGroup = plgBs
+		searchReq.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		}
 	}
 
 	sparseVecs := integration.GenerateSparseFloatArray(nq)
