@@ -197,6 +197,8 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		Properties:           properties,
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		UpdateTimestamp:      ts,
+		ExternalSource:       body.CollectionSchema.ExternalSource,
+		ExternalSpec:         body.CollectionSchema.ExternalSpec,
 	}
 }
 
