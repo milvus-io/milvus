@@ -105,6 +105,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                     config, milvus::LOAD_PRIORITY)
                     .value_or(milvus::proto::common::LoadPriority::HIGH);
             file_manager_->CacheIndexToDisk(index_files.value(), load_priority);
+        } else {
+            file_manager_->CacheRemoteIndexFilePaths(index_files.value());
         }
         read_file_span->End();
     }

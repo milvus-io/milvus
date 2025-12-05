@@ -185,6 +185,13 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     close(fd);
     EXPECT_EQ(os->Tell(), write_offset);
 
+    auto index_file_name = diskAnnFileManager->GetFileName(index_file_path);
+    auto remote_index_file_path =
+        diskAnnFileManager->GetRemoteIndexFilePrefixV2() + "/" +
+        index_file_name;
+
+    diskAnnFileManager->CacheRemoteIndexFilePaths({remote_index_file_path});
+
     auto is = diskAnnFileManager->OpenInputStream(index_file_path);
     size_t read_offset = 0;
     size_t read_large_index_size;
