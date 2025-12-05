@@ -143,6 +143,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
