@@ -1828,6 +1828,7 @@ func (m *meta) completeMixCompactionMutation(
 			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
 			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
 			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+			zap.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
@@ -2322,7 +2323,9 @@ func (m *meta) completeSortCompactionMutation(
 
 	log = log.With(zap.Int64s("compactFrom", []int64{oldSegment.GetID()}), zap.Int64("compactTo", segment.GetID()))
 
-	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", segment.GetNumOfRows()))
+	log.Info("meta update: prepare for complete stats mutation - complete",
+		zap.Int64("num rows", segment.GetNumOfRows()),
+		zap.Int64("segment size", segment.getSegmentSize()))
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, nil, err
