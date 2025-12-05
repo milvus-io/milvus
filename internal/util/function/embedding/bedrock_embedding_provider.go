@@ -52,6 +52,7 @@ type BedrockEmbeddingProvider struct {
 
 	maxBatch   int
 	timeoutSec int
+	extraInfo  *models.ModelExtraInfo
 }
 
 func createBedRockEmbeddingClient(awsAccessKeyId string, awsSecretAccessKey string, region string) (*bedrockruntime.Client, error) {
@@ -112,7 +113,7 @@ func parseAKSKInfo(credentials *milvusCredentials.Credentials, params []*commonp
 	return awsAccessKeyId, awsSecretAccessKey, nil
 }
 
-func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string, credentials *milvusCredentials.Credentials) (*BedrockEmbeddingProvider, error) {
+func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, c BedrockClient, params map[string]string, credentials *milvusCredentials.Credentials, extraInfo *models.ModelExtraInfo) (*BedrockEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -168,6 +169,7 @@ func NewBedrockEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSche
 		normalize:     normalize,
 		maxBatch:      1,
 		timeoutSec:    30,
+		extraInfo:     extraInfo,
 	}, nil
 }
 
@@ -180,7 +182,7 @@ func (provider *BedrockEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *BedrockEmbeddingProvider) CallEmbedding(texts []string, _ models.TextEmbeddingMode) (any, error) {
+func (provider *BedrockEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, _ models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += 1 {

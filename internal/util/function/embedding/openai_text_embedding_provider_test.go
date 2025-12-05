@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -78,9 +79,9 @@ func createOpenAIProvider(url string, schema *schemapb.FieldSchema, providerName
 	}
 	switch providerName {
 	case openAIProvider:
-		return NewOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		return NewOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	case azureOpenAIProvider:
-		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		return NewAzureOpenAIEmbeddingProvider(schema, functionSchema, map[string]string{models.URLParamKey: url}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -95,7 +96,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			r, err2 := provder.CallEmbedding(data, models.InsertMode)
+			r, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
@@ -104,7 +105,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbedding() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			ret, _ := provder.CallEmbedding(data, models.SearchMode)
+			ret, _ := provder.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.Equal([][]float32{{0.0, 1.0, 2.0, 3.0}, {1.0, 2.0, 3.0, 4.0}, {2.0, 3.0, 4.0, 5.0}}, ret)
 		}
 	}
@@ -142,7 +143,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provder.CallEmbedding(data, models.InsertMode)
+		_, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -174,7 +175,7 @@ func (s *OpenAITextEmbeddingProviderSuite) TestEmbeddingNubmerNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provder.CallEmbedding(data, models.InsertMode)
+		_, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
