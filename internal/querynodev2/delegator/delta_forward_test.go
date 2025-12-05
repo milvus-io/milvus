@@ -420,16 +420,16 @@ func (s *GrowingMergeL0Suite) TestAddL0ForGrowingBF() {
 
 	seg.EXPECT().Partition().Return(100)
 	seg.EXPECT().BatchPkExist(mock.Anything).Return(lo.RepeatBy(n, func(i int) bool { return true }))
-	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk storage.PrimaryKeys, u []uint64) error {
-		s.Equal(deltaData.DeletePks(), pk)
-		s.Equal(deltaData.DeleteTimestamps(), u)
+	seg.EXPECT().LoadDeltaData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dd *storage.DeltaData) error {
+		s.Equal(deltaData.DeletePks(), dd.DeletePks())
+		s.Equal(deltaData.DeleteTimestamps(), dd.DeleteTimestamps())
 		return nil
 	}).Once()
 
 	err = sd.addL0ForGrowing(context.Background(), seg)
 	s.NoError(err)
 
-	seg.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pk storage.PrimaryKeys, u []uint64) error {
+	seg.EXPECT().LoadDeltaData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dd *storage.DeltaData) error {
 		return errors.New("mocked")
 	}).Once()
 	err = sd.addL0ForGrowing(context.Background(), seg)
