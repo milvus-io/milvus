@@ -1759,7 +1759,9 @@ func (m *meta) completeMixCompactionMutation(
 		zap.String("type", t.GetType().String()),
 		zap.Int64("collectionID", t.CollectionID),
 		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()))
+		zap.String("channel", t.GetChannel()),
+		zap.Int64("planID", t.GetPlanID()),
+	)
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]int)}
 	var compactFromSegIDs []int64
@@ -1789,6 +1791,12 @@ func (m *meta) completeMixCompactionMutation(
 
 		// metrics mutation for compaction from segments
 		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+
+		log.Info("compact from segment",
+			zap.Int64("segmentID", cloned.GetID()),
+			zap.Int64("segment size", cloned.getSegmentSize()),
+			zap.Int64("num rows", cloned.GetNumOfRows()),
+		)
 	}
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
