@@ -44,6 +44,12 @@ type HardwareMetrics struct {
 	DiskUsage float64 `json:"disk_usage"`
 
 	IOWaitPercentage float64 `json:"io_wait_percentage"` // IO Wait in %
+
+	// Jemalloc memory statistics
+	JemallocAllocated uint64 `json:"jemalloc_allocated,omitempty"` // Actual memory used by application
+	JemallocResident  uint64 `json:"jemalloc_resident,omitempty"`  // Physical memory held by process (RSS)
+	JemallocCached    uint64 `json:"jemalloc_cached,omitempty"`    // Cached/unreturned memory
+	JemallocAvailable bool   `json:"jemalloc_available,omitempty"` // Whether jemalloc stats are available
 }
 
 type TaskQueueMetrics struct {
