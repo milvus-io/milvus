@@ -96,6 +96,11 @@ if (ENABLE_GCP_NATIVE)
     set(LINK_TARGETS ${LINK_TARGETS} gcp-native-storage)
 endif()
 
+# Link jemalloc library for mallctl API access (Linux only)
+if (LINUX)
+    set(LINK_TARGETS ${LINK_TARGETS} jemalloc)
+endif()
+
 target_link_libraries(milvus_core ${LINK_TARGETS})
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")
