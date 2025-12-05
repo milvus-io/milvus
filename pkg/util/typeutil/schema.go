@@ -2045,6 +2045,7 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 		minIntPK    int64 = math.MaxInt64
 
 		firstStr = true
+		firstInt = true
 		minStrPK string
 	)
 	for i, cursor := range cursors {
@@ -2064,7 +2065,8 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 				sel = i
 			}
 		case int64:
-			if pk < minIntPK {
+			if firstInt || pk < minIntPK {
+				firstInt = false
 				minIntPK = pk
 				sel = i
 			}

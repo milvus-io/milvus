@@ -912,6 +912,9 @@ func TestCreateRetrievePlan(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	_, err := CreateRetrievePlan(schema, "Int64Field > 0", nil)
 	assert.NoError(t, err)
+
+	_, err = CreateRetrievePlan(schema, "id > -9223372036854775808", nil)
+	assert.NoError(t, err)
 }
 
 func TestCreateSearchPlan(t *testing.T) {
