@@ -268,6 +268,9 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
 	}
 
+	// Get jemalloc memory statistics
+	jemallocStats := hardware.GetJemallocStats()
+
 	hardwareInfos := metricsinfo.HardwareMetrics{
 		IP:               node.session.Address,
 		CPUCoreCount:     hardware.GetCPUNum(),
@@ -277,6 +280,11 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		Disk:             totalDiskGB,
 		DiskUsage:        usedDiskGB,
 		IOWaitPercentage: ioWait,
+		// Jemalloc memory statistics
+		JemallocAllocated: jemallocStats.Allocated,
+		JemallocResident:  jemallocStats.Resident,
+		JemallocCached:    jemallocStats.Cached,
+		JemallocAvailable: jemallocStats.Available,
 	}
 
 	quotaMetrics, err := getQuotaMetrics(node)
