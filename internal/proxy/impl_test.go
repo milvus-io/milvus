@@ -473,8 +473,8 @@ func TestProxy_FlushAll_NoDatabase(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {
+			return
 		}).Build()
 
 		// Mock paramtable initialization
@@ -514,8 +514,8 @@ func TestProxy_FlushAll_WithDefaultDatabase(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {
+			return
 		}).Build()
 
 		// Mock paramtable initialization
@@ -556,8 +556,8 @@ func TestProxy_FlushAll_DatabaseNotExist(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {
+			return
 		}).Build()
 
 		// Mock paramtable initialization
@@ -593,8 +593,8 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
+		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) {
+			return
 		}).Build()
 
 		// Mock paramtable initialization

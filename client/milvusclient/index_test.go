@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -41,19 +41,21 @@ func (s *IndexSuite) TestCreateIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		fieldName := fmt.Sprintf("field_%s", s.randString(4))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
 
 		done := atomic.NewBool(false)
 
-		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cir *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+		mockCreateIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, cir *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, cir.GetCollectionName())
 			s.Equal(fieldName, cir.GetFieldName())
 			s.Equal(indexName, cir.GetIndexName())
 			return merr.Success(), nil
-		}).Once()
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+		}).Build()
+		defer mockCreateIndex.UnPatch()
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 			state := commonpb.IndexState_InProgress
 			if done.Load() {
 				state = commonpb.IndexState_Finished
@@ -68,8 +70,8 @@ func (s *IndexSuite) TestCreateIndex() {
 					},
 				},
 			}, nil
-		})
-		defer s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Unset()
+		}).Build()
+		defer mockDescribeIndex.UnPatch()
 
 		task, err := s.client.CreateIndex(ctx, NewCreateIndexOption(collectionName, fieldName, index.NewHNSWIndex(entity.L2, 32, 128)).WithIndexName(indexName))
 		s.NoError(err)
@@ -97,11 +99,13 @@ func (s *IndexSuite) TestCreateIndex() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		fieldName := fmt.Sprintf("field_%s", s.randString(4))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
 
-		s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockCreateIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateIndex).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreateIndex.UnPatch()
 
 		_, err := s.client.CreateIndex(ctx, NewCreateIndexOption(collectionName, fieldName, index.NewHNSWIndex(entity.L2, 32, 128)).WithIndexName(indexName))
 		s.Error(err)
@@ -113,8 +117,9 @@ func (s *IndexSuite) TestListIndexes() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 			s.Equal(collectionName, dir.GetCollectionName())
 			return &milvuspb.DescribeIndexResponse{
 				Status: merr.Success(),
@@ -122,7 +127,8 @@ func (s *IndexSuite) TestListIndexes() {
 					{IndexName: "test_idx"},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockDescribeIndex.UnPatch()
 
 		names, err := s.client.ListIndexes(ctx, NewListIndexOption(collectionName))
 		s.NoError(err)
@@ -130,8 +136,10 @@ func (s *IndexSuite) TestListIndexes() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDescribeIndex.UnPatch()
 
 		_, err := s.client.ListIndexes(ctx, NewListIndexOption(collectionName))
 		s.Error(err)
@@ -142,9 +150,10 @@ func (s *IndexSuite) TestDescribeIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 			s.Equal(collectionName, dir.GetCollectionName())
 			s.Equal(indexName, dir.GetIndexName())
 			return &milvuspb.DescribeIndexResponse{
@@ -155,7 +164,8 @@ func (s *IndexSuite) TestDescribeIndex() {
 					}},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockDescribeIndex.UnPatch()
 
 		index, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
 		s.NoError(err)
@@ -163,16 +173,18 @@ func (s *IndexSuite) TestDescribeIndex() {
 	})
 
 	s.Run("no_index_found", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dir *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 			s.Equal(collectionName, dir.GetCollectionName())
 			s.Equal(indexName, dir.GetIndexName())
 			return &milvuspb.DescribeIndexResponse{
 				Status:            merr.Success(),
 				IndexDescriptions: []*milvuspb.IndexDescription{},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockDescribeIndex.UnPatch()
 
 		_, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
 		s.Error(err)
@@ -180,9 +192,11 @@ func (s *IndexSuite) TestDescribeIndex() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
-		s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockDescribeIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeIndex).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDescribeIndex.UnPatch()
 
 		_, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
 		s.Error(err)
@@ -203,14 +217,18 @@ func (s *IndexSuite) TestDropIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
-		s.mock.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+		defer mockey.UnPatchAll()
+		mockDropIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropIndex).Return(merr.Success(), nil).Build()
+		defer mockDropIndex.UnPatch()
 
 		err := s.client.DropIndex(ctx, NewDropIndexOption("testCollection", "testIndex"))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockDropIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropIndex).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropIndex.UnPatch()
 
 		err := s.client.DropIndex(ctx, NewDropIndexOption("testCollection", "testIndex"))
 		s.Error(err)
@@ -221,13 +239,14 @@ func (s *IndexSuite) TestAlterIndexProperties() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
 
 		key := fmt.Sprintf("key_%s", s.randString(6))
 		val := fmt.Sprintf("val_%s", s.randString(6))
 
-		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, air *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+		mockAlterIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, air *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, air.GetCollectionName())
 			s.Equal(indexName, air.GetIndexName())
 			if s.Len(air.GetExtraParams(), 1) {
@@ -237,19 +256,22 @@ func (s *IndexSuite) TestAlterIndexProperties() {
 			}
 
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterIndex.UnPatch()
 
 		err := s.client.AlterIndexProperties(ctx, NewAlterIndexPropertiesOption(collectionName, indexName).WithProperty(key, val))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
 
 		key := fmt.Sprintf("key_%s", s.randString(6))
 		val := fmt.Sprintf("val_%s", s.randString(6))
-		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockAlterIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterIndex).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterIndex.UnPatch()
 
 		err := s.client.AlterIndexProperties(ctx, NewAlterIndexPropertiesOption(collectionName, indexName).WithProperty(key, val))
 		s.Error(err)
@@ -260,29 +282,33 @@ func (s *IndexSuite) TestDropIndexProperties() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
 
 		key := fmt.Sprintf("key_%s", s.randString(6))
 
-		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, air *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
+		mockAlterIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterIndex).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, air *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
 			s.Equal(collectionName, air.GetCollectionName())
 			s.Equal(indexName, air.GetIndexName())
 			s.ElementsMatch([]string{key}, air.GetDeleteKeys())
 
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterIndex.UnPatch()
 
 		err := s.client.DropIndexProperties(ctx, NewDropIndexPropertiesOption(collectionName, indexName, key))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		indexName := fmt.Sprintf("idx_%s", s.randString(6))
 
 		key := fmt.Sprintf("coll_%s", s.randString(6))
-		s.mock.EXPECT().AlterIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockAlterIndex := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterIndex).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterIndex.UnPatch()
 
 		err := s.client.DropIndexProperties(ctx, NewDropIndexPropertiesOption(collectionName, indexName, key))
 		s.Error(err)

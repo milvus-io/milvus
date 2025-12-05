@@ -467,8 +467,6 @@ rpm: install
 generate-mockery-types: getdeps
 	# MixCoord
 	$(INSTALL_PATH)/mockery --name=MixCoordComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_mixcoord.go --with-expecter --structname=MixCoord
-	# Proxy
-	$(INSTALL_PATH)/mockery --name=ProxyComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_proxy.go --with-expecter --structname=MockProxy
 	# QueryNode
 	$(INSTALL_PATH)/mockery --name=QueryNodeComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_querynode.go --with-expecter --structname=MockQueryNode
 	# DataNode
