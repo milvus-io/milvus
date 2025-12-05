@@ -331,14 +331,21 @@ BaseEventData::Serialize() {
                 break;
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
+                int64_t valid_idx = 0;
                 for (size_t offset = 0; offset < field_data->get_num_rows();
                      ++offset) {
-                    auto row = static_cast<
-                        const knowhere::sparse::SparseRow<SparseValueType>*>(
-                        field_data->RawValue(offset));
-                    payload_writer->add_one_binary_payload(
-                        static_cast<const uint8_t*>(row->data()),
-                        row->data_byte_size());
+                    if (!field_data->IsNullable() ||
+                        field_data->is_valid(offset)) {
+                        auto row =
+                            static_cast<const knowhere::sparse::SparseRow<
+                                SparseValueType>*>(
+                                field_data->RawValue(valid_idx++));
+                        payload_writer->add_one_binary_payload(
+                            static_cast<const uint8_t*>(row->data()),
+                            row->data_byte_size());
+                    } else {
+                        payload_writer->add_one_binary_payload(nullptr, -1);
+                    }
                 }
                 break;
             }

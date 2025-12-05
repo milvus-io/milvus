@@ -103,9 +103,6 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		if w.dim.IsNull() {
 			return nil, merr.WrapErrParameterInvalidMsg("incorrect input numbers")
 		}
-		if w.nullable {
-			return nil, merr.WrapErrParameterInvalidMsg("vector type does not support nullable")
-		}
 	} else {
 		w.dim = NewNullableInt(1)
 	}
@@ -125,8 +122,15 @@ func NewPayloadWriter(colType schemapb.DataType, options ...PayloadWriterOptions
 		w.arrowType = arrow.ListOf(elemType)
 		w.builder = array.NewListBuilder(memory.DefaultAllocator, elemType)
 	} else {
-		w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
-		w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
+		// For nullable dense vectors, use BinaryType instead of FixedSizeBinaryType.
+		// FixedSizeBinaryType requires fixed byte width per element and doesn't support null values.
+		if w.nullable && typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
+			w.arrowType = &arrow.BinaryType{}
+			w.builder = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+		} else {
+			w.arrowType = MilvusDataTypeToArrowType(colType, *w.dim.Value)
+			w.builder = array.NewBuilder(memory.DefaultAllocator, w.arrowType)
+		}
 	}
 	return w, nil
 }
@@ -262,25 +266,25 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddBinaryVectorToPayload(val, w.dim.GetValue())
+		return w.AddBinaryVectorToPayload(val, w.dim.GetValue(), validData)
 	case schemapb.DataType_FloatVector:
 		val, ok := data.([]float32)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddFloatVectorToPayload(val, w.dim.GetValue())
+		return w.AddFloatVectorToPayload(val, w.dim.GetValue(), validData)
 	case schemapb.DataType_Float16Vector:
 		val, ok := data.([]byte)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddFloat16VectorToPayload(val, w.dim.GetValue())
+		return w.AddFloat16VectorToPayload(val, w.dim.GetValue(), validData)
 	case schemapb.DataType_BFloat16Vector:
 		val, ok := data.([]byte)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddBFloat16VectorToPayload(val, w.dim.GetValue())
+		return w.AddBFloat16VectorToPayload(val, w.dim.GetValue(), validData)
 	case schemapb.DataType_SparseFloatVector:
 		val, ok := data.(*SparseFloatVectorFieldData)
 		if !ok {
@@ -292,7 +296,7 @@ func (w *NativePayloadWriter) AddDataToPayloadForUT(data interface{}, validData 
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddInt8VectorToPayload(val, w.dim.GetValue())
+		return w.AddInt8VectorToPayload(val, w.dim.GetValue(), validData)
 	case schemapb.DataType_ArrayOfVector:
 		val, ok := data.(*VectorArrayFieldData)
 		if !ok {
@@ -660,153 +664,174 @@ func (w *NativePayloadWriter) AddOneGeometryToPayload(data []byte, isValid bool)
 	return nil
 }
 
-func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int) error {
+func (w *NativePayloadWriter) addVectorToPayload(
+	dataLen int,
+	elemPerRow int,
+	byteLength int,
+	validData []bool,
+	typeName string,
+	getRowBytes func(rowIdx int) []byte,
+) error {
+	var numRows int
+	if w.nullable && len(validData) > 0 {
+		numRows = len(validData)
+		validCount := 0
+		for _, valid := range validData {
+			if valid {
+				validCount++
+			}
+		}
+		expectedDataLen := validCount * elemPerRow
+		if dataLen != expectedDataLen {
+			msg := fmt.Sprintf("when nullable, data length(%d) must equal to valid count(%d) * elemPerRow(%d) = %d", dataLen, validCount, elemPerRow, expectedDataLen)
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
+	} else {
+		if dataLen == 0 {
+			return fmt.Errorf("can't add empty msgs into %s payload", typeName)
+		}
+		numRows = dataLen / elemPerRow
+		if !w.nullable && len(validData) != 0 {
+			msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(validData))
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
+	}
+
+	if w.nullable {
+		builder, ok := w.builder.(*array.BinaryBuilder)
+		if !ok {
+			return fmt.Errorf("failed to cast to BinaryBuilder for nullable %s", typeName)
+		}
+
+		builder.Reserve(numRows)
+		dataIdx := 0
+		for i := 0; i < numRows; i++ {
+			if len(validData) > 0 && !validData[i] {
+				builder.AppendNull()
+			} else {
+				builder.Append(getRowBytes(dataIdx))
+				dataIdx++
+			}
+		}
+	} else {
+		builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
+		if !ok {
+			return fmt.Errorf("failed to cast to FixedSizeBinaryBuilder for non-nullable %s", typeName)
+		}
+
+		builder.Reserve(numRows)
+		for i := 0; i < numRows; i++ {
+			builder.Append(getRowBytes(i))
+		}
+	}
+
+	return nil
+}
+
+func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished binary vector payload")
 	}
-
-	if len(data) == 0 {
-		return errors.New("can't add empty msgs into binary vector payload")
-	}
-
-	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
-	if !ok {
-		return errors.New("failed to cast BinaryVectorBuilder")
-	}
-
 	byteLength := dim / 8
-	length := len(data) / byteLength
-	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
-
-	return nil
+	return w.addVectorToPayload(len(data), byteLength, byteLength, validData, "binary vector",
+		func(rowIdx int) []byte {
+			return data[rowIdx*byteLength : (rowIdx+1)*byteLength]
+		})
 }
 
-func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int) error {
+func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int, validData []bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished float vector payload")
 	}
-
-	if len(data) == 0 {
-		return errors.New("can't add empty msgs into float vector payload")
-	}
-
-	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
-	if !ok {
-		return errors.New("failed to cast FloatVectorBuilder")
-	}
-
 	byteLength := dim * 4
-	length := len(data) / dim
-
-	builder.Reserve(length)
 	bytesData := make([]byte, byteLength)
-	for i := 0; i < length; i++ {
-		vec := data[i*dim : (i+1)*dim]
-		for j := range vec {
-			bytes := math.Float32bits(vec[j])
-			common.Endian.PutUint32(bytesData[j*4:], bytes)
-		}
-		builder.Append(bytesData)
-	}
-
-	return nil
+	return w.addVectorToPayload(len(data), dim, byteLength, validData, "float vector",
+		func(rowIdx int) []byte {
+			vec := data[rowIdx*dim : (rowIdx+1)*dim]
+			for j := range vec {
+				bits := math.Float32bits(vec[j])
+				common.Endian.PutUint32(bytesData[j*4:], bits)
+			}
+			return bytesData
+		})
 }
 
-func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int) error {
+func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished float16 payload")
 	}
-
-	if len(data) == 0 {
-		return errors.New("can't add empty msgs into float16 payload")
-	}
-
-	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
-	if !ok {
-		return errors.New("failed to cast Float16Builder")
-	}
-
 	byteLength := dim * 2
-	length := len(data) / byteLength
-
-	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
-
-	return nil
+	return w.addVectorToPayload(len(data), byteLength, byteLength, validData, "float16 vector",
+		func(rowIdx int) []byte {
+			return data[rowIdx*byteLength : (rowIdx+1)*byteLength]
+		})
 }
 
-func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int) error {
+func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int, validData []bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished BFloat16 payload")
 	}
-
-	if len(data) == 0 {
-		return errors.New("can't add empty msgs into BFloat16 payload")
-	}
-
-	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
-	if !ok {
-		return errors.New("failed to cast BFloat16Builder")
-	}
-
 	byteLength := dim * 2
-	length := len(data) / byteLength
-
-	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
-
-	return nil
+	return w.addVectorToPayload(len(data), byteLength, byteLength, validData, "bfloat16 vector",
+		func(rowIdx int) []byte {
+			return data[rowIdx*byteLength : (rowIdx+1)*byteLength]
+		})
 }
 
 func (w *NativePayloadWriter) AddSparseFloatVectorToPayload(data *SparseFloatVectorFieldData) error {
 	if w.finished {
 		return errors.New("can't append data to finished sparse float vector payload")
 	}
+
+	var numRows int
+	if w.nullable && len(data.ValidData) > 0 {
+		numRows = len(data.ValidData)
+		validCount := 0
+		for _, valid := range data.ValidData {
+			if valid {
+				validCount++
+			}
+		}
+		if len(data.SparseFloatArray.Contents) != validCount {
+			msg := fmt.Sprintf("when nullable, Contents length(%d) must equal to valid count(%d)", len(data.SparseFloatArray.Contents), validCount)
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
+	} else {
+		numRows = len(data.SparseFloatArray.Contents)
+		if !w.nullable && len(data.ValidData) != 0 {
+			msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(data.ValidData))
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
+	}
+
 	builder, ok := w.builder.(*array.BinaryBuilder)
 	if !ok {
 		return errors.New("failed to cast SparseFloatVectorBuilder")
 	}
-	length := len(data.SparseFloatArray.Contents)
-	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data.SparseFloatArray.Contents[i])
+
+	builder.Reserve(numRows)
+	dataIdx := 0
+	for i := 0; i < numRows; i++ {
+		if w.nullable && len(data.ValidData) > 0 && !data.ValidData[i] {
+			builder.AppendNull()
+		} else {
+			builder.Append(data.SparseFloatArray.Contents[dataIdx])
+			dataIdx++
+		}
 	}
 
 	return nil
 }
 
-func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int) error {
+func (w *NativePayloadWriter) AddInt8VectorToPayload(data []int8, dim int, validData []bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished int8 vector payload")
 	}
-
-	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int8 vector payload")
-	}
-
-	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
-	if !ok {
-		return errors.New("failed to cast Int8VectorBuilder")
-	}
-
-	byteLength := dim
-	length := len(data) / byteLength
-
-	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		vec := data[i*dim : (i+1)*dim]
-		vecBytes := arrow.Int8Traits.CastToBytes(vec)
-		builder.Append(vecBytes)
-	}
-
-	return nil
+	return w.addVectorToPayload(len(data), dim, dim, validData, "int8 vector",
+		func(rowIdx int) []byte {
+			vec := data[rowIdx*dim : (rowIdx+1)*dim]
+			return arrow.Int8Traits.CastToBytes(vec)
+		})
 }
 
 func (w *NativePayloadWriter) FinishPayloadWriter() error {
@@ -826,6 +851,11 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 		metadata = arrow.NewMetadata(
 			[]string{"elementType", "dim"},
 			[]string{fmt.Sprintf("%d", int32(*w.elementType)), fmt.Sprintf("%d", w.dim.GetValue())},
+		)
+	} else if w.nullable && typeutil.IsVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType) {
+		metadata = arrow.NewMetadata(
+			[]string{"dim"},
+			[]string{fmt.Sprintf("%d", w.dim.GetValue())},
 		)
 	}
 
@@ -849,7 +879,8 @@ func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	defer table.Release()
 
 	arrowWriterProps := pqarrow.DefaultWriterProps()
-	if w.dataType == schemapb.DataType_ArrayOfVector {
+	if w.dataType == schemapb.DataType_ArrayOfVector ||
+		(w.nullable && typeutil.IsVectorType(w.dataType) && !typeutil.IsSparseFloatVectorType(w.dataType)) {
 		// Store metadata in the Arrow writer properties
 		arrowWriterProps = pqarrow.NewArrowWriterProperties(
 			pqarrow.WithStoreSchema(),
