@@ -457,6 +457,15 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string
     GetSharedKeyIndexDir();
 
+    std::string
+    GetMetaFilePath();
+
+    void
+    WriteMetaFile();
+
+    void
+    LoadMetaFile(const std::string& meta_file_path);
+
     void
     AddKeyStats(const std::vector<std::string>& path,
                 JSONType type,
@@ -660,6 +669,10 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
     SkipIndex skip_index_;
     cachinglayer::ResourceUsage cell_size_ = {0, 0};
+
+    // Meta file for storing layout type map and other metadata
+    JsonStatsMeta json_stats_meta_;
+    int64_t meta_file_size_{0};
 
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;

@@ -59,8 +59,9 @@ constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
 constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "2";
 constexpr const char* JSON_STATS_SHARED_INDEX_PATH = "shared_key_index";
 constexpr const char* JSON_STATS_SHREDDING_DATA_PATH = "shredding_data";
+constexpr const char* JSON_STATS_META_FILE_NAME = "meta.json";
 constexpr const char* JSON_KEY_STATS_SHARED_FIELD_NAME = "__shared";
-// store key layout type in parquet file metadata
+// store key layout type in parquet file metadata (deprecated, now stored in separate file)
 inline constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE_MAP =
     "key_layout_type_map";
 // start json stats field id for mock column
