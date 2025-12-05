@@ -735,6 +735,42 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// injectVirtualPKForExternalCollection adds a virtual PK field for external collections
+// if no primary key field exists. External collections use virtual PKs in the format:
+// (segmentID << 32) | offset
+func injectVirtualPKForExternalCollection(schema *schemapb.CollectionSchema) error {
+	// Check if a primary key already exists
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			// PK already exists, nothing to inject
+			return nil
+		}
+	}
+
+	// Find the maximum field ID to assign a new one
+	maxFieldID := int64(common.StartOfUserFieldID - 1)
+	for _, field := range schema.Fields {
+		if field.FieldID > maxFieldID {
+			maxFieldID = field.FieldID
+		}
+	}
+
+	// Create virtual PK field
+	virtualPKField := &schemapb.FieldSchema{
+		FieldID:      maxFieldID + 1,
+		Name:         common.VirtualPKFieldName,
+		Description:  "Virtual primary key for external collection: (segmentID << 32) | offset",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true, // Virtual PKs are auto-generated
+	}
+
+	// Prepend virtual PK field to the schema fields
+	schema.Fields = append([]*schemapb.FieldSchema{virtualPKField}, schema.Fields...)
+
+	return nil
+}
+
 func validateDynamicField(coll *schemapb.CollectionSchema) error {
 	for _, field := range coll.Fields {
 		if field.IsDynamic {

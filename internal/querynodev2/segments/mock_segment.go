@@ -1988,6 +1988,39 @@ func (_c *MockSegment_SetBloomFilter_Call) RunAndReturn(run func(*pkoracle.Bloom
 	return _c
 }
 
+// SetPKCandidate provides a mock function with given fields: candidate
+func (_m *MockSegment) SetPKCandidate(candidate pkoracle.Candidate) {
+	_m.Called(candidate)
+}
+
+// MockSegment_SetPKCandidate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetPKCandidate'
+type MockSegment_SetPKCandidate_Call struct {
+	*mock.Call
+}
+
+// SetPKCandidate is a helper method to define mock.On call
+//   - candidate pkoracle.Candidate
+func (_e *MockSegment_Expecter) SetPKCandidate(candidate interface{}) *MockSegment_SetPKCandidate_Call {
+	return &MockSegment_SetPKCandidate_Call{Call: _e.mock.On("SetPKCandidate", candidate)}
+}
+
+func (_c *MockSegment_SetPKCandidate_Call) Run(run func(candidate pkoracle.Candidate)) *MockSegment_SetPKCandidate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(pkoracle.Candidate))
+	})
+	return _c
+}
+
+func (_c *MockSegment_SetPKCandidate_Call) Return() *MockSegment_SetPKCandidate_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_SetPKCandidate_Call) RunAndReturn(run func(pkoracle.Candidate)) *MockSegment_SetPKCandidate_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Shard provides a mock function with no fields
 func (_m *MockSegment) Shard() metautil.Channel {
 	ret := _m.Called()

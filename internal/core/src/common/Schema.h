@@ -326,6 +326,31 @@ class Schema {
         return dynamic_field_id_opt_;
     }
 
+    bool
+    is_external_collection() const {
+        return !external_source_.empty();
+    }
+
+    const std::string&
+    get_external_source() const {
+        return external_source_;
+    }
+
+    const std::string&
+    get_external_spec() const {
+        return external_spec_;
+    }
+
+    void
+    set_external_source(const std::string& source) {
+        external_source_ = source;
+    }
+
+    void
+    set_external_spec(const std::string& spec) {
+        external_spec_ = spec;
+    }
+
     const ArrowSchemaPtr
     ConvertToArrowSchema() const;
 
@@ -418,6 +443,11 @@ class Schema {
     bool has_mmap_setting_ = false;
     bool mmap_enabled_ = false;
     std::unordered_map<FieldId, bool> mmap_fields_;
+    // External collection properties
+    std::string
+        external_source_;  // External data source identifier (e.g., S3 path, table name)
+    std::string
+        external_spec_;  // External data source specification (JSON format)
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

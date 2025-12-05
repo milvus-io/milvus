@@ -89,6 +89,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
 
+    // Parse external collection properties
+    if (!schema_proto.external_source().empty()) {
+        schema->set_external_source(schema_proto.external_source());
+        schema->set_external_spec(schema_proto.external_spec());
+    }
+
     return schema;
 }
 

@@ -958,6 +958,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index);
 
+    /**
+     * @brief Load virtual PK and external fields for external collections
+     *
+     * For external collections:
+     * - Creates VirtualPKChunkedColumn for the virtual PK field
+     * - Creates ExternalFieldChunkedColumn for external fields (lazy loaded)
+     */
+    void
+    LoadExternalCollectionFields();
+
     void
     load_field_data_common(
         FieldId field_id,

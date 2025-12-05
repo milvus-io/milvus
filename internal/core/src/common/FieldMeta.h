@@ -252,6 +252,21 @@ class FieldMeta {
         return default_value_;
     }
 
+    bool
+    is_external_field() const {
+        return !external_field_.empty();
+    }
+
+    const std::string&
+    get_external_field() const {
+        return external_field_;
+    }
+
+    void
+    set_external_field(const std::string& external_field) {
+        external_field_ = external_field;
+    }
+
     milvus::proto::schema::FieldSchema
     ToProto() const;
 
@@ -304,6 +319,8 @@ class FieldMeta {
     // for json stats, the main field id is the real field id
     // of collection schema, the field id is the json shredding field id
     int64_t main_field_id_ = INVALID_FIELD_ID;
+    // External field name mapping for external collections
+    std::string external_field_;
 };
 
 }  // namespace milvus

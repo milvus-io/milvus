@@ -322,3 +322,38 @@ func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 func isGrowingMmapEnable() bool {
 	return params.Params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 }
+
+// IsExternalCollection checks if a collection is external based on its schema.
+// External collections have data stored in external sources (e.g., data lakes).
+func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
+	return schema.GetExternalSource() != ""
+}
+
+// GetVirtualPK generates a virtual primary key from segmentID and offset.
+// Virtual PK format: (segmentID << 32) | offset
+// This allows up to 4 billion rows per segment.
+func GetVirtualPK(segmentID int64, offset int64) int64 {
+	return (segmentID << 32) | (offset & 0xFFFFFFFF)
+}
+
+// ExtractSegmentIDFromVirtualPK extracts the segmentID from a virtual PK.
+func ExtractSegmentIDFromVirtualPK(virtualPK int64) int64 {
+	return virtualPK >> 32
+}
+
+// ExtractOffsetFromVirtualPK extracts the offset from a virtual PK.
+func ExtractOffsetFromVirtualPK(virtualPK int64) int64 {
+	return virtualPK & 0xFFFFFFFF
+}
+
+// IsVirtualPKFromSegment checks if a virtual PK belongs to the given segment.
+// Note: Only the lower 32 bits of segmentID are preserved in the virtual PK,
+// so we compare with the truncated segment ID.
+func IsVirtualPKFromSegment(virtualPK int64, segmentID int64) bool {
+	return ExtractSegmentIDFromVirtualPK(virtualPK) == (segmentID & 0xFFFFFFFF)
+}
+
+// IsExternalField checks if a field is an external field (data stored externally).
+func IsExternalField(field *schemapb.FieldSchema) bool {
+	return field.GetExternalField() != ""
+}
