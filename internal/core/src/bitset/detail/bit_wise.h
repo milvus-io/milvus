@@ -192,6 +192,18 @@ struct BitWiseBitsetPolicy {
     }
 
     static inline void
+    op_set_indices(data_type* const data,
+                   const size_t start,
+                   const size_t size,
+                   const uint32_t* const __restrict indices,
+                   const size_t n_indices) {
+        for (size_t i = 0; i < n_indices; i++) {
+            const uint32_t idx = indices[i];
+            get_proxy(data, start + idx) = true;
+        }
+    }
+
+    static inline void
     op_reset(data_type* const data, const size_t start, const size_t size) {
         for (size_t i = 0; i < size; i++) {
             get_proxy(data, start + i) = false;
