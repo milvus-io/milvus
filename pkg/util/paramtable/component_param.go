@@ -1843,42 +1843,44 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval               ParamItem `refreshable:"false"`
-	HealthCheckTimeout             ParamItem `refreshable:"true"`
-	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
-	MaxNameLength                  ParamItem `refreshable:"true"`
-	MaxUsernameLength              ParamItem `refreshable:"true"`
-	MinPasswordLength              ParamItem `refreshable:"true"`
-	MaxPasswordLength              ParamItem `refreshable:"true"`
-	MaxFieldNum                    ParamItem `refreshable:"true"`
-	MaxVectorFieldNum              ParamItem `refreshable:"true"`
-	MaxShardNum                    ParamItem `refreshable:"true"`
-	MaxDimension                   ParamItem `refreshable:"true"`
-	GinLogging                     ParamItem `refreshable:"false"`
-	GinLogSkipPaths                ParamItem `refreshable:"false"`
-	MaxUserNum                     ParamItem `refreshable:"true"`
-	MaxRoleNum                     ParamItem `refreshable:"true"`
-	NameValidationAllowedChars     ParamItem `refreshable:"true"`
-	RoleNameValidationAllowedChars ParamItem `refreshable:"true"`
-	MaxTaskNum                     ParamItem `refreshable:"false"`
-	DDLConcurrency                 ParamItem `refreshable:"true"`
-	DCLConcurrency                 ParamItem `refreshable:"true"`
-	ShardLeaderCacheInterval       ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy         ParamItem `refreshable:"false"`
-	CheckQueryNodeHealthInterval   ParamItem `refreshable:"false"`
-	CostMetricsExpireTime          ParamItem `refreshable:"false"`
-	CheckWorkloadRequestNum        ParamItem `refreshable:"false"`
-	WorkloadToleranceFactor        ParamItem `refreshable:"false"`
-	RetryTimesOnReplica            ParamItem `refreshable:"true"`
-	RetryTimesOnHealthCheck        ParamItem `refreshable:"true"`
-	PartitionNameRegexp            ParamItem `refreshable:"true"`
-	MustUsePartitionKey            ParamItem `refreshable:"true"`
-	SkipAutoIDCheck                ParamItem `refreshable:"true"`
-	SkipPartitionKeyCheck          ParamItem `refreshable:"true"`
-	MaxVarCharLength               ParamItem `refreshable:"false"`
-	MaxTextLength                  ParamItem `refreshable:"false"`
-	MaxResultEntries               ParamItem `refreshable:"true"`
-	EnableCachedServiceProvider    ParamItem `refreshable:"true"`
+	TimeTickInterval                ParamItem `refreshable:"false"`
+	HealthCheckTimeout              ParamItem `refreshable:"true"`
+	MsgStreamTimeTickBufSize        ParamItem `refreshable:"true"`
+	MaxNameLength                   ParamItem `refreshable:"true"`
+	MaxUsernameLength               ParamItem `refreshable:"true"`
+	MinPasswordLength               ParamItem `refreshable:"true"`
+	MaxPasswordLength               ParamItem `refreshable:"true"`
+	MaxFieldNum                     ParamItem `refreshable:"true"`
+	MaxVectorFieldNum               ParamItem `refreshable:"true"`
+	MaxShardNum                     ParamItem `refreshable:"true"`
+	MaxDimension                    ParamItem `refreshable:"true"`
+	GinLogging                      ParamItem `refreshable:"false"`
+	GinLogSkipPaths                 ParamItem `refreshable:"false"`
+	MaxUserNum                      ParamItem `refreshable:"true"`
+	MaxRoleNum                      ParamItem `refreshable:"true"`
+	NameValidationAllowedChars      ParamItem `refreshable:"true"`
+	RoleNameValidationAllowedChars  ParamItem `refreshable:"true"`
+	MaxTaskNum                      ParamItem `refreshable:"false"`
+	DDLConcurrency                  ParamItem `refreshable:"true"`
+	DCLConcurrency                  ParamItem `refreshable:"true"`
+	ShardLeaderCacheInterval        ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy          ParamItem `refreshable:"false"`
+	CheckQueryNodeHealthInterval    ParamItem `refreshable:"false"`
+	CostMetricsExpireTime           ParamItem `refreshable:"false"`
+	CheckWorkloadRequestNum         ParamItem `refreshable:"false"`
+	WorkloadToleranceFactor         ParamItem `refreshable:"false"`
+	RetryTimesOnReplica             ParamItem `refreshable:"true"`
+	RetryTimesOnHealthCheck         ParamItem `refreshable:"true"`
+	ReplicaBlacklistDuration        ParamItem `refreshable:"true"`
+	ReplicaBlacklistCleanupInterval ParamItem `refreshable:"true"`
+	PartitionNameRegexp             ParamItem `refreshable:"true"`
+	MustUsePartitionKey             ParamItem `refreshable:"true"`
+	SkipAutoIDCheck                 ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck           ParamItem `refreshable:"true"`
+	MaxVarCharLength                ParamItem `refreshable:"false"`
+	MaxTextLength                   ParamItem `refreshable:"false"`
+	MaxResultEntries                ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider     ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2268,6 +2270,22 @@ please adjust in embedded Milvus: false`,
 		Doc:          "set query node unavailable on proxy when heartbeat failures reach this limit",
 	}
 	p.RetryTimesOnHealthCheck.Init(base.mgr)
+
+	p.ReplicaBlacklistDuration = ParamItem{
+		Key:          "proxy.replicaBlacklistDuration",
+		Version:      "2.6.8",
+		DefaultValue: "30s",
+		Doc:          "The duration a replica is blacklisted after a query failure, in seconds",
+	}
+	p.ReplicaBlacklistDuration.Init(base.mgr)
+
+	p.ReplicaBlacklistCleanupInterval = ParamItem{
+		Key:          "proxy.replicaBlacklistCleanupInterval",
+		Version:      "2.6.8",
+		DefaultValue: "10s",
+		Doc:          "The interval to cleanup expired entries from the replica blacklist, in seconds",
+	}
+	p.ReplicaBlacklistCleanupInterval.Init(base.mgr)
 
 	p.PartitionNameRegexp = ParamItem{
 		Key:          "proxy.partitionNameRegexp",
