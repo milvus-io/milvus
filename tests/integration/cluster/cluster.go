@@ -655,6 +655,7 @@ func (c *MiniClusterV3) getOptions() []process.Option {
 		"DATANODE_IP":             "localhost",
 		"ROOTCOORD_IP":            "localhost",
 		"PROXY_PORT":              "19530",
+		"ROOTCOORD_PORT":          "16560",
 		"ROOTCOORD_DMLCHANNELNUM": "2", // set smaller dml channel num to speed up the test.
 		paramtable.MilvusConfigRefreshIntervalEnvKey: c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
 	}
