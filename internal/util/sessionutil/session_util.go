@@ -612,10 +612,10 @@ func (s *Session) startKeepAliveLoop() {
 
 // GetSessions will get all sessions registered in etcd.
 // Revision is returned for WatchServices to prevent key events from being missed.
-func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error) {
+func (s *Session) GetSessions(ctx context.Context, prefix string) (map[string]*Session, int64, error) {
 	res := make(map[string]*Session)
 	key := path.Join(s.metaRoot, DefaultServiceRoot, prefix)
-	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
+	resp, err := s.etcdCli.Get(ctx, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, 0, err
@@ -868,7 +868,7 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 		return err
 	}
 
-	sessions, revision, err := w.s.GetSessions(w.prefix)
+	sessions, revision, err := w.s.GetSessions(w.s.ctx, w.prefix)
 	if err != nil {
 		log.Warn("GetSession before rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
 		w.closeEventCh()
@@ -963,7 +963,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 
 	registerActiveFn := func() (bool, int64, error) {
 		for _, role := range oldRoles {
-			sessions, _, err := s.GetSessions(role)
+			sessions, _, err := s.GetSessions(s.ctx, role)
 			if err != nil {
 				log.Debug("failed to get old sessions", zap.String("role", role), zap.Error(err))
 				continue
