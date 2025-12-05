@@ -188,68 +188,38 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
     }
 }
 
-// TODO :: too ugly
+template<typename T>
+T GetRequiredInt(const Config& config, const std::string& key) {
+    auto value = index::GetValueFromConfig<std::string>(config, key);
+    AssertInfo(value.has_value(),
+               fmt::format("{} not exist in index config", key));
+    try {
+        return static_cast<T>(std::stoll(value.value()));
+    } catch (const std::exception& e) {
+        auto err = fmt::format("invalid {} value: {}, error: {}", key, value.value(), e.what());
+        LOG_ERROR(err);
+        throw std::logic_error(err);
+    }
+}
+
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config) {
-    storage::FieldDataMeta field_data_meta;
-    // set collection id
-    auto collection_id =
-        index::GetValueFromConfig<std::string>(config, index::COLLECTION_ID);
-    AssertInfo(collection_id.has_value(),
-               "collection id not exist in index config");
-    field_data_meta.collection_id = std::stol(collection_id.value());
-
-    // set partition id
-    auto partition_id =
-        index::GetValueFromConfig<std::string>(config, index::PARTITION_ID);
-    AssertInfo(partition_id.has_value(),
-               "partition id not exist in index config");
-    field_data_meta.partition_id = std::stol(partition_id.value());
-
-    // set segment id
-    auto segment_id =
-        index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
-    AssertInfo(segment_id.has_value(), "segment id not exist in index config");
-    field_data_meta.segment_id = std::stol(segment_id.value());
-
-    // set field id
-    auto field_id =
-        index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
-    AssertInfo(field_id.has_value(), "field id not exist in index config");
-    field_data_meta.field_id = std::stol(field_id.value());
-
-    return field_data_meta;
+    storage::FieldDataMeta meta;
+    meta.collection_id = GetRequiredInt<int64_t>(config, index::COLLECTION_ID);
+    meta.partition_id  = GetRequiredInt<int64_t>(config, index::PARTITION_ID);
+    meta.segment_id    = GetRequiredInt<int64_t>(config, index::SEGMENT_ID);
+    meta.field_id      = GetRequiredInt<int64_t>(config, index::FIELD_ID);
+    return meta;
 }
 
 storage::IndexMeta
 GetIndexMetaFromConfig(const Config& config) {
-    storage::IndexMeta index_meta;
-    // set segment id
-    auto segment_id =
-        index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
-    AssertInfo(segment_id.has_value(), "segment id not exist in index config");
-    index_meta.segment_id = std::stol(segment_id.value());
-
-    // set field id
-    auto field_id =
-        index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
-    AssertInfo(field_id.has_value(), "field id not exist in index config");
-    index_meta.field_id = std::stol(field_id.value());
-
-    // set index version
-    auto index_version =
-        index::GetValueFromConfig<std::string>(config, index::INDEX_VERSION);
-    AssertInfo(index_version.has_value(),
-               "index_version id not exist in index config");
-    index_meta.index_version = std::stol(index_version.value());
-
-    // set index id
-    auto build_id =
-        index::GetValueFromConfig<std::string>(config, index::INDEX_BUILD_ID);
-    AssertInfo(build_id.has_value(), "build id not exist in index config");
-    index_meta.build_id = std::stol(build_id.value());
-
-    return index_meta;
+    storage::IndexMeta meta;
+    meta.segment_id    = GetRequiredInt<int64_t>(config, index::SEGMENT_ID);
+    meta.field_id      = GetRequiredInt<int64_t>(config, index::FIELD_ID);
+    meta.index_version = GetRequiredInt<int64_t>(config, index::INDEX_VERSION);
+    meta.build_id      = GetRequiredInt<int64_t>(config, index::INDEX_BUILD_ID);
+    return meta;
 }
 
 Config
