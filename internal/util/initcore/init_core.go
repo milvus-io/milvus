@@ -641,7 +641,7 @@ func serializeHeaders(headerstr string) string {
 }
 
 func InitPluginLoader() error {
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
 		log.Info("Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
 		defer C.free(unsafe.Pointer(cSoPath))

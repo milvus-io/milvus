@@ -486,9 +486,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 
-	if ezProps := hookutil.GetEzPropByDBProperties(db.Properties); ezProps != nil {
-		t.Req.Properties = append(t.Req.Properties, ezProps)
-	}
+	t.Req.Properties = hookutil.TidyCollPropsByDBProps(t.Req.Properties, db.Properties)
 
 	t.header.DbId = db.ID
 	t.body.DbID = t.header.DbId

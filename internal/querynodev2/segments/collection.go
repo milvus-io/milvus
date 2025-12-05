@@ -378,7 +378,7 @@ func DeleteCollection(collection *Collection) {
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collection.ID())
 		if ez != nil {
 			if err := segcore.UnRefPluginContext(ez); err != nil {
@@ -395,7 +395,7 @@ func DeleteCollection(collection *Collection) {
 }
 
 func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID int64) {
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(properties, collectionID)
 		if ez != nil {
 			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)

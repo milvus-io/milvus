@@ -339,6 +339,10 @@ func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDa
 	return s.mixCoord.AlterDatabase(ctx, request)
 }
 
+func (s *Server) BackupEzk(ctx context.Context, request *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.mixCoord.BackupEzk(ctx, request)
+}
+
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.mixCoord.CheckHealth(ctx, request)
 }
