@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tantivy::tokenizer::*;
 
 use super::{build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer};
+use crate::analyzer::filter::{get_stop_words_list, get_string_list};
 use crate::error::Result;
 use crate::error::TantivyBindingError;
 
@@ -34,32 +35,6 @@ impl AnalyzerBuilder<'_> {
         Err(TantivyBindingError::InternalError(format!(
             "tokenizer name should be string or dict"
         )))
-    }
-
-    fn add_custom_filter(
-        &mut self,
-        name: &String,
-        params: &json::Map<String, json::Value>,
-    ) -> Result<()> {
-        match SystemFilter::try_from(params) {
-            Ok(filter) => {
-                self.filters.insert(name.to_string(), filter);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    // not used now
-    // support add custom filter with filter name
-    fn add_custom_filters(&mut self, params: &json::Map<String, json::Value>) -> Result<()> {
-        for (name, value) in params {
-            if !value.is_object() {
-                continue;
-            }
-            self.add_custom_filter(name, value.as_object().unwrap())?;
-        }
-        Ok(())
     }
 
     fn build_filter(
