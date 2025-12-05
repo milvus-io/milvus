@@ -177,3 +177,31 @@ func NewAlterCollectionMessageBody(msg message.ImmutableMessage) (msgstream.TsMs
 		AlterCollectionMessage: alterCollMsg,
 	}, nil
 }
+
+type AlterDatabaseMessageBody struct {
+	*tsMsgImpl
+	AlterDatabaseMessage message.ImmutableAlterDatabaseMessageV2
+}
+
+func (p *AlterDatabaseMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
+func NewAlterDatabaseMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+	alterDbMsg, err := message.AsImmutableAlterDatabaseMessageV2(msg)
+	if err != nil {
+		return nil, err
+	}
+	return &AlterDatabaseMessageBody{
+		tsMsgImpl: &tsMsgImpl{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: msg.TimeTick(),
+				EndTimestamp:   msg.TimeTick(),
+			},
+			ts:      msg.TimeTick(),
+			sz:      msg.EstimateSize(),
+			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
+		},
+		AlterDatabaseMessage: alterDbMsg,
+	}, nil
+}
