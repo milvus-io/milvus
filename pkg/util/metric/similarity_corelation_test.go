@@ -51,6 +51,32 @@ func TestPositivelyRelated(t *testing.T) {
 			SUPERSTRUCTURE,
 			false,
 		},
+		// MAX_SIM metrics - positively related (higher is better)
+		{
+			MaxSim,
+			true,
+		},
+		{
+			MaxSimIP,
+			true,
+		},
+		{
+			MaxSimCosine,
+			true,
+		},
+		// MAX_SIM metrics - negatively related (lower is better)
+		{
+			MaxSimL2,
+			false,
+		},
+		{
+			MaxSimHamming,
+			false,
+		},
+		{
+			MaxSimJaccard,
+			false,
+		},
 	}
 
 	for idx := range cases {

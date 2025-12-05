@@ -172,7 +172,10 @@ PositivelyRelated(const knowhere::MetricType& metric_type) {
     return IsMetricType(metric_type, knowhere::metric::IP) ||
            IsMetricType(metric_type, knowhere::metric::COSINE) ||
            IsMetricType(metric_type, knowhere::metric::BM25) ||
-           IsMetricType(metric_type, knowhere::metric::MHJACCARD);
+           IsMetricType(metric_type, knowhere::metric::MHJACCARD) ||
+           IsMetricType(metric_type, knowhere::metric::MAX_SIM) ||
+           IsMetricType(metric_type, knowhere::metric::MAX_SIM_IP) ||
+           IsMetricType(metric_type, knowhere::metric::MAX_SIM_COSINE);
 }
 
 inline std::string
