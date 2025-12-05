@@ -34,6 +34,8 @@ type MsgHandler interface {
 	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 
 	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error
+
+	HandleAlterDatabase(ctx context.Context, alterDatabaseMsg message.ImmutableAlterDatabaseMessageV2) error
 }
 
 func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
