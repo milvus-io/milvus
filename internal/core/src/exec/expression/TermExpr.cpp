@@ -282,6 +282,12 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const ValueType& target_val) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t offset) {
             for (int i = 0; i < data[offset].length(); i++) {
                 auto val = data[offset].template get_data<GetType>(i);
@@ -378,6 +384,12 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
@@ -469,6 +481,12 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const ValueType& target_val) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -744,6 +762,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const std::shared_ptr<MultiElement>& terms) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             auto x = data[i].template at<GetType>(pointer);
             if (x.error()) {
@@ -939,6 +963,12 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& vals) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
