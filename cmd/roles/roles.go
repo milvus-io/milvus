@@ -247,6 +247,9 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool) *conc.Fu
 	return runComponent(ctx, localMsg, components.NewIndexNode, metrics.RegisterIndexNode)
 }
 
+// waitForAllComponentsReady waits for all components to be ready.
+// It will return an error if any component is not ready before closing with a fast fail strategy.
+// It will return a map of components that are ready.
 func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, componentFutureMap map[string]*conc.Future[component]) (map[string]component, error) {
 	roles := make([]string, 0, len(componentFutureMap))
 	futures := make([]*conc.Future[component], 0, len(componentFutureMap))
@@ -267,22 +270,20 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 	}
 	componentMap := make(map[string]component, len(componentFutureMap))
 	readyCount := 0
-	var gerr error
 	for {
 		index, _, _ := reflect.Select(selectCases)
 		if index == 0 {
 			cancel()
 			log.Warn("components are not ready before closing, wait for the start of components to be canceled...")
+			return nil, context.Canceled
 		} else {
 			role := roles[index-1]
 			component, err := futures[index-1].Await()
 			readyCount++
 			if err != nil {
-				if gerr == nil {
-					gerr = errors.Wrapf(err, "component %s is not ready before closing", role)
-					cancel()
-				}
+				cancel()
 				log.Warn("component is not ready before closing", zap.String("role", role), zap.Error(err))
+				return nil, err
 			} else {
 				componentMap[role] = component
 				log.Info("component is ready", zap.String("role", role))
@@ -295,9 +296,6 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 		if readyCount == len(componentFutureMap) {
 			break
 		}
-	}
-	if gerr != nil {
-		return nil, errors.Wrap(gerr, "failed to wait for all components ready")
 	}
 	return componentMap, nil
 }
