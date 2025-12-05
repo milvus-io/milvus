@@ -52,6 +52,39 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.Equal(t, 0.10, searchCacheBudgetRatio)
 	})
 
+	t.Run("fill index params without auto index param", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+
+		indexParams := make(map[string]string)
+		indexParams["max_degree"] = "28"
+		indexParams["search_list_size"] = "80"
+		indexParams[common.IndexTypeKey] = "DISKANN"
+
+		err := FillDiskIndexParams(&params, indexParams)
+		assert.NoError(t, err)
+
+		maxDegreeKey, err := strconv.ParseInt(indexParams[MaxDegreeKey], 10, 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 28, maxDegreeKey)
+
+		searchListSizeKey, err := strconv.ParseInt(indexParams[SearchListSizeKey], 10, 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 80, searchListSizeKey)
+
+		pqCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 0.125, pqCodeBudgetGBRatio)
+
+		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 1.0, buildNumThreadsRatio)
+
+		searchCacheBudgetRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
+		assert.NoError(t, err)
+		assert.Equal(t, 0.10, searchCacheBudgetRatio)
+	})
+
 	t.Run("fill index params with auto index", func(t *testing.T) {
 		var params paramtable.ComponentParam
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
