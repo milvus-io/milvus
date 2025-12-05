@@ -103,6 +103,9 @@ func TestSerDe(t *testing.T) {
 		{"test bfloat16 vector null", args{dt: schemapb.DataType_BFloat16Vector, v: nil}, nil, true},
 		{"test bfloat16 vector negative", args{dt: schemapb.DataType_BFloat16Vector, v: -1}, nil, false},
 		{"test int8 vector", args{dt: schemapb.DataType_Int8Vector, v: []int8{10}}, []int8{10}, true},
+		{"test sparse float vector", args{dt: schemapb.DataType_SparseFloatVector, v: []byte{1, 2, 3, 4}}, []byte{1, 2, 3, 4}, true},
+		{"test sparse float vector null", args{dt: schemapb.DataType_SparseFloatVector, v: nil}, nil, true},
+		{"test sparse float vector negative", args{dt: schemapb.DataType_SparseFloatVector, v: -1}, nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
