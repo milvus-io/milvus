@@ -25,7 +25,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 113,
+  "id": 250,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -98,7 +98,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "increase(milvus_proxy_slow_query_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[1m])",
+          "expr": "increase(milvus_proxy_slow_query_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\" }[1m])",
           "hide": false,
           "interval": "",
           "intervalFactor": 2,
@@ -200,7 +200,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status=\"success\"}[1m])) by(function_name) ",
+          "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\",  status=\"success\"}[1m])) by(function_name) ",
           "interval": "",
           "legendFormat": "{{function_name}}",
           "range": true,
@@ -297,7 +297,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status!~\"success|total\"}[1m])) by(function_name) ",
+          "expr": "sum(increase(milvus_proxy_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", status!~\"success|total\"}[1m])) by(function_name) ",
           "interval": "",
           "legendFormat": "{{function_name}}",
           "range": true,
@@ -389,7 +389,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "histogram_quantile(0.99, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\"}[2m])))",
           "interval": "",
           "legendFormat": "p99-{{pod}}-{{node_id}}-{{msg_type}}",
           "queryType": "randomWalk",
@@ -403,7 +403,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "sum(increase(milvus_proxy_mutation_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by (pod, node_id, msg_type) / sum(increase(milvus_proxy_mutation_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by (pod, node_id, msg_type)",
+          "expr": "sum(increase(milvus_proxy_mutation_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, msg_type) / sum(increase(milvus_proxy_mutation_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", }[2m])) by (pod, node_id, msg_type)",
           "hide": false,
           "interval": "",
           "legendFormat": "avg-{{pod}}-{{node_id}}-{{msg_type}}",
@@ -416,7 +416,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(1, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+          "expr": "histogram_quantile(1, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\"}[2m])))",
           "hide": false,
           "legendFormat": "max-{{pod}}-{{node-id}}-{{msg_type}}",
           "range": true,
@@ -508,7 +508,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "histogram_quantile(0.99, sum by (le,pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"search\"}[2m])))",
+          "expr": "histogram_quantile(0.99, sum by (le,pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"search\"}[2m])))",
           "hide": false,
           "interval": "",
           "legendFormat": "p99-{{pod}}-{{node_id}}",
@@ -522,7 +522,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "sum(increase(milvus_proxy_sq_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"search\"}[2m])) by (pod, node_id) / sum(increase(milvus_proxy_sq_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"search\"}[2m])) by (pod, node_id)",
+          "expr": "sum(increase(milvus_proxy_sq_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"search\"}[2m])) by (pod, node_id) / sum(increase(milvus_proxy_sq_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"search\"}[2m])) by (pod, node_id)",
           "hide": false,
           "interval": "",
           "legendFormat": "avg-{{pod}}-{{node_id}}",
@@ -535,7 +535,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(1, sum by (le,pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"search\"}[2m])))",
+          "expr": "histogram_quantile(1, sum by (le,pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"search\"}[2m])))",
           "hide": false,
           "legendFormat": "max-{{pod}}-{{node-id}}",
           "range": true,
@@ -627,7 +627,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"query\"}[2m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"query\"}[2m])))",
           "hide": false,
           "interval": "",
           "legendFormat": "p99-{{pod}}-{{node_id}}",
@@ -641,7 +641,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "sum(increase(milvus_proxy_sq_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"query\"}[2m])) by (pod, node_id) / sum(increase(milvus_proxy_sq_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"query\"}[2m])) by (pod, node_id)",
+          "expr": "sum(increase(milvus_proxy_sq_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"query\"}[2m])) by (pod, node_id) / sum(increase(milvus_proxy_sq_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"query\"}[2m])) by (pod, node_id)",
           "hide": false,
           "interval": "",
           "legendFormat": "avg-{{pod}}-{{node_id}}",
@@ -654,7 +654,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(1, sum by (le, pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", query_type=\"query\"}[2m])))",
+          "expr": "histogram_quantile(1, sum by (le, pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", query_type=\"query\"}[2m])))",
           "hide": false,
           "legendFormat": "max-{{pod}}-{{node_id}}",
           "range": true,
@@ -836,7 +836,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(rate(milvus_proxy_rate_limit_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", status=\"fail\"}[1m])) by (msg_type)",
+          "expr": "sum(rate(milvus_proxy_rate_limit_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", db_name=~\"$db\", collection_name=~\"$collection\", status=\"fail\"}[1m])) by (msg_type)",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -1577,7 +1577,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 10
+            "y": 42
           },
           "hiddenSeries": false,
           "id": 123453,
@@ -1670,7 +1670,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 10
+            "y": 42
           },
           "hiddenSeries": false,
           "id": 123456,
@@ -1763,7 +1763,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 10
+            "y": 42
           },
           "hiddenSeries": false,
           "id": 123457,
@@ -1856,7 +1856,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 18
+            "y": 50
           },
           "hiddenSeries": false,
           "id": 123458,
@@ -1949,7 +1949,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 18
+            "y": 50
           },
           "hiddenSeries": false,
           "id": 123459,
@@ -2042,7 +2042,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 18
+            "y": 50
           },
           "hiddenSeries": false,
           "id": 123460,
@@ -2135,7 +2135,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 26
+            "y": 58
           },
           "hiddenSeries": false,
           "id": 123461,
@@ -2228,7 +2228,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 26
+            "y": 58
           },
           "hiddenSeries": false,
           "id": 123462,
@@ -2321,7 +2321,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 26
+            "y": 58
           },
           "hiddenSeries": false,
           "id": 123463,
@@ -2420,7 +2420,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 34
+            "y": 66
           },
           "hiddenSeries": false,
           "id": 123464,
@@ -2513,7 +2513,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 34
+            "y": 66
           },
           "hiddenSeries": false,
           "id": 123465,
@@ -2630,7 +2630,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 11
+            "y": 43
           },
           "hiddenSeries": false,
           "id": 123250,
@@ -2650,7 +2650,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -2739,7 +2739,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 11
+            "y": 43
           },
           "hiddenSeries": false,
           "id": 123315,
@@ -2759,7 +2759,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -2830,7 +2830,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 11
+            "y": 43
           },
           "hiddenSeries": false,
           "id": 123264,
@@ -2850,7 +2850,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -2937,7 +2937,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 19
+            "y": 51
           },
           "hiddenSeries": false,
           "id": 123377,
@@ -2957,7 +2957,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -3040,7 +3040,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 19
+            "y": 51
           },
           "hiddenSeries": false,
           "id": 123320,
@@ -3060,7 +3060,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -3147,7 +3147,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 19
+            "y": 51
           },
           "hiddenSeries": false,
           "id": 123378,
@@ -3167,7 +3167,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -3250,7 +3250,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 27
+            "y": 59
           },
           "hiddenSeries": false,
           "id": 123348,
@@ -3270,7 +3270,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -3405,7 +3405,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 27
+            "y": 59
           },
           "hiddenSeries": false,
           "id": 123321,
@@ -3425,7 +3425,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -3512,7 +3512,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 27
+            "y": 59
           },
           "hiddenSeries": false,
           "id": 123448,
@@ -3532,7 +3532,7 @@
             "alertThreshold": true
           },
           "percentage": false,
-          "pluginVersion": "8.5.20",
+          "pluginVersion": "10.2.0",
           "pointradius": 2,
           "points": false,
           "renderer": "flot",
@@ -3619,7 +3619,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 35
+            "y": 67
           },
           "hiddenSeries": false,
           "id": 123327,
@@ -3722,7 +3722,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 35
+            "y": 67
           },
           "hiddenSeries": false,
           "id": 123326,
@@ -3825,7 +3825,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 35
+            "y": 67
           },
           "hiddenSeries": false,
           "id": 123470,
@@ -3932,7 +3932,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 43
+            "y": 75
           },
           "hiddenSeries": false,
           "id": 123319,
@@ -4048,7 +4048,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 43
+            "y": 75
           },
           "hiddenSeries": false,
           "id": 123325,
@@ -4177,7 +4177,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 43
+            "y": 75
           },
           "hiddenSeries": false,
           "id": 123449,
@@ -4280,7 +4280,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 51
+            "y": 83
           },
           "hiddenSeries": false,
           "id": 123381,
@@ -4383,7 +4383,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 51
+            "y": 83
           },
           "hiddenSeries": false,
           "id": 123329,
@@ -4474,7 +4474,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 51
+            "y": 83
           },
           "hiddenSeries": false,
           "id": 123323,
@@ -4577,7 +4577,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 59
+            "y": 91
           },
           "hiddenSeries": false,
           "id": 123369,
@@ -4668,7 +4668,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 59
+            "y": 91
           },
           "hiddenSeries": false,
           "id": 123368,
@@ -4759,7 +4759,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 59
+            "y": 91
           },
           "hiddenSeries": false,
           "id": 123379,
@@ -4850,7 +4850,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 67
+            "y": 99
           },
           "hiddenSeries": false,
           "id": 123436,
@@ -5038,7 +5038,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 67
+            "y": 99
           },
           "id": 123322,
           "options": {
@@ -5105,7 +5105,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 4
+            "y": 44
           },
           "hiddenSeries": false,
           "id": 123141,
@@ -5196,7 +5196,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 4
+            "y": 44
           },
           "hiddenSeries": false,
           "id": 123384,
@@ -5313,7 +5313,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 4
+            "y": 44
           },
           "hiddenSeries": false,
           "id": 123338,
@@ -5416,7 +5416,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 12
+            "y": 52
           },
           "hiddenSeries": false,
           "id": 123337,
@@ -5519,7 +5519,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 12
+            "y": 52
           },
           "hiddenSeries": false,
           "id": 123340,
@@ -5613,7 +5613,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 12
+            "y": 52
           },
           "hiddenSeries": false,
           "id": 123347,
@@ -5704,7 +5704,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 20
+            "y": 60
           },
           "hiddenSeries": false,
           "id": 123339,
@@ -5798,7 +5798,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 20
+            "y": 60
           },
           "hiddenSeries": false,
           "id": 123345,
@@ -5890,7 +5890,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 20
+            "y": 60
           },
           "hiddenSeries": false,
           "id": 123221,
@@ -5981,7 +5981,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 28
+            "y": 68
           },
           "hiddenSeries": false,
           "id": 123344,
@@ -6079,7 +6079,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 28
+            "y": 68
           },
           "hiddenSeries": false,
           "id": 123383,
@@ -6171,7 +6171,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 28
+            "y": 68
           },
           "hiddenSeries": false,
           "id": 123342,
@@ -6263,7 +6263,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 36
+            "y": 76
           },
           "hiddenSeries": false,
           "id": 123343,
@@ -6355,7 +6355,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 36
+            "y": 76
           },
           "hiddenSeries": false,
           "id": 123346,
@@ -11851,8 +11851,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -15410,9 +15409,9 @@
     "list": [
       {
         "current": {
-          "selected": false,
-          "text": "prometheus",
-          "value": "P1809F7CD0C75ACF3"
+          "selected": true,
+          "text": "default",
+          "value": "default"
         },
         "hide": 0,
         "includeAll": false,
@@ -15429,8 +15428,8 @@
       {
         "current": {
           "selected": false,
-          "text": "chaos-testing",
-          "value": "chaos-testing"
+          "text": "default",
+          "value": "default"
         },
         "datasource": {
           "type": "prometheus",
@@ -15458,9 +15457,10 @@
       },
       {
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "cdc-test-downstream-48",
-          "value": "cdc-test-downstream-48"
+          "text": "None",
+          "value": ""
         },
         "datasource": {
           "type": "prometheus",
@@ -15497,7 +15497,35 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(milvus_proxy_collection_mutation_latency_sum{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\"},collection_name)",
+        "definition": "label_values(milvus_proxy_req_count{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\"},db_name)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": false,
+        "name": "db",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(milvus_proxy_req_count{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\"},db_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(milvus_proxy_req_count{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", db_name=\"$db\"},collection_name)",
         "hide": 0,
         "includeAll": true,
         "multi": false,
@@ -15505,7 +15533,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(milvus_proxy_collection_mutation_latency_sum{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\"},collection_name)",
+          "query": "label_values(milvus_proxy_req_count{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", db_name=\"$db\"},collection_name)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -15569,6 +15597,6 @@
   "timezone": "browser",
   "title": "Milvus2.5",
   "uid": "uLf5cJ3Gaa",
-  "version": 8,
+  "version": 9,
   "weekStart": ""
 }
