@@ -1307,11 +1307,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
-        auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+        auto result = milvus_storage::FileRowGroupReader::Make(
             fs,
             column_group_file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             GetReaderProperties());
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       result.status().ToString());
+        auto reader = result.ValueOrDie();
 
         auto row_group_num =
             reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1515,12 +1519,16 @@ GetFieldIDList(FieldId column_group_id,
         field_id_list.Add(column_group_id.get());
         return field_id_list;
     }
-    auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+    auto result = milvus_storage::FileRowGroupReader::Make(
         fs,
         filepath,
         arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
         GetReaderProperties());
+    AssertInfo(result.ok(),
+               "[StorageV2] Failed to create file row group reader: " +
+                   result.status().ToString());
+    auto file_reader = result.ValueOrDie();
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());
