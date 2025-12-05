@@ -42,7 +42,9 @@ type indexBuildTask struct {
 	taskID   int64
 	nodeID   int64
 	taskInfo *workerpb.IndexTaskInfo
-	taskSlot int64
+
+	cpuSlot    float64
+	memorySlot float64
 
 	queueTime time.Time
 	startTime time.Time
@@ -53,10 +55,11 @@ type indexBuildTask struct {
 
 var _ Task = (*indexBuildTask)(nil)
 
-func newIndexBuildTask(taskID int64, taskSlot int64) *indexBuildTask {
+func newIndexBuildTask(taskID int64, cpuSlot, memorySlot float64) *indexBuildTask {
 	return &indexBuildTask{
-		taskID:   taskID,
-		taskSlot: taskSlot,
+		taskID:     taskID,
+		cpuSlot:    cpuSlot,
+		memorySlot: memorySlot,
 		taskInfo: &workerpb.IndexTaskInfo{
 			BuildID: taskID,
 			State:   commonpb.IndexState_Unissued,
@@ -121,8 +124,8 @@ func (it *indexBuildTask) GetFailReason() string {
 	return it.taskInfo.FailReason
 }
 
-func (it *indexBuildTask) GetTaskSlot() int64 {
-	return it.taskSlot
+func (it *indexBuildTask) GetTaskSlot() (float64, float64) {
+	return it.cpuSlot, it.memorySlot
 }
 
 func (it *indexBuildTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
@@ -286,7 +289,8 @@ func (it *indexBuildTask) PreCheck(ctx context.Context, dependency *taskSchedule
 		OptionalScalarFields:      optionalFields,
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
-		TaskSlot:                  it.taskSlot,
+		CpuSlot:                   it.cpuSlot,
+		MemorySlot:                it.memorySlot,
 	}
 
 	log.Ctx(ctx).Info("index task pre check successfully", zap.Int64("taskID", it.GetTaskID()),
