@@ -961,3 +961,37 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
 }
+
+func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.mixCoord.CreateSnapshot(ctx, req)
+}
+
+func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropSnapshot(ctx, req)
+}
+
+func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	return s.mixCoord.DescribeSnapshot(ctx, req)
+}
+
+func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	return s.mixCoord.ListSnapshots(ctx, req)
+}
+
+// RestoreSnapshot is the RootCoord API for restoring a snapshot (orchestrates the entire restore process)
+func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+	return s.mixCoord.RestoreSnapshot(ctx, req)
+}
+
+// RestoreSnapshotData is the DataCoord API for restoring snapshot data
+func (s *Server) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	return s.mixCoord.RestoreSnapshotData(ctx, req)
+}
+
+func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	return s.mixCoord.GetRestoreSnapshotState(ctx, req)
+}
+
+func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	return s.mixCoord.ListRestoreSnapshotJobs(ctx, req)
+}

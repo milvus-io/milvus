@@ -434,6 +434,36 @@
                 "MessageType": "MessageTypeDropIndex",
                 "Version": 2
             }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RestoreSnapshotMessageHeader",
+                "BodyType": "messagespb.RestoreSnapshotMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRestoreSnapshot",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateSnapshotMessageHeader",
+                "BodyType": "messagespb.CreateSnapshotMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateSnapshot",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropSnapshotMessageHeader",
+                "BodyType": "messagespb.DropSnapshotMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropSnapshot",
+                "Version": 2
+            }
         }
     ]
 }

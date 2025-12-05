@@ -1,0 +1,60 @@
+{
+  "snapshot-info": {
+    "name": "test_snapshot",
+    "id": 1,
+    "description": "test description",
+    "collection_id": 100,
+    "partition_ids": [
+      1,
+      2
+    ],
+    "create_ts": 1234567890,
+    "s3_location": "s3://test-bucket/snapshot"
+  },
+  "collection": {
+    "schema": {
+      "name": "test_collection",
+      "fields": [
+        {
+          "fieldID": 1,
+          "name": "field1",
+          "data_type": 5
+        },
+        {
+          "fieldID": 2,
+          "name": "field2",
+          "data_type": 101
+        }
+      ]
+    },
+    "num_partitions": 2,
+    "num_shards": 2,
+    "properties": [
+      {
+        "key": "key1",
+        "value": "value1"
+      }
+    ]
+  },
+  "indexes": [
+    {
+      "fieldID": 2,
+      "index_name": "test_index",
+      "indexID": 2001,
+      "index_params": [
+        {
+          "key": "metric_type",
+          "value": "IP"
+        },
+        {
+          "key": "index_type",
+          "value": "IVF_FLAT"
+        }
+      ]
+    }
+  ],
+  "manifest-list": [
+    "snapshots/100/manifests/1/1001.avro"
+  ],
+  "storagev2-manifest-list": []
+}

@@ -1245,3 +1245,39 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 func (s *mixCoordImpl) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return s.datacoordServer.CreateExternalCollection(ctx, req)
 }
+
+func (s *mixCoordImpl) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.CreateSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.DropSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	return s.datacoordServer.DescribeSnapshot(ctx, req)
+}
+
+// RestoreSnapshot routes to RootCoord which orchestrates the full snapshot restore process:
+// DescribeSnapshot -> CreateCollection -> CreatePartitions -> RestoreSnapshotData (DataCoord)
+func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+	return s.rootcoordServer.RestoreSnapshot(ctx, req)
+}
+
+// RestoreSnapshotData routes to DataCoord for data restoration
+// Called by RootCoord after collection, partitions, and indexes are created
+func (s *mixCoordImpl) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	return s.datacoordServer.RestoreSnapshotData(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	return s.datacoordServer.GetRestoreSnapshotState(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	return s.datacoordServer.ListRestoreSnapshotJobs(ctx, req)
+}
+
+func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	return s.datacoordServer.ListSnapshots(ctx, req)
+}

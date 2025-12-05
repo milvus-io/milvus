@@ -58,6 +58,9 @@ enum MessageType {
     CreateIndex          = 34;
     AlterIndex           = 35;
     DropIndex            = 36;
+    RestoreSnapshot      = 37;
+    CreateSnapshot       = 38;
+    DropSnapshot         = 39;
 
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
@@ -551,6 +554,42 @@ message DropIndexMessageHeader {
 // DropIndexMessageBody is the body of drop index message.
 message DropIndexMessageBody {}
 
+// CreateSnapshotMessageHeader is the header of create snapshot message.
+// Contains all fields from CreateSnapshotRequest (except base).
+// snapshot_id is allocated in the callback.
+message CreateSnapshotMessageHeader {
+    int64 collection_id = 1;
+    string name         = 2;
+    string description  = 3;
+}
+
+// CreateSnapshotMessageBody is the body of create snapshot message.
+// Empty - all info is in header.
+message CreateSnapshotMessageBody {}
+
+// DropSnapshotMessageHeader is the header of drop snapshot message.
+// No collection lock needed - dropping snapshot only affects snapshot metadata.
+message DropSnapshotMessageHeader {
+    string name = 1;
+}
+
+// DropSnapshotMessageBody is the body of drop snapshot message.
+// Empty - all info is in header.
+message DropSnapshotMessageBody {}
+
+// RestoreSnapshotMessageHeader is the header of restore snapshot message.
+// Contains the fields needed for distributed locking and restore tracking.
+message RestoreSnapshotMessageHeader {
+    string db_name         = 1;
+    string collection_name = 2;
+    string snapshot_name   = 3;
+    int64  job_id          = 4; // Pre-allocated restore job ID for async tracking
+}
+
+// RestoreSnapshotMessageBody is the body of restore snapshot message.
+// Empty - all info is in header. Actual restore logic is in callback.
+message RestoreSnapshotMessageBody {}
+
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {
     repeated CacheExpiration cache_expirations = 1;
@@ -642,6 +681,7 @@ enum ResourceDomain {
     ResourceDomainCollectionName = 2; // the domain of collection name.
     ResourceDomainDBName = 3; // the domain of db name.
     ResourceDomainPrivilege = 4; // the domain of privilege.
+    ResourceDomainSnapshotName = 5; // the domain of snapshot name.
     ResourceDomainCluster = 127; // the domain of full cluster.
 }
 
