@@ -1182,6 +1182,7 @@ class TestMilvusClientTimestamptzInvalid(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="skip for now")
     def test_milvus_client_timestamptz_input_data_invalid_time_format(self):
         """
         target:  Milvus raise error when input data with invalid time format

@@ -49,7 +49,7 @@ func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) 
 
 	loc, err := time.LoadLocation(defaultTimezoneStr)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid default timezone string '%s': %w", defaultTimezoneStr, err)
+		return time.Time{}, fmt.Errorf("invalid timezone string '%s': %w", defaultTimezoneStr, err)
 	}
 
 	// 2. Fallback parsing: Attempt to parse a naive string using NaiveTzLayouts
@@ -65,7 +65,7 @@ func ParseTimeTz(inputStr string, defaultTimezoneStr string) (time.Time, error) 
 	}
 
 	if !parsed {
-		return time.Time{}, fmt.Errorf("invalid timestamp string: '%s'. Does not match any known format", inputStr)
+		return time.Time{}, fmt.Errorf("invalid timestamptz string: '%s'. Does not match any known format", inputStr)
 	}
 
 	// No offset validation needed here: The time was assigned the safe defaultTimezoneStr (loc),

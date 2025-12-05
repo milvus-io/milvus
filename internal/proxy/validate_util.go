@@ -1163,10 +1163,9 @@ func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, time
 		// Use the centralized parser (timestamptz.ParseTimeTz) for validation and parsing.
 		t, err := timestamptz.ParseTimeTz(isoStr, timezone)
 		if err != nil {
-			log.Warn("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.Error(err))
+			log.Warn("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.String("timezone", timezone), zap.Error(err))
 			// Use the recommended refined error message structure
-			const invalidMsg = "invalid timezone name; must be a valid IANA Time Zone ID (e.g., 'Asia/Shanghai' or 'UTC')"
-			return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string '%s': %s", isoStr, invalidMsg)
+			return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string '%s': %s", isoStr, err.Error())
 		}
 
 		// Convert the time object to Unix Microseconds (int64)

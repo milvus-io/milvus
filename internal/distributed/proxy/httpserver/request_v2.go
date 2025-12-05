@@ -586,7 +586,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 	var err error
 	fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
 	if err != nil {
-		log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue))
+		log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue), zap.Error(err))
 		return nil, merr.WrapErrParameterInvalidMsg("convert defaultValue fail, err: %s", err.Error())
 	}
 	if dataType == schemapb.DataType_Array {
