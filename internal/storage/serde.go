@@ -45,12 +45,6 @@ type Record interface {
 	Retain()
 }
 
-type RecordReader interface {
-	Next() (Record, error)
-	SetNeededFields(fields typeutil.Set[int64])
-	Close() error
-}
-
 type RecordWriter interface {
 	Write(r Record) error
 	GetWrittenUncompressed() uint64

@@ -288,6 +288,7 @@ type commonConfig struct {
 	Stv2SystemColumnIncludeClusteringKey ParamItem `refreshable:"true"`
 	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
+	UseLoonFFI                           ParamItem `refreshable:"true"`
 
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
@@ -937,6 +938,14 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
+
+	p.UseLoonFFI = ParamItem{
+		Key:          "common.storage.useLoonFFI",
+		Version:      "2.6.7",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.UseLoonFFI.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -1666,11 +1675,14 @@ The larger the pending length, the more memory is used, the less logging writes 
 
 	l.AsyncWriteBufferSize = ParamItem{
 		Key:          "log.asyncWrite.bufferSize",
-		DefaultValue: "1m",
+		DefaultValue: "4k",
 		Version:      "2.6.7",
 		Doc: `The buffer size of the underlying bufio writer. 
 The larger the buffer size, the more memory is used, 
-but the less the number of writes to the underlying file system.`,
+but the less the number of writes to the underlying file system.
+Because the cpp will print the log message into stdout, 
+when the logging is woring with pipe like tty/docker log driver/k8s,
+PIPE_BUF=4096 may interleave the go log and cpp log together, so 4kb is set as default value to avoid this.`,
 		Export: false,
 	}
 	l.AsyncWriteBufferSize.Init(base.mgr)
@@ -4584,6 +4596,7 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
+	ScalarIndexTaskSlotUsage      ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
@@ -5600,6 +5613,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.IndexTaskSlotUsage.Init(base.mgr)
+
+	p.ScalarIndexTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.scalarIndexTaskSlotUsage",
+		Version:      "2.6.8",
+		Doc:          "slot usage of scalar index task per 512mb",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ScalarIndexTaskSlotUsage.Init(base.mgr)
 
 	p.StatsTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.statsTaskSlotUsage",

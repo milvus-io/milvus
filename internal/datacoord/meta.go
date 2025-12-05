@@ -1177,6 +1177,23 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 	}
 }
 
+func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		// skip empty manifest update and same manifest
+		if manifestPath == "" || segment.ManifestPath == manifestPath {
+			return false
+		}
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -1693,6 +1710,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
+			ManifestPath:   seg.GetManifest(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1793,7 +1811,8 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				IsSorted:     compactToSegment.GetIsSorted(),
+				ManifestPath: compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2283,6 +2302,7 @@ func (m *meta) completeSortCompactionMutation(
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
 		IsSorted:                  true,
+		ManifestPath:              resultSegment.GetManifest(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)

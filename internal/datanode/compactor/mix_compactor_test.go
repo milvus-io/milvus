@@ -1110,10 +1110,9 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 					},
 				},
 				{
-					FieldID:      Int64FieldWithDefaultValue,
-					Name:         "field_int64_with_default_value",
-					IsPrimaryKey: true,
-					DataType:     schemapb.DataType_Int64,
+					FieldID:  Int64FieldWithDefaultValue,
+					Name:     "field_int64_with_default_value",
+					DataType: schemapb.DataType_Int64,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_LongData{
 							LongData: 10,

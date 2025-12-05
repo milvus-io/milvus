@@ -31,6 +31,7 @@ type Params struct {
 	PreferSegmentSizeRatio    float64                `json:"prefer_segment_size_ratio,omitempty"`
 	BloomFilterApplyBatchSize int                    `json:"bloom_filter_apply_batch_size,omitempty"`
 	StorageConfig             *indexpb.StorageConfig `json:"storage_config,omitempty"`
+	UseLoonFFI                bool                   `json:"use_loon_ffi,omitempty"`
 }
 
 func GenParams() Params {
@@ -46,6 +47,7 @@ func GenParams() Params {
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 		StorageConfig:             CreateStorageConfig(),
+		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 	}
 }
 

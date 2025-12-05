@@ -80,8 +80,8 @@ type searchTask struct {
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
-
-	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
+	highlighter            Highlighter
+	resultBuf              *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
@@ -466,12 +466,13 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 
 		// set analyzer name for sub search
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", subReq.GetSearchParams())
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, subReq.GetSearchParams())
 		if err == nil {
 			internalSubReq.AnalyzerName = analyzer
 		}
 
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
+
 		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
 		if t.partitionKeyMode {
@@ -557,6 +558,67 @@ func (t *searchTask) fillResult() {
 	t.result.CollectionName = t.collectionName
 }
 
+func (t *searchTask) getBM25SearchTexts(placeholder []byte) ([]string, error) {
+	pb := &commonpb.PlaceholderGroup{}
+	proto.Unmarshal(placeholder, pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("please provide varchar/text for BM25 Function based search")
+	}
+
+	holder := pb.Placeholders[0]
+	if holder.Type != commonpb.PlaceholderType_VarChar {
+		return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for BM25 Function based search, got %s", holder.Type.String()))
+	}
+
+	texts := funcutil.GetVarCharFromPlaceholder(holder)
+	return texts, nil
+}
+
+func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	h, err := NewLexicalHighlighter(highlighter)
+	if err != nil {
+		return err
+	}
+	t.highlighter = h
+	if h.highlightSearch {
+		if metricType != metric.BM25 {
+			return merr.WrapErrParameterInvalidMsg(`Search highlight only support with metric type "BM25" but was: %s`, t.SearchRequest.GetMetricType())
+		}
+		function, ok := getBM25FunctionOfAnnsField(annsField, t.schema.GetFunctions())
+		if !ok {
+			return merr.WrapErrServiceInternal(`Search with highlight failed, input field of BM25 annsField not found`)
+		}
+		fieldId := function.InputFieldIds[0]
+		fieldName := function.InputFieldNames[0]
+		// set bm25 search text as highlight search texts
+		texts, err := t.getBM25SearchTexts(placeholder)
+		if err != nil {
+			return err
+		}
+		err = h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		if err != nil {
+			return err
+		}
+
+		return h.initHighlightQueries(t)
+	}
+	return nil
+}
+
+func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
+	if highlighter == nil {
+		return nil
+	}
+
+	switch highlighter.GetType() {
+	case commonpb.HighlightType_Lexical:
+		return t.createLexicalHighlighter(highlighter, metricType, annsField, placeholder, analyzerName)
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
+	}
+}
+
 func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
@@ -579,9 +641,23 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
+	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
+	if err == nil {
+		t.SearchRequest.AnalyzerName = analyzer
+	}
+
 	t.isIterator = isIterator
 	t.SearchRequest.Offset = offset
 	t.SearchRequest.FieldId = queryInfo.GetQueryFieldId()
+
+	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
+		return err
+	}
+
+	// add highlight field ids to output fields id
+	if t.highlighter != nil {
+		t.SearchRequest.OutputFieldsId = append(t.SearchRequest.OutputFieldsId, t.highlighter.FieldIDs()...)
+	}
 
 	if t.partitionKeyMode {
 		// isolation has tighter constraint, check first
@@ -631,13 +707,6 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
-
-	if t.SearchRequest.MetricType == metric.BM25 {
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", t.request.GetSearchParams())
-		if err == nil {
-			t.SearchRequest.AnalyzerName = analyzer
-		}
-	}
 
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
@@ -813,7 +882,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	t.isRecallEvaluation = isRecallEvaluation
 
 	// call pipeline
-	pipeline, err := newBuiltInPipeline(t)
+	pipeline, err := newSearchPipeline(t)
 	if err != nil {
 		log.Warn("Faild to create post process pipeline")
 		return err

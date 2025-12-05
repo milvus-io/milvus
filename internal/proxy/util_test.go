@@ -606,28 +606,64 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 }
 
 func TestFillFieldIDBySchema(t *testing.T) {
-	schema := &schemapb.CollectionSchema{}
-	columns := []*schemapb.FieldData{
-		{
-			FieldName: "TestFillFieldIDBySchema",
-		},
-	}
-
-	// length mismatch
-	assert.Error(t, fillFieldPropertiesBySchema(columns, schema))
-	schema = &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
+	t.Run("column count mismatch", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
 			{
-				Name:     "TestFillFieldIDBySchema",
-				DataType: schemapb.DataType_Int64,
-				FieldID:  1,
+				FieldName: "TestFillFieldIDBySchema",
 			},
-		},
-	}
-	assert.NoError(t, fillFieldPropertiesBySchema(columns, schema))
-	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
-	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
-	assert.Equal(t, int64(1), columns[0].FieldId)
+		}
+		// Validation should fail due to column count mismatch
+		assert.Error(t, validateFieldDataColumns(columns, schema))
+	})
+
+	t.Run("successful validation and fill", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "TestFillFieldIDBySchema",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "TestFillFieldIDBySchema",
+			},
+		}
+		// Validation should succeed
+		assert.NoError(t, validateFieldDataColumns(columns, schema))
+		// Fill properties should succeed
+		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
+		assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
+		assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
+		assert.Equal(t, int64(1), columns[0].FieldId)
+	})
+
+	t.Run("field not in schema", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "FieldA",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := newSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "FieldB",
+			},
+		}
+		// Validation should fail because FieldB is not in schema
+		err := validateFieldDataColumns(columns, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not exist in collection schema")
+	})
 }
 
 func TestValidateUsername(t *testing.T) {
@@ -4848,4 +4884,148 @@ func TestGetStorageCost(t *testing.T) {
 		assert.InDelta(t, 0.27, ratio, 1e-9)
 		assert.True(t, ok)
 	})
+}
+
+func TestCheckDuplicatePkExist_Int64PK(t *testing.T) {
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:     "id",
+		FieldID:  100,
+		DataType: schemapb.DataType_Int64,
+	}
+
+	t.Run("with duplicates", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 1, 4, 2}, // duplicates: 1, 2
+							},
+						},
+					},
+				},
+			},
+		}
+
+		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		assert.NoError(t, err)
+		assert.True(t, hasDup)
+	})
+
+	t.Run("without duplicates", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 4, 5},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		assert.NoError(t, err)
+		assert.False(t, hasDup)
+	})
+}
+
+func TestCheckDuplicatePkExist_VarCharPK(t *testing.T) {
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:     "id",
+		FieldID:  100,
+		DataType: schemapb.DataType_VarChar,
+	}
+
+	t.Run("with duplicates", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"a", "b", "c", "a", "d"}, // duplicate: "a"
+							},
+						},
+					},
+				},
+			},
+		}
+
+		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		assert.NoError(t, err)
+		assert.True(t, hasDup)
+	})
+
+	t.Run("without duplicates", func(t *testing.T) {
+		fieldsData := []*schemapb.FieldData{
+			{
+				FieldName: "id",
+				Type:      schemapb.DataType_VarChar,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: []string{"a", "b", "c", "d", "e"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		assert.NoError(t, err)
+		assert.False(t, hasDup)
+	})
+}
+
+func TestCheckDuplicatePkExist_EmptyData(t *testing.T) {
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:     "id",
+		FieldID:  100,
+		DataType: schemapb.DataType_Int64,
+	}
+
+	hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, []*schemapb.FieldData{})
+	assert.NoError(t, err)
+	assert.False(t, hasDup)
+}
+
+func TestCheckDuplicatePkExist_MissingPrimaryKey(t *testing.T) {
+	primaryFieldSchema := &schemapb.FieldSchema{
+		Name:     "id",
+		FieldID:  100,
+		DataType: schemapb.DataType_Int64,
+	}
+
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "other_field",
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+	assert.Error(t, err)
+	assert.False(t, hasDup)
 }

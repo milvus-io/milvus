@@ -1050,6 +1050,7 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 		}, nil).Build()
 
 		task := createTestUpdateTask()
+		task.req.FieldsData = []*schemapb.FieldData{}
 		task.req.NumRows = 0 // Invalid num_rows
 
 		err := task.PreExecute(context.Background())
@@ -1463,4 +1464,183 @@ func TestGenNullableFieldData_GeometryAndTimestamptz(t *testing.T) {
 		assert.Len(t, fieldData.ValidData, upsertIDSize)
 		assert.Len(t, fieldData.GetScalars().GetGeometryWktData().GetData(), upsertIDSize)
 	})
+}
+
+func TestUpsertTask_DuplicatePK_Int64(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_duplicate_pk",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	// Data with duplicate primary keys: 1, 2, 1 (duplicate)
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			FieldId:   100,
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2, 1}},
+					},
+				},
+			},
+		},
+		{
+			FieldName: "value",
+			FieldId:   101,
+			Type:      schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}},
+					},
+				},
+			},
+		},
+	}
+
+	ut := upsertTask{
+		ctx: ctx,
+		req: &milvuspb.UpsertRequest{
+			CollectionName: "test_duplicate_pk",
+			FieldsData:     fieldsData,
+			NumRows:        3,
+		},
+		schema: schemaInfo,
+	}
+
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		schema: schemaInfo,
+	}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Maybe()
+	mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{name: "_default"}, nil).Maybe()
+
+	err := ut.PreExecute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate primary keys are not allowed")
+}
+
+func TestUpsertTask_DuplicatePK_VarChar(t *testing.T) {
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	mockCache := NewMockCache(t)
+	globalMetaCache = mockCache
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_duplicate_pk_varchar",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "100"}}},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+	}
+	schemaInfo := newSchemaInfo(schema)
+
+	// Data with duplicate primary keys: "a", "b", "a" (duplicate)
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			FieldId:   100,
+			Type:      schemapb.DataType_VarChar,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: []string{"a", "b", "a"}},
+					},
+				},
+			},
+		},
+		{
+			FieldName: "value",
+			FieldId:   101,
+			Type:      schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}},
+					},
+				},
+			},
+		},
+	}
+
+	ut := upsertTask{
+		ctx: ctx,
+		req: &milvuspb.UpsertRequest{
+			CollectionName: "test_duplicate_pk_varchar",
+			FieldsData:     fieldsData,
+			NumRows:        3,
+		},
+		schema: schemaInfo,
+	}
+
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		schema: schemaInfo,
+	}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil).Maybe()
+	mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{name: "_default"}, nil).Maybe()
+
+	err := ut.PreExecute(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate primary keys are not allowed")
+}
+
+func TestUpsertTask_NoDuplicatePK(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "test_no_duplicate_pk",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+		},
+	}
+
+	// Data with unique primary keys: 1, 2, 3
+	fieldsData := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			FieldId:   100,
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+					},
+				},
+			},
+		},
+		{
+			FieldName: "value",
+			FieldId:   101,
+			Type:      schemapb.DataType_Int32,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{Data: []int32{100, 200, 300}},
+					},
+				},
+			},
+		},
+	}
+
+	// Call CheckDuplicatePkExist directly to verify no duplicate error
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
+	assert.NoError(t, err)
+	hasDuplicate, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+	assert.NoError(t, err)
+	assert.False(t, hasDuplicate, "should not have duplicate primary keys")
 }

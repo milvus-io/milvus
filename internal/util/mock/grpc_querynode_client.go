@@ -142,6 +142,10 @@ func (m *GrpcQueryNodeClient) RunAnalyzer(ctx context.Context, in *querypb.RunAn
 	return &milvuspb.RunAnalyzerResponse{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) GetHighlight(ctx context.Context, in *querypb.GetHighlightRequest, opts ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
+	return &querypb.GetHighlightResponse{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) Close() error {
 	return m.Err
 }

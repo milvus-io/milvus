@@ -280,6 +280,28 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
+	t.Run("RunAnalyzer", func(t *testing.T) {
+		mockQN.EXPECT().RunAnalyzer(mock.Anything, mock.Anything).Return(&milvuspb.RunAnalyzerResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
+		req := &querypb.RunAnalyzerRequest{}
+		resp, err := server.RunAnalyzer(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("GetHighlight", func(t *testing.T) {
+		mockQN.EXPECT().GetHighlight(mock.Anything, mock.Anything).Return(&querypb.GetHighlightResponse{
+			Status: merr.Success(),
+		}, nil)
+
+		resp, err := server.GetHighlight(ctx, &querypb.GetHighlightRequest{
+			Channel: "test-channel",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
 	err = server.Stop()
 	assert.NoError(t, err)
 }
