@@ -18,6 +18,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <nlohmann/json.hpp>
 #include "milvus-storage/common/constants.h"
 
 namespace milvus::index {
@@ -207,15 +208,101 @@ CreateArrowSchema(std::map<JsonKey, JsonKeyLayoutType> column_map) {
 
 std::vector<std::pair<std::string, std::string>>
 CreateParquetKVMetadata(std::map<JsonKey, JsonKeyLayoutType> column_map) {
-    nlohmann::json key_type;
-    for (const auto& [key, type] : column_map) {
-        key_type[key.ToColumnName()] = ToString(type);
+    // layout type map is now stored in a separate meta file to reduce parquet file size.
+    // return empty metadata vector.
+    return {};
+}
+
+std::string
+JsonStatsMeta::Serialize() const {
+    nlohmann::json root;
+
+    // Serialize string values
+    for (const auto& [key, value] : string_values_) {
+        root[key] = value;
     }
-    // for shared field, not need to store in metadata
-    std::vector<std::pair<std::string, std::string>> res;
-    res.push_back(
-        std::make_pair(JSON_STATS_META_KEY_LAYOUT_TYPE_MAP, key_type.dump()));
-    return res;
+
+    // Serialize int64 values
+    for (const auto& [key, value] : int64_values_) {
+        root[key] = value;
+    }
+
+    // Serialize layout type map
+    if (!layout_type_map_.empty()) {
+        nlohmann::json layout_map;
+        for (const auto& [json_key, layout_type] : layout_type_map_) {
+            layout_map[json_key.ToColumnName()] = ToString(layout_type);
+        }
+        root[META_KEY_LAYOUT_TYPE_MAP] = layout_map;
+    }
+
+    return root.dump();
+}
+
+JsonStatsMeta
+JsonStatsMeta::Deserialize(const std::string& json_str) {
+    JsonStatsMeta meta;
+
+    try {
+        nlohmann::json root = nlohmann::json::parse(json_str);
+
+        for (auto it = root.begin(); it != root.end(); ++it) {
+            const std::string& key = it.key();
+
+            if (key == META_KEY_LAYOUT_TYPE_MAP) {
+                // Parse layout type map
+                std::map<JsonKey, JsonKeyLayoutType> layout_map;
+                for (auto& [column_name, layout_type_str] :
+                     it.value().items()) {
+                    auto json_type = GetJsonTypeFromKeyName(column_name);
+                    auto json_pointer = GetKeyFromColumnName(column_name);
+                    JsonKey json_key(json_pointer, json_type);
+                    auto layout_type =
+                        JsonKeyLayoutTypeFromString(layout_type_str);
+                    layout_map[json_key] = layout_type;
+                }
+                meta.SetLayoutTypeMap(layout_map);
+            } else if (it.value().is_string()) {
+                meta.SetString(key, it.value().get<std::string>());
+            } else if (it.value().is_number_integer()) {
+                meta.SetInt64(key, it.value().get<int64_t>());
+            }
+            // Other types can be added as needed
+        }
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to deserialize JsonStatsMeta: {}",
+                  e.what());
+    }
+
+    return meta;
+}
+
+std::unordered_map<std::string, std::set<std::string>>
+JsonStatsMeta::DeserializeToKeyFieldMap(const std::string& json_str) {
+    std::unordered_map<std::string, std::set<std::string>> key_field_map;
+
+    try {
+        nlohmann::json root = nlohmann::json::parse(json_str);
+
+        auto it = root.find(META_KEY_LAYOUT_TYPE_MAP);
+        if (it != root.end()) {
+            for (auto& [column_name, layout_type_str] : it.value().items()) {
+                auto layout_type = JsonKeyLayoutTypeFromString(layout_type_str);
+                if (layout_type == JsonKeyLayoutType::SHARED) {
+                    continue;
+                }
+                auto json_pointer = GetKeyFromColumnName(column_name);
+                key_field_map[json_pointer].insert(column_name);
+            }
+        }
+    } catch (const std::exception& e) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "Failed to deserialize JsonStatsMeta to key_field_map: {}",
+                  e.what());
+    }
+
+    return key_field_map;
 }
 
 }  // namespace milvus::index

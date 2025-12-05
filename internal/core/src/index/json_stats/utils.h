@@ -16,18 +16,22 @@
 
 #pragma once
 
+#include <cstring>
+#include <map>
+#include <optional>
+#include <set>
 #include <string>
-#include <boost/filesystem.hpp>
+#include <unordered_map>
 
+#include <boost/filesystem.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string.hpp>
+#include <simdjson.h>
 
-#include "index/InvertedIndexTantivy.h"
-#include "common/jsmn.h"
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
-#include <simdjson.h>
-#include <cstring>
+#include "common/jsmn.h"
+#include "index/InvertedIndexTantivy.h"
 
 namespace milvus::index {
 
@@ -491,6 +495,97 @@ SortByParquetPath(const std::vector<std::string>& paths) {
 
     return result;
 }
+
+// Meta keys for JsonStatsMeta
+inline constexpr const char* META_KEY_VERSION = "version";
+inline constexpr const char* META_KEY_LAYOUT_TYPE_MAP = "layout_type_map";
+inline constexpr const char* META_KEY_NUM_ROWS = "num_rows";
+inline constexpr const char* META_KEY_NUM_SHREDDING_COLUMNS =
+    "num_shredding_columns";
+inline constexpr const char* META_CURRENT_VERSION = "1";
+
+// Generic metadata container for JSON stats
+// Supports storing various key-value pairs and can be serialized to/from JSON file
+class JsonStatsMeta {
+ public:
+    JsonStatsMeta() {
+        SetString(META_KEY_VERSION, META_CURRENT_VERSION);
+    }
+
+    void
+    SetString(const std::string& key, const std::string& value) {
+        string_values_[key] = value;
+    }
+
+    std::optional<std::string>
+    GetString(const std::string& key) const {
+        auto it = string_values_.find(key);
+        if (it != string_values_.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    void
+    SetInt64(const std::string& key, int64_t value) {
+        int64_values_[key] = value;
+    }
+
+    std::optional<int64_t>
+    GetInt64(const std::string& key) const {
+        auto it = int64_values_.find(key);
+        if (it != int64_values_.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    // layout type map operations (special handling for backward compatibility)
+    void
+    SetLayoutTypeMap(const std::map<JsonKey, JsonKeyLayoutType>& layout_map) {
+        layout_type_map_ = layout_map;
+    }
+
+    const std::map<JsonKey, JsonKeyLayoutType>&
+    GetLayoutTypeMap() const {
+        return layout_type_map_;
+    }
+
+    // build key_field_map from layout_type_map (for loading)
+    std::unordered_map<std::string, std::set<std::string>>
+    BuildKeyFieldMap() const {
+        std::unordered_map<std::string, std::set<std::string>> key_field_map;
+        for (const auto& [json_key, layout_type] : layout_type_map_) {
+            // only store metadata for shredding columns (TYPED/DYNAMIC),
+            // skip SHARED keys to save memory
+            if (layout_type == JsonKeyLayoutType::SHARED) {
+                continue;
+            }
+            auto column_name = json_key.ToColumnName();
+            key_field_map[json_key.key_].insert(column_name);
+        }
+        return key_field_map;
+    }
+
+    std::string
+    Serialize() const;
+
+    static JsonStatsMeta
+    Deserialize(const std::string& json_str);
+
+    static std::unordered_map<std::string, std::set<std::string>>
+    DeserializeToKeyFieldMap(const std::string& json_str);
+
+    size_t
+    GetSerializedSize() const {
+        return Serialize().size();
+    }
+
+ private:
+    std::map<std::string, std::string> string_values_;
+    std::map<std::string, int64_t> int64_values_;
+    std::map<JsonKey, JsonKeyLayoutType> layout_type_map_;
+};
 
 }  // namespace milvus::index
 

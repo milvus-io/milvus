@@ -113,6 +113,18 @@ DiskFileManagerImpl::GetRemoteJsonStatsShreddingPrefix() {
     return (prefix / suffix).string();
 }
 
+std::string
+DiskFileManagerImpl::GetRemoteJsonStatsMetaPath(const std::string& file_name) {
+    namespace fs = std::filesystem;
+    fs::path prefix = GetRemoteJsonStatsLogPrefix();
+    return (prefix / file_name).string();
+}
+
+std::string
+DiskFileManagerImpl::GetLocalJsonStatsMetaPrefix() {
+    return GetLocalJsonStatsPrefix();
+}
+
 bool
 DiskFileManagerImpl::AddFileInternal(
     const std::string& file,
@@ -227,6 +239,38 @@ DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
         file, [this](const std::string& file_name, int slice_num) {
             return GetRemoteJsonStatsSharedIndexPath(file_name, slice_num);
         });
+}
+
+bool
+DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    FILEMANAGER_TRY
+    if (!local_chunk_manager->Exist(file)) {
+        LOG_ERROR("local meta file {} not exists", file);
+        return false;
+    }
+
+    local_paths_.emplace_back(file);
+    auto fileName = GetFileName(file);
+    auto fileSize = local_chunk_manager->Size(file);
+    added_total_file_size_ += fileSize;
+
+    // Meta file is small, upload directly without slicing
+    auto remote_path = GetRemoteJsonStatsMetaPath(fileName);
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+    local_chunk_manager->Read(file, buf.get(), fileSize);
+    rcm_->Write(remote_path, buf.get(), fileSize);
+
+    remote_paths_to_size_[remote_path] = fileSize;
+    LOG_INFO("upload json stats meta file: {} to remote: {}, size: {}",
+             file,
+             remote_path,
+             fileSize);
+
+    FILEMANAGER_CATCH
+    FILEMANAGER_END
+    return true;
 }
 
 bool
@@ -395,6 +439,40 @@ DiskFileManagerImpl::CacheJsonStatsSharedIndexToDisk(
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files, GetLocalJsonStatsSharedIndexPrefix(), priority);
+}
+
+std::string
+DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
+    const std::string& remote_file,
+    milvus::proto::common::LoadPriority priority) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_prefix = GetLocalJsonStatsMetaPrefix();
+
+    auto file_name = remote_file.substr(remote_file.find_last_of('/') + 1);
+    auto local_file =
+        (std::filesystem::path(local_prefix) / file_name).string();
+
+    auto parent_path = std::filesystem::path(local_file).parent_path();
+    if (!local_chunk_manager->Exist(parent_path.string())) {
+        local_chunk_manager->CreateDir(parent_path.string());
+    }
+
+    auto remote_prefix = GetRemoteJsonStatsLogPrefix();
+    auto full_remote_path =
+        (std::filesystem::path(remote_prefix) / remote_file).string();
+
+    auto file_size = rcm_->Size(full_remote_path);
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[file_size]);
+    rcm_->Read(full_remote_path, buf.get(), file_size);
+    local_chunk_manager->Write(local_file, buf.get(), file_size);
+
+    LOG_INFO("Cached json stats meta file from {} to {}, size: {}",
+             full_remote_path,
+             local_file,
+             file_size);
+
+    return local_file;
 }
 
 template <typename DataType>
