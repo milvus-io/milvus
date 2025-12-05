@@ -333,6 +333,8 @@ type commonConfig struct {
 	ClusterID              ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	PreferIPv6Address ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1293,6 +1295,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       false,
 	}
 	p.HybridSearchRequeryPolicy.Init(base.mgr)
+
+	p.PreferIPv6Address = ParamItem{
+		Key:          "common.preferIPv6Address",
+		Version:      "2.6.3",
+		Doc:          "Prefer publish ipv6 addresses",
+		DefaultValue: "false",
+		Export:       true,
+	}
+	p.PreferIPv6Address.Init(base.mgr)
 }
 
 type gpuConfig struct {
