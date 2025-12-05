@@ -51,6 +51,10 @@ extraConfigFiles:
         scalarField: true
         scalarIndex: true
         growingMmapEnabled: true
+    quotaAndLimits:
+      flushRate:
+        collection:
+          max: 4
 metrics:
   serviceMonitor:
     enabled: true

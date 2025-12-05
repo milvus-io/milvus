@@ -1095,7 +1095,7 @@ quotaAndLimits:
     # To use this setting, set quotaAndLimits.flushRate.enabled to true at the same time.
     max: -1
     collection:
-      max: 0.1 # qps, default no limit, rate for flush at collection level.
+      max: 4 # qps, default no limit, rate for flush at collection level.
     db:
       max: -1 # qps of db level, default no limit, rate for flush
   compactionRate:
