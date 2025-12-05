@@ -29,6 +29,13 @@ func MustGetDefaultWALName() WALName {
 	return *defaultWALName.Load()
 }
 
+func GetDefaultWALName() WALName {
+	if defaultWALName.Load() == nil {
+		return WALNameUnknown
+	}
+	return *defaultWALName.Load()
+}
+
 // NewWALName create a WALName from string.
 func NewWALName(name string) WALName {
 	for wal, n := range walNameMap {
