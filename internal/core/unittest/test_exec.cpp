@@ -17,6 +17,8 @@
 #include <vector>
 #include <chrono>
 
+#include "arrow/api.h"
+#include "arrow/io/api.h"
 #include "query/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentSealed.h"
@@ -29,6 +31,7 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "mmap/Types.h"
 
 using namespace milvus;
 using namespace milvus::exec;
@@ -955,4 +958,283 @@ TEST_P(TaskTest, Test_MultiInConvert) {
         auto inputs = phy_expr->GetInputsRef();
         EXPECT_EQ(inputs.size(), 3);
     }
+}
+
+// This test verifies the fix for https://github.com/milvus-io/milvus/issues/46053.
+//
+// Bug scenario:
+// - Expression: int32_field == X AND int64_field == Y AND float_field > Z
+// - Data is stored in multiple chunks
+// - SkipIndex skips some chunks for the float range condition
+// - When a chunk is skipped, processed_cursor in execute_sub_batch wasn't updated
+// - This caused bitmap_input indices to be misaligned for subsequent expressions
+//
+// The fix ensures that when a chunk is skipped by SkipIndex, we still call
+// func(nullptr, ...) so that execute_sub_batch can update its internal cursors.
+//
+// Note: This test uses ChunkedSegmentSealedImpl which requires Arrow API for data loading.
+TEST(TaskTest, SkipIndexWithBitmapInputAlignment) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto int32_fid = schema->AddDebugField("int32_field", DataType::INT32);
+    auto int64_fid = schema->AddDebugField("int64_field", DataType::INT64);
+    auto float_fid = schema->AddDebugField("float_field", DataType::FLOAT);
+    schema->AddField(FieldName("ts"), TimestampFieldID, DataType::INT64, false);
+
+    // Use ChunkedSegmentSealedImpl to support multiple chunks (is_multi_chunk=true)
+    auto segment = CreateSealedSegment(schema,
+                                       nullptr,
+                                       0,
+                                       SegcoreConfig::default_config(),
+                                       false,
+                                       true /* is_multi_chunk */);
+
+    // Create two chunks with different data distributions:
+    // Chunk 0: float values [10, 20, 30, 40, 50] - will be SKIPPED by float > 60
+    // Chunk 1: float values [65, 70, 75, 80, 85] - will NOT be skipped
+    //
+    // We place the target row (int32=888, int64=999) in chunk 1 at index 2
+    // with float=75 which satisfies float > 60
+
+    const int64_t chunk_size = 5;
+    const int64_t num_chunks = 2;
+    const int64_t total_rows = chunk_size * num_chunks;
+
+    // Data for each chunk
+    // Chunk 0: pk=[100..104], int32=[11..15], int64=[1..5], float=[10,20,30,40,50]
+    // Chunk 1: pk=[105..109], int32=[16,17,888,19,20], int64=[6,7,999,9,10], float=[65,70,75,80,85]
+    std::vector<std::vector<int64_t>> pk_data = {{100, 101, 102, 103, 104},
+                                                 {105, 106, 107, 108, 109}};
+    std::vector<std::vector<int32_t>> int32_data = {{11, 12, 13, 14, 15},
+                                                    {16, 17, 888, 19, 20}};
+    std::vector<std::vector<int64_t>> int64_data = {{1, 2, 3, 4, 5},
+                                                    {6, 7, 999, 9, 10}};
+    std::vector<std::vector<float>> float_data = {
+        {10.0f, 20.0f, 30.0f, 40.0f, 50.0f},
+        {65.0f, 70.0f, 75.0f, 80.0f, 85.0f}};
+    std::vector<std::vector<int64_t>> ts_data = {{1, 1, 1, 1, 1},
+                                                 {1, 1, 1, 1, 1}};
+
+    // Helper lambda to create Arrow RecordBatchReader from data
+    auto create_int64_reader = [&](const std::vector<int64_t>& data,
+                                   const std::string& field_name)
+        -> std::shared_ptr<ArrowDataWrapper> {
+        auto builder = std::make_shared<arrow::Int64Builder>();
+        std::vector<bool> validity(data.size(), true);
+        EXPECT_TRUE(
+            builder->AppendValues(data.begin(), data.end(), validity.begin())
+                .ok());
+        std::shared_ptr<arrow::Array> arrow_array;
+        EXPECT_TRUE(builder->Finish(&arrow_array).ok());
+
+        auto arrow_field = arrow::field(field_name, arrow::int64());
+        auto arrow_schema =
+            std::make_shared<arrow::Schema>(arrow::FieldVector(1, arrow_field));
+        auto record_batch =
+            arrow::RecordBatch::Make(arrow_schema, data.size(), {arrow_array});
+        auto res = arrow::RecordBatchReader::Make({record_batch});
+        EXPECT_TRUE(res.ok());
+        return std::make_shared<ArrowDataWrapper>(
+            res.ValueOrDie(), nullptr, nullptr);
+    };
+
+    auto create_int32_reader = [&](const std::vector<int32_t>& data,
+                                   const std::string& field_name)
+        -> std::shared_ptr<ArrowDataWrapper> {
+        auto builder = std::make_shared<arrow::Int32Builder>();
+        std::vector<bool> validity(data.size(), true);
+        EXPECT_TRUE(
+            builder->AppendValues(data.begin(), data.end(), validity.begin())
+                .ok());
+        std::shared_ptr<arrow::Array> arrow_array;
+        EXPECT_TRUE(builder->Finish(&arrow_array).ok());
+
+        auto arrow_field = arrow::field(field_name, arrow::int32());
+        auto arrow_schema =
+            std::make_shared<arrow::Schema>(arrow::FieldVector(1, arrow_field));
+        auto record_batch =
+            arrow::RecordBatch::Make(arrow_schema, data.size(), {arrow_array});
+        auto res = arrow::RecordBatchReader::Make({record_batch});
+        EXPECT_TRUE(res.ok());
+        return std::make_shared<ArrowDataWrapper>(
+            res.ValueOrDie(), nullptr, nullptr);
+    };
+
+    auto create_float_reader = [&](const std::vector<float>& data,
+                                   const std::string& field_name)
+        -> std::shared_ptr<ArrowDataWrapper> {
+        auto builder = std::make_shared<arrow::FloatBuilder>();
+        std::vector<bool> validity(data.size(), true);
+        EXPECT_TRUE(
+            builder->AppendValues(data.begin(), data.end(), validity.begin())
+                .ok());
+        std::shared_ptr<arrow::Array> arrow_array;
+        EXPECT_TRUE(builder->Finish(&arrow_array).ok());
+
+        auto arrow_field = arrow::field(field_name, arrow::float32());
+        auto arrow_schema =
+            std::make_shared<arrow::Schema>(arrow::FieldVector(1, arrow_field));
+        auto record_batch =
+            arrow::RecordBatch::Make(arrow_schema, data.size(), {arrow_array});
+        auto res = arrow::RecordBatchReader::Make({record_batch});
+        EXPECT_TRUE(res.ok());
+        return std::make_shared<ArrowDataWrapper>(
+            res.ValueOrDie(), nullptr, nullptr);
+    };
+
+    // Load PK field
+    FieldDataInfo pk_info;
+    pk_info.field_id = pk_fid.get();
+    pk_info.row_count = total_rows;
+    for (int i = 0; i < num_chunks; i++) {
+        pk_info.arrow_reader_channel->push(
+            create_int64_reader(pk_data[i], "pk"));
+    }
+    pk_info.arrow_reader_channel->close();
+    segment->LoadFieldData(pk_fid, pk_info);
+
+    // Load int32 field
+    FieldDataInfo int32_info;
+    int32_info.field_id = int32_fid.get();
+    int32_info.row_count = total_rows;
+    for (int i = 0; i < num_chunks; i++) {
+        int32_info.arrow_reader_channel->push(
+            create_int32_reader(int32_data[i], "int32_field"));
+    }
+    int32_info.arrow_reader_channel->close();
+    segment->LoadFieldData(int32_fid, int32_info);
+
+    // Load int64 field
+    FieldDataInfo int64_info;
+    int64_info.field_id = int64_fid.get();
+    int64_info.row_count = total_rows;
+    for (int i = 0; i < num_chunks; i++) {
+        int64_info.arrow_reader_channel->push(
+            create_int64_reader(int64_data[i], "int64_field"));
+    }
+    int64_info.arrow_reader_channel->close();
+    segment->LoadFieldData(int64_fid, int64_info);
+
+    // Load float field
+    FieldDataInfo float_info;
+    float_info.field_id = float_fid.get();
+    float_info.row_count = total_rows;
+    for (int i = 0; i < num_chunks; i++) {
+        float_info.arrow_reader_channel->push(
+            create_float_reader(float_data[i], "float_field"));
+    }
+    float_info.arrow_reader_channel->close();
+    segment->LoadFieldData(float_fid, float_info);
+
+    // Load timestamp field
+    FieldDataInfo ts_info;
+    ts_info.field_id = TimestampFieldID.get();
+    ts_info.row_count = total_rows;
+    for (int i = 0; i < num_chunks; i++) {
+        ts_info.arrow_reader_channel->push(
+            create_int64_reader(ts_data[i], "ts"));
+    }
+    ts_info.arrow_reader_channel->close();
+    segment->LoadFieldData(TimestampFieldID, ts_info);
+
+    // Verify SkipIndex is working before running the expression:
+    // Check if chunk 0 can be skipped for float > 60
+    auto& skip_index = segment->GetSkipIndex();
+    bool chunk0_can_skip = skip_index.CanSkipUnaryRange<float>(
+        float_fid, 0, proto::plan::OpType::GreaterThan, 60.0f);
+    bool chunk1_can_skip = skip_index.CanSkipUnaryRange<float>(
+        float_fid, 1, proto::plan::OpType::GreaterThan, 60.0f);
+
+    // Chunk 0 should be skippable (max=50 < 60), chunk 1 should not (min=65 > 60)
+    EXPECT_TRUE(chunk0_can_skip)
+        << "Chunk 0 should be skippable for float > 60 (max=50)";
+    EXPECT_FALSE(chunk1_can_skip)
+        << "Chunk 1 should NOT be skippable for float > 60 (min=65)";
+
+    // Build the expression:
+    // int32_field == 888 AND int64_field == 999 AND float_field > 60
+
+    // int32_field == 888
+    proto::plan::GenericValue int32_val;
+    int32_val.set_int64_val(888);
+    auto int32_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int32_fid, DataType::INT32),
+        proto::plan::OpType::Equal,
+        int32_val);
+
+    // int64_field == 999
+    proto::plan::GenericValue int64_val;
+    int64_val.set_int64_val(999);
+    auto int64_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        int64_val);
+
+    // float_field > 60
+    proto::plan::GenericValue float_val;
+    float_val.set_float_val(60.0f);
+    auto float_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(float_fid, DataType::FLOAT),
+        proto::plan::OpType::GreaterThan,
+        float_val);
+
+    // Build AND expression: int32_expr AND int64_expr AND float_expr
+    auto and_expr1 = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, int32_expr, int64_expr);
+    auto and_expr2 = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, and_expr1, float_expr);
+
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", and_expr2, sources);
+    auto plan = plan::PlanFragment(filter_node);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_skip_index_bitmap_alignment",
+        segment.get(),
+        total_rows,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_skip_index_bitmap", plan, 0, query_context);
+
+    int64_t num_total_rows = 0;
+    int64_t filtered_rows = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+        if (col_vec && col_vec->IsBitmap()) {
+            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
+            num_total_rows += col_vec->size();
+            filtered_rows +=
+                view.count();  // These are filtered OUT (don't match)
+        }
+    }
+
+    int64_t num_matched = num_total_rows - filtered_rows;
+
+    // Expected result: exactly 1 row should match
+    // - Row at chunk 1, index 2 (global index 7) has:
+    //   - int32_field = 888 ✓
+    //   - int64_field = 999 ✓
+    //   - float_field = 75 > 60 ✓
+    //
+    // With the bug (before fix): 0 rows would match because bitmap_input
+    // indices were misaligned after chunk 0 was skipped.
+    //
+    // With the fix: 1 row should match correctly.
+    EXPECT_EQ(num_matched, 1);
 }
