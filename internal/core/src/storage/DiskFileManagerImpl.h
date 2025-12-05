@@ -166,6 +166,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheNgramIndexToDisk(const std::vector<std::string>& remote_files,
                           milvus::proto::common::LoadPriority priority);
+    void
+    CacheRemoteIndexFilePaths(const std::vector<std::string>& remote_files);
 
     void
     RemoveIndexFiles();
@@ -269,6 +271,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
  private:
     // local file path (abs path)
     std::vector<std::string> local_paths_;
+
+    // remote file paths when load index with stream
+    std::vector<std::string> remote_paths_;
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
