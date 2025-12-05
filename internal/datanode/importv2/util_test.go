@@ -495,6 +495,42 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:     "float vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_FloatVector,
+			nullable: true,
+		},
+		{
+			name:     "float16 vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_Float16Vector,
+			nullable: true,
+		},
+		{
+			name:     "bfloat16 vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_BFloat16Vector,
+			nullable: true,
+		},
+		{
+			name:     "binary vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_BinaryVector,
+			nullable: true,
+		},
+		{
+			name:     "sparse float vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_SparseFloatVector,
+			nullable: true,
+		},
+		{
+			name:     "int8 vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_Int8Vector,
+			nullable: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -511,6 +547,12 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
 			} else if tt.dataType == schemapb.DataType_VarChar {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
+			} else if tt.dataType == schemapb.DataType_FloatVector ||
+				tt.dataType == schemapb.DataType_Float16Vector ||
+				tt.dataType == schemapb.DataType_BFloat16Vector ||
+				tt.dataType == schemapb.DataType_BinaryVector ||
+				tt.dataType == schemapb.DataType_Int8Vector {
+				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
 			}
 
 			// create data without the new field
@@ -599,8 +641,21 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 					default:
 					}
 				} else if tt.nullable {
-					for i := 0; i < count; i++ {
-						assert.Nil(t, fieldData.GetRow(i))
+					validData := fieldData.GetValidData()
+					assert.Equal(t, count, len(validData), "ValidData length should equal row count")
+					for _, v := range validData {
+						assert.False(t, v, "all values should be null")
+					}
+					isVectorType := tt.dataType == schemapb.DataType_FloatVector ||
+						tt.dataType == schemapb.DataType_Float16Vector ||
+						tt.dataType == schemapb.DataType_BFloat16Vector ||
+						tt.dataType == schemapb.DataType_BinaryVector ||
+						tt.dataType == schemapb.DataType_SparseFloatVector ||
+						tt.dataType == schemapb.DataType_Int8Vector
+					if !isVectorType {
+						for i := 0; i < count; i++ {
+							assert.Nil(t, fieldData.GetRow(i))
+						}
 					}
 				}
 			}

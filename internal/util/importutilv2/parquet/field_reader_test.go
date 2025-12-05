@@ -340,7 +340,7 @@ func TestParseSparseFloatVectorStructs(t *testing.T) {
 }
 
 func TestReadFieldData(t *testing.T) {
-	checkFunc := func(dataHasNull bool, readScehamIsNullable bool, dataType schemapb.DataType, elementType schemapb.DataType) {
+	checkFunc := func(nullPercent int, readScehamIsNullable bool, dataType schemapb.DataType, elementType schemapb.DataType) {
 		fieldName := dataType.String()
 		if elementType != schemapb.DataType_None {
 			fieldName = fieldName + "_" + elementType.String()
@@ -352,7 +352,7 @@ func TestReadFieldData(t *testing.T) {
 					Name:        fieldName,
 					DataType:    dataType,
 					ElementType: elementType,
-					Nullable:    dataHasNull,
+					Nullable:    nullPercent != 0,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
 							Key:   "dim",
@@ -371,8 +371,12 @@ func TestReadFieldData(t *testing.T) {
 			},
 		}
 
+		useNullType := nullPercent == 100
 		arrDataType, err := convertToArrowDataType(schema.Fields[0], false)
 		assert.NoError(t, err)
+		if useNullType {
+			arrDataType = arrow.Null
+		}
 		arrFields := make([]arrow.Field, 0)
 		arrFields = append(arrFields, arrow.Field{
 			Name:     schema.Fields[0].Name,
@@ -392,13 +396,9 @@ func TestReadFieldData(t *testing.T) {
 		assert.NoError(t, err)
 
 		rowCount := 5
-		nullPercent := 0
-		if dataHasNull {
-			nullPercent = 50
-		}
 		insertData, err := testutil.CreateInsertData(schema, rowCount, nullPercent)
 		assert.NoError(t, err)
-		columns, err := testutil.BuildArrayData(schema, insertData, false)
+		columns, err := testutil.BuildArrayData(schema, insertData, useNullType)
 		assert.NoError(t, err)
 
 		recordBatch := array.NewRecord(pqSchema, columns, int64(rowCount))
@@ -413,12 +413,19 @@ func TestReadFieldData(t *testing.T) {
 
 		schema.Fields[0].Nullable = readScehamIsNullable
 		reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+
+		if nullPercent == 100 && !readScehamIsNullable {
+			assert.Error(t, err)
+			assert.Nil(t, reader)
+			return
+		}
+
 		assert.NoError(t, err)
 		assert.NotNil(t, reader)
 		defer reader.Close()
 
 		_, err = reader.Read()
-		if !readScehamIsNullable && dataHasNull {
+		if !readScehamIsNullable && nullPercent != 0 {
 			assert.Error(t, err)
 		} else {
 			assert.NoError(t, err)
@@ -427,17 +434,17 @@ func TestReadFieldData(t *testing.T) {
 
 	type testCase struct {
 		name                 string
-		dataHasNull          bool
+		nullPercent          int
 		readScehamIsNullable bool
 		dataType             schemapb.DataType
 		elementType          schemapb.DataType
 	}
-	buildCaseFunc := func(dataHasNull bool, readScehamIsNullable bool, dataType schemapb.DataType, elementType schemapb.DataType) *testCase {
-		name := fmt.Sprintf("dataHasNull='%v' schemaNullable='%v' dataType='%s' elementType='%s'",
-			dataHasNull, readScehamIsNullable, dataType, elementType)
+	buildCaseFunc := func(nullPercent int, readScehamIsNullable bool, dataType schemapb.DataType, elementType schemapb.DataType) *testCase {
+		name := fmt.Sprintf("nullPercent='%v' schemaNullable='%v' dataType='%s' elementType='%s'",
+			nullPercent, readScehamIsNullable, dataType, elementType)
 		return &testCase{
 			name:                 name,
-			dataHasNull:          dataHasNull,
+			nullPercent:          nullPercent,
 			readScehamIsNullable: readScehamIsNullable,
 			dataType:             dataType,
 			elementType:          elementType,
@@ -454,12 +461,19 @@ func TestReadFieldData(t *testing.T) {
 		schemapb.DataType_Float,
 		schemapb.DataType_Double,
 		schemapb.DataType_VarChar,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
 	}
 	for _, dataType := range nullableDataTypes {
-		cases = append(cases, buildCaseFunc(true, true, dataType, schemapb.DataType_None))
-		cases = append(cases, buildCaseFunc(true, false, dataType, schemapb.DataType_None))
-		cases = append(cases, buildCaseFunc(false, true, dataType, schemapb.DataType_None))
-		cases = append(cases, buildCaseFunc(false, true, dataType, schemapb.DataType_None))
+		for _, nullPercent := range []int{0, 50, 100} {
+			for _, readScehamIsNullable := range []bool{true, false} {
+				cases = append(cases, buildCaseFunc(nullPercent, readScehamIsNullable, dataType, schemapb.DataType_None))
+			}
+		}
 	}
 
 	elementTypes := []schemapb.DataType{
@@ -473,28 +487,23 @@ func TestReadFieldData(t *testing.T) {
 		schemapb.DataType_VarChar,
 	}
 	for _, elementType := range elementTypes {
-		cases = append(cases, buildCaseFunc(true, true, schemapb.DataType_Array, elementType))
-		cases = append(cases, buildCaseFunc(true, false, schemapb.DataType_Array, elementType))
-		cases = append(cases, buildCaseFunc(false, true, schemapb.DataType_Array, elementType))
-		cases = append(cases, buildCaseFunc(false, false, schemapb.DataType_Array, elementType))
+		for _, nullPercent := range []int{0, 50, 100} {
+			for _, readScehamIsNullable := range []bool{true, false} {
+				cases = append(cases, buildCaseFunc(nullPercent, readScehamIsNullable, schemapb.DataType_Array, elementType))
+			}
+		}
 	}
 
 	notNullableTypes := []schemapb.DataType{
 		schemapb.DataType_JSON,
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_BinaryVector,
-		schemapb.DataType_SparseFloatVector,
-		schemapb.DataType_Float16Vector,
-		schemapb.DataType_BFloat16Vector,
-		schemapb.DataType_Int8Vector,
 	}
 	for _, dataType := range notNullableTypes {
-		cases = append(cases, buildCaseFunc(false, false, dataType, schemapb.DataType_None))
+		cases = append(cases, buildCaseFunc(0, false, dataType, schemapb.DataType_None))
 	}
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			checkFunc(tt.dataHasNull, tt.readScehamIsNullable, tt.dataType, tt.elementType)
+			checkFunc(tt.nullPercent, tt.readScehamIsNullable, tt.dataType, tt.elementType)
 		})
 	}
 }
@@ -654,14 +663,25 @@ func TestTypeMismatch(t *testing.T) {
 		cases = append(cases, buildCaseFunc(schemapb.DataType_Bool, schemapb.DataType_None, schemapb.DataType_Array, elementType, false))
 	}
 
-	notNullableTypes := []schemapb.DataType{
-		schemapb.DataType_JSON,
+	vectorTypes := []schemapb.DataType{
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_SparseFloatVector,
 		schemapb.DataType_Float16Vector,
 		schemapb.DataType_BFloat16Vector,
 		schemapb.DataType_Int8Vector,
+	}
+	for _, dataType := range vectorTypes {
+		srcDataType := schemapb.DataType_Bool
+		cases = append(cases, buildCaseFunc(srcDataType, schemapb.DataType_None, dataType, schemapb.DataType_None, true))
+		cases = append(cases, buildCaseFunc(srcDataType, schemapb.DataType_None, dataType, schemapb.DataType_None, false))
+
+		cases = append(cases, buildCaseFunc(schemapb.DataType_Array, schemapb.DataType_Bool, dataType, schemapb.DataType_None, true))
+		cases = append(cases, buildCaseFunc(schemapb.DataType_Array, schemapb.DataType_Bool, dataType, schemapb.DataType_None, false))
+	}
+
+	notNullableTypes := []schemapb.DataType{
+		schemapb.DataType_JSON,
 	}
 	for _, dataType := range notNullableTypes {
 		srcDataType := schemapb.DataType_Bool
