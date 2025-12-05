@@ -173,13 +173,36 @@ DiskFileManagerImpl::AddFileInternal(
 std::shared_ptr<InputStream>
 DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
     auto local_file_name = GetFileName(filename);
-    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    std::string remote_file_path;
+
+    auto get_local_file_name =
+        [&](const std::string& file_path) -> std::string {
+        auto pos = file_path.find_last_of('/');
+        return pos == std::string::npos ? file_path : file_path.substr(pos + 1);
+    };
+
+    // because all remote paths are shared with prefix, only need to compare the filename
+    for (auto& file : remote_paths_) {
+        if (get_local_file_name(file) == local_file_name) {
+            remote_file_path = file;
+            break;
+        }
+    }
+
+    AssertInfo(
+        !remote_file_path.empty(),
+        "remote file path is empty for local file: {}, remote file paths: {}",
+        local_file_name,
+        fmt::join(remote_paths_, ", "));
 
     auto fs = fs_;
     AssertInfo(fs, "fs is nullptr");
 
     auto remote_file = fs->OpenInputFile(remote_file_path);
-    AssertInfo(remote_file.ok(), "failed to open remote file");
+    AssertInfo(
+        remote_file.ok(),
+        "failed to open remote file, remote_file_path = " + remote_file_path);
     return std::static_pointer_cast<milvus::InputStream>(
         std::make_shared<milvus::storage::RemoteInputStream>(
             std::move(remote_file.ValueOrDie())));
@@ -414,6 +437,12 @@ DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
         return cache_raw_data_to_disk_storage_v2<DataType>(config);
     }
     return cache_raw_data_to_disk_internal<DataType>(config);
+}
+
+void
+DiskFileManagerImpl::CacheRemoteIndexFilePaths(
+    const std::vector<std::string>& remote_files) {
+    remote_paths_ = remote_files;
 }
 
 template <typename DataType>
