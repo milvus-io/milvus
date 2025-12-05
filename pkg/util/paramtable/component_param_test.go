@@ -414,6 +414,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 
 		assert.Equal(t, 100, Params.BalanceCheckCollectionMaxCount.GetAsInt())
+		assert.Equal(t, 30, Params.ResourceExhaustionPenaltyDuration.GetAsInt())
+		assert.Equal(t, 10, Params.ResourceExhaustionCleanupInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

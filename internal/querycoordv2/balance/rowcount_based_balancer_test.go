@@ -1258,6 +1258,31 @@ func assertSegmentAssignPlanElementMatch(suite *suite.Suite, left []SegmentAssig
 	}
 }
 
+// assertSegmentPlanNumAndTargetNodeMatch checks that:
+// 1. The number of plans matches the expected count
+// 2. Each plan's target node is in the expected target nodes set (extracted from expectPlans)
+// 3. The number of unique target nodes matches between expected and actual plans
+func assertSegmentPlanNumAndTargetNodeMatch(suite *suite.Suite, expectPlans []SegmentAssignPlan, plans []SegmentAssignPlan) {
+	suite.Len(plans, len(expectPlans))
+
+	// Extract expected target nodes from expectPlans
+	expectedSet := make(map[int64]struct{})
+	for _, p := range expectPlans {
+		expectedSet[p.To] = struct{}{}
+	}
+
+	// Extract actual target nodes from plans
+	actualSet := make(map[int64]struct{})
+	for _, plan := range plans {
+		_, ok := expectedSet[plan.To]
+		suite.True(ok, "target node %d not in expected set", plan.To)
+		actualSet[plan.To] = struct{}{}
+	}
+
+	// Check that the number of unique target nodes matches
+	suite.Len(actualSet, len(expectedSet), "number of unique target nodes mismatch: expected %d, got %d", len(expectedSet), len(actualSet))
+}
+
 // remove it after resource group enhancement.
 func assertChannelAssignPlanElementMatch(suite *suite.Suite, left []ChannelAssignPlan, right []ChannelAssignPlan, subset ...bool) {
 	type comparablePlan struct {
@@ -1299,4 +1324,29 @@ func assertChannelAssignPlanElementMatch(suite *suite.Suite, left []ChannelAssig
 	} else {
 		suite.ElementsMatch(leftPlan, rightPlan)
 	}
+}
+
+// assertChannelPlanNumAndTargetNodeMatch checks that:
+// 1. The number of plans matches the expected count
+// 2. Each plan's target node is in the expected target nodes set (extracted from expectPlans)
+// 3. The number of unique target nodes matches between expected and actual plans
+func assertChannelPlanNumAndTargetNodeMatch(suite *suite.Suite, expectPlans []ChannelAssignPlan, plans []ChannelAssignPlan) {
+	suite.Len(plans, len(expectPlans))
+
+	// Extract expected target nodes from expectPlans
+	expectedSet := make(map[int64]struct{})
+	for _, p := range expectPlans {
+		expectedSet[p.To] = struct{}{}
+	}
+
+	// Extract actual target nodes from plans
+	actualSet := make(map[int64]struct{})
+	for _, plan := range plans {
+		_, ok := expectedSet[plan.To]
+		suite.True(ok, "target node %d not in expected set", plan.To)
+		actualSet[plan.To] = struct{}{}
+	}
+
+	// Check that the number of unique target nodes matches
+	suite.Len(actualSet, len(expectedSet), "number of unique target nodes mismatch: expected %d, got %d", len(expectedSet), len(actualSet))
 }
