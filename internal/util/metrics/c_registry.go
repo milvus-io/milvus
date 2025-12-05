@@ -24,6 +24,7 @@ package metrics
 #include <stdlib.h>
 #include "segcore/metrics_c.h"
 #include "monitor/monitor_c.h"
+#include "monitor/jemalloc_stats_c.h"
 
 */
 import "C"
@@ -39,6 +40,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
@@ -125,6 +127,8 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 	var parser expfmt.TextParser
 
 	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+
 	cMetricsStr := C.GetKnowhereMetrics()
 	metricsStr := C.GoString(cMetricsStr)
 	C.free(unsafe.Pointer(cMetricsStr))
@@ -146,6 +150,62 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 	}
 
 	maps.Copy(out, out1)
+
+	// Add jemalloc stats metrics
+	jemallocMetrics := gatherJemallocMetrics()
+	for name, mf := range jemallocMetrics {
+		out[name] = mf
+	}
+
 	res = NormalizeMetricFamilies(out)
 	return
+}
+
+// gatherJemallocMetrics collects jemalloc stats and returns them as metric families.
+func gatherJemallocMetrics() map[string]*dto.MetricFamily {
+	result := make(map[string]*dto.MetricFamily)
+
+	cStats := C.GetJemallocStats()
+	if !bool(cStats.success) {
+		log.Warn("failed to get jemalloc stats")
+		return result
+	}
+
+	gaugeType := dto.MetricType_GAUGE
+
+	// Helper function to create a gauge metric family
+	createGaugeFamily := func(name, help string, value float64) *dto.MetricFamily {
+		return &dto.MetricFamily{
+			Name: proto.String(name),
+			Help: proto.String(help),
+			Type: &gaugeType,
+			Metric: []*dto.Metric{
+				{
+					Gauge: &dto.Gauge{
+						Value: proto.Float64(value),
+					},
+				},
+			},
+		}
+	}
+
+	// Define all jemalloc metrics
+	metrics := []struct {
+		name  string
+		help  string
+		value uint64
+	}{
+		{"milvus_jemalloc_allocated_bytes", "Total number of bytes allocated by the application", uint64(cStats.allocated)},
+		{"milvus_jemalloc_active_bytes", "Total number of bytes in active pages allocated by the application", uint64(cStats.active)},
+		{"milvus_jemalloc_metadata_bytes", "Total number of bytes dedicated to jemalloc metadata", uint64(cStats.metadata)},
+		{"milvus_jemalloc_resident_bytes", "Total number of bytes in physically resident data pages mapped by the allocator", uint64(cStats.resident)},
+		{"milvus_jemalloc_mapped_bytes", "Total number of bytes in virtual memory mappings", uint64(cStats.mapped)},
+		{"milvus_jemalloc_retained_bytes", "Total number of bytes in retained virtual memory mappings", uint64(cStats.retained)},
+	}
+
+	for _, m := range metrics {
+		result[m.name] = createGaugeFamily(m.name, m.help, float64(m.value))
+	}
+
+	return result
 }
