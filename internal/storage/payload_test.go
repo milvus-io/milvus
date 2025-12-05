@@ -484,7 +484,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			in2[i] = 1
 		}
 
-		err = w.AddBinaryVectorToPayload(in, 8)
+		err = w.AddBinaryVectorToPayload(in, 8, nil)
 		assert.NoError(t, err)
 		err = w.AddDataToPayloadForUT(in2, nil)
 		assert.NoError(t, err)
@@ -505,7 +505,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, length, 24)
 
-		binVecs, dim, err := r.GetBinaryVectorFromPayload()
+		binVecs, dim, _, _, err := r.GetBinaryVectorFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, 8, dim)
 		assert.Equal(t, 24, len(binVecs))
@@ -524,7 +524,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddFloatVectorToPayload([]float32{1.0, 2.0}, 1)
+		err = w.AddFloatVectorToPayload([]float32{1.0, 2.0}, 1, nil)
 		assert.NoError(t, err)
 		err = w.AddDataToPayloadForUT([]float32{3.0, 4.0}, nil)
 		assert.NoError(t, err)
@@ -545,7 +545,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, length, 4)
 
-		floatVecs, dim, err := r.GetFloatVectorFromPayload()
+		floatVecs, dim, _, _, err := r.GetFloatVectorFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, 1, dim)
 		assert.Equal(t, 4, len(floatVecs))
@@ -566,7 +566,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddFloat16VectorToPayload([]byte{1, 2}, 1)
+		err = w.AddFloat16VectorToPayload([]byte{1, 2}, 1, nil)
 		assert.NoError(t, err)
 		err = w.AddDataToPayloadForUT([]byte{3, 4}, nil)
 		assert.NoError(t, err)
@@ -587,7 +587,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, length, 2)
 
-		float16Vecs, dim, err := r.GetFloat16VectorFromPayload()
+		float16Vecs, dim, _, _, err := r.GetFloat16VectorFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, 1, dim)
 		assert.Equal(t, 4, len(float16Vecs))
@@ -608,7 +608,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddBFloat16VectorToPayload([]byte{1, 2}, 1)
+		err = w.AddBFloat16VectorToPayload([]byte{1, 2}, 1, nil)
 		assert.NoError(t, err)
 		err = w.AddDataToPayloadForUT([]byte{3, 4}, nil)
 		assert.NoError(t, err)
@@ -629,7 +629,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, length, 2)
 
-		bfloat16Vecs, dim, err := r.GetBFloat16VectorFromPayload()
+		bfloat16Vecs, dim, _, _, err := r.GetBFloat16VectorFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, 1, dim)
 		assert.Equal(t, 4, len(bfloat16Vecs))
@@ -689,7 +689,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, length, 6)
 
-		floatVecs, dim, err := r.GetSparseFloatVectorFromPayload()
+		floatVecs, dim, _, err := r.GetSparseFloatVectorFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, 600, dim)
 		assert.Equal(t, 6, len(floatVecs.Contents))
@@ -743,7 +743,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, length, 3)
 
-		floatVecs, dim, err := r.GetSparseFloatVectorFromPayload()
+		floatVecs, dim, _, err := r.GetSparseFloatVectorFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, actualDim, dim)
 		assert.Equal(t, 3, len(floatVecs.Contents))
@@ -951,16 +951,16 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		err = w.FinishPayloadWriter()
 		assert.NoError(t, err)
 
-		err = w.AddBinaryVectorToPayload([]byte{}, 8)
+		err = w.AddBinaryVectorToPayload([]byte{}, 8, nil)
 		assert.Error(t, err)
-		err = w.AddBinaryVectorToPayload([]byte{1}, 0)
+		err = w.AddBinaryVectorToPayload([]byte{1}, 0, nil)
 		assert.Error(t, err)
 
-		err = w.AddBinaryVectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddBinaryVectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.Error(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Error(t, err)
-		err = w.AddBinaryVectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddBinaryVectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.Error(t, err)
 	})
 	t.Run("TestAddFloatVectorAfterFinish", func(t *testing.T) {
@@ -972,16 +972,16 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		err = w.FinishPayloadWriter()
 		assert.NoError(t, err)
 
-		err = w.AddFloatVectorToPayload([]float32{}, 8)
+		err = w.AddFloatVectorToPayload([]float32{}, 8, nil)
 		assert.Error(t, err)
-		err = w.AddFloatVectorToPayload([]float32{1.0}, 0)
+		err = w.AddFloatVectorToPayload([]float32{1.0}, 0, nil)
 		assert.Error(t, err)
 
-		err = w.AddFloatVectorToPayload([]float32{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 8)
+		err = w.AddFloatVectorToPayload([]float32{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 8, nil)
 		assert.Error(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Error(t, err)
-		err = w.AddFloatVectorToPayload([]float32{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 8)
+		err = w.AddFloatVectorToPayload([]float32{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 8, nil)
 		assert.Error(t, err)
 	})
 	t.Run("TestAddFloat16VectorAfterFinish", func(t *testing.T) {
@@ -990,22 +990,22 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.NotNil(t, w)
 		defer w.Close()
 
-		err = w.AddFloat16VectorToPayload([]byte{}, 8)
+		err = w.AddFloat16VectorToPayload([]byte{}, 8, nil)
 		assert.Error(t, err)
 
 		err = w.FinishPayloadWriter()
 		assert.NoError(t, err)
 
-		err = w.AddFloat16VectorToPayload([]byte{}, 8)
+		err = w.AddFloat16VectorToPayload([]byte{}, 8, nil)
 		assert.Error(t, err)
-		err = w.AddFloat16VectorToPayload([]byte{1}, 0)
+		err = w.AddFloat16VectorToPayload([]byte{1}, 0, nil)
 		assert.Error(t, err)
 
-		err = w.AddFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.Error(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Error(t, err)
-		err = w.AddFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.Error(t, err)
 	})
 	t.Run("TestAddBFloat16VectorAfterFinish", func(t *testing.T) {
@@ -1014,22 +1014,22 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.NotNil(t, w)
 		defer w.Close()
 
-		err = w.AddBFloat16VectorToPayload([]byte{}, 8)
+		err = w.AddBFloat16VectorToPayload([]byte{}, 8, nil)
 		assert.Error(t, err)
 
 		err = w.FinishPayloadWriter()
 		assert.NoError(t, err)
 
-		err = w.AddBFloat16VectorToPayload([]byte{}, 8)
+		err = w.AddBFloat16VectorToPayload([]byte{}, 8, nil)
 		assert.Error(t, err)
-		err = w.AddBFloat16VectorToPayload([]byte{1}, 0)
+		err = w.AddBFloat16VectorToPayload([]byte{1}, 0, nil)
 		assert.Error(t, err)
 
-		err = w.AddBFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddBFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.Error(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Error(t, err)
-		err = w.AddBFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddBFloat16VectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.Error(t, err)
 	})
 	t.Run("TestAddSparseFloatVectorAfterFinish", func(t *testing.T) {
@@ -1481,11 +1481,11 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		r, err := NewPayloadReader(schemapb.DataType_BinaryVector, buffer, false)
 		assert.NoError(t, err)
 
-		_, _, err = r.GetBinaryVectorFromPayload()
+		_, _, _, _, err = r.GetBinaryVectorFromPayload()
 		assert.Error(t, err)
 
 		r.colType = 999
-		_, _, err = r.GetBinaryVectorFromPayload()
+		_, _, _, _, err = r.GetBinaryVectorFromPayload()
 		assert.Error(t, err)
 	})
 	t.Run("TestGetBinaryVectorError2", func(t *testing.T) {
@@ -1493,7 +1493,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddBinaryVectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8)
+		err = w.AddBinaryVectorToPayload([]byte{1, 0, 0, 0, 0, 0, 0, 0}, 8, nil)
 		assert.NoError(t, err)
 
 		err = w.FinishPayloadWriter()
@@ -1506,7 +1506,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 
 		r.numRows = 99
-		_, _, err = r.GetBinaryVectorFromPayload()
+		_, _, _, _, err = r.GetBinaryVectorFromPayload()
 		assert.Error(t, err)
 	})
 	t.Run("TestGetFloatVectorError", func(t *testing.T) {
@@ -1526,11 +1526,11 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		r, err := NewPayloadReader(schemapb.DataType_FloatVector, buffer, false)
 		assert.NoError(t, err)
 
-		_, _, err = r.GetFloatVectorFromPayload()
+		_, _, _, _, err = r.GetFloatVectorFromPayload()
 		assert.Error(t, err)
 
 		r.colType = 999
-		_, _, err = r.GetFloatVectorFromPayload()
+		_, _, _, _, err = r.GetFloatVectorFromPayload()
 		assert.Error(t, err)
 	})
 	t.Run("TestGetFloatVectorError2", func(t *testing.T) {
@@ -1538,7 +1538,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddFloatVectorToPayload([]float32{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 8)
+		err = w.AddFloatVectorToPayload([]float32{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 8, nil)
 		assert.NoError(t, err)
 
 		err = w.FinishPayloadWriter()
@@ -1551,7 +1551,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NoError(t, err)
 
 		r.numRows = 99
-		_, _, err = r.GetFloatVectorFromPayload()
+		_, _, _, _, err = r.GetFloatVectorFromPayload()
 		assert.Error(t, err)
 	})
 
@@ -1599,7 +1599,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_FloatVector)
 		assert.NoError(t, err)
 
-		err = w.AddFloatVectorToPayload(vec, 128)
+		err = w.AddFloatVectorToPayload(vec, 128, nil)
 		assert.NoError(t, err)
 
 		err = w.FinishPayloadWriter()
@@ -2234,19 +2234,549 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		w.ReleasePayloadWriter()
 	})
 
-	t.Run("TestBinaryVector", func(t *testing.T) {
-		_, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithNullable(true), WithDim(8))
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	t.Run("TestFloatVector", func(t *testing.T) {
+		dim := 128
+		numRows := 100
+
+		type testCase struct {
+			name           string
+			validDataSetup func([]bool) int
+		}
+
+		testCases := []testCase{
+			{
+				name: "half null",
+				validDataSetup: func(validData []bool) int {
+					validCount := 0
+					for i := 0; i < numRows; i++ {
+						if i%2 == 0 {
+							validData[i] = true
+							validCount++
+						}
+					}
+					return validCount
+				},
+			},
+			{
+				name: "all valid",
+				validDataSetup: func(validData []bool) int {
+					for i := 0; i < numRows; i++ {
+						validData[i] = true
+					}
+					return numRows
+				},
+			},
+			{
+				name: "all null",
+				validDataSetup: func(validData []bool) int {
+					return 0
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			w, err := NewPayloadWriter(schemapb.DataType_FloatVector, WithDim(dim), WithNullable(true))
+			require.NoError(t, err)
+
+			validData := make([]bool, numRows)
+			validCount := tc.validDataSetup(validData)
+
+			data := make([]float32, validCount*dim)
+			dataIdx := 0
+			for i := 0; i < numRows; i++ {
+				if validData[i] {
+					for j := 0; j < dim; j++ {
+						data[dataIdx*dim+j] = float32(i*100 + j)
+					}
+					dataIdx++
+				}
+			}
+
+			err = w.AddFloatVectorToPayload(data, dim, validData)
+			require.NoError(t, err)
+
+			err = w.FinishPayloadWriter()
+			require.NoError(t, err)
+
+			buffer, err := w.GetPayloadBufferFromWriter()
+			require.NoError(t, err)
+
+			r, err := NewPayloadReader(schemapb.DataType_FloatVector, buffer, true)
+			require.NoError(t, err)
+
+			readData, readDim, readValid, readNumRows, err := r.GetFloatVectorFromPayload()
+			require.NoError(t, err)
+			require.Equal(t, dim, readDim)
+			require.Equal(t, numRows, readNumRows)
+			require.Equal(t, numRows, len(readValid))
+
+			dataIdx = 0
+			for i := 0; i < numRows; i++ {
+				require.Equal(t, validData[i], readValid[i])
+				if validData[i] {
+					pos := dataIdx
+					for j := 0; j < dim; j++ {
+						require.Equal(t, data[dataIdx*dim+j], readData[pos*dim+j])
+					}
+					dataIdx++
+				}
+			}
+		}
 	})
 
-	t.Run("TestFloatVector", func(t *testing.T) {
-		_, err := NewPayloadWriter(schemapb.DataType_FloatVector, WithNullable(true), WithDim(1))
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	t.Run("TestBinaryVector", func(t *testing.T) {
+		dim := 128
+		numRows := 100
+
+		type testCase struct {
+			name           string
+			validDataSetup func([]bool) int
+		}
+
+		testCases := []testCase{
+			{
+				name: "partial null",
+				validDataSetup: func(validData []bool) int {
+					validCount := 0
+					for i := 0; i < numRows; i++ {
+						if i%3 == 0 {
+							validData[i] = true
+							validCount++
+						}
+					}
+					return validCount
+				},
+			},
+			{
+				name: "all valid",
+				validDataSetup: func(validData []bool) int {
+					for i := 0; i < numRows; i++ {
+						validData[i] = true
+					}
+					return numRows
+				},
+			},
+			{
+				name: "all null",
+				validDataSetup: func(validData []bool) int {
+					return 0
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, WithDim(dim), WithNullable(true))
+			require.NoError(t, err)
+
+			validData := make([]bool, numRows)
+			validCount := tc.validDataSetup(validData)
+
+			data := make([]byte, validCount*dim/8)
+			dataIdx := 0
+			for i := 0; i < numRows; i++ {
+				if validData[i] {
+					for j := 0; j < dim/8; j++ {
+						data[dataIdx*dim/8+j] = byte(i + j)
+					}
+					dataIdx++
+				}
+			}
+
+			err = w.AddBinaryVectorToPayload(data, dim, validData)
+			require.NoError(t, err)
+
+			err = w.FinishPayloadWriter()
+			require.NoError(t, err)
+
+			buffer, err := w.GetPayloadBufferFromWriter()
+			require.NoError(t, err)
+
+			r, err := NewPayloadReader(schemapb.DataType_BinaryVector, buffer, true)
+			require.NoError(t, err)
+
+			readData, readDim, readValid, readNumRows, err := r.GetBinaryVectorFromPayload()
+			require.NoError(t, err)
+			require.Equal(t, dim, readDim)
+			require.Equal(t, numRows, readNumRows)
+			require.Equal(t, numRows, len(readValid))
+
+			dataIdx = 0
+			for i := 0; i < numRows; i++ {
+				require.Equal(t, validData[i], readValid[i])
+				if validData[i] {
+					pos := dataIdx
+					for j := 0; j < dim/8; j++ {
+						require.Equal(t, data[dataIdx*dim/8+j], readData[pos*dim/8+j])
+					}
+					dataIdx++
+				}
+			}
+		}
 	})
 
 	t.Run("TestFloat16Vector", func(t *testing.T) {
-		_, err := NewPayloadWriter(schemapb.DataType_Float16Vector, WithNullable(true), WithDim(1))
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		dim := 128
+		numRows := 100
+
+		type testCase struct {
+			name           string
+			validDataSetup func([]bool) int
+		}
+
+		testCases := []testCase{
+			{
+				name: "partial null",
+				validDataSetup: func(validData []bool) int {
+					validCount := 0
+					for i := 0; i < numRows; i++ {
+						if i%2 == 1 {
+							validData[i] = true
+							validCount++
+						}
+					}
+					return validCount
+				},
+			},
+			{
+				name: "all valid",
+				validDataSetup: func(validData []bool) int {
+					for i := 0; i < numRows; i++ {
+						validData[i] = true
+					}
+					return numRows
+				},
+			},
+			{
+				name: "all null",
+				validDataSetup: func(validData []bool) int {
+					return 0
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			w, err := NewPayloadWriter(schemapb.DataType_Float16Vector, WithDim(dim), WithNullable(true))
+			require.NoError(t, err)
+
+			validData := make([]bool, numRows)
+			validCount := tc.validDataSetup(validData)
+
+			data := make([]byte, validCount*dim*2)
+			dataIdx := 0
+			for i := 0; i < numRows; i++ {
+				if validData[i] {
+					for j := 0; j < dim*2; j++ {
+						data[dataIdx*dim*2+j] = byte((i*10 + j) % 256)
+					}
+					dataIdx++
+				}
+			}
+
+			err = w.AddFloat16VectorToPayload(data, dim, validData)
+			require.NoError(t, err)
+
+			err = w.FinishPayloadWriter()
+			require.NoError(t, err)
+
+			buffer, err := w.GetPayloadBufferFromWriter()
+			require.NoError(t, err)
+
+			r, err := NewPayloadReader(schemapb.DataType_Float16Vector, buffer, true)
+			require.NoError(t, err)
+
+			readData, readDim, readValid, readNumRows, err := r.GetFloat16VectorFromPayload()
+			require.NoError(t, err)
+			require.Equal(t, dim, readDim)
+			require.Equal(t, numRows, readNumRows)
+			require.Equal(t, numRows, len(readValid))
+
+			dataIdx = 0
+			for i := 0; i < numRows; i++ {
+				require.Equal(t, validData[i], readValid[i])
+				if validData[i] {
+					pos := dataIdx
+					for j := 0; j < dim*2; j++ {
+						require.Equal(t, data[dataIdx*dim*2+j], readData[pos*dim*2+j])
+					}
+					dataIdx++
+				}
+			}
+		}
+	})
+
+	t.Run("TestBFloat16Vector", func(t *testing.T) {
+		dim := 128
+		numRows := 100
+
+		type testCase struct {
+			name           string
+			validDataSetup func([]bool) int
+		}
+
+		testCases := []testCase{
+			{
+				name: "partial null",
+				validDataSetup: func(validData []bool) int {
+					validCount := 0
+					for i := 0; i < numRows; i++ {
+						if (i+1)%3 != 0 {
+							validData[i] = true
+							validCount++
+						}
+					}
+					return validCount
+				},
+			},
+			{
+				name: "all valid",
+				validDataSetup: func(validData []bool) int {
+					for i := 0; i < numRows; i++ {
+						validData[i] = true
+					}
+					return numRows
+				},
+			},
+			{
+				name: "all null",
+				validDataSetup: func(validData []bool) int {
+					return 0
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			w, err := NewPayloadWriter(schemapb.DataType_BFloat16Vector, WithDim(dim), WithNullable(true))
+			require.NoError(t, err)
+
+			validData := make([]bool, numRows)
+			validCount := tc.validDataSetup(validData)
+
+			data := make([]byte, validCount*dim*2)
+			dataIdx := 0
+			for i := 0; i < numRows; i++ {
+				if validData[i] {
+					for j := 0; j < dim*2; j++ {
+						data[dataIdx*dim*2+j] = byte((i*20 + j) % 256)
+					}
+					dataIdx++
+				}
+			}
+
+			err = w.AddBFloat16VectorToPayload(data, dim, validData)
+			require.NoError(t, err)
+
+			err = w.FinishPayloadWriter()
+			require.NoError(t, err)
+
+			buffer, err := w.GetPayloadBufferFromWriter()
+			require.NoError(t, err)
+
+			r, err := NewPayloadReader(schemapb.DataType_BFloat16Vector, buffer, true)
+			require.NoError(t, err)
+
+			readData, readDim, readValid, readNumRows, err := r.GetBFloat16VectorFromPayload()
+			require.NoError(t, err)
+			require.Equal(t, dim, readDim)
+			require.Equal(t, numRows, readNumRows)
+			require.Equal(t, numRows, len(readValid))
+
+			dataIdx = 0
+			for i := 0; i < numRows; i++ {
+				require.Equal(t, validData[i], readValid[i])
+				if validData[i] {
+					pos := dataIdx
+					for j := 0; j < dim*2; j++ {
+						require.Equal(t, data[dataIdx*dim*2+j], readData[pos*dim*2+j])
+					}
+					dataIdx++
+				}
+			}
+		}
+	})
+
+	t.Run("TestInt8Vector", func(t *testing.T) {
+		dim := 128
+		numRows := 100
+
+		type testCase struct {
+			name           string
+			validDataSetup func([]bool) int
+		}
+
+		testCases := []testCase{
+			{
+				name: "partial null",
+				validDataSetup: func(validData []bool) int {
+					validCount := 0
+					for i := 0; i < numRows; i++ {
+						if i < numRows/2 {
+							validData[i] = true
+							validCount++
+						}
+					}
+					return validCount
+				},
+			},
+			{
+				name: "all valid",
+				validDataSetup: func(validData []bool) int {
+					for i := 0; i < numRows; i++ {
+						validData[i] = true
+					}
+					return numRows
+				},
+			},
+			{
+				name: "all null",
+				validDataSetup: func(validData []bool) int {
+					return 0
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			w, err := NewPayloadWriter(schemapb.DataType_Int8Vector, WithDim(dim), WithNullable(true))
+			require.NoError(t, err)
+
+			validData := make([]bool, numRows)
+			validCount := tc.validDataSetup(validData)
+
+			data := make([]int8, validCount*dim)
+			dataIdx := 0
+			for i := 0; i < numRows; i++ {
+				if validData[i] {
+					for j := 0; j < dim; j++ {
+						data[dataIdx*dim+j] = int8((i*10 + j) % 128)
+					}
+					dataIdx++
+				}
+			}
+
+			err = w.AddInt8VectorToPayload(data, dim, validData)
+			require.NoError(t, err)
+
+			err = w.FinishPayloadWriter()
+			require.NoError(t, err)
+
+			buffer, err := w.GetPayloadBufferFromWriter()
+			require.NoError(t, err)
+
+			r, err := NewPayloadReader(schemapb.DataType_Int8Vector, buffer, true)
+			require.NoError(t, err)
+
+			readData, readDim, readValid, readNumRows, err := r.GetInt8VectorFromPayload()
+			require.NoError(t, err)
+			require.Equal(t, dim, readDim)
+			require.Equal(t, numRows, readNumRows)
+			require.Equal(t, numRows, len(readValid))
+
+			dataIdx = 0
+			for i := 0; i < numRows; i++ {
+				require.Equal(t, validData[i], readValid[i])
+				if validData[i] {
+					pos := dataIdx
+					for j := 0; j < dim; j++ {
+						require.Equal(t, data[dataIdx*dim+j], readData[pos*dim+j])
+					}
+					dataIdx++
+				}
+			}
+		}
+	})
+
+	t.Run("TestSparseFloatVector", func(t *testing.T) {
+		numRows := 100
+
+		type testCase struct {
+			name           string
+			validDataSetup func([]bool) int
+		}
+
+		testCases := []testCase{
+			{
+				name: "half null",
+				validDataSetup: func(validData []bool) int {
+					validCount := 0
+					for i := 0; i < numRows; i++ {
+						if i%2 == 0 {
+							validData[i] = true
+							validCount++
+						}
+					}
+					return validCount
+				},
+			},
+			{
+				name: "all valid",
+				validDataSetup: func(validData []bool) int {
+					for i := 0; i < numRows; i++ {
+						validData[i] = true
+					}
+					return numRows
+				},
+			},
+			{
+				name: "all null",
+				validDataSetup: func(validData []bool) int {
+					return 0
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Logf("Running test case: %s", tc.name)
+			w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, WithNullable(true))
+			require.NoError(t, err)
+
+			validData := make([]bool, numRows)
+			tc.validDataSetup(validData)
+
+			data := &SparseFloatVectorFieldData{
+				SparseFloatArray: schemapb.SparseFloatArray{
+					Dim: 100,
+				},
+				ValidData: validData,
+			}
+			for i := 0; i < numRows; i++ {
+				if validData[i] {
+					sparseVec := make([]byte, 16)
+					for j := 0; j < 16; j++ {
+						sparseVec[j] = byte((i*10 + j) % 256)
+					}
+					data.SparseFloatArray.Contents = append(data.SparseFloatArray.Contents, sparseVec)
+				}
+			}
+
+			err = w.AddSparseFloatVectorToPayload(data)
+			require.NoError(t, err)
+
+			err = w.FinishPayloadWriter()
+			require.NoError(t, err)
+
+			buffer, err := w.GetPayloadBufferFromWriter()
+			require.NoError(t, err)
+
+			r, err := NewPayloadReader(schemapb.DataType_SparseFloatVector, buffer, true)
+			require.NoError(t, err)
+
+			readData, _, readValid, err := r.GetSparseFloatVectorFromPayload()
+			require.NoError(t, err)
+			require.Equal(t, numRows, len(readValid))
+			require.Equal(t, numRows, len(readData.Contents))
+
+			for i := 0; i < numRows; i++ {
+				require.Equal(t, validData[i], readValid[i])
+				if validData[i] {
+					require.NotNil(t, readData.Contents[i])
+					require.Equal(t, 16, len(readData.Contents[i]))
+					for j := 0; j < 16; j++ {
+						require.Equal(t, byte((i*10+j)%256), readData.Contents[i][j])
+					}
+				} else {
+					require.Nil(t, readData.Contents[i])
+				}
+			}
+		}
 	})
 
 	t.Run("TestAddBool with wrong valids", func(t *testing.T) {
