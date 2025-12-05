@@ -23,6 +23,7 @@
 #include <vector>
 #include "common/FieldData.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 
 namespace milvus::segcore {
 
@@ -72,22 +73,28 @@ class ParallelDegreeSplitStrategy : public RowGroupSplitStrategy {
 /*
  * Load storage v2 files with specified strategy. The number of row group readers is determined by the strategy.
  *
+ * @param file_readers: list of file readers
  * @param remote_files: list of remote files
  * @param channel: channel to store the loaded data
  * @param memory_limit: memory limit for each chunk
  * @param strategy: strategy to split row groups
  * @param row_group_lists: list of row group lists
+ * @param fs: file system
  * @param schema: schema of the data, if not provided, storage v2 will read all columns of the files.
+ * @param priority: priority of the load
  */
 void
-LoadWithStrategy(const std::vector<std::string>& remote_files,
-                 std::shared_ptr<ArrowReaderChannel> channel,
-                 int64_t memory_limit,
-                 std::unique_ptr<RowGroupSplitStrategy> strategy,
-                 const std::vector<std::vector<int64_t>>& row_group_lists,
-                 const milvus_storage::ArrowFileSystemPtr& fs,
-                 const std::shared_ptr<arrow::Schema> schema = nullptr,
-                 milvus::proto::common::LoadPriority priority =
-                     milvus::proto::common::LoadPriority::HIGH);
+LoadWithStrategy(
+    const std::vector<std::shared_ptr<milvus_storage::FileRowGroupReader>>&
+        file_readers,
+    const std::vector<std::string>& remote_files,
+    std::shared_ptr<ArrowReaderChannel> channel,
+    int64_t memory_limit,
+    std::unique_ptr<RowGroupSplitStrategy> strategy,
+    const std::vector<std::vector<int64_t>>& row_group_lists,
+    const milvus_storage::ArrowFileSystemPtr& fs,
+    const std::shared_ptr<arrow::Schema> schema = nullptr,
+    milvus::proto::common::LoadPriority priority =
+        milvus::proto::common::LoadPriority::HIGH);
 
 }  // namespace milvus::segcore
