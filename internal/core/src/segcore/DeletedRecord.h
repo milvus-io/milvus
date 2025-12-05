@@ -184,7 +184,8 @@ class DeletedRecord {
                     loc--;
                 }
                 if (loc >= 0) {
-                    next_iter = snap_next_iter_[loc];
+                    // use lower_bound to relocate the iterator in current Accessor
+                    next_iter = accessor.lower_bound(snap_next_pos_[loc]);
                     auto or_size =
                         std::min(snapshots_[loc].second.size(), bitset.size());
                     bitset.inplace_or_with_count(snapshots_[loc].second,
@@ -227,7 +228,8 @@ class DeletedRecord {
             auto it = accessor.begin();
             Timestamp last_dump_ts = 0;
             if (!snapshots_.empty()) {
-                it = snap_next_iter_.back();
+                // relocate iterator using lower_bound
+                it = accessor.lower_bound(snap_next_pos_.back());
                 last_dump_ts = snapshots_.back().first;
                 bitmap.inplace_or_with_count(snapshots_.back().second,
                                              snapshots_.back().second.size());
@@ -250,13 +252,13 @@ class DeletedRecord {
                     if (dump_ts == last_dump_ts) {
                         // only update
                         snapshots_.back().second = std::move(bitmap.clone());
-                        snap_next_iter_.back() = it;
+                        snap_next_pos_.back() = *it;
                     } else {
                         // add new snapshot
                         snapshots_.push_back(
                             std::make_pair(dump_ts, std::move(bitmap.clone())));
                         Assert(it != accessor.end() && it.good());
-                        snap_next_iter_.push_back(it);
+                        snap_next_pos_.push_back(*it);
                     }
                 }
 
@@ -317,8 +319,9 @@ class DeletedRecord {
     // dump snapshot low frequency
     mutable std::shared_mutex snap_lock_;
     std::vector<std::pair<Timestamp, BitsetType>> snapshots_;
-    // next delete record iterator that follows every snapshot
-    std::vector<SortedDeleteList::iterator> snap_next_iter_;
+    // next delete record position that follows every snapshot
+    // store position (timestamp, offset)
+    std::vector<std::pair<Timestamp, Offset>> snap_next_pos_;
     // total number of delete entries that have been incorporated into snapshots
     std::atomic<int64_t> dumped_entry_count_{0};
 };
