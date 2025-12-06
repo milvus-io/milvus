@@ -406,9 +406,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             is_vector = true;
         }
         std::shared_lock lck(mutex_);
-        if (index_has_raw_data_.find(field_id) != index_has_raw_data_.end()) {
-            index_has_rawdata =
-                index_has_raw_data_.at(field_id) && index_has_rawdata;
+        auto iter = index_has_raw_data_.find(field_id);
+        if (iter != index_has_raw_data_.end()) {
+            index_has_rawdata = index_has_rawdata && iter->second;
         } else {
             index_has_rawdata = false;
         }
@@ -2908,22 +2908,58 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
             segment_load_info_.storageversion();
 
         const auto& field_binlog = segment_load_info_.binlog_paths(i);
-        auto field_id = FieldId(field_binlog.fieldid());
 
+        std::vector<FieldId> field_ids;
+        // when child fields specified, field id is group id, child field ids are actual id values here
+        if (field_binlog.child_fields_size() > 0) {
+            field_ids.reserve(field_binlog.child_fields_size());
+            for (auto field_id : field_binlog.child_fields()) {
+                field_ids.emplace_back(field_id);
+            }
+        } else {
+            field_ids.emplace_back(field_binlog.fieldid());
+        }
+
+        bool index_has_raw_data = true;
+        bool has_mmap_setting = false;
+        bool mmap_enabled = false;
+        bool is_vector = false;
+        for (const auto& child_field_id : field_ids) {
+            auto& field_meta = schema_->operator[](child_field_id);
+            if (IsVectorDataType(field_meta.get_data_type())) {
+                is_vector = true;
+            }
+
+            // if field has mmap setting, use it
+            // - mmap setting at collection level, then all field are the same
+            // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
+            auto [field_has_setting, field_mmap_enabled] =
+                schema_->MmapEnabled(child_field_id);
+            has_mmap_setting = has_mmap_setting || field_has_setting;
+            mmap_enabled = mmap_enabled || field_mmap_enabled;
+
+            auto iter = index_has_raw_data_.find(child_field_id);
+            if (iter != index_has_raw_data_.end()) {
+                index_has_raw_data = index_has_raw_data && iter->second;
+            } else {
+                index_has_raw_data = false;
+            }
+        }
+
+        auto group_id = field_binlog.fieldid();
         // Skip if this field has an index with raw data
-        auto iter = index_has_raw_data_.find(field_id);
-        if (iter != index_has_raw_data_.end() && iter->second) {
+        if (index_has_raw_data) {
             LOG_INFO(
-                "Skip loading binlog for segment {} field {} because index "
+                "Skip loading fielddata for segment {} group {} because index "
                 "has raw data",
                 id_,
-                field_id.get());
+                group_id);
             continue;
         }
 
         // Build FieldBinlogInfo
         FieldBinlogInfo field_binlog_info;
-        field_binlog_info.field_id = field_id.get();
+        field_binlog_info.field_id = group_id;
 
         // Calculate total row count and collect binlog paths
         int64_t total_entries = 0;
@@ -2935,24 +2971,6 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
         }
         field_binlog_info.row_count = total_entries;
 
-        bool has_mmap_setting = false;
-        bool mmap_enabled = false;
-        bool is_vector = false;
-        for (const auto& child_field_id : field_binlog.child_fields()) {
-            auto& field_meta = schema_->operator[](FieldId(child_field_id));
-            if (IsVectorDataType(field_meta.get_data_type())) {
-                is_vector = true;
-            }
-
-            // if field has mmap setting, use it
-            // - mmap setting at collection level, then all field are the same
-            // - mmap setting at field level, we define that as long as one field shall be mmap, then whole group shall be mmaped
-            auto [field_has_setting, field_mmap_enabled] =
-                schema_->MmapEnabled(field_id);
-            has_mmap_setting = has_mmap_setting || field_has_setting;
-            mmap_enabled = mmap_enabled || field_mmap_enabled;
-        }
-
         auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
         auto global_use_mmap = is_vector
                                    ? mmap_config.GetVectorFieldEnableMmap()
@@ -2961,9 +2979,9 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
             has_mmap_setting ? mmap_enabled : global_use_mmap;
 
         // Store in map
-        load_field_data_info.field_infos[field_id.get()] = field_binlog_info;
+        load_field_data_info.field_infos[group_id] = field_binlog_info;
 
-        field_data_to_load[field_id] = load_field_data_info;
+        field_data_to_load[FieldId(group_id)] = load_field_data_info;
     }
 
     // Step 4: Load field data for non-indexed fields
