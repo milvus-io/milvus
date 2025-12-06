@@ -93,6 +93,9 @@ func RegisterMgrRoute(proxy *Proxy) {
 
 // EncodeTicket encodes the ticket with token and collectionID
 func EncodeTicket(token string, collectionID string) string {
+	if collectionID == "" {
+		collectionID = "-1"
+	}
 	m := map[string]string{
 		"token":         token,
 		"collection_id": collectionID,
