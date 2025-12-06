@@ -1332,6 +1332,52 @@ BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
     return res;
 }
 
+template <typename T>
+const TargetBitmap
+BitmapIndex<T>::PatternMatchQuery(const std::string& like_pattern) {
+    ThrowInfo(Unsupported, "PatternMatchQuery is only supported for string type");
+}
+
+template <>
+const TargetBitmap
+BitmapIndex<std::string>::PatternMatchQuery(const std::string& like_pattern) {
+    AssertInfo(is_built_, "index has not been built");
+    tracer::AutoSpan span("BitmapIndex::PatternMatchQuery", tracer::GetRootSpan());
+
+    auto matcher = RegexMatcher::FromLikePattern(like_pattern);
+    TargetBitmap res(total_num_rows_, false);
+    if (is_mmap_) {
+        for (auto it = bitmap_info_map_.begin(); it != bitmap_info_map_.end();
+             ++it) {
+            const auto& key = it->first;
+            if (matcher(key)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
+                }
+            }
+        }
+        return res;
+    }
+    if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            const auto& key = it->first;
+            if (matcher(key)) {
+                for (const auto& v : it->second) {
+                    res.set(v);
+                }
+            }
+        }
+    } else {
+        for (auto it = bitsets_.begin(); it != bitsets_.end(); ++it) {
+            const auto& key = it->first;
+            if (matcher(key)) {
+                res |= it->second;
+            }
+        }
+    }
+    return res;
+}
+
 template class BitmapIndex<bool>;
 template class BitmapIndex<int8_t>;
 template class BitmapIndex<int16_t>;
