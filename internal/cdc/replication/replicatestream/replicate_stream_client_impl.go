@@ -170,10 +170,6 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	default:
 		// TODO: Should be done at streamingnode, but after move it into streamingnode, the metric need to be adjusted.
 		if msg.MessageType().IsSelfControlled() {
-			if r.pendingMessages.Len() == 0 {
-				// if there is no pending messages, there's no lag between source and target.
-				r.metrics.OnNoIncomingMessages()
-			}
 			return ErrReplicateIgnored
 		}
 		r.metrics.StartReplicate(msg)
