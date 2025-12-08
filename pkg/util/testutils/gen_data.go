@@ -105,7 +105,17 @@ func GenerateFloat64Array(numRows int) []float64 {
 func GenerateVarCharArray(numRows int, maxLen int) []string {
 	ret := make([]string, numRows)
 	for i := 0; i < numRows; i++ {
-		ret[i] = funcutil.RandomString(rand.Intn(maxLen))
+		suffix := fmt.Sprintf("_%d", i)
+		suffixLen := len(suffix)
+		availableLen := maxLen - suffixLen
+		if availableLen < 0 {
+			availableLen = 0
+		}
+		randLen := 0
+		if availableLen > 0 {
+			randLen = rand.Intn(availableLen + 1)
+		}
+		ret[i] = funcutil.RandomString(randLen) + suffix
 	}
 	return ret
 }
