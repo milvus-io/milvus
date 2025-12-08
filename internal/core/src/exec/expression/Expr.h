@@ -1403,7 +1403,59 @@ class SegmentExpr : public Expr {
     CanUseIndex() const {
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
         // TODO: if multiple indexes are supported, this logic should be changed
-        return num_index_chunk_ != 0 && !CanUseNgramIndex();
+        if (num_index_chunk_ == 0 || CanUseNgramIndex()) {
+            return false;
+        }
+
+        // For JSON fields with JsonFlatIndex, check if prefix matching is valid.
+        // Tantivy JSON index can handle nested object paths (e.g., "a.b") but NOT
+        // numeric array indices (e.g., "a.0"). Per RFC 6901, JSON Pointer doesn't
+        // distinguish between array indices and object keys syntactically. Since
+        // Tantivy doesn't store array index information, we must fall back to
+        // brute-force search when the relative path contains numeric segments.
+        if (field_type_ != DataType::JSON || pinned_index_.empty()) {
+            return true;
+        }
+
+        auto json_flat_index =
+            dynamic_cast<const index::JsonFlatIndex*>(pinned_index_[0].get());
+        if (json_flat_index == nullptr) {
+            return true;
+        }
+
+        auto index_path = json_flat_index->GetNestedPath();
+        auto query_path = milvus::Json::pointer(nested_path_);
+
+        // Exact match - safe to use index
+        if (index_path == query_path) {
+            return true;
+        }
+
+        // PinJsonIndex guarantees index_path is a prefix of query_path
+
+        // Get relative path (e.g., if index_path="/a" and query_path="/a/0/b",
+        // relative_path="/0/b")
+        auto relative_path = query_path.substr(index_path.length());
+
+        // Check if any path segment is numeric (potential array index)
+        size_t pos = 0;
+        while (pos < relative_path.length()) {
+            if (relative_path[pos] == '/') {
+                pos++;
+                continue;
+            }
+            size_t end = relative_path.find('/', pos);
+            if (end == std::string::npos) {
+                end = relative_path.length();
+            }
+            auto segment = relative_path.substr(pos, end - pos);
+            if (!segment.empty() && milvus::IsInteger(segment)) {
+                return false;
+            }
+            pos = end;
+        }
+
+        return true;
     }
 
     template <typename T>
