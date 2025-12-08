@@ -245,44 +245,6 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.max_connections};
 }
 
-std::string
-GetManifest(const std::string& path,
-            const std::shared_ptr<Properties>& properties) {
-    try {
-        // Parse the JSON string
-        json j = json::parse(path);
-
-        // Extract base_path
-        std::string base_path = j.at("base_path").get<std::string>();
-
-        ColumnGroupsHandle out_column_groups = 0;
-        int64_t out_read_version = 0;
-        FFIResult result = get_latest_column_groups(base_path.c_str(),
-                                                    properties.get(),
-                                                    &out_column_groups,
-                                                    &out_read_version);
-        if (!IsSuccess(&result)) {
-            auto message = GetErrorMessage(&result);
-            // Copy the error message before freeing the FFIResult
-            std::string error_msg = message ? message : "Unknown error";
-            FreeFFIResult(&result);
-            throw std::runtime_error(error_msg);
-        }
-
-        FreeFFIResult(&result);
-        return {out_column_groups};
-    } catch (const json::parse_error& e) {
-        throw std::runtime_error(
-            std::string("Failed to parse manifest JSON: ") + e.what());
-    } catch (const json::out_of_range& e) {
-        throw std::runtime_error(
-            std::string("Missing required field in manifest: ") + e.what());
-    } catch (const json::type_error& e) {
-        throw std::runtime_error(
-            std::string("Invalid field type in manifest: ") + e.what());
-    }
-}
-
 std::shared_ptr<milvus_storage::api::ColumnGroups>
 GetColumnGroups(
     const std::string& path,
@@ -291,20 +253,24 @@ GetColumnGroups(
         // Parse the JSON string
         json j = json::parse(path);
 
-        // Extract base_path
+        // Extract base_path & version
         std::string base_path = j.at("base_path").get<std::string>();
+        int64_t version = j.at("ver").get<int64_t>();
 
-        // TODO fetch manifest based on version after api supported
         auto transaction =
             std::make_unique<milvus_storage::api::transaction::TransactionImpl<
                 milvus_storage::api::ColumnGroups>>(*properties, base_path);
-        auto latest_manifest_result = transaction->get_latest_manifest();
-        if (!latest_manifest_result.ok()) {
-            throw(
-                std::runtime_error(latest_manifest_result.status().ToString()));
+        auto status = transaction->begin(version);
+        if (!status.ok()) {
+            throw(std::runtime_error(status.ToString()));
         }
-        auto latest_manifest = latest_manifest_result.ValueOrDie();
-        return latest_manifest;
+        auto current_manifest_result = transaction->get_current_manifest();
+        if (!current_manifest_result.ok()) {
+            throw(std::runtime_error(
+                current_manifest_result.status().ToString()));
+        }
+        auto current_manifest = current_manifest_result.ValueOrDie();
+        return current_manifest;
     } catch (const json::parse_error& e) {
         throw std::runtime_error(
             std::string("Failed to parse manifest JSON: ") + e.what());

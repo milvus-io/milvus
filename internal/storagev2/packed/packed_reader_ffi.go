@@ -201,8 +201,7 @@ func GetColumnGroups(manifestPath string, storageConfig *indexpb.StorageConfig) 
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
-	var cVersion C.int64_t
-	result := C.get_latest_column_groups(cBasePath, cProperties, &cColumnGroups, &cVersion)
+	result := C.get_column_groups_by_version(cBasePath, cProperties, C.int64_t(version), &cColumnGroups)
 	err = HandleFFIResult(result)
 	if err != nil {
 		return cColumnGroups, err
