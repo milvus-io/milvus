@@ -4722,3 +4722,257 @@ func TestUpdateFieldData_GeometryAndTimestamptz(t *testing.T) {
 		assert.Equal(t, []byte{0xFB, 0xFA}, geoData[2])
 	})
 }
+
+func TestIsBM25FunctionOutputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(schema.Fields[0], schema))
+	assert.True(t, IsBM25FunctionOutputField(schema.Fields[1], schema))
+
+	// Test with field IDs instead of names
+	schemaWithIds := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", FieldID: 100, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25_func",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{100},
+				OutputFieldIds: []int64{101},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(schemaWithIds.Fields[0], schemaWithIds))
+	assert.True(t, IsBM25FunctionOutputField(schemaWithIds.Fields[1], schemaWithIds))
+
+	// Test with non-BM25 function
+	nonBM25Schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "other_func",
+				Type:             schemapb.FunctionType_Unknown,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(nonBM25Schema.Fields[1], nonBM25Schema))
+
+	// Test with non-sparse vector field
+	nonSparseSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(nonSparseSchema.Fields[1], nonSparseSchema))
+
+	// Test with field not marked as function output
+	nonFunctionOutputSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: false},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBM25FunctionOutputField(nonFunctionOutputSchema.Fields[1], nonFunctionOutputSchema))
+}
+
+func TestIsBm25FunctionInputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.True(t, IsBm25FunctionInputField(schema, schema.Fields[0]))
+	assert.False(t, IsBm25FunctionInputField(schema, schema.Fields[1]))
+
+	// Test with multiple functions, only one is BM25
+	multipleSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field1", DataType: schemapb.DataType_VarChar},
+			{Name: "input_field2", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field1", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{Name: "output_field2", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "bm25_func",
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"input_field1"},
+				OutputFieldNames: []string{"output_field1"},
+			},
+			{
+				Name:             "other_func",
+				Type:             schemapb.FunctionType_Unknown,
+				InputFieldNames:  []string{"input_field2"},
+				OutputFieldNames: []string{"output_field2"},
+			},
+		},
+	}
+	assert.True(t, IsBm25FunctionInputField(multipleSchema, multipleSchema.Fields[0]))
+	assert.False(t, IsBm25FunctionInputField(multipleSchema, multipleSchema.Fields[1]))
+	assert.False(t, IsBm25FunctionInputField(multipleSchema, multipleSchema.Fields[2]))
+	assert.False(t, IsBm25FunctionInputField(multipleSchema, multipleSchema.Fields[3]))
+
+	// Test with no BM25 functions
+	noBM25Schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:             "other_func",
+				Type:             schemapb.FunctionType_Unknown,
+				InputFieldNames:  []string{"input_field"},
+				OutputFieldNames: []string{"output_field"},
+			},
+		},
+	}
+	assert.False(t, IsBm25FunctionInputField(noBM25Schema, noBM25Schema.Fields[0]))
+
+	// Test with empty functions
+	emptySchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+		},
+		Functions: []*schemapb.FunctionSchema{},
+	}
+	assert.False(t, IsBm25FunctionInputField(emptySchema, emptySchema.Fields[0]))
+
+	// Test with nil functions
+	nilSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", DataType: schemapb.DataType_VarChar},
+		},
+		Functions: nil,
+	}
+	assert.False(t, IsBm25FunctionInputField(nilSchema, nilSchema.Fields[0]))
+}
+
+func TestSchemaHelper_GetFunctionByOutputField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", FieldID: 100, DataType: schemapb.DataType_VarChar},
+			{Name: "output_field", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{Name: "regular_field", FieldID: 102, DataType: schemapb.DataType_Int64},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25_func",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{100},
+				OutputFieldIds: []int64{101},
+			},
+		},
+	}
+
+	helper, err := CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Test getting function by output field
+	function, err := helper.GetFunctionByOutputField(schema.Fields[1])
+	assert.NoError(t, err)
+	assert.Equal(t, "bm25_func", function.Name)
+	assert.Equal(t, schemapb.FunctionType_BM25, function.Type)
+
+	// Test with non-function output field
+	_, err = helper.GetFunctionByOutputField(schema.Fields[0])
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "function not exist")
+
+	// Test with regular field
+	_, err = helper.GetFunctionByOutputField(schema.Fields[2])
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "function not exist")
+}
+
+func TestSchemaHelper_CanRetrieveRawFieldData(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "input_field", FieldID: 100, DataType: schemapb.DataType_VarChar},
+			{Name: "bm25_output", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+			{Name: "other_output", FieldID: 102, DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+			{Name: "regular_field", FieldID: 103, DataType: schemapb.DataType_Int64},
+		},
+		Functions: []*schemapb.FunctionSchema{
+			{
+				Name:           "bm25_func",
+				Type:           schemapb.FunctionType_BM25,
+				InputFieldIds:  []int64{100},
+				OutputFieldIds: []int64{101},
+			},
+			{
+				Name:           "other_func",
+				Type:           schemapb.FunctionType_Unknown,
+				InputFieldIds:  []int64{100},
+				OutputFieldIds: []int64{102},
+			},
+		},
+	}
+
+	helper, err := CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Regular field should be retrievable
+	assert.True(t, helper.CanRetrieveRawFieldData(schema.Fields[0]))
+	assert.True(t, helper.CanRetrieveRawFieldData(schema.Fields[3]))
+
+	// BM25 function output field should NOT be retrievable
+	assert.False(t, helper.CanRetrieveRawFieldData(schema.Fields[1]))
+
+	// Other function output field should be retrievable
+	assert.True(t, helper.CanRetrieveRawFieldData(schema.Fields[2]))
+
+	// Test with field that has IsFunctionOutput=true but no corresponding function
+	orphanField := &schemapb.FieldSchema{
+		Name:             "orphan_field",
+		FieldID:          104,
+		DataType:         schemapb.DataType_FloatVector,
+		IsFunctionOutput: true,
+	}
+	assert.False(t, helper.CanRetrieveRawFieldData(orphanField))
+}

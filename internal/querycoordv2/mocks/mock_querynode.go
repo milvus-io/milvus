@@ -1657,6 +1657,65 @@ func (_c *MockQueryNodeServer_UpdateSchema_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// ValidateAnalyzer provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAnalyzer")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ValidateAnalyzerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_ValidateAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAnalyzer'
+type MockQueryNodeServer_ValidateAnalyzer_Call struct {
+	*mock.Call
+}
+
+// ValidateAnalyzer is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ValidateAnalyzerRequest
+func (_e *MockQueryNodeServer_Expecter) ValidateAnalyzer(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ValidateAnalyzer_Call {
+	return &MockQueryNodeServer_ValidateAnalyzer_Call{Call: _e.mock.On("ValidateAnalyzer", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_ValidateAnalyzer_Call) Run(run func(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest)) *MockQueryNodeServer_ValidateAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ValidateAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNodeServer_ValidateAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MockQueryNodeServer_ValidateAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WatchDmChannels provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) WatchDmChannels(_a0 context.Context, _a1 *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

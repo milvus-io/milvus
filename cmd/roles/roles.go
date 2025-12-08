@@ -541,7 +541,7 @@ func (mr *MilvusRoles) Run() {
 
 		exp, err := tracer.CreateTracerExporter(params)
 		if err != nil {
-			log.Warn("Init tracer faield", zap.Error(err))
+			log.Warn("Init tracer failed", zap.Error(err))
 			return
 		}
 
