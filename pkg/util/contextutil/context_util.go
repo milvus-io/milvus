@@ -51,7 +51,7 @@ func TenantID(ctx context.Context) string {
 
 func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	if len(kv)%2 == 1 {
-		panic(fmt.Sprintf("metadata: AppendToOutgoingContext got an odd number of input pairs for metadata: %d", len(kv)))
+		panic(fmt.Sprintf("metadata: AppendToIncomingContext got an odd number of input pairs for metadata: %d", len(kv)))
 	}
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -68,7 +68,7 @@ func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context 
 // SetToIncomingContext sets the metadata to the incoming context.
 func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
 	if len(kv)%2 == 1 {
-		panic(fmt.Sprintf("metadata: AppendToOutgoingContext got an odd number of input pairs for metadata: %d", len(kv)))
+		panic(fmt.Sprintf("metadata: SetToIncomingContext got an odd number of input pairs for metadata: %d", len(kv)))
 	}
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

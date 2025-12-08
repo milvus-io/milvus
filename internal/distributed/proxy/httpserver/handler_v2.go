@@ -49,8 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -386,11 +384,10 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 
 	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
 		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
-		newCtx := reqCtx
 		if token, ok := ginCtx.Get(ContextToken); ok {
-			newCtx = contextutil.SetToIncomingContext(reqCtx, util.HeaderAuthorize, token.(string))
+			interceptor = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token.(string)))
 		}
-		return interceptor(newCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
+		return interceptor(reqCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
 			return handler(ctx, req)
 		})
 	}
