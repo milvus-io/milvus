@@ -107,7 +107,7 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 	})
 	base.role = typeutil.QueryNodeRole
 	mockSession := sessionutil.NewMockSession(t)
-	mockSession.EXPECT().GetSessions(mock.Anything).Return(nil, 0, nil)
+	mockSession.EXPECT().GetSessions(mock.Anything, mock.Anything).Return(nil, 0, nil)
 	base.sess = mockSession
 	base.grpcClientMtx.Lock()
 	base.grpcClient = nil
@@ -551,7 +551,7 @@ func TestVerifySession(t *testing.T) {
 	base := ClientBase[*mockClient]{}
 	mockSession := sessionutil.NewMockSession(t)
 	expectedErr := errors.New("mocked")
-	mockSession.EXPECT().GetSessions(mock.Anything).Return(nil, 0, expectedErr)
+	mockSession.EXPECT().GetSessions(mock.Anything, mock.Anything).Return(nil, 0, expectedErr)
 	base.sess = mockSession
 
 	ctx := context.Background()
@@ -562,7 +562,7 @@ func TestVerifySession(t *testing.T) {
 	base.NodeID = *atomic.NewInt64(1)
 	base.role = typeutil.RootCoordRole
 	mockSession2 := sessionutil.NewMockSession(t)
-	mockSession2.EXPECT().GetSessions(mock.Anything).Return(
+	mockSession2.EXPECT().GetSessions(mock.Anything, mock.Anything).Return(
 		map[string]*sessionutil.Session{
 			typeutil.RootCoordRole: {
 				SessionRaw: sessionutil.SessionRaw{

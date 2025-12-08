@@ -16,6 +16,8 @@
 package sessionutil
 
 import (
+	"context"
+
 	"github.com/blang/semver/v4"
 )
 
@@ -27,7 +29,7 @@ type SessionInterface interface {
 	String() string
 	Register()
 
-	GetSessions(prefix string) (map[string]*Session, int64, error)
+	GetSessions(ctx context.Context, prefix string) (map[string]*Session, int64, error)
 	GetSessionsWithVersionRange(prefix string, r semver.Range) (map[string]*Session, int64, error)
 
 	GoingStop() error
