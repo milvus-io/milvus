@@ -559,3 +559,181 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestComplexJson) {
     VerifyJsonType("/user/address/zip_INT64", JSONType::INT64);
     VerifyJsonType("/timestamp_INT64", JSONType::INT64);
 }
+
+// Test that meta.json file is created and contains correct metadata
+TEST_F(JsonKeyStatsUploadLoadTest, TestMetaFileCreation) {
+    std::vector<std::string> json_strings = {
+        R"({"int": 1, "string": "test1"})",
+        R"({"int": 2, "string": "test2"})",
+        R"({"int": 3, "string": "test3"})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+
+    // Verify meta.json is in the index files
+    bool meta_file_found = false;
+    for (const auto& file : index_files_) {
+        if (file.find(JSON_STATS_META_FILE_NAME) != std::string::npos &&
+            file.find(JSON_STATS_SHARED_INDEX_PATH) == std::string::npos &&
+            file.find(JSON_STATS_SHREDDING_DATA_PATH) == std::string::npos) {
+            meta_file_found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(meta_file_found) << "meta.json should be in index files";
+
+    // Load and verify
+    Load();
+    VerifyBasicOperations();
+    VerifyPathInShredding("/int");
+    VerifyPathInShredding("/string");
+}
+
+// Test full pipeline: build -> upload -> load -> query
+TEST_F(JsonKeyStatsUploadLoadTest, TestFullPipelineWithMetaFile) {
+    std::vector<std::string> json_strings;
+    // Generate more data for a comprehensive test
+    for (int i = 0; i < 100; i++) {
+        json_strings.push_back(fmt::format(
+            R"({{"id": {}, "name": "user_{}", "score": {}, "active": {}}})",
+            i,
+            i,
+            i * 1.5,
+            i % 2 == 0 ? "true" : "false"));
+    }
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+
+    // Verify index files structure
+    bool has_meta = false;
+    bool has_shredding = false;
+    bool has_shared_index = false;
+    for (const auto& file : index_files_) {
+        if (file.find(JSON_STATS_META_FILE_NAME) != std::string::npos &&
+            file.find(JSON_STATS_SHARED_INDEX_PATH) == std::string::npos &&
+            file.find(JSON_STATS_SHREDDING_DATA_PATH) == std::string::npos) {
+            has_meta = true;
+        }
+        if (file.find(JSON_STATS_SHREDDING_DATA_PATH) != std::string::npos) {
+            has_shredding = true;
+        }
+        if (file.find(JSON_STATS_SHARED_INDEX_PATH) != std::string::npos) {
+            has_shared_index = true;
+        }
+    }
+    EXPECT_TRUE(has_meta) << "Should have meta.json file";
+    EXPECT_TRUE(has_shredding) << "Should have shredding data files";
+    EXPECT_TRUE(has_shared_index) << "Should have shared key index files";
+
+    // Load and verify
+    Load();
+
+    // Verify count
+    EXPECT_EQ(load_index_->Count(), 100);
+
+    // Verify shredding fields exist
+    auto id_fields = load_index_->GetShreddingFields("/id");
+    EXPECT_FALSE(id_fields.empty());
+
+    auto name_fields = load_index_->GetShreddingFields("/name");
+    EXPECT_FALSE(name_fields.empty());
+
+    auto score_fields = load_index_->GetShreddingFields("/score");
+    EXPECT_FALSE(score_fields.empty());
+
+    auto active_fields = load_index_->GetShreddingFields("/active");
+    EXPECT_FALSE(active_fields.empty());
+
+    // Verify types
+    VerifyJsonType("/id_INT64", JSONType::INT64);
+    VerifyJsonType("/name_STRING", JSONType::STRING);
+    VerifyJsonType("/score_DOUBLE", JSONType::DOUBLE);
+    VerifyJsonType("/active_BOOL", JSONType::BOOL);
+}
+
+// Test backward compatibility: load data without meta.json
+// This simulates old format where metadata was stored in parquet files.
+// Note: Since new code doesn't write metadata to parquet anymore, this test
+// verifies that the loading code path handles missing meta.json gracefully
+// and falls back to reading from parquet (even if parquet metadata is empty).
+TEST_F(JsonKeyStatsUploadLoadTest, TestLoadWithoutMetaFile) {
+    std::vector<std::string> json_strings = {
+        R"({"int": 1, "string": "test1"})",
+        R"({"int": 2, "string": "test2"})",
+        R"({"int": 3, "string": "test3"})"};
+
+    InitContext();
+    PrepareData(json_strings);
+    BuildAndUpload();
+
+    // Remove meta.json from index_files to simulate old format
+    std::vector<std::string> index_files_without_meta;
+    for (const auto& file : index_files_) {
+        if (file.find(JSON_STATS_META_FILE_NAME) == std::string::npos ||
+            file.find(JSON_STATS_SHARED_INDEX_PATH) != std::string::npos ||
+            file.find(JSON_STATS_SHREDDING_DATA_PATH) != std::string::npos) {
+            index_files_without_meta.push_back(file);
+        }
+    }
+
+    // Verify we actually removed the meta file
+    EXPECT_LT(index_files_without_meta.size(), index_files_.size());
+
+    // Replace index_files_ with version without meta
+    index_files_ = index_files_without_meta;
+
+    // Load should still work - it will try to read from parquet metadata
+    // (which is empty in new format, but the code path should not crash)
+    Load();
+
+    // Basic operations should still work
+    EXPECT_EQ(load_index_->Count(), data_.size());
+    EXPECT_EQ(load_index_->Size(), data_.size());
+
+    // Note: GetShreddingFields may return empty because key_field_map_ is empty
+    // when both meta.json and parquet metadata are missing/empty.
+    // This is expected behavior for backward compatibility path.
+}
+
+// Test that multiple build-upload-load cycles work correctly
+TEST_F(JsonKeyStatsUploadLoadTest, TestMultipleBuildCycles) {
+    // First cycle
+    {
+        std::vector<std::string> json_strings = {R"({"a": 1, "b": "test1"})",
+                                                 R"({"a": 2, "b": "test2"})"};
+
+        InitContext();
+        PrepareData(json_strings);
+        BuildAndUpload();
+        Load();
+
+        EXPECT_EQ(load_index_->Count(), 2);
+        VerifyPathInShredding("/a");
+        VerifyPathInShredding("/b");
+    }
+
+    // Clean up for second cycle
+    boost::filesystem::remove_all(chunk_manager_->GetRootPath());
+
+    // Second cycle with different schema
+    {
+        index_build_id_ = GenerateRandomInt64(1, 100000);  // New build id
+        std::vector<std::string> json_strings = {
+            R"({"x": 100, "y": 200, "z": "data1"})",
+            R"({"x": 101, "y": 201, "z": "data2"})",
+            R"({"x": 102, "y": 202, "z": "data3"})"};
+
+        InitContext();
+        PrepareData(json_strings);
+        BuildAndUpload();
+        Load();
+
+        EXPECT_EQ(load_index_->Count(), 3);
+        VerifyPathInShredding("/x");
+        VerifyPathInShredding("/y");
+        VerifyPathInShredding("/z");
+    }
+}
