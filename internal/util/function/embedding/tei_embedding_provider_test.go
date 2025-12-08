@@ -18,6 +18,7 @@
 package embedding
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func createTEIProvider(url string, schema *schemapb.FieldSchema, providerName st
 	}
 	switch providerName {
 	case teiProvider:
-		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		return NewTEIEmbeddingProvider(schema, functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	default:
 		return nil, errors.New("Unknow provider")
 	}
@@ -91,7 +92,7 @@ func (s *TEITextEmbeddingProviderSuite) TestEmbedding() {
 		s.NoError(err)
 		{
 			data := []string{"sentence"}
-			r, err2 := provder.CallEmbedding(data, models.InsertMode)
+			r, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 			ret := r.([][]float32)
 			s.NoError(err2)
 			s.Equal(1, len(ret))
@@ -99,7 +100,7 @@ func (s *TEITextEmbeddingProviderSuite) TestEmbedding() {
 		}
 		{
 			data := []string{"sentence 1", "sentence 2", "sentence 3"}
-			_, err := provder.CallEmbedding(data, models.SearchMode)
+			_, err := provder.CallEmbedding(context.Background(), data, models.SearchMode)
 			s.NoError(err)
 		}
 	}
@@ -120,7 +121,7 @@ func (s *TEITextEmbeddingProviderSuite) TestEmbeddingDimNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence"}
-		_, err2 := provder.CallEmbedding(data, models.InsertMode)
+		_, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -141,7 +142,7 @@ func (s *TEITextEmbeddingProviderSuite) TestEmbeddingNumberNotMatch() {
 
 		// embedding dim not match
 		data := []string{"sentence", "sentence2"}
-		_, err2 := provder.CallEmbedding(data, models.InsertMode)
+		_, err2 := provder.CallEmbedding(context.Background(), data, models.InsertMode)
 		s.Error(err2)
 	}
 }
@@ -159,7 +160,7 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 			{Key: models.EndpointParamKey, Value: "http://mymock.com"},
 		},
 	}
-	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+	provider, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 	s.NoError(err)
 	s.Equal(provider.FieldDim(), int64(4))
 	s.True(provider.MaxBatch() == 32*5)
@@ -167,35 +168,35 @@ func (s *TEITextEmbeddingProviderSuite) TestNewTEIEmbeddingProvider() {
 	// Invalid truncate
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 	// Invalid truncationDirection
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: models.TruncateParamKey, Value: "true"}
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 
 	// truncationDirection
 	{
 		functionSchema.Params[3] = &commonpb.KeyValuePair{Key: models.TruncationDirectionParamKey, Value: "Left"}
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.NoError(err)
 	}
 
 	// Invalid max batch
 	{
 		functionSchema.Params = append(functionSchema.Params, &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "Invalid"})
-		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		_, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.Error(err)
 	}
 
 	// Valid max batch
 	{
 		functionSchema.Params[4] = &commonpb.KeyValuePair{Key: models.MaxClientBatchSizeParamKey, Value: "128"}
-		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		pv, err := NewTEIEmbeddingProvider(s.schema.Fields[2], functionSchema, map[string]string{}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{})
 		s.NoError(err)
 		s.True(pv.MaxBatch() == 128*5)
 	}

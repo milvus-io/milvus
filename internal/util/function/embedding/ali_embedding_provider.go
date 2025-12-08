@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -39,6 +40,7 @@ type AliEmbeddingProvider struct {
 
 	maxBatch   int
 	timeoutSec int64
+	extraInfo  *models.ModelExtraInfo
 }
 
 func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbedding, error) {
@@ -53,12 +55,12 @@ func createAliEmbeddingClient(apiKey string, url string) (*ali.AliDashScopeEmbed
 	return c, nil
 }
 
-func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*AliEmbeddingProvider, error) {
+func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*AliEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
 	}
-	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.DashscopeAKEnvStr)
+	apiKey, url, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, models.DashscopeAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +99,7 @@ func NewAliDashScopeEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functio
 		outputType: "dense",
 		maxBatch:   maxBatch,
 		timeoutSec: 30,
+		extraInfo:  extraInfo,
 	}
 	return &provider, nil
 }
@@ -109,7 +112,7 @@ func (provider *AliEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *AliEmbeddingProvider) CallEmbedding(texts []string, mode models.TextEmbeddingMode) (any, error) {
+func (provider *AliEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	var textType string
 	if mode == models.SearchMode {

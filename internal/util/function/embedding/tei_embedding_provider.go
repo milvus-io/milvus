@@ -19,6 +19,7 @@
 package embedding
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -42,9 +43,10 @@ type TeiEmbeddingProvider struct {
 
 	maxBatch   int
 	timeoutSec int64
+	extraInfo  *models.ModelExtraInfo
 }
 
-func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials) (*TeiEmbeddingProvider, error) {
+func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *schemapb.FunctionSchema, params map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (*TeiEmbeddingProvider, error) {
 	fieldDim, err := typeutil.GetDim(fieldSchema)
 	if err != nil {
 		return nil, err
@@ -80,7 +82,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		}
 	}
 
-	apiKey, _, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, "")
+	apiKey, _, err := models.ParseAKAndURL(credentials, functionSchema.Params, params, "", extraInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +101,7 @@ func NewTEIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSchema *
 		maxBatch:            maxBatch,
 		truncate:            truncate,
 		timeoutSec:          30,
+		extraInfo:           extraInfo,
 	}
 	return &provider, nil
 }
@@ -111,7 +114,7 @@ func (provider *TeiEmbeddingProvider) FieldDim() int64 {
 	return provider.fieldDim
 }
 
-func (provider *TeiEmbeddingProvider) CallEmbedding(texts []string, mode models.TextEmbeddingMode) (any, error) {
+func (provider *TeiEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
 	numRows := len(texts)
 	data := make([][]float32, 0, numRows)
 	var prompt string
