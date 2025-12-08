@@ -44,7 +44,7 @@
 #include "storage/InsertData.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/MinioChunkManager.h"
+#include "storage/minio/MinioChunkManager.h"
 #ifdef USE_OPENDAL
 #include "storage/opendal/OpenDALChunkManager.h"
 #endif
