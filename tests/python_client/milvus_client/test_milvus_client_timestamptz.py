@@ -53,6 +53,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         expected: Step 3 should result success
         """
         # step 1: create collection
+        # default_dim = 3
+        # default_nb = 3
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
@@ -72,10 +74,30 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
 
         # step 3: query the rows
         rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
+        result = self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0")
+        for i in range(default_nb):
+            expected_result = rows[i]
+            result_result = result[0][i]
+            print("================================")
+            print(f"expected_result: {expected_result[default_timestamp_field_name]}")
+            print(f"result_result: {result_result[default_timestamp_field_name]}")
+            if expected_result[default_timestamp_field_name] != result_result[default_timestamp_field_name]:
+                print(f"results mismatch❌")
+            else:
+                print(f"results match✅")
+            print("================================")
+            print(f"expected_result: {expected_result[default_vector_field_name]}")
+            print(f"result_result: {result_result[default_vector_field_name]}")
+            if expected_result[default_vector_field_name] != result_result[default_vector_field_name]:
+                print(f"vector results mismatch❌")
+            else:
+                print(f"vector results match✅")
+            print("================================")
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: rows,
-                                         "pk_name": default_primary_key_field_name})
+                                         "pk_name": default_primary_key_field_name,
+                                         "debug_mode": True})
 
         self.drop_collection(client, collection_name)
 
