@@ -295,7 +295,12 @@ func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operato
 
 func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.Results.GetFieldsData()
+	datas := result.GetResults().GetFieldsData()
+	// skip highlight if result is empty
+	if len(datas) == 0 {
+		return []any{result}, nil
+	}
+
 	req := &querypb.GetHighlightRequest{
 		Topks: result.GetResults().GetTopks(),
 		Tasks: lo.Map(op.tasks, func(task *highlightTask, _ int) *querypb.HighlightTask { return task.HighlightTask }),

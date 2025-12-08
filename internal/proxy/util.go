@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -629,10 +628,6 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
 		return err
 	}
-
-	if err := validateAnalyzer(schema, field); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -697,107 +692,6 @@ func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 			return err
 		}
 	}
-	return nil
-}
-
-func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema) error {
-	var m map[string]json.RawMessage
-	var analyzerMap map[string]json.RawMessage
-	var mFileName string
-
-	err := json.Unmarshal([]byte(params), &m)
-	if err != nil {
-		return err
-	}
-
-	mfield, ok := m["by_field"]
-	if !ok {
-		return fmt.Errorf("multi analyzer params now must set by_field to specify with field decide analyzer")
-	}
-
-	err = json.Unmarshal(mfield, &mFileName)
-	if err != nil {
-		return fmt.Errorf("multi analyzer params by_field must be string but now: %s", mfield)
-	}
-
-	// check field exist
-	fieldExist := false
-	for _, field := range coll.GetFields() {
-		if field.GetName() == mFileName {
-			// only support string field now
-			if field.GetDataType() != schemapb.DataType_VarChar {
-				return fmt.Errorf("multi analyzer params now only support by string field, but field %s is not string", field.GetName())
-			}
-			fieldExist = true
-			break
-		}
-	}
-
-	if !fieldExist {
-		return fmt.Errorf("multi analyzer dependent field %s not exist in collection %s", string(mfield), coll.GetName())
-	}
-
-	if value, ok := m["alias"]; ok {
-		mapping := map[string]string{}
-		err = json.Unmarshal(value, &mapping)
-		if err != nil {
-			return fmt.Errorf("multi analyzer alias must be string map but now: %s", value)
-		}
-	}
-
-	analyzers, ok := m["analyzers"]
-	if !ok {
-		return fmt.Errorf("multi analyzer params must set analyzers ")
-	}
-
-	err = json.Unmarshal(analyzers, &analyzerMap)
-	if err != nil {
-		return fmt.Errorf("unmarshal analyzers failed: %s", err)
-	}
-
-	hasDefault := false
-	for name, params := range analyzerMap {
-		if err := analyzer.ValidateAnalyzer(string(params)); err != nil {
-			return fmt.Errorf("analyzer %s params invalid: %s", name, err)
-		}
-		if name == "default" {
-			hasDefault = true
-		}
-	}
-
-	if !hasDefault {
-		return fmt.Errorf("multi analyzer must set default analyzer for all unknown value")
-	}
-	return nil
-}
-
-func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema) error {
-	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !wasBm25FunctionInputField(collSchema, fieldSchema) {
-		return nil
-	}
-
-	if !h.EnableAnalyzer() {
-		return fmt.Errorf("field %s is set to enable match or bm25 function but not enable analyzer", fieldSchema.Name)
-	}
-
-	if params, ok := h.GetMultiAnalyzerParams(); ok {
-		if h.EnableMatch() {
-			return fmt.Errorf("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
-		}
-		if h.HasAnalyzerParams() {
-			return fmt.Errorf("field %s analyzer params should be none if has multi analyzer params", fieldSchema.Name)
-		}
-
-		return validateMultiAnalyzerParams(params, collSchema)
-	}
-
-	for _, kv := range fieldSchema.GetTypeParams() {
-		if kv.GetKey() == "analyzer_params" {
-			return analyzer.ValidateAnalyzer(kv.Value)
-		}
-	}
-	// return nil when use default analyzer
 	return nil
 }
 
@@ -1275,7 +1169,7 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 
 	// Count expected columns
 	for _, field := range schema.CollectionSchema.GetFields() {
-		if !IsBM25FunctionOutputField(field, schema.CollectionSchema) {
+		if !typeutil.IsBM25FunctionOutputField(field, schema.CollectionSchema) {
 			expectColumnNum++
 		}
 	}
@@ -1899,12 +1793,12 @@ func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
+		if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) {
 			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && needAutoGenPk && inInsert) || typeutil.IsBM25FunctionOutputField(fieldSchema, schema) {
 				// autoGenField
 				continue
 			}
@@ -2115,7 +2009,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 
 		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
 			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
-				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				typeutil.IsBM25FunctionOutputField(fieldSchema, schema) ||
 				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
 				// autoGenField
 				continue
@@ -2780,24 +2674,6 @@ func GetReplicateID(ctx context.Context, database, collectionName string) (strin
 	}
 	replicateID, _ := common.GetReplicateID(dbInfo.properties)
 	return replicateID, nil
-}
-
-func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb.CollectionSchema) bool {
-	if !(field.GetIsFunctionOutput() && field.GetDataType() == schemapb.DataType_SparseFloatVector) {
-		return false
-	}
-
-	for _, fSchema := range collSchema.Functions {
-		if fSchema.Type == schemapb.FunctionType_BM25 {
-			if len(fSchema.OutputFieldNames) != 0 && field.Name == fSchema.OutputFieldNames[0] {
-				return true
-			}
-			if len(fSchema.OutputFieldIds) != 0 && field.FieldID == fSchema.OutputFieldIds[0] {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {

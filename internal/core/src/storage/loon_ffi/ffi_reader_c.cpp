@@ -19,50 +19,63 @@
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/reader.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/PluginLoader.h"
+#include "storage/KeyRetriever.h"
 #include "monitor/scope_metric.h"
 
-ReaderHandle
-createFFIReader(char* manifest,
-                struct ArrowSchema* schema,
-                char** needed_columns,
-                int64_t needed_columns_size,
-                const std::shared_ptr<Properties>& properties) {
-    ReaderHandle reader_handler = 0;
-
-    FFIResult result = reader_new(manifest,
-                                  schema,
-                                  needed_columns,
-                                  needed_columns_size,
-                                  properties.get(),
-                                  &reader_handler);
-    if (!IsSuccess(&result)) {
-        auto message = GetErrorMessage(&result);
-        // Copy the error message before freeing the FFIResult
-        std::string error_msg = message ? message : "Unknown error";
-        FreeFFIResult(&result);
-        throw std::runtime_error(error_msg);
-    }
-
-    FreeFFIResult(&result);
-    return reader_handler;
-}
-
+/**
+ * @brief Creates a Loon reader with optional CMEK decryption support.
+ *
+ * This function creates a milvus_storage Reader instance and optionally configures
+ * it with a key retriever for decrypting encrypted data when CMEK is enabled.
+ *
+ * @param[in] column_groups Shared pointer to the column groups to read
+ * @param[in] schema Arrow schema defining the data structure
+ * @param[in] needed_columns Array of column names to read
+ * @param[in] needed_columns_size Number of columns in needed_columns array
+ * @param[in] properties Storage properties for reader configuration
+ * @param[in] c_plugin_context Optional plugin context for CMEK decryption.
+ *                             If non-null, configures the reader with a key retriever
+ *                             that can decrypt data encrypted with CMEK.
+ *
+ * @return Unique pointer to the created Reader instance
+ *
+ * @throws AssertException if schema import fails or cipher plugin is null when required
+ */
 std::unique_ptr<milvus_storage::api::Reader>
 GetLoonReader(
     std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
     struct ArrowSchema* schema,
     char** needed_columns,
     int64_t needed_columns_size,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
+    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    CPluginContext* c_plugin_context) {
     auto result = arrow::ImportSchema(schema);
     AssertInfo(result.ok(), "Import arrow schema failed");
     auto arrow_schema = result.ValueOrDie();
-    return milvus_storage::api::Reader::create(
+    auto reader = milvus_storage::api::Reader::create(
         column_groups,
         arrow_schema,
         std::make_shared<std::vector<std::string>>(
             needed_columns, needed_columns + needed_columns_size),
         *properties);
+
+    // Configure CMEK decryption if plugin context is provided
+    if (c_plugin_context != nullptr) {
+        auto plugin_ptr =
+            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+        AssertInfo(plugin_ptr != nullptr, "cipher plugin is nullptr");
+        plugin_ptr->Update(c_plugin_context->ez_id,
+                           c_plugin_context->collection_id,
+                           std::string(c_plugin_context->key));
+        auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
+        reader->set_keyretriever(
+            [key_retriever](const std::string& metadata) -> std::string {
+                return key_retriever->GetKey(metadata);
+            });
+    }
+
+    return reader;
 }
 
 CStatus
@@ -87,7 +100,8 @@ NewPackedFFIReader(const char* manifest_path,
                                     schema,
                                     needed_columns,
                                     needed_columns_size,
-                                    properties);
+                                    properties,
+                                    c_plugin_context);
 
         *c_packed_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();
@@ -97,7 +111,7 @@ NewPackedFFIReader(const char* manifest_path,
 }
 
 CStatus
-NewPackedFFIReaderWithManifest(const char* manifest_content,
+NewPackedFFIReaderWithManifest(const ColumnGroupsHandle column_groups_handle,
                                struct ArrowSchema* schema,
                                char** needed_columns,
                                int64_t needed_columns_size,
@@ -109,18 +123,17 @@ NewPackedFFIReaderWithManifest(const char* manifest_content,
     try {
         auto properties =
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
-        // Parse the column groups, the column groups is a JSON string
-        auto cpp_column_groups =
-            std::make_shared<milvus_storage::api::ColumnGroups>();
-        auto des_result =
-            cpp_column_groups->deserialize(std::string_view(manifest_content));
-        AssertInfo(des_result.ok(), "failed to deserialize column groups");
+        auto* cg_ptr = reinterpret_cast<
+            std::shared_ptr<milvus_storage::api::ColumnGroups>*>(
+            column_groups_handle);
+        auto cpp_column_groups = *cg_ptr;
 
         auto reader = GetLoonReader(cpp_column_groups,
                                     schema,
                                     needed_columns,
                                     needed_columns_size,
-                                    properties);
+                                    properties,
+                                    c_plugin_context);
 
         *c_loon_reader = static_cast<CFFIPackedReader>(reader.release());
         return milvus::SuccessCStatus();

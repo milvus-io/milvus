@@ -3122,25 +3122,6 @@ func TestValidateFunctionBasicParams(t *testing.T) {
 	})
 }
 
-func TestIsBM25FunctionOutputField(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
-			{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
-		},
-		Functions: []*schemapb.FunctionSchema{
-			{
-				Name:             "bm25_func",
-				Type:             schemapb.FunctionType_BM25,
-				InputFieldNames:  []string{"input_field"},
-				OutputFieldNames: []string{"output_field"},
-			},
-		},
-	}
-	assert.False(t, IsBM25FunctionOutputField(schema.Fields[0], schema))
-	assert.True(t, IsBM25FunctionOutputField(schema.Fields[1], schema))
-}
-
 func TestComputeRecall(t *testing.T) {
 	t.Run("normal case1", func(t *testing.T) {
 		result1 := &schemapb.SearchResultData{

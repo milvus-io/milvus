@@ -50,6 +50,7 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "mongo-cxx-driver/3.11.0#ae206de0e90fb8cb2fb95465fb8b2f01",
         "geos/3.12.0#0b177c90c25a8ca210578fb9e2899c37",
+        "libavrocpp/1.12.1@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {

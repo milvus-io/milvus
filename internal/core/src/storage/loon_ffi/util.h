@@ -77,21 +77,6 @@ CStorageConfig
 ToCStorageConfig(const milvus::storage::StorageConfig& config);
 
 /**
- * @brief Retrieve manifest/column groups from storage via FFI
- *
- * Parses the manifest path JSON to extract base_path and version,
- * then fetches the latest column groups from storage using FFI.
- *
- * @param path JSON string containing "base_path" and "ver" fields
- * @param properties Storage properties for accessing the manifest
- * @return JSON string containing column groups information
- * @throws std::runtime_error If JSON parsing fails or FFI call fails
- */
-std::string
-GetManifest(const std::string& path,
-            const std::shared_ptr<Properties>& properties);
-
-/**
  * @brief Retrieve ColumnGroups metadata from manifest path
  *
  * Parses the manifest path JSON and fetches the latest manifest

@@ -106,13 +106,16 @@ class TestVectorArrayStorageV2 : public testing::Test {
         auto storage_config = milvus_storage::StorageConfig();
 
         // Create writer
-        milvus_storage::PackedRecordBatchWriter writer(
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
             fs,
             paths,
             schema_->ConvertToArrowSchema(),
             storage_config,
             column_groups,
-            writer_memory);
+            writer_memory,
+            ::parquet::default_writer_properties());
+        EXPECT_TRUE(result.ok());
+        auto writer = result.ValueOrDie();
 
         // Generate and write data
         int64_t row_count = 0;
@@ -201,9 +204,9 @@ class TestVectorArrayStorageV2 : public testing::Test {
             auto record_batch = arrow::RecordBatch::Make(
                 schema_->ConvertToArrowSchema(), test_data_count_, arrays);
             row_count += test_data_count_;
-            EXPECT_TRUE(writer.Write(record_batch).ok());
+            EXPECT_TRUE(writer->Write(record_batch).ok());
         }
-        EXPECT_TRUE(writer.Close().ok());
+        EXPECT_TRUE(writer->Close().ok());
 
         LoadFieldDataInfo load_info;
         load_info.field_infos.emplace(
