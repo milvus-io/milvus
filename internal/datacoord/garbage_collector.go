@@ -115,41 +115,20 @@ func (gc *gcPauseRecords) PauseUntil() time.Time {
 	return gc.records.Peek().pauseUntil
 }
 
-func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) {
+func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 	gc.mut.Lock()
 	defer gc.mut.Unlock()
 
-	// heap small enough, short path
-	if gc.records.Len() < gc.maxLen {
-		gc.records.Push(gcPauseRecord{
-			ticket:     ticket,
-			pauseUntil: pauseUntil,
-		})
-		return
+	if gc.records.Len() >= gc.maxLen {
+		// too many pause records, refresh heap
+		return merr.WrapErrTooManyRequests(64, "too many pause records")
 	}
 
-	// too many pause records, refresh heap
-	counter := 0
-	now := time.Now()
-	records := make([]gcPauseRecord, 0, gc.records.Len())
-	for gc.records.Len() > 0 {
-		record := gc.records.Pop()
-		if now.Before(record.pauseUntil) {
-			records = append(records, record)
-			counter++
-		}
-		// reserve space for new record
-		if counter == gc.maxLen-1 {
-			break
-		}
-	}
-	gc.records = typeutil.NewObjectArrayBasedMaximumHeap(records, func(r gcPauseRecord) int64 {
-		return r.pauseUntil.UnixNano()
-	})
 	gc.records.Push(gcPauseRecord{
 		ticket:     ticket,
 		pauseUntil: pauseUntil,
 	})
+	return nil
 }
 
 func (gc *gcPauseRecords) Delete(ticket string) {
@@ -282,7 +261,7 @@ func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, ticke
 		log.Info("garbage collection not enabled")
 		return nil
 	}
-	done := make(chan error)
+	done := make(chan error, 1)
 	select {
 	case gc.cmdCh <- gcCmd{
 		cmdType:      datapb.GcCommand_Pause,
@@ -371,7 +350,8 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 		case cmd := <-gc.cmdCh:
 			switch cmd.cmdType {
 			case datapb.GcCommand_Pause:
-				gc.pause(cmd)
+				err := gc.pause(cmd)
+				cmd.done <- err
 			case datapb.GcCommand_Resume:
 				gc.resume(cmd)
 			}
@@ -383,7 +363,7 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 	}
 }
 
-func (gc *garbageCollector) pause(cmd gcCmd) {
+func (gc *garbageCollector) pause(cmd gcCmd) error {
 	log := log.With(
 		zap.Int64("collectionID", cmd.collectionID),
 		zap.String("ticket", cmd.ticket),
@@ -393,8 +373,9 @@ func (gc *garbageCollector) pause(cmd gcCmd) {
 		zap.Time("pauseUntil", reqPauseUntil),
 		zap.Duration("duration", cmd.duration),
 	)
+	var err error
 	if cmd.collectionID <= 0 { // legacy pause all
-		gc.pauseUntil.Insert(cmd.ticket, reqPauseUntil)
+		err = gc.pauseUntil.Insert(cmd.ticket, reqPauseUntil)
 		log.Info("global pause ticket recorded")
 	} else {
 		curr, has := gc.pausedCollection.Get(cmd.collectionID)
@@ -402,8 +383,11 @@ func (gc *garbageCollector) pause(cmd gcCmd) {
 			curr = NewGCPauseRecords()
 			gc.pausedCollection.Insert(cmd.collectionID, curr)
 		}
-		curr.Insert(cmd.ticket, reqPauseUntil)
+		err = curr.Insert(cmd.ticket, reqPauseUntil)
 		log.Info("collection new pause ticket recorded")
+	}
+	if err != nil {
+		return err
 	}
 	signalCh := gc.controlChannels["meta"]
 	// send signal to worker
@@ -419,6 +403,7 @@ func (gc *garbageCollector) pause(cmd gcCmd) {
 		// timeout, resume the pause
 		gc.resume(cmd)
 	}
+	return nil
 }
 
 func (gc *garbageCollector) resume(cmd gcCmd) {
