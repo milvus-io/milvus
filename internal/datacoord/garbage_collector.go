@@ -120,11 +120,12 @@ func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 	defer gc.mut.Unlock()
 
 	// heap small enough, short path
-	if gc.records.Len() >= gc.maxLen {
+	if gc.records.Len() < gc.maxLen {
 		gc.records.Push(gcPauseRecord{
 			ticket:     ticket,
 			pauseUntil: pauseUntil,
 		})
+		return nil
 	}
 
 	records := make([]gcPauseRecord, 0, gc.records.Len())
@@ -136,7 +137,7 @@ func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 		}
 	}
 
-	if gc.records.Len() >= gc.maxLen {
+	if gc.records.Len() < gc.maxLen {
 		gc.records.Push(gcPauseRecord{
 			ticket:     ticket,
 			pauseUntil: pauseUntil,
