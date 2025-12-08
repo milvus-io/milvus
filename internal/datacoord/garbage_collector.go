@@ -119,16 +119,32 @@ func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
 	gc.mut.Lock()
 	defer gc.mut.Unlock()
 
+	// heap small enough, short path
 	if gc.records.Len() >= gc.maxLen {
-		// too many pause records, refresh heap
-		return merr.WrapErrTooManyRequests(64, "too many pause records")
+		gc.records.Push(gcPauseRecord{
+			ticket:     ticket,
+			pauseUntil: pauseUntil,
+		})
 	}
 
-	gc.records.Push(gcPauseRecord{
-		ticket:     ticket,
-		pauseUntil: pauseUntil,
-	})
-	return nil
+	records := make([]gcPauseRecord, 0, gc.records.Len())
+	now := time.Now()
+	for gc.records.Len() > 0 {
+		record := gc.records.Pop()
+		if record.pauseUntil.After(now) {
+			records = append(records, record)
+		}
+	}
+
+	if gc.records.Len() >= gc.maxLen {
+		gc.records.Push(gcPauseRecord{
+			ticket:     ticket,
+			pauseUntil: pauseUntil,
+		})
+	}
+
+	// too many pause records, refresh heap
+	return merr.WrapErrTooManyRequests(64, "too many pause records")
 }
 
 func (gc *gcPauseRecords) Delete(ticket string) {
