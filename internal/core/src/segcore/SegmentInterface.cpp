@@ -142,9 +142,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        ThrowInfo(
-            RetrieveError,
-            fmt::format("query results exceed the limit size ", limit_size));
+        ThrowInfo(RetrieveError,
+                  fmt::format("query results exceed the limit size {} vs {}",
+                              output_data_size,
+                              limit_size));
     }
 
     results->set_all_retrieve_count(retrieve_results.total_data_cnt_);
