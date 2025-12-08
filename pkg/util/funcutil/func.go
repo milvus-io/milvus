@@ -438,6 +438,9 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetDoubleData().GetData())
 	case schemapb.DataType_Timestamptz:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetTimestamptzData().GetData())
+		if fieldNumRows == 0 {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
@@ -446,6 +449,9 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
 	case schemapb.DataType_Geometry:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryData().GetData())
+		if fieldNumRows == 0 {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryWktData().GetData())
+		}
 	case schemapb.DataType_FloatVector:
 		dim := fieldData.GetVectors().GetDim()
 		fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
