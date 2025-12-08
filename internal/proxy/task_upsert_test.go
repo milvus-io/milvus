@@ -845,18 +845,41 @@ func TestUpdateTask_queryPreExecute_Success(t *testing.T) {
 							FieldName: "id",
 							FieldId:   100,
 							Type:      schemapb.DataType_Int64,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_LongData{
+										LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+									},
+								},
+							},
 						},
 						{
 							FieldName: "name",
 							FieldId:   102,
 							Type:      schemapb.DataType_VarChar,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_StringData{
+										StringData: &schemapb.StringArray{Data: []string{"test1", "test2", "test3"}},
+									},
+								},
+							},
 						},
 						{
 							FieldName: "vector",
 							FieldId:   101,
 							Type:      schemapb.DataType_FloatVector,
+							Field: &schemapb.FieldData_Vectors{
+								Vectors: &schemapb.VectorField{
+									Dim: 128,
+									Data: &schemapb.VectorField_FloatVector{
+										FloatVector: &schemapb.FloatArray{Data: make([]float32, 384)}, // 3 * 128
+									},
+								},
+							},
 						},
 					},
+					NumRows: 3,
 				},
 			},
 		}
@@ -1670,37 +1693,63 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			},
 		}
 
-		task := &upsertTask{
-			ctx:    context.Background(),
-			schema: schema,
-			req: &milvuspb.UpsertRequest{
-				FieldsData: upsertData,
-				NumRows:    uint32(numRows),
-			},
-			upsertMsg: &msgstream.UpsertMsg{
-				InsertMsg: &msgstream.InsertMsg{
-					InsertRequest: &msgpb.InsertRequest{
-						FieldsData: upsertData,
-						NumRows:    uint64(numRows),
+		mockey.PatchConvey("test nullable field", t, func() {
+			// Setup mocks using mockey
+			mockey.Mock(GetReplicateID).Return("", nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
+			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
+			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+
+			globalMetaCache = &MetaCache{}
+
+			// Setup idAllocator
+			ctx := context.Background()
+			rc := mocks.NewMockRootCoordClient(t)
+			rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+				Status: merr.Status(nil),
+				ID:     1000,
+				Count:  uint32(numRows),
+			}, nil).Maybe()
+			idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+			assert.NoError(t, err)
+			idAllocator.Start()
+			defer idAllocator.Close()
+
+			task := &upsertTask{
+				ctx:    ctx,
+				schema: schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_empty_data_array",
+					FieldsData:     upsertData,
+					NumRows:        uint32(numRows),
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							CollectionName: "test_empty_data_array",
+							FieldsData:     upsertData,
+							NumRows:        uint64(numRows),
+						},
 					},
 				},
-			},
-			node: &Proxy{},
-		}
+				idAllocator: idAllocator,
+				result:      &milvuspb.MutationResult{},
+				node:        &Proxy{},
+			}
 
-		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
-		defer mockRetrieve.UnPatch()
+			// case1: test upsert
+			err = task.PreExecute(ctx)
+			assert.Error(t, err)
 
-		// case1: test upsert
-		// For nullable field, when data array is empty but field is nullable,
-		// the merge logic should handle it gracefully
-		err := task.PreExecute(context.Background())
-		assert.Error(t, err)
-
-		// case2 : test partial update
-		task.req.PartialUpdate = true
-		err = task.queryPreExecute(context.Background())
-		assert.Error(t, err)
+			// case2: test partial update
+			task.req.PartialUpdate = true
+			err = task.PreExecute(ctx)
+			assert.Error(t, err)
+		})
 	})
 
 	t.Run("scalar field with empty data array - non-nullable field", func(t *testing.T) {
@@ -1763,36 +1812,62 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			},
 		}
 
-		task := &upsertTask{
-			ctx:    context.Background(),
-			schema: schema,
-			req: &milvuspb.UpsertRequest{
-				FieldsData: upsertData,
-				NumRows:    uint32(numRows),
-			},
-			upsertMsg: &msgstream.UpsertMsg{
-				InsertMsg: &msgstream.InsertMsg{
-					InsertRequest: &msgpb.InsertRequest{
-						FieldsData: upsertData,
-						NumRows:    uint64(numRows),
+		mockey.PatchConvey("test non-nullable field", t, func() {
+			// Setup mocks using mockey
+			mockey.Mock(GetReplicateID).Return("", nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
+			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
+			mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
+			mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+
+			globalMetaCache = &MetaCache{}
+
+			// Setup idAllocator
+			ctx := context.Background()
+			rc := mocks.NewMockRootCoordClient(t)
+			rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+				Status: merr.Status(nil),
+				ID:     1000,
+				Count:  uint32(numRows),
+			}, nil).Maybe()
+			idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+			assert.NoError(t, err)
+			idAllocator.Start()
+			defer idAllocator.Close()
+
+			task := &upsertTask{
+				ctx:    ctx,
+				schema: schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_empty_data_array_non_nullable",
+					FieldsData:     upsertData,
+					NumRows:        uint32(numRows),
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							CollectionName: "test_empty_data_array_non_nullable",
+							FieldsData:     upsertData,
+							NumRows:        uint64(numRows),
+						},
 					},
 				},
-			},
-			node: &Proxy{},
-		}
+				idAllocator: idAllocator,
+				result:      &milvuspb.MutationResult{},
+				node:        &Proxy{},
+			}
 
-		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
-		defer mockRetrieve.UnPatch()
+			// case1: test upsert
+			err = task.PreExecute(ctx)
+			assert.Error(t, err)
 
-		// case1 : test upsert
-		// For non-nullable field with empty data array, should return error
-		err := task.PreExecute(context.Background())
-		// Non-nullable field with empty data array should cause an error
-		assert.Error(t, err)
-
-		// case2 : test partial update
-		task.req.PartialUpdate = true
-		err = task.queryPreExecute(context.Background())
-		assert.Error(t, err)
+			// case2: test partial update
+			task.req.PartialUpdate = true
+			err = task.PreExecute(ctx)
+			assert.Error(t, err)
+		})
 	})
 }
