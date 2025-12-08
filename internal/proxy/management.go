@@ -17,11 +17,13 @@
 package proxy
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -89,15 +91,54 @@ func RegisterMgrRoute(proxy *Proxy) {
 	})
 }
 
+// EncodeTicket encodes the ticket with token and collectionID
+func EncodeTicket(token string, collectionID string) string {
+	if collectionID == "" {
+		collectionID = "-1"
+	}
+	m := map[string]string{
+		"token":         token,
+		"collection_id": collectionID,
+	}
+	bytes, _ := json.Marshal(m)
+	ticket := base64.StdEncoding.EncodeToString(bytes)
+	return ticket
+}
+
+// DecodeTicket decodes the ticket to get token and collectionID
+func DecodeTicket(ticket string) (string, string, error) {
+	bytes, err := base64.StdEncoding.DecodeString(ticket)
+	if err != nil {
+		return "", "", err
+	}
+	m := make(map[string]string)
+	err = json.Unmarshal(bytes, &m)
+	if err != nil {
+		return "", "", err
+	}
+	return m["token"], m["collection_id"], nil
+}
+
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
+	// generate ticket for request
+	token := uuid.New().String()
+	ticket := EncodeTicket(token, req.URL.Query().Get("collection_id"))
+	params := []*commonpb.KeyValuePair{
+		{Key: "duration", Value: pauseSeconds},
+		{Key: "ticket", Value: ticket},
+	}
+	if req.URL.Query().Has("collection_id") {
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "collection_id",
+			Value: req.URL.Query().Get("collection_id"),
+		})
+	}
 
 	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: pauseSeconds},
-		},
+		Params:  params,
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -110,22 +151,40 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	fmt.Fprintf(w, `{"msg": "OK", "ticket": "%s"}`, ticket)
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
+	ticket := req.URL.Query().Get("ticket")
+	var collectionID string
+	var err error
+	// allow empty ticket for backward compatibility
+	if ticket != "" {
+		_, collectionID, err = DecodeTicket(ticket)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(fmt.Sprintf(`{"msg": "failed to decode ticket, %s"}`, err.Error())))
+			return
+		}
+	}
+	params := []*commonpb.KeyValuePair{
+		{Key: "ticket", Value: req.URL.Query().Get("ticket")},
+		{Key: "collection_id", Value: collectionID},
+	}
+
 	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Resume,
+		Params:  params,
 	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume garbage collection, %s"}`, err.Error())))
 		return
 	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, resp.GetReason())))
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to resume garbage collection, %s"}`, resp.GetReason())))
 		return
 	}
 	w.WriteHeader(http.StatusOK)
