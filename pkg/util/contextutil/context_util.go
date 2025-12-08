@@ -65,6 +65,23 @@ func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context 
 	return metadata.NewIncomingContext(ctx, md)
 }
 
+// SetToIncomingContext sets the metadata to the incoming context.
+func SetToIncomingContext(ctx context.Context, kv ...string) context.Context {
+	if len(kv)%2 == 1 {
+		panic(fmt.Sprintf("metadata: AppendToOutgoingContext got an odd number of input pairs for metadata: %d", len(kv)))
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		md = metadata.New(make(map[string]string, len(kv)/2))
+	}
+	for i, s := range kv {
+		if i%2 == 0 {
+			md.Set(s, kv[i+1])
+		}
+	}
+	return metadata.NewIncomingContext(ctx, md)
+}
+
 func GetCurUserFromContext(ctx context.Context) (string, error) {
 	username, _, err := GetAuthInfoFromContext(ctx)
 	return username, err
