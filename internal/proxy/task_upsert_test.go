@@ -1644,3 +1644,199 @@ func TestUpsertTask_NoDuplicatePK(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, hasDuplicate, "should not have duplicate primary keys")
 }
+
+// TestUpsertTask_queryPreExecute_EmptyDataArray tests the scenario where:
+// 1. Partial update is enabled
+// 2. Three columns are passed: pk (a), vector (b), scalar (c)
+// 3. Columns a and b have 10 rows of data, column c has FieldData but empty data array
+// 4. Verifies both nullable and non-nullable scenarios for column c
+func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
+	numRows := 10
+	dim := 128
+
+	t.Run("scalar field with empty data array nullable field", func(t *testing.T) {
+		// Schema with nullable scalar field c
+		schema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name: "test_empty_data_array",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "a", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:  101,
+					Name:     "b",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					},
+				},
+				{FieldID: 102, Name: "c", DataType: schemapb.DataType_Int32, Nullable: true},
+			},
+		})
+
+		// Upsert data: a (pk, 10 rows), b (vector, 10 rows), c (scalar, FieldData exists but data array is empty)
+		pkData := make([]int64, numRows)
+		for i := 0; i < numRows; i++ {
+			pkData[i] = int64(i + 1)
+		}
+		vectorData := make([]float32, numRows*dim)
+
+		upsertData := []*schemapb.FieldData{
+			{
+				FieldName: "a", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pkData}}}},
+			},
+			{
+				FieldName: "b", FieldId: 101, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: int64(dim), Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectorData}}}},
+			},
+			{
+				// c has FieldData but empty data array
+				FieldName: "c", FieldId: 102, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{}}}}},
+			},
+		}
+
+		// Query result returns empty (all are new inserts)
+		mockQueryResult := &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "a", FieldId: 100, Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{}}}}},
+				},
+				{
+					FieldName: "b", FieldId: 101, Type: schemapb.DataType_FloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: int64(dim), Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}}}},
+				},
+				{
+					FieldName: "c", FieldId: 102, Type: schemapb.DataType_Int32,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{}}}}},
+				},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData: upsertData,
+				NumRows:    uint32(numRows),
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: upsertData,
+						NumRows:    uint64(numRows),
+					},
+				},
+			},
+			node: &Proxy{},
+		}
+
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+
+		// case1: test upsert
+		// For nullable field, when data array is empty but field is nullable,
+		// the merge logic should handle it gracefully
+		err := task.PreExecute(context.Background())
+		assert.Error(t, err)
+
+		// case2 : test partial update
+		task.req.PartialUpdate = true
+		err = task.queryPreExecute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("scalar field with empty data array - non-nullable field", func(t *testing.T) {
+		// Schema with non-nullable scalar field c
+		schema := newSchemaInfo(&schemapb.CollectionSchema{
+			Name: "test_empty_data_array_non_nullable",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "a", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:  101,
+					Name:     "b",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					},
+				},
+				{FieldID: 102, Name: "c", DataType: schemapb.DataType_Int32, Nullable: false},
+			},
+		})
+
+		// Upsert data: a (pk, 10 rows), b (vector, 10 rows), c (scalar, FieldData exists but data array is empty)
+		pkData := make([]int64, numRows)
+		for i := 0; i < numRows; i++ {
+			pkData[i] = int64(i + 1)
+		}
+		vectorData := make([]float32, numRows*dim)
+
+		upsertData := []*schemapb.FieldData{
+			{
+				FieldName: "a", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pkData}}}},
+			},
+			{
+				FieldName: "b", FieldId: 101, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: int64(dim), Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectorData}}}},
+			},
+			{
+				// c has FieldData but empty data array - this should cause validation error for non-nullable field
+				FieldName: "c", FieldId: 102, Type: schemapb.DataType_Int32,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{}}}}},
+			},
+		}
+
+		// Query result returns empty (all are new inserts)
+		mockQueryResult := &milvuspb.QueryResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "a", FieldId: 100, Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{}}}}},
+				},
+				{
+					FieldName: "b", FieldId: 101, Type: schemapb.DataType_FloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: int64(dim), Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}}}},
+				},
+				{
+					FieldName: "c", FieldId: 102, Type: schemapb.DataType_Int32,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{}}}}},
+				},
+			},
+		}
+
+		task := &upsertTask{
+			ctx:    context.Background(),
+			schema: schema,
+			req: &milvuspb.UpsertRequest{
+				FieldsData: upsertData,
+				NumRows:    uint32(numRows),
+			},
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &msgstream.InsertMsg{
+					InsertRequest: &msgpb.InsertRequest{
+						FieldsData: upsertData,
+						NumRows:    uint64(numRows),
+					},
+				},
+			},
+			node: &Proxy{},
+		}
+
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(mockQueryResult, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+
+		// case1 : test upsert
+		// For non-nullable field with empty data array, should return error
+		err := task.PreExecute(context.Background())
+		// Non-nullable field with empty data array should cause an error
+		assert.Error(t, err)
+
+		// case2 : test partial update
+		task.req.PartialUpdate = true
+		err = task.queryPreExecute(context.Background())
+		assert.Error(t, err)
+	})
+}
