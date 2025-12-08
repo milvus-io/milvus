@@ -210,6 +210,9 @@ class SegmentExpr : public Expr {
                 field_id_, 0, current_data_chunk_pos_, need_size);
 
             func(data_vec.data(), need_size, res, values...);
+        } else {
+            // Chunk is skipped by SkipIndex, set all bits to false
+            res.reset();
         }
         current_data_chunk_pos_ += need_size;
         return need_size;
@@ -251,6 +254,10 @@ class SegmentExpr : public Expr {
                 auto chunk = segment_->chunk_data<T>(field_id_, i);
                 const T* data = chunk.data() + data_pos;
                 func(data, size, res + processed_size, values...);
+            } else {
+                // Chunk is skipped by SkipIndex, set all bits to false
+                TargetBitmapView chunk_res(res.data() + processed_size, size);
+                chunk_res.reset();
             }
 
             processed_size += size;
