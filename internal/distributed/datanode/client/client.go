@@ -50,10 +50,8 @@ type DataNodeClient struct {
 // Client is the grpc client for DataNode
 type Client struct {
 	grpcClient grpcclient.GrpcClient[DataNodeClient]
-	sess       *sessionutil.Session
 	addr       string
 	serverID   int64
-	ctx        context.Context
 }
 
 // NewClient creates a client for DataNode.
@@ -61,7 +59,7 @@ func NewClient(ctx context.Context, addr string, serverID int64, encryption bool
 	if addr == "" {
 		return nil, errors.New("address is empty")
 	}
-	sess := sessionutil.NewSession(ctx)
+	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
@@ -72,9 +70,7 @@ func NewClient(ctx context.Context, addr string, serverID int64, encryption bool
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[DataNodeClient](config, "milvus.proto.data.DataNode"),
-		sess:       sess,
 		serverID:   serverID,
-		ctx:        ctx,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.DataNodeRole, serverID))

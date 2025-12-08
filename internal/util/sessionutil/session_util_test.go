@@ -88,7 +88,7 @@ func TestInit(t *testing.T) {
 	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
-	sessions, _, err := s.GetSessions("inittest")
+	sessions, _, err := s.GetSessions(ctx, "inittest")
 	assert.NoError(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
 }
@@ -111,7 +111,7 @@ func TestInitNoArgs(t *testing.T) {
 	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
 	s.Register()
-	sessions, _, err := s.GetSessions("inittest")
+	sessions, _, err := s.GetSessions(ctx, "inittest")
 	assert.NoError(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
 }
@@ -131,7 +131,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 
-	sessions, rev, err := s.GetSessions("test")
+	sessions, rev, err := s.GetSessions(ctx, "test")
 	assert.NoError(t, err)
 	assert.Equal(t, len(sessions), 0)
 	watcher := s.WatchServices("test", rev, nil)
@@ -155,15 +155,15 @@ func TestUpdateSessions(t *testing.T) {
 	wg.Wait()
 
 	assert.Eventually(t, func() bool {
-		sessions, _, _ := s.GetSessions("test")
+		sessions, _, _ := s.GetSessions(ctx, "test")
 		return len(sessions) == 10
 	}, 10*time.Second, 100*time.Millisecond)
-	notExistSessions, _, _ := s.GetSessions("testt")
+	notExistSessions, _, _ := s.GetSessions(ctx, "testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
 	etcdKV.RemoveWithPrefix(ctx, metaRoot)
 	assert.Eventually(t, func() bool {
-		sessions, _, _ := s.GetSessions("test")
+		sessions, _, _ := s.GetSessions(ctx, "test")
 		return len(sessions) == 0
 	}, 10*time.Second, 100*time.Millisecond)
 
