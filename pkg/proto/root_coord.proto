@@ -32,6 +32,15 @@ service RootCoord {
     rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
 
     /**
+     * @brief This method is used to clear a collection.
+     *
+     * @param TruncateCollectionRequest, collection name is going to be cleared.
+     *
+     * @return Status
+     */
+    rpc TruncateCollection(milvus.TruncateCollectionRequest) returns (common.Status) {}
+
+    /**
      * @brief This method is used to add collection field.
      *
      * @param AddCollectionFieldRequest, field schema is going to be added.

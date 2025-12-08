@@ -2222,6 +2222,50 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 	}
 }
 
+func (suite *ServiceSuite) TestManualUpdateCurrentTarget() {
+	ctx := context.Background()
+	server := suite.server
+	collectionID := suite.collections[0]
+
+	// Test when server is not healthy
+	server.UpdateStateCode(commonpb.StateCode_Initializing)
+	req := &querypb.ManualUpdateCurrentTargetRequest{
+		CollectionID: collectionID,
+	}
+	resp, err := server.ManualUpdateCurrentTarget(ctx, req)
+	suite.NoError(err)
+	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
+
+	// Restore healthy state
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	// Test success case
+	mockey.PatchConvey("TestManualUpdateCurrentTarget success", suite.T(), func() {
+		m := mockey.Mock(job.WaitCurrentTargetUpdated).Return(nil).Build()
+		defer m.UnPatch()
+
+		req := &querypb.ManualUpdateCurrentTargetRequest{
+			CollectionID: collectionID,
+		}
+		resp, err := server.ManualUpdateCurrentTarget(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	// Test WaitCurrentTargetUpdated error case
+	mockey.PatchConvey("TestManualUpdateCurrentTarget error", suite.T(), func() {
+		m := mockey.Mock(job.WaitCurrentTargetUpdated).Return(errors.New("mock error")).Build()
+		defer m.UnPatch()
+
+		req := &querypb.ManualUpdateCurrentTargetRequest{
+			CollectionID: collectionID,
+		}
+		resp, err := server.ManualUpdateCurrentTarget(ctx, req)
+		suite.NoError(err)
+		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
 func (suite *ServiceSuite) TearDownTest() {
 	suite.targetObserver.Stop()
 	suite.collectionObserver.Stop()

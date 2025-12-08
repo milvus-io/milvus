@@ -3934,6 +3934,65 @@ func (_c *MockRootCoord_Stop_Call) RunAndReturn(run func() error) *MockRootCoord
 	return _c
 }
 
+// TruncateCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockRootCoord) TruncateCollection(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TruncateCollection")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TruncateCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoord_TruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TruncateCollection'
+type MockRootCoord_TruncateCollection_Call struct {
+	*mock.Call
+}
+
+// TruncateCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TruncateCollectionRequest
+func (_e *MockRootCoord_Expecter) TruncateCollection(_a0 interface{}, _a1 interface{}) *MockRootCoord_TruncateCollection_Call {
+	return &MockRootCoord_TruncateCollection_Call{Call: _e.mock.On("TruncateCollection", _a0, _a1)}
+}
+
+func (_c *MockRootCoord_TruncateCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest)) *MockRootCoord_TruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.TruncateCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockRootCoord_TruncateCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoord_TruncateCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoord_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)) *MockRootCoord_TruncateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateChannelTimeTick provides a mock function with given fields: _a0, _a1
 func (_m *MockRootCoord) UpdateChannelTimeTick(_a0 context.Context, _a1 *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

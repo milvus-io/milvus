@@ -172,3 +172,45 @@ func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
 	err = handler.HandleSchemaChange(context.Background(), im)
 	assert.NoError(t, err)
 }
+
+func TestFlushMsgHandler_HandleTruncateCollection(t *testing.T) {
+	vchannel := "ch-0"
+
+	// test failed - SealSegments error
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+
+	msg := message.NewTruncateCollectionMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
+		WithHeader(&message.TruncateCollectionMessageHeader{
+			CollectionId: 0,
+			SegmentIds:   []int64{1, 2},
+		}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
+	msg.WithTimeTick(1000)
+
+	handler := newMsgHandler(wbMgr)
+	msgID := mock_message.NewMockMessageID(t)
+	im, err := message.AsImmutableTruncateCollectionMessageV2(msg.IntoImmutableMessage(msgID))
+	assert.NoError(t, err)
+	err = handler.HandleTruncateCollection(im)
+	assert.Error(t, err)
+
+	// test failed - SealSegments success but FlushChannel error
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Unset()
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+
+	err = handler.HandleTruncateCollection(im)
+	assert.Error(t, err)
+
+	// test normal
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Unset()
+	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err = handler.HandleTruncateCollection(im)
+	assert.NoError(t, err)
+}

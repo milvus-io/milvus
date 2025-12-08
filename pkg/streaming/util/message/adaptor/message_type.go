@@ -6,20 +6,21 @@ import (
 )
 
 var messageTypeToCommonpbMsgType = map[message.MessageType]commonpb.MsgType{
-	message.MessageTypeTimeTick:         commonpb.MsgType_TimeTick,
-	message.MessageTypeInsert:           commonpb.MsgType_Insert,
-	message.MessageTypeDelete:           commonpb.MsgType_Delete,
-	message.MessageTypeFlush:            commonpb.MsgType_FlushSegment,
-	message.MessageTypeManualFlush:      commonpb.MsgType_ManualFlush,
-	message.MessageTypeFlushAll:         commonpb.MsgType_FlushAll,
-	message.MessageTypeCreateSegment:    commonpb.MsgType_CreateSegment,
-	message.MessageTypeCreateCollection: commonpb.MsgType_CreateCollection,
-	message.MessageTypeDropCollection:   commonpb.MsgType_DropCollection,
-	message.MessageTypeCreatePartition:  commonpb.MsgType_CreatePartition,
-	message.MessageTypeDropPartition:    commonpb.MsgType_DropPartition,
-	message.MessageTypeImport:           commonpb.MsgType_Import,
-	message.MessageTypeSchemaChange:     commonpb.MsgType_AddCollectionField, // TODO change to schema change
-	message.MessageTypeAlterCollection:  commonpb.MsgType_AlterCollection,
+	message.MessageTypeTimeTick:           commonpb.MsgType_TimeTick,
+	message.MessageTypeInsert:             commonpb.MsgType_Insert,
+	message.MessageTypeDelete:             commonpb.MsgType_Delete,
+	message.MessageTypeFlush:              commonpb.MsgType_FlushSegment,
+	message.MessageTypeManualFlush:        commonpb.MsgType_ManualFlush,
+	message.MessageTypeFlushAll:           commonpb.MsgType_FlushAll,
+	message.MessageTypeCreateSegment:      commonpb.MsgType_CreateSegment,
+	message.MessageTypeCreateCollection:   commonpb.MsgType_CreateCollection,
+	message.MessageTypeDropCollection:     commonpb.MsgType_DropCollection,
+	message.MessageTypeCreatePartition:    commonpb.MsgType_CreatePartition,
+	message.MessageTypeDropPartition:      commonpb.MsgType_DropPartition,
+	message.MessageTypeImport:             commonpb.MsgType_Import,
+	message.MessageTypeSchemaChange:       commonpb.MsgType_AddCollectionField, // TODO change to schema change
+	message.MessageTypeAlterCollection:    commonpb.MsgType_AlterCollection,
+	message.MessageTypeTruncateCollection: commonpb.MsgType_TruncateCollection,
 }
 
 // MustGetCommonpbMsgTypeFromMessageType returns the commonpb.MsgType from message.MessageType.

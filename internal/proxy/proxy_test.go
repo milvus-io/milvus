@@ -2486,6 +2486,33 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	wg.Add(1)
+	t.Run("truncate collection", func(t *testing.T) {
+		defer wg.Done()
+		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, "", resp.Reason)
+
+		// Verify that data is cleared but collection still exists
+		statsResp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, statsResp.GetStatus().GetErrorCode())
+		rowNumStr := funcutil.KeyValuePair2Map(statsResp.Stats)["row_count"]
+		assert.Equal(t, "0", rowNumStr)
+	})
+
+	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
 		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
@@ -2707,6 +2734,15 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("TruncateCollection fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("HasCollection fail, unhealthy", func(t *testing.T) {
 		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
@@ -3004,6 +3040,15 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("TruncateCollection fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("HasCollection fail, dd queue full", func(t *testing.T) {
 		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
@@ -3226,6 +3271,15 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("TruncateCollection fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.TruncateCollection(shortCtx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("HasCollection fail, timeout", func(t *testing.T) {
 		resp, err := proxy.HasCollection(shortCtx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)

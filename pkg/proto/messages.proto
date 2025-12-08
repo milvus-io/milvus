@@ -59,6 +59,7 @@ enum MessageType {
     AlterIndex           = 35;
     DropIndex            = 36;
     FlushAll             = 37;
+    TruncateCollection   = 38;
 
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
@@ -668,3 +669,14 @@ message CipherHeader {
     bytes safe_key = 3; // the safe key
     int64 payload_bytes = 4; // the size of the payload before encryption
 }
+
+// TruncateCollectionMessageHeader is the header of truncate collection message.
+message TruncateCollectionMessageHeader {
+    int64 db_id = 1;
+    int64 collection_id = 2;
+    repeated int64 segment_ids = 3;
+}
+
+// TruncateCollectionMessageBody is the body of truncate collection message.
+message TruncateCollectionMessageBody {}
+

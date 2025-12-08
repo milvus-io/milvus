@@ -778,4 +778,28 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
+
+	t.Run("TruncateCollection", func(t *testing.T) {
+		req := &milvuspb.TruncateCollectionRequest{}
+		mockMixCoord.EXPECT().TruncateCollection(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		resp, err := server.TruncateCollection(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DropSegmentsByTime", func(t *testing.T) {
+		req := &datapb.DropSegmentsByTimeRequest{}
+		mockMixCoord.EXPECT().DropSegmentsByTime(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		resp, err := server.DropSegmentsByTime(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ManualUpdateCurrentTarget", func(t *testing.T) {
+		req := &querypb.ManualUpdateCurrentTargetRequest{}
+		mockMixCoord.EXPECT().ManualUpdateCurrentTarget(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		resp, err := server.ManualUpdateCurrentTarget(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
 }

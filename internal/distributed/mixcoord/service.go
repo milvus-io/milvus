@@ -959,3 +959,18 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
 }
+
+// TruncateCollection truncate a collection
+func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	return s.mixCoord.TruncateCollection(ctx, in)
+}
+
+// DropSegmentsByTime drop segments that were updated before the flush timestamp for truncating collection
+func (s *Server) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
+	return s.mixCoord.DropSegmentsByTime(ctx, req)
+}
+
+// ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
+func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
+	return s.mixCoord.ManualUpdateCurrentTarget(ctx, req)
+}

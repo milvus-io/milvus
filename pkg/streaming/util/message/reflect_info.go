@@ -28,6 +28,7 @@ const (
 	MessageTypeDelete               MessageType = MessageType(messagespb.MessageType_Delete)
 	MessageTypeCreateCollection     MessageType = MessageType(messagespb.MessageType_CreateCollection)
 	MessageTypeDropCollection       MessageType = MessageType(messagespb.MessageType_DropCollection)
+	MessageTypeTruncateCollection   MessageType = MessageType(messagespb.MessageType_TruncateCollection)
 	MessageTypeCreatePartition      MessageType = MessageType(messagespb.MessageType_CreatePartition)
 	MessageTypeDropPartition        MessageType = MessageType(messagespb.MessageType_DropPartition)
 	MessageTypeImport               MessageType = MessageType(messagespb.MessageType_Import)
@@ -93,6 +94,8 @@ type (
 	CreateCollectionRequest           = msgpb.CreateCollectionRequest
 	DropCollectionMessageHeader       = messagespb.DropCollectionMessageHeader
 	DropCollectionRequest             = msgpb.DropCollectionRequest
+	TruncateCollectionMessageHeader   = messagespb.TruncateCollectionMessageHeader
+	TruncateCollectionMessageBody     = messagespb.TruncateCollectionMessageBody
 	CreatePartitionMessageHeader      = messagespb.CreatePartitionMessageHeader
 	CreatePartitionRequest            = msgpb.CreatePartitionRequest
 	DropPartitionMessageHeader        = messagespb.DropPartitionMessageHeader
@@ -373,6 +376,47 @@ var MustAsBroadcastDropCollectionMessageV1 = MustAsSpecializedBroadcastMessage[*
 
 // NewDropCollectionMessageBuilderV1 creates a new message builder for DropCollectionMessageV1
 var NewDropCollectionMessageBuilderV1 = newMutableMessageBuilder[*DropCollectionMessageHeader, *DropCollectionRequest]
+
+// Type aliases for TruncateCollectionMessageV2
+type (
+	MutableTruncateCollectionMessageV2         = specializedMutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+	ImmutableTruncateCollectionMessageV2       = SpecializedImmutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+	BroadcastTruncateCollectionMessageV2       = SpecializedBroadcastMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+	BroadcastResultTruncateCollectionMessageV2 = BroadcastResult[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+)
+
+// MessageTypeWithVersion for TruncateCollectionMessageV2
+var MessageTypeTruncateCollectionV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeTruncateCollection,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for TruncateCollectionMessageV2
+var SpecializedTypeTruncateCollectionV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*TruncateCollectionMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*TruncateCollectionMessageHeader)(nil)),
+}
+
+// AsMutableTruncateCollectionMessageV2 converts a BasicMessage to MutableTruncateCollectionMessageV2
+var AsMutableTruncateCollectionMessageV2 = asSpecializedMutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+
+// MustAsMutableTruncateCollectionMessageV2 converts a BasicMessage to MutableTruncateCollectionMessageV2, panics on error
+var MustAsMutableTruncateCollectionMessageV2 = mustAsSpecializedMutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+
+// AsImmutableTruncateCollectionMessageV2 converts an ImmutableMessage to ImmutableTruncateCollectionMessageV2
+var AsImmutableTruncateCollectionMessageV2 = asSpecializedImmutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+
+// MustAsImmutableTruncateCollectionMessageV2 converts an ImmutableMessage to ImmutableTruncateCollectionMessageV2, panics on error
+var MustAsImmutableTruncateCollectionMessageV2 = MustAsSpecializedImmutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+
+// AsBroadcastTruncateCollectionMessageV2 converts a BasicMessage to BroadcastTruncateCollectionMessageV2
+var AsBroadcastTruncateCollectionMessageV2 = asSpecializedBroadcastMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+
+// MustAsBroadcastTruncateCollectionMessageV2 converts a BasicMessage to BroadcastTruncateCollectionMessageV2, panics on error
+var MustAsBroadcastTruncateCollectionMessageV2 = MustAsSpecializedBroadcastMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+
+// NewTruncateCollectionMessageBuilderV2 creates a new message builder for TruncateCollectionMessageV2
+var NewTruncateCollectionMessageBuilderV2 = newMutableMessageBuilder[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
 
 // Type aliases for CreatePartitionMessageV1
 type (
@@ -1913,6 +1957,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):          MessageTypeRollbackTxn,
 	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):         MessageTypeSchemaChange,
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):             MessageTypeTimeTick,
+	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):   MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                  MessageTypeTxn,
 }
 
@@ -1975,6 +2020,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeRollbackTxnV2:          SpecializedTypeRollbackTxnV2,
 	MessageTypeSchemaChangeV2:         SpecializedTypeSchemaChangeV2,
 	MessageTypeTimeTickV1:             SpecializedTypeTimeTickV1,
+	MessageTypeTruncateCollectionV2:   SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                  SpecializedTypeTxnV2,
 }
 
@@ -2021,5 +2067,6 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeRollbackTxnV2:          MessageTypeRollbackTxnV2,
 	SpecializedTypeSchemaChangeV2:         MessageTypeSchemaChangeV2,
 	SpecializedTypeTimeTickV1:             MessageTypeTimeTickV1,
+	SpecializedTypeTruncateCollectionV2:   MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                  MessageTypeTxnV2,
 }

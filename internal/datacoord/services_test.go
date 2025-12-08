@@ -2416,3 +2416,146 @@ func getWatchKV(t *testing.T) kv.WatchKV {
 
 	return kv
 }
+
+func TestServer_DropSegmentsByTime(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1)
+	channelName := "test-channel"
+	flushTs := uint64(1000)
+
+	t.Run("server not healthy", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Abnormal)
+		req := &datapb.DropSegmentsByTimeRequest{
+			CollectionID: collectionID,
+			FlushTsList:  map[string]uint64{channelName: flushTs},
+		}
+		resp, err := s.DropSegmentsByTime(ctx, req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("get channels failed", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMixCoord := mocks2.NewMixCoord(t)
+		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock error"))
+		s.mixCoord = mockMixCoord
+
+		req := &datapb.DropSegmentsByTimeRequest{
+			CollectionID: collectionID,
+			FlushTsList:  map[string]uint64{channelName: flushTs},
+		}
+		resp, err := s.DropSegmentsByTime(ctx, req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("watch channel checkpoint failed", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMixCoord := mocks2.NewMixCoord(t)
+		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				CollectionID:        collectionID,
+				VirtualChannelNames: []string{channelName},
+			}, nil)
+		s.mixCoord = mockMixCoord
+
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		s.meta = meta
+
+		// WatchChannelCheckpoint will wait indefinitely, so we use a context with timeout
+		ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		req := &datapb.DropSegmentsByTimeRequest{
+			CollectionID: collectionID,
+			FlushTsList:  map[string]uint64{channelName: flushTs},
+		}
+		resp, err := s.DropSegmentsByTime(ctxWithTimeout, req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("success - drop segments", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMixCoord := mocks2.NewMixCoord(t)
+		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:              merr.Success(),
+				CollectionID:        collectionID,
+				VirtualChannelNames: []string{channelName},
+			}, nil)
+		s.mixCoord = mockMixCoord
+
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+		s.meta = meta
+
+		// Set channel checkpoint to satisfy WatchChannelCheckpoint
+		pos := &msgpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			Timestamp:   flushTs,
+		}
+		err = meta.UpdateChannelCheckpoint(ctx, channelName, pos)
+		assert.NoError(t, err)
+
+		// Add segments to drop (timestamp <= flushTs)
+		seg1 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           1,
+				CollectionID: collectionID,
+				State:        commonpb.SegmentState_Flushed,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: flushTs - 100, // less than flushTs
+				},
+			},
+		}
+		err = meta.AddSegment(ctx, seg1)
+		assert.NoError(t, err)
+
+		// Add segment that should not be dropped (timestamp > flushTs)
+		seg2 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           2,
+				CollectionID: collectionID,
+				State:        commonpb.SegmentState_Flushed,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: flushTs + 100, // greater than flushTs
+				},
+			},
+		}
+		err = meta.AddSegment(ctx, seg2)
+		assert.NoError(t, err)
+
+		// Set segment channel
+		seg1.InsertChannel = channelName
+		seg2.InsertChannel = channelName
+		meta.segments.SetSegment(seg1.ID, seg1)
+		meta.segments.SetSegment(seg2.ID, seg2)
+
+		req := &datapb.DropSegmentsByTimeRequest{
+			CollectionID: collectionID,
+			FlushTsList:  map[string]uint64{channelName: flushTs},
+		}
+		resp, err := s.DropSegmentsByTime(ctx, req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+
+		// Verify segment 1 is dropped
+		seg1After := meta.GetSegment(ctx, seg1.ID)
+		assert.NotNil(t, seg1After)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg1After.GetState())
+
+		// Verify segment 2 is not dropped
+		seg2After := meta.GetSegment(ctx, seg2.ID)
+		assert.NotNil(t, seg2After)
+		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
+	})
+}

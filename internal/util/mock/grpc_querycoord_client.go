@@ -201,3 +201,7 @@ func (m *GrpcQueryCoordClient) RunAnalyzer(ctx context.Context, req *querypb.Run
 func (m *GrpcQueryCoordClient) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	return &querypb.ValidateAnalyzerResponse{}, m.Err
 }
+
+func (m *GrpcQueryCoordClient) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

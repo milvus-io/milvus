@@ -126,3 +126,14 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), putCollectionMsg.VChannel(), putCollectionMsg.Header().FlushedSegmentIds)
 }
+
+func (impl *msgHandlerImpl) HandleTruncateCollection(flushMsg message.ImmutableTruncateCollectionMessageV2) error {
+	vchannel := flushMsg.VChannel()
+	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, flushMsg.Header().SegmentIds); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
+	}
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.TimeTick()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	return nil
+}

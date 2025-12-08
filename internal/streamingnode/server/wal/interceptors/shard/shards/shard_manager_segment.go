@@ -162,7 +162,7 @@ func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(uniquePartitionKey Parti
 }
 
 // FlushAndFenceSegmentAllocUntil flush all segment that contains the message which timetick is less than the incoming timetick.
-// It will be used for message like ManualFlush, SchemaChange operations that want the exists segment to be flushed.
+// It will be used for message like ManualFlush, SchemaChange, TruncateCollection operations that want the exists segment to be flushed.
 // !!! The returned segmentIDs may be is on-flushing state(which is on-flushing, a segmentFlushWorker is running, but not send into wal yet)
 // !!! The caller should promise the returned segmentIDs to be flushed.
 func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
