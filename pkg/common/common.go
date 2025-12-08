@@ -246,8 +246,9 @@ const (
 	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
-	TimezoneKey          = "timezone"
-	AllowInsertAutoIDKey = "allow_insert_auto_id"
+	TimezoneKey             = "timezone"
+	AllowInsertAutoIDKey    = "allow_insert_auto_id"
+	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 )
 
 const (
@@ -360,6 +361,19 @@ func IsPartitionKeyIsolationKvEnabled(kvs ...*commonpb.KeyValuePair) (bool, erro
 			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
 			if err != nil {
 				return false, errors.Wrap(err, "failed to parse partition key isolation")
+			}
+			return val, nil
+		}
+	}
+	return false, nil
+}
+
+func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {
+	for _, kv := range kvs {
+		if kv.Key == DisableFuncRuntimeCheck {
+			val, err := strconv.ParseBool(strings.ToLower(kv.Value))
+			if err != nil {
+				return false, errors.Wrap(err, "failed to parse disable_func_runtime_check param")
 			}
 			return val, nil
 		}

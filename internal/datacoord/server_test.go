@@ -2782,6 +2782,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_Import,
 			},
+			Schema: &schemapb.CollectionSchema{},
 		}).
 		WithBroadcast([]string{"ch-0"}, resourceKey).
 		BuildBroadcast()
@@ -2795,6 +2796,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_Import,
 			},
+			Schema: &schemapb.CollectionSchema{},
 		}).
 		WithBroadcast([]string{"test_channel"}, resourceKey).
 		MustBuildBroadcast()

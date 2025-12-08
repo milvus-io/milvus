@@ -84,7 +84,7 @@ func NewSiliconflowEmbeddingProvider(fieldSchema *schemapb.FieldSchema, function
 }
 
 func (provider *SiliconflowEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
+	return provider.extraInfo.BatchFactor * provider.maxBatch
 }
 
 func (provider *SiliconflowEmbeddingProvider) FieldDim() int64 {
