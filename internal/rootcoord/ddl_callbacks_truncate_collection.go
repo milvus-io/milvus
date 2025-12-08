@@ -1,0 +1,129 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package rootcoord
+
+import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) error {
+	broadcaster, err := c.startBroadcastWithCollectionLock(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	defer broadcaster.Close()
+
+	// get collection info
+	coll, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+
+	header := &messagespb.TruncateCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+	}
+	body := &messagespb.TruncateCollectionMessageBody{}
+
+	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.VirtualChannelNames...)
+	msg := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(header).
+		WithBody(body).
+		WithBroadcast(channels).
+		MustBuildBroadcast()
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// truncateCollectionV2AckCallback is called when the truncate collection message is acknowledged
+func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error {
+	msg := result.Message
+	header := msg.Header()
+
+	flushTsList := make(map[string]uint64)
+	for vchannel, result := range result.Results {
+		if funcutil.IsControlChannel(vchannel) {
+			continue
+		}
+		flushTs := result.TimeTick
+		flushTsList[vchannel] = flushTs
+	}
+	dropSegmentsTr := timerecord.NewTimeRecorder("DropSegmentsByTime")
+	// Drop segments that were updated before the flush timestamp
+	_, err := c.mixCoord.DropSegmentsByTime(ctx, &datapb.DropSegmentsByTimeRequest{
+		CollectionID: header.CollectionId,
+		FlushTsList:  flushTsList,
+	})
+	if err != nil {
+		return err
+	}
+	dropSegmentsDuration := dropSegmentsTr.ElapseSpan()
+	log.Ctx(ctx).Info("mydebug: drop segments by time done",
+		zap.Int64("collectionID", header.CollectionId),
+		zap.Duration("duration", dropSegmentsDuration))
+
+	// Check if the collection is loaded in QueryCoord, if not, skip ManualUpdateCurrentTarget
+	resp, err := c.mixCoord.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
+		CollectionIDs: []int64{header.CollectionId},
+	})
+	if err != nil {
+		return err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded) {
+			log.Ctx(ctx).Info("collection not loaded, skip ManualUpdateCurrentTarget",
+				zap.Int64("collectionID", header.CollectionId))
+		} else {
+			return errors.New(resp.GetStatus().GetReason())
+		}
+	} else {
+		// Collection is loaded, manually update current target to sync QueryCoord's view
+		updateTargetTr := timerecord.NewTimeRecorder("ManualUpdateCurrentTarget")
+		_, err = c.mixCoord.ManualUpdateCurrentTarget(ctx, &querypb.ManualUpdateCurrentTargetRequest{
+			CollectionID: header.CollectionId,
+		})
+		if err != nil {
+			return err
+		}
+		updateTargetDuration := updateTargetTr.ElapseSpan()
+		log.Ctx(ctx).Info("mydebug: manual update current target done",
+			zap.Int64("collectionID", header.CollectionId),
+			zap.Duration("duration", updateTargetDuration))
+	}
+
+	return nil
+}

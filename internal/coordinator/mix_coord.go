@@ -1245,3 +1245,18 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 func (s *mixCoordImpl) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return s.datacoordServer.CreateExternalCollection(ctx, req)
 }
+
+// TruncateCollection truncate collection
+func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.TruncateCollection(ctx, req)
+}
+
+// DropSegmentsByTime drop segments by time for TruncateCollection
+func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.DropSegmentsByTime(ctx, req)
+}
+
+// ManualUpdateCurrentTarget manually update current target for TruncateCollection
+func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
+	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, req)
+}

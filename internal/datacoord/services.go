@@ -2106,3 +2106,47 @@ func (s *Server) SyncFileResources(ctx context.Context) error {
 	resources, version := s.meta.ListFileResource(ctx)
 	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
 }
+
+// DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
+func (s *Server) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Ctx(ctx).Info("receive DropSegmentsByTime request",
+		zap.Int64("collectionID", req.GetCollectionID()))
+
+	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
+	if err != nil {
+		log.Ctx(ctx).Warn("get channels by collection id failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	operators := make([]UpdateOperator, 0)
+	for _, channel := range channels {
+		channelName := channel.GetName()
+		// wait until the checkpoint reaches or exceeds the flush timestamp
+		err = s.meta.WatchChannelCheckpoint(ctx, channelName, req.GetFlushTsList()[channelName])
+		if err != nil {
+			log.Ctx(ctx).Warn("WatchChannelCheckpoint failed", zap.Error(err))
+			return merr.Status(err), nil
+		}
+		// get segments to drop
+		segments := s.meta.GetSegmentsByChannel(channelName)
+		for _, segment := range segments {
+			if segment.GetDmlPosition().GetTimestamp() <= req.GetFlushTsList()[channelName] {
+				operators = append(operators, UpdateStatusOperator(segment.GetID(), commonpb.SegmentState_Dropped))
+			}
+		}
+	}
+	// batch set segments state to dropped
+	if len(operators) > 0 {
+		err = s.meta.UpdateSegmentsInfo(ctx, operators...)
+		if err != nil {
+			log.Warn("Failed to batch set segments state to dropped", zap.Error(err))
+			return merr.Status(err), nil
+		}
+	}
+
+	return merr.Success(), nil
+}

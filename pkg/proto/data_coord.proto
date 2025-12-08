@@ -112,6 +112,8 @@ service DataCoord {
   rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
   rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
   rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+
+  rpc DropSegmentsByTime(DropSegmentsByTimeRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -1145,4 +1147,10 @@ message FileResourceInfo {
 
 message CreateExternalCollectionResponse {
   common.Status status = 1;
+}
+
+message DropSegmentsByTimeRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  map<string, uint64> flushTsList = 3;
 }

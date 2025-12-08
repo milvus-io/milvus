@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -126,12 +127,16 @@ func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 type channelCPs struct {
 	lock.RWMutex
 	checkpoints map[string]*msgpb.MsgPosition
+	cond        *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
-	return &channelCPs{
+	cp := &channelCPs{
 		checkpoints: make(map[string]*msgpb.MsgPosition),
 	}
+	// use the same lock as channelCPs
+	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
+	return cp
 }
 
 // A local cache of segment metric update. Must call commit() to take effect.
@@ -2039,6 +2044,8 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel).Set(float64(ts.Unix()))
 	}
+	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
+	m.channelCPs.cond.UnsafeBroadcast()
 	return nil
 }
 
@@ -2485,4 +2492,22 @@ func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResource
 	defer m.resourceLock.RUnlock()
 
 	return lo.Values(m.resourceMeta), m.resourceVersion
+}
+
+// WatchChannelCheckpoint waits until the checkpoint of the specified channel
+// reaches or exceeds the target timestamp. Used for TruncateCollection.
+func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {
+	m.channelCPs.cond.L.Lock()
+
+	for {
+		cp, ok := m.channelCPs.checkpoints[vChannel]
+		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
+			m.channelCPs.cond.L.Unlock()
+			return nil
+		}
+
+		if err := m.channelCPs.cond.Wait(ctx); err != nil {
+			return err
+		}
+	}
 }

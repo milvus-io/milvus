@@ -102,6 +102,7 @@ service QueryCoord {
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+  rpc ManualUpdateCurrentTarget(ManualUpdateCurrentTargetRequest) returns(common.Status){}
 }
 
 service QueryNode {
@@ -1088,4 +1089,9 @@ message DropIndexRequest {
     repeated int64 indexIDs = 3;
     string channel = 4;
     bool need_transfer = 5;
+}
+
+message ManualUpdateCurrentTargetRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
 }

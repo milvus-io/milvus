@@ -953,6 +953,18 @@ func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 	panic("implement me")
 }
 
+func (s *mockMixCoord) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 	meta *meta
 }

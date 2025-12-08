@@ -623,6 +623,70 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	return dct.result, nil
 }
 
+// TruncateCollection truncate a collection.
+func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
+	defer sp.End()
+	method := "TruncateCollection"
+	tr := timerecord.NewTimeRecorder(method)
+
+	dct := &truncateCollectionTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		TruncateCollectionRequest: request,
+		mixCoord:                  node.mixCoord,
+		chMgr:                     node.chMgr,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+	)
+
+	log.Info("TruncateCollection received")
+
+	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+		log.Warn("TruncateCollection failed to enqueue",
+			zap.Error(err))
+
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		"TruncateCollection enqueued",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+
+	if err := dct.WaitToFinish(); err != nil {
+		log.Warn("TruncateCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTs", dct.BeginTs()),
+			zap.Uint64("EndTs", dct.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		"TruncateCollection done",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+	DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
+
+	metrics.ProxyReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+	).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return dct.result, nil
+}
+
 // HasCollection check if the specific collection exists in Milvus.
 func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
