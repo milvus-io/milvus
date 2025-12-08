@@ -28,11 +28,30 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const analyzerParams = "analyzer_params"
+
+var (
+	analyzerPool         *conc.Pool[struct{}]
+	analyzerPoolInitOnce sync.Once
+)
+
+func initAnalyzerPool() {
+	cpuNum := hardware.GetCPUNum()
+	initPoolSize := cpuNum * paramtable.Get().FunctionCfg.AnalyzerConcurrencyPerCPUCore.GetAsInt()
+	analyzerPool = conc.NewPool[struct{}](initPoolSize)
+}
+
+func getOrCreateAnalyzerPool() *conc.Pool[struct{}] {
+	analyzerPoolInitOnce.Do(initAnalyzerPool)
+	return analyzerPool
+}
 
 type Analyzer interface {
 	BatchAnalyze(withDetail bool, withHash bool, inputs ...any) ([][]*milvuspb.AnalyzerToken, error)
@@ -233,33 +252,25 @@ func (v *BM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs
 
 	rowNum := len(text)
 	result := make([][]*milvuspb.AnalyzerToken, rowNum)
-	wg := sync.WaitGroup{}
+	pool := getOrCreateAnalyzerPool()
+	futures := make([]*conc.Future[struct{}], 0, v.concurrency)
 
-	errCh := make(chan error, v.concurrency)
 	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
 		start := j
 		end := start + rowNum/v.concurrency
 		if i < rowNum%v.concurrency {
 			end += 1
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := v.analyze(text[start:end], result[start:end], withDetail, withHash)
-			if err != nil {
-				errCh <- err
-				return
-			}
-		}()
+		future := pool.Submit(func() (struct{}, error) {
+			return struct{}{}, v.analyze(text[start:end], result[start:end], withDetail, withHash)
+		})
+		futures = append(futures, future)
 		j = end
 	}
 
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return nil, err
-		}
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }
