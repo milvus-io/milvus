@@ -4208,9 +4208,9 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
     iso_offset_re = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
     def _days_in_month(year: int, month: int) -> int:
-        if month in (1, 3, 5, 7, 9, 10, 12):
+        if month in (1, 3, 5, 7, 8, 10, 12):
             return 31
-        if month in (4, 6, 8, 11):
+        if month in (4, 6, 9, 11):
             return 30
         # February
         is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))

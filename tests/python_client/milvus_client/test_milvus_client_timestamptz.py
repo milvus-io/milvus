@@ -86,13 +86,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
             else:
                 print(f"results match✅")
             print("================================")
-            print(f"expected_result: {expected_result[default_vector_field_name]}")
-            print(f"result_result: {result_result[default_vector_field_name]}")
-            if expected_result[default_vector_field_name] != result_result[default_vector_field_name]:
-                print(f"vector results mismatch❌")
-            else:
-                print(f"vector results match✅")
-            print("================================")
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: rows,
@@ -145,7 +138,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: new_rows,
-                                         "pk_name": default_primary_key_field_name})
+                                         "pk_name": default_primary_key_field_name,
+                                         "debug_mode": True})
         
         self.drop_collection(client, collection_name)
         self.drop_database(client, db_name)
@@ -189,7 +183,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                    check_task=CheckTasks.check_query_results,
                    check_items={exp_res: new_rows,
-                                "pk_name": default_primary_key_field_name})
+                                "pk_name": default_primary_key_field_name,
+                                "debug_mode": True})
         
         self.drop_collection(client, collection_name)
 
@@ -227,7 +222,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                 check_task=CheckTasks.check_query_results,
                 check_items={exp_res: rows,
-                            "pk_name": default_primary_key_field_name})
+                            "pk_name": default_primary_key_field_name,
+                            "debug_mode": True})
 
         # step 3: alter collection properties
         self.alter_collection_properties(client, collection_name, properties={"timezone": IANA_timezone})
@@ -239,7 +235,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                     check_task=CheckTasks.check_query_results,
                     check_items={exp_res: new_rows,
-                                    "pk_name": default_primary_key_field_name})
+                                    "pk_name": default_primary_key_field_name,
+                                    "debug_mode": True})
         
         self.drop_collection(client, collection_name)
 
