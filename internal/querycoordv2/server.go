@@ -164,7 +164,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 }
 
 func (s *Server) ServerExist(serverID int64) bool {
-	sessions, _, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	sessions, _, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
 		return false
@@ -481,7 +481,7 @@ func (s *Server) Start() error {
 
 func (s *Server) startQueryCoord() error {
 	log.Ctx(s.ctx).Info("start watcher...")
-	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	sessions, revision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return err
 	}

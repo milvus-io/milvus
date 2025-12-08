@@ -45,7 +45,6 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 type Client struct {
 	grpcClient grpcclient.GrpcClient[proxypb.ProxyClient]
 	addr       string
-	sess       *sessionutil.Session
 }
 
 // NewClient creates a new client instance
@@ -53,7 +52,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 	if addr == "" {
 		return nil, errors.New("address is empty")
 	}
-	sess := sessionutil.NewSession(ctx)
+	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("Proxy client new session failed", zap.Error(err))
@@ -63,7 +62,6 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[proxypb.ProxyClient](config, "milvus.proto.proxy.Proxy"),
-		sess:       sess,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.ProxyRole, nodeID))
