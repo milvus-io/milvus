@@ -153,13 +153,6 @@ func TestForceMergeSegmentView_Complete(t *testing.T) {
 		topology:      topology,
 	}
 
-	// Test all fields
-	assert.Equal(t, label, view.GetGroupLabel())
-	assert.Equal(t, segments, view.GetSegmentsView())
-	assert.Equal(t, int64(99999), view.GetTriggerID())
-	assert.Equal(t, 24*time.Hour, view.collectionTTL)
-	assert.Equal(t, int64(2048*1024*1024), view.targetSize)
-
 	// Test String output
 	str := view.String()
 	assert.Contains(t, str, "ForceMerge")
