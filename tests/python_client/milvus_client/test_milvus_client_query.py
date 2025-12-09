@@ -3882,6 +3882,7 @@ class TestQueryOperation(TestMilvusClientV2Base):
         # 6. clean up
         self.drop_collection(client, collection_name)
 
+
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
 
