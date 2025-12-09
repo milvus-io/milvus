@@ -74,18 +74,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
 
         # step 3: query the rows
         rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "UTC")
-        result = self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0")
-        for i in range(default_nb):
-            expected_result = rows[i]
-            result_result = result[0][i]
-            print("================================")
-            print(f"expected_result: {expected_result[default_timestamp_field_name]}")
-            print(f"result_result: {result_result[default_timestamp_field_name]}")
-            if expected_result[default_timestamp_field_name] != result_result[default_timestamp_field_name]:
-                print(f"results mismatch❌")
-            else:
-                print(f"results match✅")
-            print("================================")
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: rows,

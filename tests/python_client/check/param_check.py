@@ -207,7 +207,7 @@ def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon)
             ignore_string_type_changes=True,
         )
         if diff:
-            log.debug(f"[COMPARE_LISTS] Found differences: {diff}")
+            log.debug(f"[COMPARE_LISTS] Found differences at row {i}: {diff}")
             return False
     return True
 
