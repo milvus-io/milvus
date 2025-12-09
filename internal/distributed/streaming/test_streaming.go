@@ -244,7 +244,7 @@ func (n *noopWALAccesser) ForwardService() ForwardService {
 
 type noopForwardService struct{}
 
-func (n *noopForwardService) ForwardLegacyProxy(ctx context.Context, request any) (any, error) {
+func (n *noopForwardService) ForwardLegacyProxy(ctx context.Context, request any, opts ...ForwardOption) (any, error) {
 	return nil, ErrForwardDisabled
 }
 
