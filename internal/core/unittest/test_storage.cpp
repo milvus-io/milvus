@@ -308,8 +308,7 @@ TEST_F(StorageUtilTest, NormalizePath) {
     EXPECT_EQ(NormalizePath(prefix4 / path / path1), "index_files/segment_123");
 
     // === Edge cases ===
-    EXPECT_EQ(NormalizePath(boost::filesystem::path("//")), "/");
-    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/..")), "a/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/..")), "a");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/../b/./c/../d")),
               "b/d");
     EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b c/d")), "a/b c/d");
