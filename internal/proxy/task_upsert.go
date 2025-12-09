@@ -289,11 +289,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
 	// set field id for user passed field data, prepare for merge logic
-	upsertFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
-	if len(upsertFieldData) == 0 {
+	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("upsert field data is empty")
 	}
-	for _, fieldData := range upsertFieldData {
+	for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
 		fieldName := fieldData.GetFieldName()
 		if fieldData.GetIsDynamic() {
 			fieldName = "$meta"
@@ -314,6 +313,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+
+	// Validate field data alignment before processing to prevent index out of range panic
+	if err := newValidateUtil().checkAligned(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, uint64(upsertIDSize)); err != nil {
+		log.Warn("check field data aligned failed", zap.Error(err))
+		return err
 	}
 
 	// Two nullable data formats are supported:
@@ -393,7 +398,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
 			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
-			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(baseIdx), int64(idx))
+			err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx))
 			baseIdx += 1
 			if err != nil {
 				log.Info("update field data failed", zap.Error(err))
