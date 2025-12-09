@@ -151,16 +151,12 @@ Schema::AbsentFields(Schema& old_schema) const {
 }
 
 const FieldMeta&
-Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
-    {
-        std::shared_lock lock(struct_array_field_cache_mutex_);
-        auto cache_it = struct_array_field_cache_.find(struct_name);
-        if (cache_it != struct_array_field_cache_.end()) {
-            return fields_.at(cache_it->second);
-        }
+Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) {
+    auto cache_it = struct_array_field_cache_.find(struct_name);
+    if (cache_it != struct_array_field_cache_.end()) {
+        return *cache_it->second;
     }
 
-    FieldId found_field_id;
     const FieldMeta* found_field_meta = nullptr;
 
     for (const auto& [field_id, field_meta] : fields_) {
@@ -175,7 +171,6 @@ Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
                            data_type == DataType::VECTOR_ARRAY,
                        "Expected ARRAY or VECTOR_ARRAY type for struct field");
 
-            found_field_id = field_id;
             found_field_meta = &field_meta;
             break;
         }
@@ -187,12 +182,7 @@ Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
                   struct_name);
     }
 
-    // Cache the result (with exclusive lock)
-    {
-        std::unique_lock lock(struct_array_field_cache_mutex_);
-        struct_array_field_cache_[struct_name] = found_field_id;
-    }
-
+    struct_array_field_cache_[struct_name] = found_field_meta;
     return *found_field_meta;
 }
 

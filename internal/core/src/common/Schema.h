@@ -377,7 +377,7 @@ class Schema {
 
     // Find the first array field belonging to a struct (cached)
     const FieldMeta&
-    GetFirstArrayFieldInStruct(const std::string& struct_name) const;
+    GetFirstArrayFieldInStruct(const std::string& struct_name);
 
  private:
     int64_t debug_id = START_USER_FIELDID;
@@ -401,9 +401,8 @@ class Schema {
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
 
-    mutable std::shared_mutex struct_array_field_cache_mutex_;
     // Cache for struct_name -> first array field mapping
-    mutable std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+    std::unordered_map<std::string, const FieldMeta*> struct_array_field_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
