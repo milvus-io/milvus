@@ -11,6 +11,12 @@ RemoteOutputStream::RemoteOutputStream(
     : output_stream_(std::move(output_stream)) {
 }
 
+RemoteOutputStream::~RemoteOutputStream() {
+    // temp solution, will expose `Close` method in OutputStream later
+    auto status = output_stream_->Close();
+    AssertInfo(status.ok(), "Failed to close output stream");
+}
+
 size_t
 RemoteOutputStream::Tell() const {
     auto status = output_stream_->Tell();

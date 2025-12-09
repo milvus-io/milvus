@@ -4208,9 +4208,9 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
     iso_offset_re = re.compile(r"([+-])(\d{2}):(\d{2})$")
 
     def _days_in_month(year: int, month: int) -> int:
-        if month in (1, 3, 5, 7, 9, 10, 12):
+        if month in (1, 3, 5, 7, 8, 10, 12):
             return 31
-        if month in (4, 6, 8, 11):
+        if month in (4, 6, 9, 11):
             return 30
         # February
         is_leap = (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0))
@@ -4370,11 +4370,11 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
             target_minutes = 480 if timezone == 'Asia/Shanghai' else 0
             try:
                 # Try to get actual offset from timezone if possible
-                if 1 <= uy <= 9999:
-                    test_dt = datetime(uy, um, ud, uh, umi, uss, tzinfo=tzmod.utc)
-                    test_target = test_dt.astimezone(ZoneInfo(timezone))
-                    off_td = test_target.utcoffset() or tzmod.utc.utcoffset(test_target)
-                    target_minutes = int(off_td.total_seconds() // 60)
+                test_year = uy if (1 <= uy <= 9999) else 2004
+                test_dt = datetime(test_year, um, ud, uh, umi, uss, tzinfo=tzmod.utc)
+                test_target = test_dt.astimezone(ZoneInfo(timezone))
+                off_td = test_target.utcoffset() or tzmod.utc.utcoffset(test_target)
+                target_minutes = int(off_td.total_seconds() // 60)
             except Exception:
                 pass
             # Convert UTC to local time: UTC + offset = local

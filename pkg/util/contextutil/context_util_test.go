@@ -48,6 +48,28 @@ func TestAppendToIncomingContext(t *testing.T) {
 	})
 }
 
+func TestSetToIncomingContext(t *testing.T) {
+	t.Run("invalid kvs", func(t *testing.T) {
+		assert.Panics(t, func() {
+			// nolint
+			SetToIncomingContext(context.Background(), "foo")
+		})
+	})
+
+	t.Run("valid kvs", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = SetToIncomingContext(ctx, "foo", "bar1")
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+		assert.Equal(t, "bar1", md.Get("foo")[0])
+
+		ctx = SetToIncomingContext(ctx, "foo", "bar2")
+		md, ok = metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+		assert.Equal(t, "bar2", md.Get("foo")[0])
+	})
+}
+
 func TestGetCurUserFromContext(t *testing.T) {
 	_, err := GetCurUserFromContext(context.Background())
 	assert.Error(t, err)

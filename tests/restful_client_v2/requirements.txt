@@ -9,7 +9,7 @@ Faker==19.2.0
 pymilvus==2.5.0rc108
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
-minio==7.1.14
+minio==7.2.0
 tenacity==8.1.0
 # for bf16 datatype
 ml-dtypes==0.2.0
