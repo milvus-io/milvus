@@ -232,7 +232,7 @@ class JsonStatsParquetWriter {
     size_t batch_size_;
     std::shared_ptr<arrow::fs::FileSystem> fs_;
     milvus_storage::StorageConfig storage_config_;
-    std::unique_ptr<milvus_storage::PackedRecordBatchWriter> packed_writer_;
+    std::shared_ptr<milvus_storage::PackedRecordBatchWriter> packed_writer_;
     std::vector<std::pair<std::string, std::string>> kv_metadata_;
 
     // cache for builders
