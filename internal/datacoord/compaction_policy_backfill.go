@@ -190,7 +190,6 @@ func (v *BackfillSegmentsView) String() string {
 }
 
 func (v *BackfillSegmentsView) Trigger() (CompactionView, string) {
-	// For backfill compaction, we always trigger
 	return v, "backfill schema version mismatch"
 }
 

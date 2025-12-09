@@ -62,7 +62,7 @@ func (t *backfillCompactionTask) GetTaskProto() *datapb.CompactionTask {
 }
 
 func (t *backfillCompactionTask) GetTaskSlot() int64 {
-	return 0
+	return 1
 }
 
 func (t *backfillCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -177,10 +177,6 @@ func (t *backfillCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error
 
 func (t *backfillCompactionTask) SaveTaskMeta() error {
 	return t.saveTaskMeta(t.GetTaskProto())
-}
-
-func (t *backfillCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
-	return false
 }
 
 func (t *backfillCompactionTask) Clean() bool {
