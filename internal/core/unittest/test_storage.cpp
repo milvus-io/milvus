@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include "common/EasyAssert.h"
+#include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
@@ -241,4 +242,77 @@ TEST_F(StorageUtilTest, TestInitArrowFileSystem) {
     //     auto fs = InitArrowFileSystem(remote_config);
     //     ASSERT_NE(fs, nullptr);
     // }
+}
+
+// Test cases for NormalizePath function
+// NormalizePath uses boost::filesystem::path::lexically_normal() and then
+// removes trailing "/." (only the dot, keeping the slash)
+TEST_F(StorageUtilTest, NormalizePath) {
+    // === Basic paths ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/c")), "a/b/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("")), "");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("file")), "file");
+
+    // === Dot handling ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path(".")), ".");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/b")), "a/b");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/./b")), "a/b");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/.")), "a/b/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/./b/.")), "a/b/");
+
+    // === Double dot (..) handling ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/../c")), "a/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/c/../../d")), "a/d");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("../a/b")), "../a/b");
+
+    // === Trailing slash ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/")), "a/b/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("files/")), "files/");
+
+    // === Absolute paths ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/a/b/c")), "/a/b/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/a/./b")), "/a/b");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/a/b/.")), "/a/b/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("/")), "/");
+
+    // === Multiple slashes ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a//b//c")), "a/b/c");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/./b//c")), "a/b/c");
+
+    // === Real-world scenarios (S3/MinIO) ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("bucket/index_files/123")),
+              "bucket/index_files/123");
+    // Key fix for 403 error
+    EXPECT_EQ(
+        NormalizePath(boost::filesystem::path("./index_files/segment_123")),
+        "index_files/segment_123");
+
+    // Path construction with root_path = "."
+    boost::filesystem::path prefix = ".";
+    boost::filesystem::path path = "index_files";
+    boost::filesystem::path path1 = "segment_123";
+    EXPECT_EQ(NormalizePath(prefix / path / path1), "index_files/segment_123");
+
+    // Non-empty root path
+    boost::filesystem::path prefix2 = "files";
+    EXPECT_EQ(NormalizePath(prefix2 / path / path1),
+              "files/index_files/segment_123");
+
+    // Root path with trailing slash
+    boost::filesystem::path prefix3 = "files/";
+    EXPECT_EQ(NormalizePath(prefix3 / path / path1),
+              "files/index_files/segment_123");
+
+    // Empty root path
+    boost::filesystem::path prefix4 = "";
+    EXPECT_EQ(NormalizePath(prefix4 / path / path1), "index_files/segment_123");
+
+    // === Edge cases ===
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("//")), "/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b/..")), "a/");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./a/../b/./c/../d")),
+              "b/d");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("a/b c/d")), "a/b c/d");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./.")), ".");
+    EXPECT_EQ(NormalizePath(boost::filesystem::path("./..")), "..");
 }

@@ -40,7 +40,7 @@ NormalizePath(const boost::filesystem::path& path) {
     auto result = path.lexically_normal().string();
     // Remove trailing "/." if present
     if (result.size() >= 2 && result.substr(result.size() - 2) == "/.") {
-        result = result.substr(0, result.size() - 2);
+        result = result.substr(0, result.size() - 1);
     }
     return result;
 }
