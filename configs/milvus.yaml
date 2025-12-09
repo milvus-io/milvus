@@ -215,6 +215,10 @@ woodpecker:
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
     retentionPolicy:
       ttl: 72h # Time to live for truncated segments in seconds, default is 72h
+    fencePolicy:
+      # Enable conditional write for embedded mode, default is auto, which will automatically detect whether the storage supports conditional write.
+      # Valid values: [auto, enable, disable]
+      conditionWrite: auto
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
@@ -735,6 +739,7 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger

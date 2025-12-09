@@ -1592,6 +1592,7 @@ const (
 	QueryNode_GetHighlight_FullMethodName           = "/milvus.proto.query.QueryNode/GetHighlight"
 	QueryNode_DropIndex_FullMethodName              = "/milvus.proto.query.QueryNode/DropIndex"
 	QueryNode_ValidateAnalyzer_FullMethodName       = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
+	QueryNode_SyncFileResource_FullMethodName       = "/milvus.proto.query.QueryNode/SyncFileResource"
 	QueryNode_ComputePhraseMatchSlop_FullMethodName = "/milvus.proto.query.QueryNode/ComputePhraseMatchSlop"
 )
 
@@ -1632,6 +1633,8 @@ type QueryNodeClient interface {
 	GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// file resource
+	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
 }
 
@@ -1959,6 +1962,15 @@ func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnal
 	return out, nil
 }
 
+func (c *queryNodeClient) SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryNode_SyncFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryNodeClient) ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error) {
 	out := new(ComputePhraseMatchSlopResponse)
 	err := c.cc.Invoke(ctx, QueryNode_ComputePhraseMatchSlop_FullMethodName, in, out, opts...)
@@ -2005,6 +2017,8 @@ type QueryNodeServer interface {
 	GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
+	// file resource
+	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
 }
 
@@ -2101,6 +2115,9 @@ func (UnimplementedQueryNodeServer) DropIndex(context.Context, *DropIndexRequest
 }
 func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
+}
+func (UnimplementedQueryNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
 }
 func (UnimplementedQueryNodeServer) ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ComputePhraseMatchSlop not implemented")
@@ -2663,6 +2680,24 @@ func _QueryNode_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_SyncFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.SyncFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).SyncFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_SyncFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).SyncFileResource(ctx, req.(*internalpb.SyncFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryNode_ComputePhraseMatchSlop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ComputePhraseMatchSlopRequest)
 	if err := dec(in); err != nil {
@@ -2799,6 +2834,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateAnalyzer",
 			Handler:    _QueryNode_ValidateAnalyzer_Handler,
+		},
+		{
+			MethodName: "SyncFileResource",
+			Handler:    _QueryNode_SyncFileResource_Handler,
 		},
 		{
 			MethodName: "ComputePhraseMatchSlop",

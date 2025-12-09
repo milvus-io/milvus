@@ -1167,6 +1167,65 @@ func (_c *MixCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ComputePhraseMatchSlop(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputePhraseMatchSlop")
+	}
+
+	var r0 *querypb.ComputePhraseMatchSlopResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) *querypb.ComputePhraseMatchSlopResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ComputePhraseMatchSlopResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
+type MixCoord_ComputePhraseMatchSlop_Call struct {
+	*mock.Call
+}
+
+// ComputePhraseMatchSlop is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ComputePhraseMatchSlopRequest
+func (_e *MixCoord_Expecter) ComputePhraseMatchSlop(_a0 interface{}, _a1 interface{}) *MixCoord_ComputePhraseMatchSlop_Call {
+	return &MixCoord_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop", _a0, _a1)}
+}
+
+func (_c *MixCoord_ComputePhraseMatchSlop_Call) Run(run func(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest)) *MixCoord_ComputePhraseMatchSlop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ComputePhraseMatchSlopRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ComputePhraseMatchSlop_Call) Return(_a0 *querypb.ComputePhraseMatchSlopResponse, _a1 error) *MixCoord_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)) *MixCoord_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateAlias provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) CreateAlias(_a0 context.Context, _a1 *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8432,6 +8491,54 @@ func (_c *MixCoord_SyncNewCreatedPartition_Call) Return(_a0 *commonpb.Status, _a
 }
 
 func (_c *MixCoord_SyncNewCreatedPartition_Call) RunAndReturn(run func(context.Context, *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error)) *MixCoord_SyncNewCreatedPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SyncQcFileResource provides a mock function with given fields: ctx, resources, version
+func (_m *MixCoord) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	ret := _m.Called(ctx, resources, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncQcFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*internalpb.FileResourceInfo, uint64) error); ok {
+		r0 = rf(ctx, resources, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_SyncQcFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncQcFileResource'
+type MixCoord_SyncQcFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncQcFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resources []*internalpb.FileResourceInfo
+//   - version uint64
+func (_e *MixCoord_Expecter) SyncQcFileResource(ctx interface{}, resources interface{}, version interface{}) *MixCoord_SyncQcFileResource_Call {
+	return &MixCoord_SyncQcFileResource_Call{Call: _e.mock.On("SyncQcFileResource", ctx, resources, version)}
+}
+
+func (_c *MixCoord_SyncQcFileResource_Call) Run(run func(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64)) *MixCoord_SyncQcFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*internalpb.FileResourceInfo), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_SyncQcFileResource_Call) Return(_a0 error) *MixCoord_SyncQcFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_SyncQcFileResource_Call) RunAndReturn(run func(context.Context, []*internalpb.FileResourceInfo, uint64) error) *MixCoord_SyncQcFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

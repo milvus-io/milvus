@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -51,6 +52,9 @@ func (s *ArrayStructDataNodeSuite) setupParam() {
 }
 
 func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
 	c := s.Cluster
 	dbName := ""
 	schema := integration.ConstructSchema(collectionName, s.dim, true)
@@ -101,7 +105,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.MilvusClient.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -112,7 +116,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	err = merr.Error(createCollectionStatus)
 	s.NoError(err)
 
-	showCollectionsResp, err := c.MilvusClient.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 
@@ -126,7 +130,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	s.generatedFieldData[structColumn.GetStructArrays().Fields[0].FieldId] = structColumn.GetStructArrays().Fields[0]
 	s.generatedFieldData[structColumn.GetStructArrays().Fields[1].FieldId] = structColumn.GetStructArrays().Fields[1]
 
-	insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn, structColumn},
@@ -138,7 +142,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	log.Info("=========================Data insertion finished=========================")
 
 	// flush
-	flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -150,14 +154,14 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
-	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("=========================Data flush finished=========================")
 
 	// create index
-	createIndexStatus, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
@@ -168,10 +172,10 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	err = merr.Error(createIndexStatus)
 	s.NoError(err)
 	log.Info("=========================Index created for float vector=========================")
-	s.WaitForIndexBuilt(context.TODO(), collectionName, integration.FloatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	subFieldName := typeutil.ConcatStructFieldName(integration.StructArrayField, integration.StructSubFloatVecField)
-	createIndexResult, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+	createIndexResult, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldName:      subFieldName,
@@ -180,19 +184,19 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	})
 	s.NoError(err)
 	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
-	s.WaitForIndexBuilt(context.TODO(), collectionName, subFieldName)
+	s.WaitForIndexBuilt(ctx, collectionName, subFieldName)
 
 	log.Info("=========================Index created for array of vector=========================")
 
 	// load
-	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	err = merr.Error(loadStatus)
 	s.NoError(err)
-	s.WaitForLoad(context.TODO(), collectionName)
+	s.WaitForLoad(ctx, collectionName)
 	log.Info("=========================Collection loaded=========================")
 }
 

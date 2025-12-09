@@ -559,7 +559,11 @@ func (b *MultiTargetBalancer) genSegmentPlan(ctx context.Context, replica *meta.
 		globalNodeSegments[node] = b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
 	}
 
-	return b.genPlanByDistributions(nodeSegments, globalNodeSegments)
+	plans := b.genPlanByDistributions(nodeSegments, globalNodeSegments)
+	for i := range plans {
+		plans[i].Replica = replica
+	}
+	return plans
 }
 
 func (b *MultiTargetBalancer) genPlanByDistributions(nodeSegments, globalNodeSegments map[int64][]*meta.Segment) []SegmentAssignPlan {

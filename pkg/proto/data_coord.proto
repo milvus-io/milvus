@@ -145,6 +145,9 @@ service DataNode {
   rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
 
   rpc DropCompactionPlan(DropCompactionPlanRequest) returns(common.Status) {}
+
+  // file resource
+  rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
 }
 
 message FlushRequest {

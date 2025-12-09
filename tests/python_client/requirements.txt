@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.7.0rc75
-pymilvus[bulk_writer]==2.7.0rc75
+pymilvus==2.7.0rc83
+pymilvus[bulk_writer]==2.7.0rc83
 # for protobuf
 protobuf>=5.29.5
 
@@ -38,7 +38,7 @@ python-benedict==0.24.3
 timeout-decorator==0.5.0
 
 # for bulk insert test
-minio==7.1.5
+minio==7.2.0
 npy-append-array==0.9.15
 Faker==19.2.0
 

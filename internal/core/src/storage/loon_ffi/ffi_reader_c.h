@@ -105,7 +105,7 @@ NewPackedFFIReader(const char* manifest_path,
  *       be freed after this call returns.
  */
 CStatus
-NewPackedFFIReaderWithManifest(const char* manifest_content,
+NewPackedFFIReaderWithManifest(const ColumnGroupsHandle column_groups_handle,
                                struct ArrowSchema* schema,
                                char** needed_columns,
                                int64_t needed_columns_size,

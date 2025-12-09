@@ -436,7 +436,7 @@ func TestUpsertAutoID(t *testing.T) {
 	// upsert without pks -> error
 	vecColumn = hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn))
-	common.CheckErr(t, err, false, "has no corresponding fieldData pass in: invalid parameter")
+	common.CheckErr(t, err, false, "must assign pk when upsert")
 }
 
 // test upsert autoId collection

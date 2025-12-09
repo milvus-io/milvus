@@ -7,6 +7,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
@@ -686,6 +688,66 @@ func (_c *MockCluster_SyncDistribution_Call) Return(_a0 *commonpb.Status, _a1 er
 }
 
 func (_c *MockCluster_SyncDistribution_Call) RunAndReturn(run func(context.Context, int64, *querypb.SyncDistributionRequest) (*commonpb.Status, error)) *MockCluster_SyncDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SyncFileResource provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) SyncFileResource(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *internalpb.SyncFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *internalpb.SyncFileResourceRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_SyncFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncFileResource'
+type MockCluster_SyncFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *internalpb.SyncFileResourceRequest
+func (_e *MockCluster_Expecter) SyncFileResource(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_SyncFileResource_Call {
+	return &MockCluster_SyncFileResource_Call{Call: _e.mock.On("SyncFileResource", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_SyncFileResource_Call) Run(run func(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest)) *MockCluster_SyncFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*internalpb.SyncFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_SyncFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockCluster_SyncFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_SyncFileResource_Call) RunAndReturn(run func(context.Context, int64, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)) *MockCluster_SyncFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }
