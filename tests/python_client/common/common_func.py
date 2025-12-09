@@ -4370,11 +4370,11 @@ def convert_timestamptz(rows, timestamptz_field_name, timezone="UTC"):
             target_minutes = 480 if timezone == 'Asia/Shanghai' else 0
             try:
                 # Try to get actual offset from timezone if possible
-                if 1 <= uy <= 9999:
-                    test_dt = datetime(uy, um, ud, uh, umi, uss, tzinfo=tzmod.utc)
-                    test_target = test_dt.astimezone(ZoneInfo(timezone))
-                    off_td = test_target.utcoffset() or tzmod.utc.utcoffset(test_target)
-                    target_minutes = int(off_td.total_seconds() // 60)
+                test_year = uy if (1 <= uy <= 9999) else 2004
+                test_dt = datetime(test_year, um, ud, uh, umi, uss, tzinfo=tzmod.utc)
+                test_target = test_dt.astimezone(ZoneInfo(timezone))
+                off_td = test_target.utcoffset() or tzmod.utc.utcoffset(test_target)
+                target_minutes = int(off_td.total_seconds() // 60)
             except Exception:
                 pass
             # Convert UTC to local time: UTC + offset = local

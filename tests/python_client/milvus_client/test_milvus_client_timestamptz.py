@@ -135,6 +135,17 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
 
         # step 3: query the rows
         new_rows = cf.convert_timestamptz(rows, default_timestamp_field_name, IANA_timezone)
+        result = self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0", output_fields=[default_timestamp_field_name])
+        for i in range(default_nb):
+            print("===========================================")
+            print(f"original_result[{i}]: {rows[i][default_timestamp_field_name]}")
+            print(f"expected_result[{i}]: {new_rows[i][default_timestamp_field_name]}")
+            print(f"result_result[{i}]: {result[0][i][default_timestamp_field_name]}")
+            if new_rows[i][default_timestamp_field_name] != result[0][i][default_timestamp_field_name]:
+                print(f"❌")
+            else:
+                print(f"✅")
+
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: new_rows,
