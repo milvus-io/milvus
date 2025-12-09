@@ -37,7 +37,7 @@ type teiProvider struct {
 }
 
 func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
-	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "")
+	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
 	if err != nil {
 		return nil, err
 	}

@@ -231,7 +231,7 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) ServerExist(serverID int64) bool {
-	sessions, _, err := s.session.GetSessions(typeutil.DataNodeRole)
+	sessions, _, err := s.session.GetSessions(s.ctx, typeutil.DataNodeRole)
 	if err != nil {
 		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
 		return false
@@ -533,7 +533,7 @@ func (s *Server) initServiceDiscovery() error {
 	}
 
 	s.indexEngineVersionManager = newIndexEngineVersionManager()
-	qnSessions, qnRevision, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	qnSessions, qnRevision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
 		return err

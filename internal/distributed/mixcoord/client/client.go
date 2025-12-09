@@ -67,7 +67,7 @@ type Client struct {
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
 func NewClient(ctx context.Context) (types.MixCoordClient, error) {
-	sess := sessionutil.NewSession(ctx)
+	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("New MixCoord Client failed", zap.Error(err))
@@ -109,7 +109,7 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) MixCoordClient {
 func (c *Client) getMixCoordAddr() (string, error) {
 	log := log.Ctx(c.ctx)
 	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+	msess, _, err := c.sess.GetSessions(c.ctx, key)
 	if err != nil {
 		log.Debug("MixCoordClient GetSessions failed", zap.Any("key", key))
 		return "", err
@@ -134,7 +134,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 // compatible with standalone mode upgrade from 2.5, shoule be removed in 3.0
 func (c *Client) getCompatibleMixCoordAddr() (string, error) {
 	log := log.Ctx(c.ctx)
-	msess, _, err := c.sess.GetSessions(typeutil.RootCoordRole)
+	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
 	if err != nil {
 		log.Debug("mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
 		return "", errors.New("find no available mixcoord, check mixcoord state")
@@ -335,6 +335,39 @@ func (c *Client) AlterCollectionField(ctx context.Context, request *milvuspb.Alt
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
 		return client.AlterCollectionField(ctx, request)
+	})
+}
+
+func (c *Client) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AddCollectionFunction(ctx, request)
+	})
+}
+
+func (c *Client) AlterCollectionFunction(ctx context.Context, request *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AlterCollectionFunction(ctx, request)
+	})
+}
+
+func (c *Client) DropCollectionFunction(ctx context.Context, request *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.DropCollectionFunction(ctx, request)
 	})
 }
 
