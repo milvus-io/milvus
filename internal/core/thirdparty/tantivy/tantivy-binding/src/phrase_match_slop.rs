@@ -60,11 +60,7 @@ pub fn compute_phrase_match_slop(
 
     // Calculate Max Query Position for Reverse Position Logic
     // Assuming tokens usually come in order, but max() is safer.
-    let max_query_pos = query_terms
-        .iter()
-        .map(|(_, pos)| *pos)
-        .max()
-        .unwrap_or(0); // Safe because check empty above
+    let max_query_pos = query_terms.iter().map(|(_, pos)| *pos).max().unwrap_or(0); // Safe because check empty above
 
     // 4. Tokenize Data and Store Positions
     // We map Term -> Vec<Position>
@@ -110,7 +106,7 @@ pub fn compute_phrase_match_slop(
 
     // 6. Find Smallest Range covering at least one element from each list
     // We use a Min-Heap to track the current minimum of the selected elements from each list.
-    
+
     let mut min_heap = BinaryHeap::new();
     let mut current_max = i64::MIN;
 
@@ -238,7 +234,7 @@ mod tests {
         let result = compute_phrase_match_slop(tokenizer_params, query, data);
         assert_eq!(result, Ok(0));
     }
-    
+
     #[test]
     fn test_repeated_terms_in_query() {
         let tokenizer_params = r#"{ "type": "standard" }"#;
