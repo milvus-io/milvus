@@ -40,6 +40,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -60,7 +63,22 @@ func newForwardService(streamingCoordClient client.Client) *forwardServiceImpl {
 }
 
 type ForwardService interface {
-	ForwardLegacyProxy(ctx context.Context, request any) (any, error)
+	ForwardLegacyProxy(ctx context.Context, request any, forwardAuth ...ForwardOption) (any, error)
+}
+
+// OptForwardAuth is the option to set the auth token for the forward service.
+func OptForwardAuth(authToken string) ForwardOption {
+	return func(fs *forwardOption) {
+		fs.authToken = authToken
+	}
+}
+
+// ForwardOption is the option for the forward service.
+type ForwardOption func(*forwardOption)
+
+// forwardOption is the option for the forward service.
+type forwardOption struct {
+	authToken string
 }
 
 // forwardServiceImpl is the implementation of FallbackService.
@@ -75,12 +93,12 @@ type forwardServiceImpl struct {
 }
 
 // ForwardLegacyProxy forwards the request to the legacy proxy.
-func (fs *forwardServiceImpl) ForwardLegacyProxy(ctx context.Context, request any) (any, error) {
+func (fs *forwardServiceImpl) ForwardLegacyProxy(ctx context.Context, request any, opts ...ForwardOption) (any, error) {
 	if err := fs.checkIfForwardDisabledWithLock(ctx); err != nil {
 		return nil, err
 	}
 
-	return fs.forwardLegacyProxy(ctx, request)
+	return fs.forwardLegacyProxy(ctx, request, opts...)
 }
 
 // checkIfForwardDisabledWithLock checks if the forward is disabled with lock.
@@ -92,10 +110,18 @@ func (fs *forwardServiceImpl) checkIfForwardDisabledWithLock(ctx context.Context
 }
 
 // forwardLegacyProxy forwards the request to the legacy proxy.
-func (fs *forwardServiceImpl) forwardLegacyProxy(ctx context.Context, request any) (any, error) {
+func (fs *forwardServiceImpl) forwardLegacyProxy(ctx context.Context, request any, opts ...ForwardOption) (any, error) {
 	s, err := fs.getLegacyProxyService(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	var optForwardOption forwardOption
+	for _, opt := range opts {
+		opt(&optForwardOption)
+	}
+	if optForwardOption.authToken != "" {
+		ctx = contextutil.SetToIncomingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode(optForwardOption.authToken))
 	}
 
 	var result proto.Message
@@ -247,7 +273,7 @@ func (fs *forwardServiceImpl) markForwardDisabled() {
 // the dml cannot be executed at new 2.6.x proxy until all 2.5.x proxies are down.
 //
 // so we need to forward the request to the 2.5.x proxy.
-func ForwardLegacyProxyUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+func ForwardLegacyProxyUnaryServerInterceptor(opts ...ForwardOption) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if info.FullMethod != milvuspb.MilvusService_Insert_FullMethodName &&
 			info.FullMethod != milvuspb.MilvusService_Delete_FullMethodName &&
@@ -259,7 +285,7 @@ func ForwardLegacyProxyUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		// try to forward the request to the legacy proxy.
-		resp, err := WAL().ForwardService().ForwardLegacyProxy(ctx, req)
+		resp, err := WAL().ForwardService().ForwardLegacyProxy(ctx, req, opts...)
 		if err == nil {
 			return resp, nil
 		}
