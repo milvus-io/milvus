@@ -323,7 +323,7 @@ func (node *QueryNode) Init() error {
 				return NewLocalWorker(node), nil
 			}
 
-			sessions, _, err := node.session.GetSessions(typeutil.QueryNodeRole)
+			sessions, _, err := node.session.GetSessions(node.ctx, typeutil.QueryNodeRole)
 			if err != nil {
 				return nil, err
 			}

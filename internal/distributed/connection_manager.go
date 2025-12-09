@@ -105,7 +105,7 @@ func (cm *ConnectionManager) AddDependency(roleName string) error {
 	}
 	cm.dependencies[roleName] = struct{}{}
 
-	msess, rev, err := cm.session.GetSessions(roleName)
+	msess, rev, err := cm.session.GetSessions(context.TODO(), roleName)
 	if err != nil {
 		log.Debug("ClientManager GetSessions failed", zap.String("roleName", roleName))
 		return err
