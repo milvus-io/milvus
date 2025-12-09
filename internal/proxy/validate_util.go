@@ -56,6 +56,9 @@ func withMaxCapCheck() validateOption {
 }
 
 func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
+	if *fieldData == nil || (*fieldData).GetScalars() == nil || (*fieldData).GetScalars().Data == nil {
+		return nil
+	}
 	// Check if the field data already contains GeometryWktData
 	_, ok := (*fieldData).GetScalars().Data.(*schemapb.ScalarField_GeometryWktData)
 	if ok {
