@@ -72,9 +72,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 
     ~ArrayOffsetsSealed() {
         cachinglayer::Manager::GetInstance().RefundLoadedResource(
-            {static_cast<int64_t>(4 * GetRowCount() +
-                                  4 * GetTotalElementCount()),
-             0});
+            {resource_size_, 0});
     }
 
     int64_t
@@ -104,6 +102,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
  private:
     const std::vector<int32_t> element_row_ids_;
     const std::vector<int32_t> row_to_element_start_;
+    int64_t resource_size_{0};
 };
 
 class ArrayOffsetsGrowing : public IArrayOffsets {
