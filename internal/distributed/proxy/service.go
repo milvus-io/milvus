@@ -67,7 +67,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util"
-	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
@@ -131,7 +130,7 @@ func authenticate(c *gin.Context) {
 		if proxy.PasswordVerify(c, username, password) {
 			log.Ctx(context.TODO()).Debug("auth successful", zap.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
-			c.Set(httpserver.ContextToken, crypto.Base64Encode(fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, password)))
+			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, password))
 			return
 		}
 	}
