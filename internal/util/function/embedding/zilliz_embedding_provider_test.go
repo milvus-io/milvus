@@ -31,78 +31,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/function/models/zilliz"
 )
-
-// ZillizClientInterface defines the interface for ZillizClient used in testing
-type ZillizClientInterface interface {
-	Embedding(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error)
-}
-
-// MockZillizClient is a mock implementation of ZillizClientInterface for testing
-type MockZillizClient struct {
-	embeddingFunc func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error)
-}
-
-func (m *MockZillizClient) Embedding(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
-	if m.embeddingFunc != nil {
-		return m.embeddingFunc(ctx, texts, params, timeoutSec)
-	}
-	// Default behavior: return mock embeddings
-	embeddings := make([][]float32, len(texts))
-	for i := range texts {
-		embeddings[i] = []float32{float32(i), float32(i + 1), float32(i + 2), float32(i + 3)}
-	}
-	return embeddings, nil
-}
-
-// TestableZillizEmbeddingProvider is a version of ZillizEmbeddingProvider that accepts an interface for testing
-type TestableZillizEmbeddingProvider struct {
-	fieldDim int64
-
-	client      ZillizClientInterface
-	modelName   string
-	maxBatch    int
-	timeoutSec  int64
-	modelParams map[string]string
-	extraInfo   *models.ModelExtraInfo
-}
-
-func (provider *TestableZillizEmbeddingProvider) MaxBatch() int {
-	return 5 * provider.maxBatch
-}
-
-func (provider *TestableZillizEmbeddingProvider) FieldDim() int64 {
-	return provider.fieldDim
-}
-
-func (provider *TestableZillizEmbeddingProvider) CallEmbedding(ctx context.Context, texts []string, mode models.TextEmbeddingMode) (any, error) {
-	numRows := len(texts)
-	if mode == models.SearchMode {
-		provider.modelParams["input_type"] = "query"
-	} else {
-		provider.modelParams["input_type"] = "document"
-	}
-
-	data := make([][]float32, 0, numRows)
-	for i := 0; i < numRows; i += provider.maxBatch {
-		end := i + provider.maxBatch
-		if end > numRows {
-			end = numRows
-		}
-		resp, err := provider.client.Embedding(ctx, texts[i:end], provider.modelParams, provider.timeoutSec)
-		if err != nil {
-			return nil, err
-		}
-		data = append(data, resp...)
-	}
-	return data, nil
-}
 
 func TestZillizEmbeddingProvider(t *testing.T) {
 	suite.Run(t, new(ZillizEmbeddingProviderSuite))
@@ -144,8 +81,9 @@ func (s *ZillizEmbeddingProviderSuite) SetupTest() {
 	}
 
 	s.extraInfo = &models.ModelExtraInfo{
-		ClusterID: "test-cluster-id",
-		DBName:    "test-db",
+		ClusterID:   "test-cluster-id",
+		DBName:      "test-db",
+		BatchFactor: 5,
 	}
 }
 
@@ -196,7 +134,8 @@ func (s *ZillizEmbeddingProviderSuite) TestNewZillizEmbeddingProvider_InvalidDim
 func (s *ZillizEmbeddingProviderSuite) TestMaxBatch() {
 	// Test MaxBatch method with a provider that has default maxBatch
 	provider := &ZillizEmbeddingProvider{
-		maxBatch: 64,
+		maxBatch:  64,
+		extraInfo: &models.ModelExtraInfo{BatchFactor: 5},
 	}
 
 	maxBatch := provider.MaxBatch()
@@ -327,12 +266,11 @@ func (s *ZillizEmbeddingProviderSuite) TestNewZillizEmbeddingProviderWithInvalid
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SearchMode() {
 	// Create a provider with mock client
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:      mockClient,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client:      client,
 		fieldDim:    4,
 		maxBatch:    10,
-		timeoutSec:  30,
 		modelParams: make(map[string]string),
 		extraInfo:   s.extraInfo,
 	}
@@ -341,11 +279,9 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SearchMode() {
 	texts := []string{"hello", "world"}
 	mode := models.SearchMode
 
-	// Set up mock to verify parameters
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		// Verify that input_type is set to "query" for SearchMode
 		s.Equal("query", params["input_type"])
-		s.Equal(int64(30), timeoutSec)
 
 		// Return mock embeddings
 		embeddings := make([][]float32, len(texts))
@@ -353,7 +289,8 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SearchMode() {
 			embeddings[i] = []float32{1.0, 2.0, 3.0, 4.0}
 		}
 		return embeddings, nil
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.NoError(err)
@@ -372,12 +309,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SearchMode() {
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_InsertMode() {
 	// Create a provider with mock client
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:      mockClient,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client:      client,
 		fieldDim:    4,
 		maxBatch:    10,
-		timeoutSec:  30,
 		modelParams: make(map[string]string),
 		extraInfo:   s.extraInfo,
 	}
@@ -387,7 +323,7 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_InsertMode() {
 	mode := models.InsertMode
 
 	// Set up mock to verify parameters
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		// Verify that input_type is set to "document" for InsertMode
 		s.Equal("document", params["input_type"])
 
@@ -397,7 +333,8 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_InsertMode() {
 			embeddings[i] = []float32{2.0, 3.0, 4.0, 5.0}
 		}
 		return embeddings, nil
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.NoError(err)
@@ -416,12 +353,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_InsertMode() {
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Batching() {
 	// Create a provider with small batch size to test batching
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:      mockClient,
-		fieldDim:    4,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client: client,
+
 		maxBatch:    3, // Small batch size to force batching
-		timeoutSec:  30,
 		modelParams: make(map[string]string),
 		extraInfo:   s.extraInfo,
 	}
@@ -431,7 +367,7 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Batching() {
 	mode := models.InsertMode
 
 	callCount := 0
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		callCount++
 
 		// First batch should have 3 texts, second batch should have 2 texts
@@ -449,7 +385,8 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Batching() {
 			embeddings[i] = []float32{float32(callCount), float32(i), 0.0, 0.0}
 		}
 		return embeddings, nil
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.NoError(err)
@@ -475,12 +412,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Batching() {
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Error() {
 	// Create a provider with mock client that returns error
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:      mockClient,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client:      client,
 		fieldDim:    4,
 		maxBatch:    10,
-		timeoutSec:  30,
 		modelParams: make(map[string]string),
 		extraInfo:   s.extraInfo,
 	}
@@ -490,9 +426,10 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Error() {
 	mode := models.SearchMode
 
 	expectedError := errors.New("embedding service error")
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		return nil, expectedError
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.Error(err)
@@ -502,12 +439,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_Error() {
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_EmptyTexts() {
 	// Create a provider with mock client
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:      mockClient,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client:      client,
 		fieldDim:    4,
 		maxBatch:    10,
-		timeoutSec:  30,
 		modelParams: make(map[string]string),
 		extraInfo:   s.extraInfo,
 	}
@@ -517,10 +453,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_EmptyTexts() {
 	mode := models.InsertMode
 
 	callCount := 0
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		callCount++
 		return [][]float32{}, nil
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.NoError(err)
@@ -537,12 +474,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_EmptyTexts() {
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SingleBatch() {
 	// Test with texts that fit exactly in one batch
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:      mockClient,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client:      client,
 		fieldDim:    4,
 		maxBatch:    5, // Batch size 5
-		timeoutSec:  30,
 		modelParams: make(map[string]string),
 		extraInfo:   s.extraInfo,
 	}
@@ -552,7 +488,7 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SingleBatch() {
 	mode := models.SearchMode
 
 	callCount := 0
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		callCount++
 		s.Len(texts, 5)
 		s.Equal("query", params["input_type"])
@@ -563,7 +499,8 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SingleBatch() {
 			embeddings[i] = []float32{float32(i), 1.0, 2.0, 3.0}
 		}
 		return embeddings, nil
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.NoError(err)
@@ -584,12 +521,11 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_SingleBatch() {
 
 func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_ModelParamsPreservation() {
 	// Test that existing model params are preserved and input_type is added
-	mockClient := &MockZillizClient{}
-	provider := &TestableZillizEmbeddingProvider{
-		client:     mockClient,
-		fieldDim:   4,
-		maxBatch:   10,
-		timeoutSec: 30,
+	client := &zilliz.ZillizClient{}
+	provider := &ZillizEmbeddingProvider{
+		client:   client,
+		fieldDim: 4,
+		maxBatch: 10,
 		modelParams: map[string]string{
 			"existing_param": "existing_value",
 			"another_param":  "another_value",
@@ -601,7 +537,7 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_ModelParamsPreservation
 	texts := []string{"test"}
 	mode := models.SearchMode
 
-	mockClient.embeddingFunc = func(ctx context.Context, texts []string, params map[string]string, timeoutSec int64) ([][]float32, error) {
+	mock := mockey.Mock((*zilliz.ZillizClient).Embedding).To(func(_ *zilliz.ZillizClient, ctx context.Context, texts []string, params map[string]string) ([][]float32, error) {
 		// Verify that existing params are preserved and input_type is added
 		s.Equal("existing_value", params["existing_param"])
 		s.Equal("another_value", params["another_param"])
@@ -609,7 +545,8 @@ func (s *ZillizEmbeddingProviderSuite) TestCallEmbedding_ModelParamsPreservation
 		s.Len(params, 3) // Should have 3 parameters total
 
 		return [][]float32{{1.0, 2.0, 3.0, 4.0}}, nil
-	}
+	}).Build()
+	defer mock.UnPatch()
 
 	result, err := provider.CallEmbedding(ctx, texts, mode)
 	s.NoError(err)

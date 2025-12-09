@@ -313,3 +313,18 @@ func TestFunctionProperty(t *testing.T) {
 		[]*commonpb.KeyValuePair{{Key: CollectionAllowInsertNonBM25FunctionOutputs, Value: "true"}}),
 	)
 }
+
+func TestIsDisableFuncRuntimeCheck(t *testing.T) {
+	disable, err := IsDisableFuncRuntimeCheck([]*commonpb.KeyValuePair{}...)
+	assert.NoError(t, err)
+	assert.False(t, disable)
+	disable, err = IsDisableFuncRuntimeCheck([]*commonpb.KeyValuePair{{Key: DisableFuncRuntimeCheck, Value: "False"}}...)
+	assert.NoError(t, err)
+	assert.False(t, disable)
+	disable, err = IsDisableFuncRuntimeCheck([]*commonpb.KeyValuePair{{Key: DisableFuncRuntimeCheck, Value: "True"}}...)
+	assert.NoError(t, err)
+	assert.True(t, disable)
+	disable, err = IsDisableFuncRuntimeCheck([]*commonpb.KeyValuePair{{Key: DisableFuncRuntimeCheck, Value: "Error"}}...)
+	assert.Error(t, err)
+	assert.False(t, disable)
+}
