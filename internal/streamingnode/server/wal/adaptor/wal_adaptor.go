@@ -196,6 +196,14 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		}
 		return nil, err
 	}
+	// Mark WAL as fenced if alter WAL message is appended successfully
+	// This prevents further append operations during WAL switch
+	if msg.MessageType() == message.MessageTypeAlterWAL {
+		w.Logger().Info("alter WAL message appended, marking WAL as fenced")
+		w.isFenced.CompareAndSwap(false, true)
+		w.forceCancelAfterGracefulTimeout()
+		w.Logger().Info("WAL marked as fenced for WAL switch, all append operations will be rejected")
+	}
 	var extra *anypb.Any
 	if extraAppendResult.Extra != nil {
 		var err error
@@ -228,6 +236,10 @@ func (w *walAdaptorImpl) retryAppendWhenRecoverableError(ctx context.Context, ms
 	for i := 0; ; i++ {
 		msgID, err := w.rwWALImpls.Append(ctx, msg)
 		if err == nil {
+			if msg.MessageType() == message.MessageTypeAlterWAL {
+				// if the append operation is a alter WAL message, we should log the message
+				w.Logger().Info("append alter WAL message to WAL finish", zap.String("channel", msg.VChannel()), zap.Uint64("timetick", msg.TimeTick()))
+			}
 			return msgID, nil
 		}
 		if errors.IsAny(err, context.Canceled, context.DeadlineExceeded, walimpls.ErrFenced) {

@@ -9,6 +9,7 @@ import (
 
 var _ wal.OpenerBuilder = (*builderAdaptorImpl)(nil)
 
+// Deprecated: Use NewOpener to create opener directly, no need for builder
 func AdaptImplsToBuilder(builder walimpls.OpenerBuilderImpls, interceptorBuilders ...interceptors.InterceptorBuilder) wal.OpenerBuilder {
 	return builderAdaptorImpl{
 		builder:             builder,
