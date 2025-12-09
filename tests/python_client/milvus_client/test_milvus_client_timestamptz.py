@@ -53,8 +53,6 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         expected: Step 3 should result success
         """
         # step 1: create collection
-        # default_dim = 3
-        # default_nb = 3
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
