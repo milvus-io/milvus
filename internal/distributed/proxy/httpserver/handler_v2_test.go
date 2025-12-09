@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -74,6 +75,7 @@ func (req *DefaultReq) GetDbName() string { return req.DbName }
 
 func init() {
 	paramtable.Init()
+	streaming.SetupNoopWALForTest()
 }
 
 func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
@@ -2871,4 +2873,113 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 
 func TestAddCollectionFieldSuite(t *testing.T) {
 	suite.Run(t, new(AddCollectionFieldSuite))
+}
+
+func TestCollectionFunctionSuite(t *testing.T) {
+	suite.Run(t, new(CollectionFunctionSuite))
+}
+
+type CollectionFunctionSuite struct {
+	suite.Suite
+	testEngine *gin.Engine
+	mp         *mocks.MockProxy
+}
+
+func (s *CollectionFunctionSuite) SetupSuite() {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+}
+
+func (s *CollectionFunctionSuite) TearDownSuite() {
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+}
+
+func (s *CollectionFunctionSuite) SetupTest() {
+	s.mp = mocks.NewMockProxy(s.T())
+	s.testEngine = initHTTPServerV2(s.mp, false)
+}
+
+func (s *CollectionFunctionSuite) TestAddCollectionFunctionNormal() {
+	s.Run("success", func() {
+		addFunctionTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "function": {"name": "test_function", "type": "TextEmbedding", "inputFieldNames": [], "OutputFieldNames": []}}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().AddCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+	})
+
+	s.Run("bad_request", func() {
+		addFunctionTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "", "function": {"name": "test_function", "type": "BM25", "inputFieldNames": [], "OutputFieldNames": []}}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters, error: Key: 'CollectionAddFunction.CollectionName' Error:Field validation for 'CollectionName' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionCategory, AddFunctionAction),
+				requestBody: []byte(`invalid json`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+	})
+}
+
+func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
+	s.Run("success", func() {
+		alterFunctionTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AlterFunctionAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "test_function", "function": {"name": "test_function", "type": "TextEmbedding", "inputFieldNames": [], "OutputFieldNames": []}}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().AlterCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
+	})
+
+	s.Run("bad_request", func() {
+		alterFunctionTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, AlterFunctionAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "", "functionName": "test_function", "function": {"name": "test_function", "type": "BM25", "inputFieldNames": [], "OutputFieldNames": []}}`),
+				errCode:     1802,
+				errMsg:      "missing required parameters, error: Key: 'CollectionAlterFunction.CollectionName' Error:Field validation for 'CollectionName' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionCategory, AlterFunctionAction),
+				requestBody: []byte(`invalid json`),
+				errCode:     1801,
+				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
+	})
+}
+
+func (s *CollectionFunctionSuite) TestDropCollectionFunctionNormal() {
+	s.Run("success", func() {
+		addFunctionTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionCategory, DropFunctionAction),
+				requestBody: []byte(`{"dbName": "db", "collectionName": "coll", "functionName": "test"}`),
+				errCode:     0,
+				errMsg:      "",
+			},
+		}
+		s.mp.EXPECT().DropCollectionFunction(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
+	})
 }

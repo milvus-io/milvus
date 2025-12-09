@@ -59,12 +59,16 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
-        milvus_storage::PackedRecordBatchWriter writer(fs_,
-                                                       paths_,
-                                                       arrow_schema_,
-                                                       storage_config,
-                                                       column_groups,
-                                                       writer_memory);
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
+            fs_,
+            paths_,
+            arrow_schema_,
+            storage_config,
+            column_groups,
+            writer_memory,
+            ::parquet::default_writer_properties());
+        EXPECT_TRUE(result.ok());
+        auto writer = result.ValueOrDie();
         int64_t total_rows = 0;
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema_, per_batch);
@@ -72,9 +76,9 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
                 ConvertToArrowRecordBatch(dataset, dim, arrow_schema_);
             total_rows += record_batch->num_rows();
 
-            EXPECT_TRUE(writer.Write(record_batch).ok());
+            EXPECT_TRUE(writer->Write(record_batch).ok());
         }
-        EXPECT_TRUE(writer.Close().ok());
+        EXPECT_TRUE(writer->Close().ok());
     }
 
  protected:
@@ -97,12 +101,17 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
 };
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
+    auto temp_dir =
+        std::filesystem::temp_directory_path() / "gctt_test_with_mmap";
+    std::filesystem::create_directory(temp_dir);
+
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
-    auto column_group_info = FieldDataInfo(0, 3000, "");
+    auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
+        GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
         paths_,
@@ -111,8 +120,12 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         milvus::proto::common::LoadPriority::LOW);
 
     // num cells - get the expected number from the file directly
-    auto fr =
-        std::make_shared<milvus_storage::FileRowGroupReader>(fs_, paths_[0]);
+    auto reader_result =
+        milvus_storage::FileRowGroupReader::Make(fs_, paths_[0]);
+    AssertInfo(reader_result.ok(),
+               "[StorageV2] Failed to create file row group reader: " +
+                   reader_result.status().ToString());
+    auto fr = reader_result.ValueOrDie();
     auto expected_num_cells =
         fr->file_metadata()->GetRowGroupMetadataVector().size();
     auto row_group_metadata_vector =
@@ -164,17 +177,23 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     EXPECT_EQ(meta->chunk_memory_size_.size(), num_cells);
     EXPECT_EQ(expected_total_size, chunked_column_group->memory_size());
 
+    // Verify the mmap files for cell 0 and 1 are created
+    std::vector<std::string> mmap_paths = {
+        (temp_dir / "seg_0_cg_0_0").string(),
+        (temp_dir / "seg_0_cg_0_1").string()};
     // Verify mmap directory and files if in mmap mode
     if (use_mmap) {
-        std::string mmap_dir = std::to_string(segment_id_);
-        EXPECT_TRUE(std::filesystem::exists(mmap_dir));
+        for (const auto& mmap_path : mmap_paths) {
+            EXPECT_TRUE(std::filesystem::exists(mmap_path));
+        }
+    }
 
-        // DO NOT Verify each field has a corresponding file: files are unlinked immediately after being mmaped.
-        // for (size_t i = 0; i < field_id_list.size(); ++i) {
-        //     auto field_id = field_id_list.Get(i);
-        //     std::string field_file = mmap_dir + "/" + std::to_string(field_id);
-        //     EXPECT_TRUE(std::filesystem::exists(field_file));
-        // }
+    // Clean up mmap files
+    if (use_mmap) {
+        for (const auto& mmap_path : mmap_paths) {
+            std::filesystem::remove(mmap_path);
+        }
+        std::filesystem::remove(temp_dir);
     }
 }
 
@@ -203,35 +222,47 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
         std::vector<std::string> single_file_paths{file_path};
-        milvus_storage::PackedRecordBatchWriter writer(fs_,
-                                                       single_file_paths,
-                                                       arrow_schema_,
-                                                       storage_config,
-                                                       column_groups,
-                                                       writer_memory);
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
+            fs_,
+            single_file_paths,
+            arrow_schema_,
+            storage_config,
+            column_groups,
+            writer_memory,
+            ::parquet::default_writer_properties());
+        EXPECT_TRUE(result.ok());
+        auto writer = result.ValueOrDie();
 
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema_, per_batch);
             auto record_batch =
                 ConvertToArrowRecordBatch(dataset, dim, arrow_schema_);
             total_rows += record_batch->num_rows();
-            EXPECT_TRUE(writer.Write(record_batch).ok());
+            EXPECT_TRUE(writer->Write(record_batch).ok());
         }
-        EXPECT_TRUE(writer.Close().ok());
+        EXPECT_TRUE(writer->Close().ok());
 
         // Get the number of row groups in this file
-        auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs_, file_path);
+        auto reader_result =
+            milvus_storage::FileRowGroupReader::Make(fs_, file_path);
+        AssertInfo(reader_result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       reader_result.status().ToString());
+        auto fr = reader_result.ValueOrDie();
         expected_row_groups_per_file.push_back(
             fr->file_metadata()->GetRowGroupMetadataVector().size());
         auto status = fr->Close();
         AssertInfo(status.ok(), "failed to close file reader");
     }
 
-    auto column_group_info = FieldDataInfo(0, total_rows, "");
+    auto temp_dir =
+        std::filesystem::temp_directory_path() / "gctt_test_multiple_files";
+    std::filesystem::create_directory(temp_dir);
+    auto column_group_info = FieldDataInfo(0, total_rows, temp_dir.string());
 
     auto translator = std::make_unique<GroupChunkTranslator>(
         segment_id_,
+        GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
         multi_file_paths,
@@ -288,8 +319,12 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         auto usage = translator->estimated_byte_size_of_cell(i).first;
 
         // Get the expected memory size from the corresponding file
-        auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
+        auto reader_result = milvus_storage::FileRowGroupReader::Make(
             fs_, multi_file_paths[file_idx]);
+        AssertInfo(reader_result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       reader_result.status().ToString());
+        auto fr = reader_result.ValueOrDie();
         auto row_group_metadata_vector =
             fr->file_metadata()->GetRowGroupMetadataVector();
         auto expected_size = static_cast<int64_t>(
@@ -309,6 +344,10 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         if (std::filesystem::exists(file_path)) {
             std::filesystem::remove(file_path);
         }
+    }
+    // Clean up cached column group files
+    if (use_mmap && std::filesystem::exists(temp_dir)) {
+        std::filesystem::remove_all(temp_dir);
     }
 }
 

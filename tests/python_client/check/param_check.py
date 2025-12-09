@@ -7,6 +7,9 @@ from utils.util_log import test_log as log
 
 import numpy as np
 from collections.abc import Iterable
+import json
+from datetime import datetime
+from deepdiff import DeepDiff
 
 epsilon = ct.epsilon
 
@@ -69,6 +72,75 @@ def deep_approx_compare(x, y, epsilon=epsilon):
     return x == y
 
 
+import re
+# Pre-compile regex patterns for better performance
+_GEO_PATTERN = re.compile(r'(POINT|LINESTRING|POLYGON)\s+\(')
+_WHITESPACE_PATTERN = re.compile(r'\s+')
+
+def normalize_geo_string(s):
+    """
+    Normalize a GEO string by removing extra whitespace.
+
+    Args:
+        s: String value that might be a GEO type (POINT, LINESTRING, POLYGON)
+
+    Returns:
+        Normalized GEO string or original value if not a GEO string
+    """
+    if isinstance(s, str) and s.startswith(('POINT', 'LINESTRING', 'POLYGON')):
+        s = _GEO_PATTERN.sub(r'\1(', s)
+        s = _WHITESPACE_PATTERN.sub(' ', s).strip()
+    return s
+
+
+def normalize_value(value):
+    """
+    Normalize values for comparison by converting to standard types and formats.
+    """
+    # Fast path for None and simple immutable types
+    if value is None or isinstance(value, (bool, int)):
+        return value
+
+    # Convert numpy types to Python native types
+    if isinstance(value, (np.integer, np.floating)):
+        return float(value) if isinstance(value, np.floating) else int(value)
+
+    # Handle strings (common case for GEO fields)
+    if isinstance(value, str):
+        return normalize_geo_string(value)
+
+    # Convert list-like protobuf/custom types to standard list
+    type_name = type(value).__name__
+    if type_name in ('RepeatedScalarContainer', 'HybridExtraList', 'RepeatedCompositeContainer'):
+        value = list(value)
+
+    # Handle list of dicts (main use case for search/query results)
+    if isinstance(value, (list, tuple)):
+        normalized_list = []
+        for item in value:
+            if isinstance(item, dict):
+                # Normalize GEO strings in dict values
+                normalized_dict = {}
+                for k, v in item.items():
+                    if isinstance(v, str):
+                        normalized_dict[k] = normalize_geo_string(v)
+                    elif isinstance(v, (np.integer, np.floating)):
+                        normalized_dict[k] = float(v) if isinstance(v, np.floating) else int(v)
+                    elif isinstance(v, np.ndarray):
+                        normalized_dict[k] = v.tolist()
+                    elif type(v).__name__ in ('RepeatedScalarContainer', 'HybridExtraList', 'RepeatedCompositeContainer'):
+                        normalized_dict[k] = list(v)
+                    else:
+                        normalized_dict[k] = v
+                normalized_list.append(normalized_dict)
+            else:
+                # For non-dict items, just add as-is
+                normalized_list.append(item)
+        return normalized_list
+
+    # Return as-is for other types
+    return value
+
 def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
     """
     Compares two lists of dictionaries for equality (order-insensitive) with floating-point tolerance.
@@ -87,7 +159,8 @@ def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
     """
     if len(a) != len(b):
         return False
-
+    a = normalize_value(a)
+    b = normalize_value(b)
     # Create a set of available indices for b
     available_indices = set(range(len(b)))
 
@@ -110,6 +183,25 @@ def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
 
     return True
 
+def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon):
+    """
+    Compare two lists of dictionaries for equality (order-insensitive) with floating-point tolerance using DeepDiff.
+    """
+    # Normalize both lists to handle type differences
+    a_normalized = normalize_value(a)
+    b_normalized = normalize_value(b)
+    for i in range(len(a_normalized)):
+        diff = DeepDiff(
+            a_normalized[i],
+            b_normalized[i],
+            ignore_order=True,
+            math_epsilon=epsilon,
+            significant_digits=1,
+            ignore_type_in_groups=[(list, tuple)],
+            ignore_string_type_changes=True,
+        )
+        if diff:
+            log.debug(f"[COMPARE_LISTS] Found differences at row {i}: {diff}")
 
 def ip_check(ip):
     if ip == "localhost":
@@ -339,20 +431,23 @@ def output_field_value_check(search_res, original, pk_name):
     :return: True or False
     """
     pk_name = ct.default_primary_field_name if pk_name is None else pk_name
+    nq = len(search_res)
     limit = len(search_res[0])
-    for i in range(limit):
-        entity = search_res[0][i].fields
-        _id = search_res[0][i].id
-        for field in entity.keys():
-            if isinstance(entity[field], list):
-                for order in range(0, len(entity[field]), 4):
-                    assert abs(original[field][_id][order] - entity[field][order]) < ct.epsilon
-            elif isinstance(entity[field], dict) and field != ct.default_json_field_name:
-                # sparse checking, sparse vector must be the last, this is a bit hacky,
-                # but sparse only supports list data type insertion for now
-                assert entity[field].keys() == original[-1][_id].keys()
-            else:
-                num = original[original[pk_name] == _id].index.to_list()[0]
-                assert original[field][num] == entity[field]
+    check_nqs = min(2, nq)       # the output field values are wrong only at nq>=2  #45338
+    for n in range(check_nqs):
+        for i in range(limit):
+            entity = search_res[n][i].fields
+            _id = search_res[n][i].id
+            for field in entity.keys():
+                if isinstance(entity[field], list):
+                    for order in range(0, len(entity[field]), 4):
+                        assert abs(original[field][_id][order] - entity[field][order]) < ct.epsilon
+                elif isinstance(entity[field], dict) and field != ct.default_json_field_name:
+                    # sparse checking, sparse vector must be the last, this is a bit hacky,
+                    # but sparse only supports list data type insertion for now
+                    assert entity[field].keys() == original[-1][_id].keys()
+                else:
+                    num = original[original[pk_name] == _id].index.to_list()[0]
+                    assert original[field][num] == entity[field], f"the output field values are wrong at nq={n}"
 
     return True

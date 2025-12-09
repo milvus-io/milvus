@@ -79,6 +79,8 @@ type Server struct {
 	tikvCli             *txnkv.Client
 	address             string
 	session             sessionutil.SessionInterface
+	sessionWatcher      sessionutil.SessionWatcher
+	sessionWatcherMu    sync.Mutex
 	kv                  kv.MetaKv
 	idAllocator         func() (int64, error)
 	metricsCacheManager *metricsinfo.MetricsCacheManager
@@ -129,6 +131,10 @@ type Server struct {
 	proxyClientManager proxyutil.ProxyClientManagerInterface
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// for balance streaming node request
+	// now only used for run analyzer and validate analyzer
+	nodeIdx atomic.Uint32
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -158,7 +164,7 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 }
 
 func (s *Server) ServerExist(serverID int64) bool {
-	sessions, _, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	sessions, _, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
 		return false
@@ -475,7 +481,7 @@ func (s *Server) Start() error {
 
 func (s *Server) startQueryCoord() error {
 	log.Ctx(s.ctx).Info("start watcher...")
-	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	sessions, revision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return err
 	}
@@ -589,12 +595,19 @@ func (s *Server) Stop() error {
 		s.cluster.Stop()
 	}
 
+	s.sessionWatcherMu.Lock()
+	if s.sessionWatcher != nil {
+		s.sessionWatcher.Stop()
+	}
+	s.sessionWatcherMu.Unlock()
+
+	s.cancel()
+	s.wg.Wait()
+
 	if s.session != nil {
 		s.session.Stop()
 	}
 
-	s.cancel()
-	s.wg.Wait()
 	log.Info("QueryCoord stop successfully")
 	return nil
 }
@@ -634,14 +647,16 @@ func (s *Server) watchNodes(revision int64) {
 	log := log.Ctx(s.ctx)
 	defer s.wg.Done()
 
-	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, s.rewatchNodes)
+	s.sessionWatcherMu.Lock()
+	s.sessionWatcher = s.session.WatchServices(typeutil.QueryNodeRole, revision+1, s.rewatchNodes)
+	s.sessionWatcherMu.Unlock()
 	for {
 		select {
 		case <-s.ctx.Done():
 			log.Info("stop watching nodes, QueryCoord stopped")
 			return
 
-		case event, ok := <-eventChan:
+		case event, ok := <-s.sessionWatcher.EventChannel():
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
 				log.Warn("Session Watcher channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
@@ -719,11 +734,13 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 				Labels:   nodeSession.GetServerLabel(),
 			}))
 
+			// call handleNodeUp no matter what state new querynode is in
+			// all component need this op so that stopping balance could work correctly
+			s.handleNodeUp(nodeSession.GetServerID())
+
 			if nodeSession.Stopping {
 				s.nodeMgr.Stopping(nodeSession.ServerID)
 				s.handleNodeStopping(nodeSession.ServerID)
-			} else {
-				s.handleNodeUp(nodeSession.GetServerID())
 			}
 		}
 	}

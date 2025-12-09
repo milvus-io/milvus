@@ -17,12 +17,14 @@ from chaos.checker import (CollectionCreateChecker,
                            TextMatchChecker,
                            PhraseMatchChecker,
                            JsonQueryChecker,
+                           GeoQueryChecker,
                            IndexCreateChecker,
                            DeleteChecker,
                            CollectionDropChecker,
                            AlterCollectionChecker,
                            AddFieldChecker,
                            CollectionRenameChecker,
+                           TensorSearchChecker,
                            Op,
                            EventRecords,
                            ResultAnalyzer
@@ -53,15 +55,26 @@ class TestBase:
 class TestOperations(TestBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self, host, port, user, password, milvus_ns, minio_host, enable_import, minio_bucket):
-        if user and password:
-            # log.info(f"connect to {host}:{port} with user {user} and password {password}")
-            connections.connect('default', host=host, port=port, user=user, password=password)
+    def connection(self, host, port, user, password, uri, token, milvus_ns, minio_host, enable_import, minio_bucket):
+        # Prioritize uri and token for connection
+        if uri:
+            actual_uri = uri
         else:
-            connections.connect('default', host=host, port=port)
+            actual_uri = f"http://{host}:{port}"
+
+        if token:
+            actual_token = token
+        else:
+            actual_token = f"{user}:{password}" if user and password else None
+
+        if actual_token:
+            connections.connect('default', uri=actual_uri, token=actual_token)
+        else:
+            connections.connect('default', uri=actual_uri)
+
         if connections.has_connection("default") is False:
             raise Exception("no connections")
-        log.info("connect to milvus successfully")
+        log.info(f"connect to milvus successfully, uri: {actual_uri}")
         pymilvus_version = pymilvus.__version__
         server_version = utility.get_server_version()
         log.info(f"server version: {server_version}")
@@ -70,6 +83,8 @@ class TestOperations(TestBase):
         self.port = port
         self.user = user
         self.password = password
+        self.uri = actual_uri
+        self.token = actual_token
         self.milvus_sys = MilvusSys(alias='default')
         self.milvus_ns = milvus_ns
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
@@ -82,8 +97,9 @@ class TestOperations(TestBase):
         checkers = {
             Op.create: CollectionCreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
+            Op.tensor_search :TensorSearchChecker(collection_name=c_name),
             Op.upsert: UpsertChecker(collection_name=c_name),
-            Op.partial_update: PartialUpdateChecker(collection_name=c_name),
+            Op.partial_update: PartialUpdateChecker(collection_name=c_name), 
             Op.flush: FlushChecker(collection_name=c_name),
             Op.index: IndexCreateChecker(collection_name=c_name),
             Op.search: SearchChecker(collection_name=c_name),
@@ -93,6 +109,7 @@ class TestOperations(TestBase):
             Op.text_match: TextMatchChecker(collection_name=c_name),
             Op.phrase_match: PhraseMatchChecker(collection_name=c_name),
             Op.json_query: JsonQueryChecker(collection_name=c_name),
+            Op.geo_query: GeoQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
             Op.drop: CollectionDropChecker(collection_name=c_name),
             Op.alter_collection: AlterCollectionChecker(collection_name=c_name),

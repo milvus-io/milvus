@@ -461,11 +461,6 @@ var (
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
-
-	WALTruncateTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "truncate_time_tick",
-		Help: "the final timetick tick of truncator seen",
-	}, WALChannelLabelName, WALChannelTermLabelName)
 )
 
 // RegisterStreamingServiceClient registers streaming service client metrics
@@ -505,6 +500,7 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumeBytes)
 
 	registerWAL(registry)
+	RegisterLoggingMetrics(registry)
 
 	// TODO: after remove the implementation of old data node
 	// Such as flowgraph and writebuffer, we can remove these metrics from streaming node.
@@ -566,7 +562,6 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
-	registry.MustRegister(WALTruncateTimeTick)
 }
 
 func newStreamingCoordGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {

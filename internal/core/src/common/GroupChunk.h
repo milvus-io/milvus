@@ -98,4 +98,9 @@ class GroupChunk {
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks_;
 };
 
+enum class GroupChunkType : uint8_t {
+    DEFAULT = 0,
+    JSON_KEY_STATS = 1,
+};
+
 }  // namespace milvus

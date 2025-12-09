@@ -19,6 +19,7 @@
 #include "arrow/array/builder_binary.h"
 #include "arrow/array/builder_nested.h"
 #include "arrow/array/builder_primitive.h"
+#include <arrow/c/bridge.h>
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "common/type_c.h"
@@ -58,8 +59,12 @@
 #include "storage/KeyRetriever.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/util.h"
+#include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/reader.h"
 
 namespace milvus::storage {
 
@@ -1302,11 +1307,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
-        auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+        auto result = milvus_storage::FileRowGroupReader::Make(
             fs,
             column_group_file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
             GetReaderProperties());
+        AssertInfo(result.ok(),
+                   "[StorageV2] Failed to create file row group reader: " +
+                       result.status().ToString());
+        auto reader = result.ValueOrDie();
 
         auto row_group_num =
             reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1357,6 +1366,95 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         }
     }
     return field_data_list;
+}
+
+std::vector<FieldDataPtr>
+GetFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type) {
+    auto column_groups = GetColumnGroups(manifest_path, loon_ffi_properties);
+
+    // ReaderHandle reader_handler = 0;
+
+    std::string field_id_str = std::to_string(field_meta.field_id);
+    std::vector<std::string> needed_columns = {field_id_str};
+
+    // Create arrow schema from field meta
+    std::shared_ptr<arrow::Schema> arrow_schema;
+    bool nullable = field_meta.field_schema.nullable();
+
+    if (IsVectorDataType(data_type.value())) {
+        if (data_type.value() == DataType::VECTOR_ARRAY) {
+            arrow_schema = CreateArrowSchema(
+                data_type.value(), static_cast<int>(dim), element_type.value());
+        } else if (IsSparseFloatVectorDataType(data_type.value())) {
+            arrow_schema = CreateArrowSchema(data_type.value(), nullable);
+        } else {
+            arrow_schema = CreateArrowSchema(
+                data_type.value(), static_cast<int>(dim), nullable);
+        }
+    } else if (data_type.value() == DataType::ARRAY) {
+        // For ARRAY types, we use binary representation
+        // Element type information is encoded in the data itself
+        arrow_schema = CreateArrowSchema(data_type.value(), nullable);
+    } else {
+        // For scalar types
+        arrow_schema = CreateArrowSchema(data_type.value(), nullable);
+    }
+
+    auto updated_schema = std::make_shared<arrow::Schema>(
+        arrow::Schema({arrow_schema->field(0)->WithName(
+            std::to_string((field_meta.field_id)))}));
+
+    auto reader = milvus_storage::api::Reader::create(
+        column_groups,
+        updated_schema,
+        std::make_shared<std::vector<std::string>>(needed_columns),
+        *loon_ffi_properties);
+
+    AssertInfo(reader != nullptr, "Failed to create reader");
+
+    // without predicate
+    auto reader_result = reader->get_record_batch_reader("");
+    AssertInfo(reader_result.ok(),
+               "Failed to get record batch reader: " +
+                   reader_result.status().ToString());
+
+    auto record_batch_reader = reader_result.ValueOrDie();
+
+    // Read all record batches and convert to FieldDataPtr
+    std::vector<FieldDataPtr> field_datas;
+    while (true) {
+        std::shared_ptr<arrow::RecordBatch> batch;
+        auto status = record_batch_reader->ReadNext(&batch);
+        AssertInfo(status.ok(),
+                   "Failed to read record batch: " + status.ToString());
+        if (batch == nullptr) {
+            break;  // End of stream
+        }
+
+        // Convert record batch to FieldData
+        auto num_rows = batch->num_rows();
+        if (num_rows == 0) {
+            continue;
+        }
+
+        auto chunked_array =
+            std::make_shared<arrow::ChunkedArray>(batch->column(0));
+        auto field_data = CreateFieldData(data_type.value(),
+                                          element_type.value(),
+                                          batch->schema()->field(0)->nullable(),
+                                          dim,
+                                          num_rows);
+        field_data->FillFieldData(chunked_array);
+        field_datas.push_back(field_data);
+    }
+
+    return field_datas;
 }
 
 std::vector<FieldDataPtr>
@@ -1421,12 +1519,16 @@ GetFieldIDList(FieldId column_group_id,
         field_id_list.Add(column_group_id.get());
         return field_id_list;
     }
-    auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+    auto result = milvus_storage::FileRowGroupReader::Make(
         fs,
         filepath,
         arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
         GetReaderProperties());
+    AssertInfo(result.ok(),
+               "[StorageV2] Failed to create file row group reader: " +
+                   result.status().ToString());
+    auto file_reader = result.ValueOrDie();
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());

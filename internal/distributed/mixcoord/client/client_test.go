@@ -258,6 +258,18 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.AddCollectionFunction(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.AlterCollectionFunction(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
+			r, err := client.DropCollectionFunction(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.AlterDatabase(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -384,6 +396,12 @@ func Test_NewClient(t *testing.T) {
 
 		r40, err := client.CheckBalanceStatus(ctx, nil)
 		retCheck(retNotNil, r40, err)
+
+		r41, err := client.RunAnalyzer(ctx, nil)
+		retCheck(retNotNil, r41, err)
+
+		r42, err := client.ValidateAnalyzer(ctx, nil)
+		retCheck(retNotNil, r42, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[MixCoordClient]{

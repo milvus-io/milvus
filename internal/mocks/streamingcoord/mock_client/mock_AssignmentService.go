@@ -11,6 +11,8 @@ import (
 
 	replicateutil "github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 
+	streamingpb "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+
 	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
@@ -128,6 +130,64 @@ func (_c *MockAssignmentService_GetLatestAssignments_Call) Return(_a0 *types.Ver
 }
 
 func (_c *MockAssignmentService_GetLatestAssignments_Call) RunAndReturn(run func(context.Context) (*types.VersionedStreamingNodeAssignments, error)) *MockAssignmentService_GetLatestAssignments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetLatestStreamingVersion provides a mock function with given fields: ctx
+func (_m *MockAssignmentService) GetLatestStreamingVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestStreamingVersion")
+	}
+
+	var r0 *streamingpb.StreamingVersion
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*streamingpb.StreamingVersion, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *streamingpb.StreamingVersion); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingVersion)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockAssignmentService_GetLatestStreamingVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestStreamingVersion'
+type MockAssignmentService_GetLatestStreamingVersion_Call struct {
+	*mock.Call
+}
+
+// GetLatestStreamingVersion is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockAssignmentService_Expecter) GetLatestStreamingVersion(ctx interface{}) *MockAssignmentService_GetLatestStreamingVersion_Call {
+	return &MockAssignmentService_GetLatestStreamingVersion_Call{Call: _e.mock.On("GetLatestStreamingVersion", ctx)}
+}
+
+func (_c *MockAssignmentService_GetLatestStreamingVersion_Call) Run(run func(ctx context.Context)) *MockAssignmentService_GetLatestStreamingVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockAssignmentService_GetLatestStreamingVersion_Call) Return(_a0 *streamingpb.StreamingVersion, _a1 error) *MockAssignmentService_GetLatestStreamingVersion_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockAssignmentService_GetLatestStreamingVersion_Call) RunAndReturn(run func(context.Context) (*streamingpb.StreamingVersion, error)) *MockAssignmentService_GetLatestStreamingVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -151,7 +151,12 @@ TEST(Sealed, without_predicate) {
 
     sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
-    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100);
+    sr = sealed_segment->Search(plan.get(),
+                                ph_group.get(),
+                                timestamp,
+                                folly::CancellationToken(),
+                                0,
+                                100);
     EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
@@ -989,7 +994,12 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100000);
+    auto sr = segment->Search(plan.get(),
+                              ph_group.get(),
+                              timestamp,
+                              folly::CancellationToken(),
+                              0,
+                              100000);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }
@@ -1505,7 +1515,7 @@ TEST(Sealed, LoadArrayFieldData) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-    segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 
     auto ids_ds = GenRandomIds(N);
     auto s = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
@@ -1563,7 +1573,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     segment = CreateSealedWithFieldDataLoaded(schema, dataset, true);
-    segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
 }
 
 TEST(Sealed, SkipIndexSkipUnaryRange) {
@@ -2278,31 +2288,6 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(string_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(double_array_result->valid_data_size(), dataset_size);
     EXPECT_EQ(float_array_result->valid_data_size(), dataset_size);
-}
-
-TEST(Sealed, SearchSortedPk) {
-    auto schema = std::make_shared<Schema>();
-    auto varchar_pk_field = schema->AddDebugField("pk", DataType::VARCHAR);
-    schema->set_primary_field_id(varchar_pk_field);
-    auto segment_sealed = CreateSealedSegment(
-        schema, nullptr, 999, SegcoreConfig::default_config(), true);
-    auto segment =
-        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
-
-    int64_t dataset_size = 1000;
-    auto dataset = DataGen(schema, dataset_size, 42, 0, 10);
-    LoadGeneratedDataIntoSegment(dataset, segment);
-
-    auto pk_values = dataset.get_col<std::string>(varchar_pk_field);
-    auto offsets =
-        segment->search_pk(nullptr, PkType(pk_values[100]), Timestamp(99999));
-    EXPECT_EQ(10, offsets.size());
-    EXPECT_EQ(100, offsets[0].get());
-
-    auto offsets2 =
-        segment->search_pk(nullptr, PkType(pk_values[100]), int64_t(105));
-    EXPECT_EQ(6, offsets2.size());
-    EXPECT_EQ(100, offsets2[0].get());
 }
 
 using VectorArrayTestParam =

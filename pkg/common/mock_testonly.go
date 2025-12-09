@@ -22,9 +22,7 @@ package common
 
 import (
 	"context"
-	"fmt"
-
-	"github.com/milvus-io/milvus/pkg/v2/log"
+	"log"
 )
 
 type MockTestingT struct {
@@ -38,15 +36,15 @@ func NewEmptyMockT() *MockTestingT {
 }
 
 func (m *MockTestingT) Logf(format string, args ...interface{}) {
-	log.Ctx(m.ctx).Info(fmt.Sprintf(format, args...))
+	log.Printf(format, args...)
 }
 
 func (m *MockTestingT) Errorf(format string, args ...interface{}) {
-	log.Ctx(m.ctx).Error(fmt.Sprintf(format, args...))
+	log.Printf(format, args...)
 }
 
 func (m *MockTestingT) FailNow() {
-	log.Ctx(m.ctx).Panic("FailNow called")
+	log.Println("FailNow called")
 }
 
 func (m *MockTestingT) Cleanup(func()) {}

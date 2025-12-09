@@ -46,15 +46,15 @@ func NewRunner(ctx context.Context, cfg *configs.Config) *Runner {
 
 func (r *Runner) watchByPrefix(prefix string) {
 	defer r.wg.Done()
-	_, revision, err := r.session.GetSessions(prefix)
+	_, revision, err := r.session.GetSessions(r.ctx, prefix)
 	fn := func() { r.Stop() }
 	console.AbnormalExitIf(err, r.backupFinished.Load(), console.AddCallbacks(fn))
-	eventCh := r.session.WatchServices(prefix, revision, nil)
+	watcher := r.session.WatchServices(prefix, revision, nil)
 	for {
 		select {
 		case <-r.ctx.Done():
 			return
-		case event := <-eventCh:
+		case event := <-watcher.EventChannel():
 			msg := fmt.Sprintf("session up/down, exit migration, event type: %s, session: %s", event.EventType.String(), event.Session.String())
 			console.AbnormalExit(r.backupFinished.Load(), msg, console.AddCallbacks(fn))
 		}
@@ -79,7 +79,8 @@ func (r *Runner) initEtcdCli() {
 		r.cfg.EtcdCfg.EtcdTLSCert.GetValue(),
 		r.cfg.EtcdCfg.EtcdTLSKey.GetValue(),
 		r.cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		r.cfg.EtcdCfg.EtcdTLSMinVersion.GetValue(),
+		r.cfg.EtcdCfg.ClientOptions()...)
 	console.AbnormalExitIf(err, r.backupFinished.Load())
 	r.etcdCli = cli
 }
@@ -127,7 +128,7 @@ func (r *Runner) CheckCompatible() bool {
 }
 
 func (r *Runner) checkSessionsWithPrefix(prefix string) error {
-	sessions, _, err := r.session.GetSessions(prefix)
+	sessions, _, err := r.session.GetSessions(r.ctx, prefix)
 	if err != nil {
 		return err
 	}
@@ -138,7 +139,7 @@ func (r *Runner) checkSessionsWithPrefix(prefix string) error {
 }
 
 func (r *Runner) checkMySelf() error {
-	sessions, _, err := r.session.GetSessions(Role)
+	sessions, _, err := r.session.GetSessions(r.ctx, Role)
 	if err != nil {
 		return err
 	}
@@ -164,7 +165,6 @@ func (r *Runner) CheckSessions() error {
 
 func (r *Runner) RegisterSession() error {
 	r.session.Register()
-	r.session.LivenessCheck(r.ctx, func() {})
 	return nil
 }
 
@@ -245,7 +245,7 @@ func (r *Runner) waitUntilSessionExpired() {
 }
 
 func (r *Runner) Stop() {
-	r.session.Revoke(time.Second)
+	r.session.Stop()
 	r.waitUntilSessionExpired()
 	r.cancel()
 	r.wg.Wait()

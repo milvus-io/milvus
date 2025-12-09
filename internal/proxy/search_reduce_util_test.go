@@ -244,6 +244,104 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithPartialEmptyFieldsData() 
 	struts.Greater(len(results.Results.FieldsData), 0)
 }
 
+func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
+	ctx := context.Background()
+	nq := int64(1)
+	topK := int64(4)
+	offset := int64(0)
+
+	// For positively related metrics (higher is better):
+	// Segment 1: scores 10, 8
+	// Segment 2: scores 9, 7
+	// Expected merge: 10, 9, 8, 7 (IDs: 1, 3, 2, 4)
+	positiveSegment1 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+			},
+		},
+		Scores:     []float32{10, 8},
+		Topks:      []int64{2},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	positiveSegment2 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{3, 4}},
+			},
+		},
+		Scores:     []float32{9, 7},
+		Topks:      []int64{2},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	// Test positively related MAX_SIM metrics
+	positiveMetrics := []string{"MAX_SIM", "MAX_SIM_IP", "MAX_SIM_COSINE"}
+	for _, metricType := range positiveMetrics {
+		results, err := reduceSearchResultDataNoGroupBy(ctx,
+			[]*schemapb.SearchResultData{positiveSegment1, positiveSegment2},
+			nq, topK, metricType, schemapb.DataType_Int64, offset)
+
+		s.NoError(err, "metric: %s", metricType)
+		s.Equal([]int64{1, 3, 2, 4}, results.Results.GetIds().GetIntId().GetData(),
+			"metric %s: IDs should be merged correctly", metricType)
+		s.Equal([]float32{10, 9, 8, 7}, results.Results.GetScores(),
+			"metric %s: Scores should be in descending order", metricType)
+	}
+
+	// For negatively related metrics (lower is better):
+	// Input scores are negated internally, so we provide negative scores
+	// Segment 1: scores -1, -3 (representing distances 1, 3)
+	// Segment 2: scores -2, -4 (representing distances 2, 4)
+	// Internal merge uses negated values, then negates back
+	// Expected final scores: 1, 2, 3, 4 (IDs: 1, 3, 2, 4)
+	negativeSegment1 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+			},
+		},
+		Scores:     []float32{-1, -3},
+		Topks:      []int64{2},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	negativeSegment2 := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{3, 4}},
+			},
+		},
+		Scores:     []float32{-2, -4},
+		Topks:      []int64{2},
+		NumQueries: nq,
+		TopK:       topK,
+		FieldsData: []*schemapb.FieldData{},
+	}
+
+	// Test negatively related MAX_SIM metrics
+	negativeMetrics := []string{"MAX_SIM_L2", "MAX_SIM_HAMMING", "MAX_SIM_JACCARD"}
+	for _, metricType := range negativeMetrics {
+		results, err := reduceSearchResultDataNoGroupBy(ctx,
+			[]*schemapb.SearchResultData{negativeSegment1, negativeSegment2},
+			nq, topK, metricType, schemapb.DataType_Int64, offset)
+
+		s.NoError(err, "metric: %s", metricType)
+		s.Equal([]int64{1, 3, 2, 4}, results.Results.GetIds().GetIntId().GetData(),
+			"metric %s: IDs should be merged correctly", metricType)
+		// Scores are negated back for negatively related metrics
+		s.Equal([]float32{1, 2, 3, 4}, results.Results.GetScores(),
+			"metric %s: Scores should be distances in ascending order", metricType)
+	}
+}
+
 func TestSearchReduceUtilTestSuite(t *testing.T) {
 	suite.Run(t, new(SearchReduceUtilTestSuite))
 }

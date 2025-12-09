@@ -18,7 +18,6 @@ package syncmgr
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/samber/lo"
@@ -179,31 +178,6 @@ func (s *storageV1Serializer) serializeMergedBM25Stats(pack *SyncPack) (map[int6
 		}
 	}
 	return blobs, nil
-}
-
-func (s *storageV1Serializer) serializeDeltalog(pack *SyncPack) (*storage.Blob, error) {
-	if len(pack.deltaData.Pks) == 0 {
-		return &storage.Blob{}, nil
-	}
-
-	writer, finalizer, err := storage.CreateDeltalogWriter(pack.collectionID, pack.partitionID, pack.segmentID, pack.deltaData.Pks[0].Type(), 1024)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(pack.deltaData.Pks) != len(pack.deltaData.Tss) {
-		return nil, fmt.Errorf("pk and ts should have same length in delta log, but get %d and %d", len(pack.deltaData.Pks), len(pack.deltaData.Tss))
-	}
-
-	for i := 0; i < len(pack.deltaData.Pks); i++ {
-		deleteLog := storage.NewDeleteLog(pack.deltaData.Pks[i], pack.deltaData.Tss[i])
-		err = writer.WriteValue(deleteLog)
-		if err != nil {
-			return nil, err
-		}
-	}
-	writer.Close()
-	return finalizer()
 }
 
 func hasBM25Function(schema *schemapb.CollectionSchema) bool {

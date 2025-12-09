@@ -32,7 +32,8 @@ func newEtcdBasedBackend(cfg *configs.MilvusConfig) (*etcdBasedBackend, error) {
 		cfg.EtcdCfg.EtcdTLSCert.GetValue(),
 		cfg.EtcdCfg.EtcdTLSKey.GetValue(),
 		cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue(),
+		cfg.EtcdCfg.ClientOptions()...)
 	if err != nil {
 		return nil, err
 	}

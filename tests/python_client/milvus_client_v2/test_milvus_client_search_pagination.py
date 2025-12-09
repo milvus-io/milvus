@@ -1,19 +1,16 @@
 import logging
 
-import numpy as np
-from common.constants import *
+
 from utils.util_pymilvus import *
 from common.common_type import CaseLabel, CheckTasks
 from common import common_type as ct
 from common import common_func as cf
 from utils.util_log import test_log as log
 from base.client_v2_base import TestMilvusClientV2Base
-from base.client_base import TestcaseBase
 import random
 import pytest
 import pandas as pd
 from faker import Faker
-import inspect
 
 Faker.seed(19530)
 fake_en = Faker("en_US")
@@ -1071,3 +1068,44 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
         for i in range(ct.default_nq):
             assert len(search_res1[i]) == 0, "search result is not empty"
             assert len(search_res2[i]) == 0, "search result is not empty"
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_pagination_flat_index_with_same_score(self):
+        """
+        target: test search pagination with flat index and same score
+        method: 
+        - create collection in fast mode
+        - insert data with different pk and same vector
+        - create flat index
+        - search with pagination and check the results
+        expected: the results should be the same as the results of the full search
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field(default_primary_key_field_name, datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, datatype=DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field(default_float_field_name, datatype=DataType.FLOAT)
+        self.create_collection(client, collection_name, schema=schema)
+
+        vector = cf.gen_vectors(1, ct.default_dim, vector_data_type=DataType.SPARSE_FLOAT_VECTOR)
+        
+        # insert data with different pk and same vector
+        nb = 100
+        data = [{default_primary_key_field_name: i, 
+                 default_vector_field_name: vector[0],
+                 default_float_field_name: i * 1.0} for i in range(nb)]
+        self.insert(client, collection_name, data)
+        # create flat index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(default_vector_field_name, index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+
+        # search with pagination and check the results
+        pages = 10
+        limit = nb // pages
+        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                             vector_dtype=DataType.SPARSE_FLOAT_VECTOR,
+                                             index="SPARSE_INVERTED_INDEX", metric_type="IP",
+                                             expected_overlap_ratio=50)

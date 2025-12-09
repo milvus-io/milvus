@@ -11,6 +11,9 @@
 
 #pragma once
 
+#ifndef MILVUS_SEGCORE_SEGMENT_INTERFACE_H_
+#define MILVUS_SEGCORE_SEGMENT_INTERFACE_H_
+
 #include <atomic>
 #include <memory>
 #include <shared_mutex>
@@ -74,8 +77,22 @@ class SegmentInterface {
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
            Timestamp timestamp,
-           int32_t consistency_level = 0,
-           Timestamp collection_ttl = 0) const = 0;
+           const folly::CancellationToken& cancel_token,
+           int32_t consistency_level,
+           Timestamp collection_ttl) const = 0;
+
+    // Only used for test
+    std::unique_ptr<SearchResult>
+    Search(const query::Plan* Plan,
+           const query::PlaceholderGroup* placeholder_group,
+           Timestamp timestamp) const {
+        return Search(Plan,
+                      placeholder_group,
+                      timestamp,
+                      folly::CancellationToken(),
+                      0,
+                      0);
+    }
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -83,8 +100,26 @@ class SegmentInterface {
              Timestamp timestamp,
              int64_t limit_size,
              bool ignore_non_pk,
-             int32_t consistency_level = 0,
-             Timestamp collection_ttl = 0) const = 0;
+             const folly::CancellationToken& cancel_token,
+             int32_t consistency_level,
+             Timestamp collection_ttl) const = 0;
+
+    // Only used for test
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    Retrieve(tracer::TraceContext* trace_ctx,
+             const query::RetrievePlan* Plan,
+             Timestamp timestamp,
+             int64_t limit_size,
+             bool ignore_non_pk) const {
+        return Retrieve(trace_ctx,
+                        Plan,
+                        timestamp,
+                        limit_size,
+                        ignore_non_pk,
+                        folly::CancellationToken(),
+                        0,
+                        0);
+    }
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -158,9 +193,14 @@ class SegmentInterface {
     virtual std::vector<PinWrapper<const index::IndexBase*>>
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
-             bool include_ngram = false) const {
+             bool include_ngram) const {
         return {};
     };
+
+    std::vector<PinWrapper<const index::IndexBase*>>
+    PinIndex(milvus::OpContext* op_ctx, FieldId field_id) const {
+        return PinIndex(op_ctx, field_id, false);
+    }
 
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -197,6 +237,12 @@ class SegmentInterface {
     // currently it's used to sync field data list with updated schema.
     virtual void
     FinishLoad() = 0;
+
+    virtual void
+    SetLoadInfo(const milvus::proto::segcore::SegmentLoadInfo& load_info) = 0;
+
+    virtual void
+    Load(milvus::tracer::TraceContext& trace_ctx) = 0;
 };
 
 // internal API for DSL calculation
@@ -304,12 +350,16 @@ class SegmentInternalInterface : public SegmentInterface {
                std::to_string(field_id);
     }
 
+    // Bring in base class Search overloads to avoid name hiding
+    using SegmentInterface::Search;
+
     std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup* placeholder_group,
            Timestamp timestamp,
-           int32_t consistency_level = 0,
-           Timestamp collection_ttl = 0) const override;
+           const folly::CancellationToken& cancel_token,
+           int32_t consistency_level,
+           Timestamp collection_ttl) const override;
 
     void
     FillPrimaryKeys(const query::Plan* plan,
@@ -319,14 +369,18 @@ class SegmentInternalInterface : public SegmentInterface {
     FillTargetEntry(const query::Plan* plan,
                     SearchResult& results) const override;
 
+    // Bring in base class Retrieve overloads to avoid name hiding
+    using SegmentInterface::Retrieve;
+
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
              bool ignore_non_pk,
-             int32_t consistency_level = 0,
-             Timestamp collection_ttl = 0) const override;
+             const folly::CancellationToken& cancel_token,
+             int32_t consistency_level,
+             Timestamp collection_ttl) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
@@ -336,9 +390,6 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
-
-    virtual std::string
-    debug() const = 0;
 
     int64_t
     get_real_count() const override;
@@ -371,13 +422,19 @@ class SegmentInternalInterface : public SegmentInterface {
     PinWrapper<index::TextMatchIndex*>
     GetTextIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
-    virtual PinWrapper<index::NgramInvertedIndex*>
+    PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
-    virtual PinWrapper<index::NgramInvertedIndex*>
+    PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndexForJson(milvus::OpContext* op_ctx,
                          FieldId field_id,
                          const std::string& nested_path) const override;
+
+    virtual void
+    SetLoadInfo(
+        const milvus::proto::segcore::SegmentLoadInfo& load_info) override {
+        load_info_ = load_info;
+    }
 
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
@@ -432,12 +489,14 @@ class SegmentInternalInterface : public SegmentInterface {
     /**
      * search offset by possible pk values and mvcc timestamp
      *
+     * @param bitset The final bitset after id array filtering,
+     *  `false` means that the entity will be filtered out.
      * @param id_array possible pk values
-     * @param timestamp mvcc timestamp 
-     * @return all the hit entries in vector of offsets
+     * this interface is used for internal expression calculation,
+     * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
-    virtual std::vector<SegOffset>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
+    virtual void
+    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
 
     /**
      * Apply timestamp filtering on bitset, the query can't see an entity whose
@@ -508,26 +567,26 @@ class SegmentInternalInterface : public SegmentInterface {
     // internal API: return chunk string views in vector
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_string_view_impl(milvus::OpContext* op_ctx,
-                           FieldId field_id,
-                           int64_t chunk_id,
-                           std::optional<std::pair<int64_t, int64_t>>
-                               offset_len = std::nullopt) const = 0;
+    chunk_string_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
     virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
-    chunk_array_view_impl(milvus::OpContext* op_ctx,
-                          FieldId field_id,
-                          int64_t chunk_id,
-                          std::optional<std::pair<int64_t, int64_t>>
-                              offset_len = std::nullopt) const = 0;
+    chunk_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
-    chunk_vector_array_view_impl(milvus::OpContext* op_ctx,
-                                 FieldId field_id,
-                                 int64_t chunk_id,
-                                 std::optional<std::pair<int64_t, int64_t>>
-                                     offset_len = std::nullopt) const = 0;
+    chunk_vector_array_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -575,16 +634,19 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const = 0;
 
-    virtual std::vector<SegOffset>
-    search_pk(milvus::OpContext* op_ctx,
-              const PkType& pk,
-              Timestamp timestamp) const = 0;
-
     virtual void
     pk_range(milvus::OpContext* op_ctx,
              proto::plan::OpType op,
              const PkType& pk,
              BitsetTypeView& bitset) const = 0;
+
+    virtual void
+    pk_binary_range(milvus::OpContext* op_ctx,
+                    const PkType& lower_pk,
+                    bool lower_inclusive,
+                    const PkType& upper_pk,
+                    bool upper_inclusive,
+                    BitsetTypeView& bitset) const = 0;
 
     virtual GEOSContextHandle_t
     get_ctx() const {
@@ -594,6 +656,8 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
+
+    milvus::proto::segcore::SegmentLoadInfo load_info_;
 
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
@@ -619,3 +683,5 @@ class SegmentInternalInterface : public SegmentInterface {
 };
 
 }  // namespace milvus::segcore
+
+#endif  // MILVUS_SEGCORE_SEGMENT_INTERFACE_H_

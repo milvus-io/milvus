@@ -365,45 +365,23 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 				candidatesServiceable := candidates.IsServiceable()
 				channelServiceable := channel.IsServiceable()
 
-				candidateIsStreamingNode := m.checkIfStreamingNode(candidates.Node)
-				channelIsStreamingNode := m.checkIfStreamingNode(channel.Node)
-				logger.Debug("check whether stream node is serviceable",
-					zap.Bool("candidatesServiceable", candidatesServiceable),
-					zap.Bool("channelServiceable", channelServiceable),
-					zap.Bool("candidateIsStreamingNode", candidateIsStreamingNode),
-					zap.Bool("channelIsStreamingNode", channelIsStreamingNode))
-
-				if channelIsStreamingNode && !candidateIsStreamingNode {
-					// When upgrading from 2.5 to 2.6, the delegator leader may not locate at streaming node.
-					// We always use the streaming node as the delegator leader to avoid the delete data lost when loading segment.
-					logger.Debug("set delegator on stream node to candidate shard leader", zap.Int64("node", channel.Node),
+				updateNeeded := false
+				switch {
+				case !candidatesServiceable && channelServiceable:
+					// Current candidate is not serviceable but new channel is
+					updateNeeded = true
+					logger.Debug("set serviceable delegator to candidate shard leader", zap.Int64("node", channel.Node),
 						zap.Int64("channel version", channel.Version))
+				case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
+					// Same service status but higher version
+					updateNeeded = true
+					logger.Debug("set serviceable delegator with larger version to candidate shard leader", zap.Int64("node", channel.Node),
+						zap.Int64("channel version", channel.Version), zap.Int64("candidate version", candidates.Version))
+				}
+				if updateNeeded {
 					candidates = channel
-				} else if !channelIsStreamingNode && candidateIsStreamingNode {
-					// When downgrading from 2.6 to 2.5, the delegator leader may locate at non-streaming node.
-					// We always use the non-streaming node as the delegator leader to avoid the delete data lost when loading segment.
-					logger.Debug("found delegator which is not on stream node", zap.Int64("node", channel.Node),
-						zap.Int64("channel version", channel.Version))
-					continue
 				} else {
-					updateNeeded := false
-					switch {
-					case !candidatesServiceable && channelServiceable:
-						// Current candidate is not serviceable but new channel is
-						updateNeeded = true
-						logger.Debug("set serviceable delegator to candidate shard leader", zap.Int64("node", channel.Node),
-							zap.Int64("channel version", channel.Version))
-					case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
-						// Same service status but higher version
-						updateNeeded = true
-						logger.Debug("set serviceable delegator with larger version to candidate shard leader", zap.Int64("node", channel.Node),
-							zap.Int64("channel version", channel.Version), zap.Int64("candidate version", candidates.Version))
-					}
-					if updateNeeded {
-						candidates = channel
-					} else {
-						logger.Debug("not set any channel to candidates in this round")
-					}
+					logger.Debug("not set any channel to candidates in this round")
 				}
 			}
 		}
@@ -414,17 +392,6 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 			zap.Int64("candidates node", candidates.Node))
 	}
 	return candidates
-}
-
-// checkIfStreamingNode checks if the node is a streaming node.
-// Because the session of streaming node and embedded query node are different,
-// So we need to check if the node is a streaming node from the query node session but not streaming node session to avoid the wrong check result.
-func (m *ChannelDistManager) checkIfStreamingNode(nodeID int64) bool {
-	node := m.nodeManager.Get(nodeID)
-	if node == nil {
-		return false
-	}
-	return node.IsEmbeddedQueryNodeInStreamingNode() || node.IsInStandalone()
 }
 
 func (m *ChannelDistManager) GetChannelDist(collectionID int64) []*metricsinfo.DmChannel {

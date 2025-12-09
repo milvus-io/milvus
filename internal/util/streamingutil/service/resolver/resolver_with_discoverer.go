@@ -182,11 +182,11 @@ func (r *resolverWithDiscoverer) doDiscover() {
 				latestState := r.getLatestState()
 				if latestState != nil && !state.Version.GT(latestState.Version) {
 					// Ignore the old version.
-					r.Logger().Info("service discover update, ignore old version", zap.Any("state", state))
+					r.Logger().Info("service discover update, ignore old version", zap.Stringer("state", state))
 					continue
 				}
 				// Update all grpc resolver.
-				r.Logger().Info("service discover update, update resolver", zap.Any("state", state), zap.Int("resolver_count", len(grpcResolvers)))
+				r.Logger().Info("service discover update, update resolver", zap.Stringer("state", state), zap.Int("resolver_count", len(grpcResolvers)))
 				for watcher := range grpcResolvers {
 					// Update operation do not block.
 					// Only return error if the resolver is closed, so just print a info log and delete the resolver.

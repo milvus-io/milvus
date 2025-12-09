@@ -436,14 +436,13 @@ class ResponseChecker:
                     original_entities = pandas.DataFrame(original_entities)
                 pc.output_field_value_check(search_res, original_entities, pk_name=pk_name)
         if len(search_res) != check_items["nq"]:
-            log.error("search_results_check: Numbers of query searched (%d) "
+            log.error("search_results_check: Numbers of query searched(nq) (%d) "
                       "is not equal with expected (%d)"
                       % (len(search_res), check_items["nq"]))
             assert len(search_res) == check_items["nq"]
         else:
             log.info("search_results_check: Numbers of query searched is correct")
         # log.debug(search_res)
-        nq_i = 0
         for hits in search_res:
             ids = []
             distances = []
@@ -454,32 +453,31 @@ class ResponseChecker:
             else:
                 ids = list(hits.ids)
                 distances = list(hits.distances)
-            if (len(hits) != check_items["limit"]) \
-                    or (len(ids) != check_items["limit"]):
+            if check_items.get("limit", None) is not None \
+                    and ((len(hits) != check_items["limit"]) or (len(ids) != check_items["limit"])):
                 log.error("search_results_check: limit(topK) searched (%d) "
                           "is not equal with expected (%d)"
                           % (len(hits), check_items["limit"]))
                 assert len(hits) == check_items["limit"]
                 assert len(ids) == check_items["limit"]
-            else:
-                if check_items.get("ids", None) is not None:
-                    ids_match = pc.list_contain_check(ids, list(check_items["ids"]))
-                    if not ids_match:
-                        log.error("search_results_check: ids searched not match")
-                        assert ids_match
-                elif check_items.get("metric", None) is not None:
-                    # verify the distances are already sorted
-                    if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
-                        assert pc.compare_lists_with_epsilon_ignore_dict_order(distances, sorted(distances, reverse=True))
-                    else:
-                        assert pc.compare_lists_with_epsilon_ignore_dict_order(distances, sorted(distances, reverse=False))
-                    if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
-                        log.debug("skip distance check for knowhere does not return the precise distances")
-                    else:
-                        pass
+            if check_items.get("ids", None) is not None:
+                ids_match = pc.list_contain_check(ids, list(check_items["ids"]))
+                if not ids_match:
+                    log.error("search_results_check: ids searched not match")
+                    assert ids_match
+            if check_items.get("metric", None) is not None:
+                # verify the distances are already sorted
+                num_to_check = min(100, len(distances))   # check 100 items if more than that
+                if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
+                    assert np.allclose(distances[:num_to_check], sorted(distances[:num_to_check], reverse=True))
                 else:
-                    pass  # just check nq and topk, not specific ids need check
-            nq_i += 1
+                    assert np.allclose(distances[:num_to_check], sorted(distances[:num_to_check], reverse=False))
+                if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
+                    log.debug("skip distance check for knowhere does not return the precise distances")
+                else:
+                    pass
+            else:
+                pass  # just check nq and topk, not specific ids need check
 
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
@@ -586,12 +584,13 @@ class ResponseChecker:
                     for single_query_result in query_res:
                         single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.int8).tolist()
             if isinstance(query_res, list):
-                result = pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res)
-                if result is False:
-                    log.debug(f"query expected: {exp_res}")
-                    log.debug(f"query actual: {query_res}")
-                assert result
-                return result
+                debug_mode = check_items.get("debug_mode", False)
+                if debug_mode is True:
+                    assert pc.compare_lists_with_epsilon_ignore_dict_order_deepdiff(a=query_res, b=exp_res)
+                else:
+                    assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res), \
+                        f"there exists different values between query_results and expected_results, " \
+                        f"use debug_mode in check_items to print the difference entity by entity(but it is slow)"
             else:
                 log.error(f"Query result {query_res} is not list")
                 return False

@@ -18,10 +18,10 @@ future_create_test_case(int interval, int loop_cnt, int case_no) {
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
         [interval = interval, loop_cnt = loop_cnt, case_no = case_no](
-            milvus::futures::CancellationToken token) {
+            const folly::CancellationToken& token) {
             for (int i = 0; i < loop_cnt; i++) {
                 if (case_no != 0) {
-                    token.throwIfCancelled();
+                    milvus::futures::throwIfCancelled(token);
                 }
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(interval));

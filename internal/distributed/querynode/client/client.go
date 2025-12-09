@@ -45,9 +45,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 type Client struct {
 	grpcClient grpcclient.GrpcClient[querypb.QueryNodeClient]
 	addr       string
-	sess       *sessionutil.Session
 	nodeID     int64
-	ctx        context.Context
 }
 
 // NewClient creates a new QueryNode client.
@@ -55,7 +53,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 	if addr == "" {
 		return nil, errors.New("addr is empty")
 	}
-	sess := sessionutil.NewSession(ctx)
+	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("QueryNodeClient NewClient failed", zap.Error(err))
@@ -65,9 +63,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 	client := &Client{
 		addr:       addr,
 		grpcClient: grpcclient.NewClientBase[querypb.QueryNodeClient](config, "milvus.proto.query.QueryNode"),
-		sess:       sess,
 		nodeID:     nodeID,
-		ctx:        ctx,
 	}
 	// node shall specify node id
 	client.grpcClient.SetRole(fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID))
@@ -392,5 +388,27 @@ func (c *Client) DropIndex(ctx context.Context, req *querypb.DropIndexRequest, _
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
 		return client.DropIndex(ctx, req)
+	})
+}
+
+func (c *Client) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest, _ ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.GetHighlightResponse, error) {
+		return client.GetHighlight(ctx, req)
+	})
+}
+
+func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+		return client.ValidateAnalyzer(ctx, req)
 	})
 }

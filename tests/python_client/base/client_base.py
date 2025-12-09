@@ -65,12 +65,24 @@ class Base:
         self._teardown_objects()
 
     def _teardown_objects(self):
+        # Prioritize uri and token for connection
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
+        else:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+
+        if cf.param_info.param_token:
+            token = cf.param_info.param_token
+        else:
+            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}" if cf.param_info.param_user and cf.param_info.param_password else None
+
         try:
             """ Drop collection before disconnect """
             if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
-                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
-                                             port=cf.param_info.param_port, user=ct.default_user,
-                                             password=ct.default_password)
+                if token:
+                    self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
+                else:
+                    self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
 
             if self.collection_wrap.collection is not None:
                 if self.collection_wrap.collection.name.startswith("alias"):
@@ -106,9 +118,10 @@ class Base:
         try:
             """ Drop roles before disconnect """
             if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
-                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
-                                             port=cf.param_info.param_port, user=ct.default_user,
-                                             password=ct.default_password)
+                if token:
+                    self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
+                else:
+                    self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
 
             role_list = self.utility_wrap.list_roles(False)[0]
             for role in role_list.groups:
@@ -145,34 +158,35 @@ class TestcaseBase(Base):
         if self.skip_connection:
             return None
 
-        if enable_milvus_client_api:
-            if cf.param_info.param_uri:
-                uri = cf.param_info.param_uri
-            else:
-                uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
-            self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,uri=uri,token=cf.param_info.param_token)
-            res, is_succ = self.connection_wrap.MilvusClient(uri=uri,
-                                                             token=cf.param_info.param_token)
-            self.client = MilvusClient(uri=uri, token=cf.param_info.param_token)
+        # Prioritize uri and token for connection
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
         else:
-            if cf.param_info.param_user and cf.param_info.param_password:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+
+        if cf.param_info.param_token:
+            token = cf.param_info.param_token
+        else:
+            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}" if cf.param_info.param_user and cf.param_info.param_password else None
+
+        if enable_milvus_client_api:
+            self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
+            res, is_succ = self.connection_wrap.MilvusClient(uri=uri, token=token)
+            self.client = MilvusClient(uri=uri, token=token)
+        else:
+            if token:
                 res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
-                                                            host=cf.param_info.param_host,
-                                                            port=cf.param_info.param_port,
-                                                            user=cf.param_info.param_user,
-                                                            password=cf.param_info.param_password,
+                                                            uri=uri,
+                                                            token=token,
                                                             secure=cf.param_info.param_secure)
             else:
                 res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
-                                                            host=cf.param_info.param_host,
-                                                            port=cf.param_info.param_port)
+                                                            uri=uri)
 
-            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
-            self.client = MilvusClient(uri=uri, token=cf.param_info.param_token)
+            self.client = MilvusClient(uri=uri, token=token)
         server_version = utility.get_server_version()
         log.info(f"server version: {server_version}")
         return res
-
 
     def get_tokens_by_analyzer(self, text, analyzer_params):
         if cf.param_info.param_uri:

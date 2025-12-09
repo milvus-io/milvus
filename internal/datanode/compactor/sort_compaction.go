@@ -62,6 +62,8 @@ type sortCompactionTask struct {
 	insertLogs            []*datapb.FieldBinlog
 	storageVersion        int64
 	segmentStorageVersion int64
+	manifest              string
+	useLoonFFI            bool
 
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
@@ -132,6 +134,8 @@ func (t *sortCompactionTask) preCompact() error {
 	t.insertLogs = segment.GetFieldBinlogs()
 	t.storageVersion = t.compactionParams.StorageVersion
 	t.segmentStorageVersion = segment.GetStorageVersion()
+	t.manifest = segment.GetManifest()
+	t.useLoonFFI = t.compactionParams.UseLoonFFI
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -139,6 +143,7 @@ func (t *sortCompactionTask) preCompact() error {
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int64("segmentID", t.segmentID),
 		zap.Int64("storageVersion", t.storageVersion),
+		zap.Bool("useLoonFFI", t.useLoonFFI),
 		zap.Any("compactionParams", t.compactionParams),
 	)
 
@@ -175,6 +180,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		}),
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithUseLoonFFI(t.useLoonFFI),
 	)
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer",
@@ -207,12 +213,23 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("sort task only support int64 and varchar pk field")
 	}
 
-	rr, err := storage.NewBinlogRecordReader(ctx, t.insertLogs, t.plan.Schema,
-		storage.WithVersion(t.segmentStorageVersion),
-		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-		storage.WithCollectionID(t.collectionID),
-	)
+	var rr storage.RecordReader
+	// use manifest reader if manifest presents
+	if t.manifest != "" {
+		rr, err = storage.NewManifestRecordReader(ctx, t.manifest, t.plan.Schema,
+			storage.WithVersion(t.segmentStorageVersion),
+			storage.WithDownloader(t.binlogIO.Download),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithCollectionID(t.collectionID),
+		)
+	} else {
+		rr, err = storage.NewBinlogRecordReader(ctx, t.insertLogs, t.plan.Schema,
+			storage.WithVersion(t.segmentStorageVersion),
+			storage.WithDownloader(t.binlogIO.Download),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+			storage.WithCollectionID(t.collectionID),
+		)
+	}
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
@@ -228,7 +245,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats := srw.GetLogs()
+	binlogs, stats, bm25stats, manifest := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
@@ -264,6 +281,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			Channel:             t.GetChannelName(),
 			IsSorted:            true,
 			StorageVersion:      t.storageVersion,
+			Manifest:            manifest,
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{

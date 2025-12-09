@@ -150,7 +150,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig), storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
 	if err != nil {
 		return nil, err
 	}
@@ -217,14 +217,26 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewBinlogRecordReader(ctx,
-		seg.GetFieldBinlogs(),
-		t.plan.GetSchema(),
-		storage.WithCollectionID(t.collectionID),
-		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithVersion(seg.GetStorageVersion()),
-		storage.WithStorageConfig(t.compactionParams.StorageConfig),
-	)
+	var reader storage.RecordReader
+	if seg.GetManifest() != "" {
+		reader, err = storage.NewManifestRecordReader(ctx,
+			seg.GetManifest(),
+			t.plan.GetSchema(),
+			storage.WithCollectionID(t.collectionID),
+			storage.WithDownloader(t.binlogIO.Download),
+			storage.WithVersion(seg.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	} else {
+		reader, err = storage.NewBinlogRecordReader(ctx,
+			seg.GetFieldBinlogs(),
+			t.plan.GetSchema(),
+			storage.WithCollectionID(t.collectionID),
+			storage.WithDownloader(t.binlogIO.Download),
+			storage.WithVersion(seg.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		)
+	}
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
@@ -355,8 +367,8 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				break
 			}
 		}
-		if len(t.plan.GetSegmentBinlogs()) <= 1 ||
-			len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
+
+		if len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
 			// sort merge is not applicable if there is only one segment or too many segments
 			sortMergeAppicable = false
 		}
@@ -365,7 +377,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	var res []*datapb.CompactionSegment
 	var err error
 	if sortMergeAppicable {
-		// TODO: the implementation of mergeSortMultipleSegments is not correct, also see issue: https://github.com/milvus-io/milvus/issues/43034
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)

@@ -158,8 +158,10 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
     for (auto i = 0; i < field_datas.size(); ++i) {
         auto& field_data = field_datas[i];
         row_count += field_data->Length();
-        auto file =
-            "./data/test" + std::to_string(field_id) + "/" + std::to_string(i);
+        auto file = "./data/test/" + std::to_string(collection_id) + "/" +
+                    std::to_string(partition_id) + "/" +
+                    std::to_string(segment_id) + "/" +
+                    std::to_string(field_id) + "/" + std::to_string(i);
         files.push_back(file);
         row_counts.push_back(field_data->Length());
         auto payload_reader =

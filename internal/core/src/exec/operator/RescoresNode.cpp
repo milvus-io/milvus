@@ -50,6 +50,10 @@ PhyRescoresNode::IsFinished() {
 
 RowVectorPtr
 PhyRescoresNode::GetOutput() {
+    ExecContext* exec_context = operator_context_->get_exec_context();
+    auto query_context_ = exec_context->get_query_context();
+    milvus::exec::checkCancellation(query_context_);
+
     if (is_finished_ || !no_more_input_) {
         return nullptr;
     }
@@ -66,12 +70,10 @@ PhyRescoresNode::GetOutput() {
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
 
-    ExecContext* exec_context = operator_context_->get_exec_context();
-    auto query_context_ = exec_context->get_query_context();
     auto query_info = exec_context->get_query_config();
     milvus::SearchResult search_result = query_context_->get_search_result();
     auto segment = query_context_->get_segment();
-    auto op_ctx = query_context_->get_op_context();
+    auto op_context = query_context_->get_op_context();
 
     // prepare segment offset
     FixedVector<int32_t> offsets;
@@ -101,7 +103,7 @@ PhyRescoresNode::GetOutput() {
         // boost for all result if no filter
         if (!filter) {
             scorer->batch_score(
-                op_ctx, segment, function_mode, offsets, boost_scores);
+                op_context, segment, function_mode, offsets, boost_scores);
             continue;
         }
 
@@ -127,7 +129,7 @@ PhyRescoresNode::GetOutput() {
             auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results[0]);
             auto col_vec_size = col_vec->size();
             TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
-            scorer->batch_score(op_ctx,
+            scorer->batch_score(op_context,
                                 segment,
                                 function_mode,
                                 offsets,
@@ -143,8 +145,12 @@ PhyRescoresNode::GetOutput() {
             auto col_vec_size = col_vec->size();
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             bitset.append(view);
-            scorer->batch_score(
-                op_ctx, segment, function_mode, offsets, bitset, boost_scores);
+            scorer->batch_score(op_context,
+                                segment,
+                                function_mode,
+                                offsets,
+                                bitset,
+                                boost_scores);
         }
     }
 

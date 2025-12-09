@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
@@ -152,6 +154,7 @@ type resourceEstimateFactor struct {
 	EnableInterminSegmentIndex      bool
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
+	jsonKeyStatsExpansionFactor     float64
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
@@ -307,6 +310,28 @@ func (loader *segmentLoader) Load(ctx context.Context,
 
 	for _, info := range infos {
 		loadInfo := info
+
+		for _, indexInfo := range loadInfo.IndexInfos {
+			indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+
+			// some build params also exist in indexParams, which are useless during loading process
+			if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexParams["index_type"]) {
+				if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+					return nil, err
+				}
+			}
+
+			// set whether enable offset cache for bitmap index
+			if indexParams["index_type"] == indexparamcheck.IndexBitmap {
+				indexparams.SetBitmapIndexLoadParams(paramtable.Get(), indexParams)
+			}
+
+			if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+				return nil, err
+			}
+
+			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+		}
 
 		segment, err := NewSegment(
 			ctx,
@@ -884,7 +909,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-	indexedFieldInfos, fieldBinlogs, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
+	indexedFieldInfos, _, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
 	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 		return err
 	}
@@ -897,61 +922,23 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 	)
-	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
-		return err
-	}
-	loadFieldsIndexSpan := tr.RecordSpan()
-	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(loadFieldsIndexSpan.Milliseconds()))
 
-	// 2. complement raw data for the scalar fields without raw data
-	for _, info := range indexedFieldInfos {
-		fieldID := info.IndexInfo.FieldID
-		field, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			return err
-		}
-		if !segment.HasRawData(fieldID) || field.GetIsPrimaryKey() {
-			// Skip loading raw data for fields in column group when using storage v2
-			if loadInfo.GetStorageVersion() == storage.StorageV2 &&
-				!storagecommon.IsVectorDataType(field.GetDataType()) &&
-				field.GetDataType() != schemapb.DataType_Text {
-				log.Info("skip loading raw data for field in short column group",
-					zap.Int64("fieldID", fieldID),
-					zap.String("index", info.IndexInfo.GetIndexName()),
-				)
-				continue
-			}
-
-			log.Info("field index doesn't include raw data, load binlog...",
-				zap.Int64("fieldID", fieldID),
-				zap.String("index", info.IndexInfo.GetIndexName()),
-			)
-			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
-				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
-				return err
-			}
-		}
-
-		if !storagecommon.IsVectorDataType(field.GetDataType()) &&
-			!segment.HasFieldData(fieldID) &&
-			loadInfo.GetStorageVersion() != storage.StorageV2 {
-			// Lazy load raw data to avoid search failure after dropping index.
-			// storage v2 will load all scalar fields so we don't need to load raw data for them.
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
-				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
-				return err
-			}
-		}
+	if err = segment.Load(ctx); err != nil {
+		return errors.Wrap(err, "At Load")
 	}
-	complementScalarDataSpan := tr.RecordSpan()
-	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
-		return err
-	}
-	loadRawDataSpan := tr.RecordSpan()
 
 	if err = segment.FinishLoad(); err != nil {
 		return errors.Wrap(err, "At FinishLoad")
+	}
+
+	for _, indexInfo := range loadInfo.IndexInfos {
+		segment.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			IsLoaded:  true,
+		})
 	}
 
 	// load text indexes.
@@ -984,9 +971,9 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	patchEntryNumberSpan := tr.RecordSpan()
 	log.Info("Finish loading segment",
-		zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
-		zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
-		zap.Duration("loadRawDataSpan", loadRawDataSpan),
+		// zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
+		// zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
+		// zap.Duration("loadRawDataSpan", loadRawDataSpan),
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
@@ -1031,7 +1018,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			return err
 		}
 	} else {
-		if err := segment.LoadMultiFieldData(ctx); err != nil {
+		if err := segment.Load(ctx); err != nil {
 			return err
 		}
 		if err := segment.FinishLoad(); err != nil {
@@ -1623,12 +1610,13 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	maxFactor := resourceEstimateFactor{
-		memoryUsageFactor:          paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:     paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		EnableInterminSegmentIndex: paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:     paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:      paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		memoryUsageFactor:           paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
+		memoryIndexUsageFactor:      paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
+		EnableInterminSegmentIndex:  paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
+		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
+		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -1946,7 +1934,14 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 					fieldIndexInfo.GetBuildID())
 			}
 
-			if !multiplyFactor.TieredEvictionEnabled {
+			needWarmup := false
+			if isVectorType {
+				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
+			} else {
+				needWarmup = paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
+			}
+
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 				indexMemorySize += estimateResult.MaxMemoryCost
 				segDiskLoadingSize += estimateResult.MaxDiskCost
 			}
@@ -1997,6 +1992,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		var legacyNilSchema bool
 		mmapEnabled := true
 		isVectorType := true
+		needWarmup := false
 
 		for _, fieldID := range fieldIDs {
 			// get field schema from fieldID
@@ -2017,6 +2013,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 
 			supportInterimIndexDataType = supportInterimIndexDataType || SupportInterimIndexDataType(fieldSchema.GetDataType())
 			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
+			if isVectorType {
+				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue() == "sync"
+			} else {
+				needWarmup = needWarmup || paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
+			}
 			mmapEnabled = mmapEnabled && isDataMmapEnable(fieldSchema)
 			containsTimestampField = containsTimestampField || DoubleMemorySystemField(fieldSchema.GetFieldID())
 			doubleMomoryDataField = doubleMomoryDataField || DoubleMemoryDataType(fieldSchema.GetDataType())
@@ -2026,7 +2027,7 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			continue
 		}
 
-		if !multiplyFactor.TieredEvictionEnabled {
+		if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && supportInterimIndexDataType
 			if interimIndexEnable {
 				segMemoryLoadingSize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
@@ -2036,11 +2037,11 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		if isVectorType {
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
-				if !multiplyFactor.TieredEvictionEnabled {
+				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 					segDiskLoadingSize += binlogSize
 				}
 			} else {
-				if !multiplyFactor.TieredEvictionEnabled {
+				if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
@@ -2056,15 +2057,15 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 
 		if !mmapEnabled {
-			if !multiplyFactor.TieredEvictionEnabled {
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
 				segMemoryLoadingSize += binlogSize
 				if doubleMomoryDataField {
 					segMemoryLoadingSize += binlogSize
 				}
 			}
 		} else {
-			if !multiplyFactor.TieredEvictionEnabled {
-				segDiskLoadingSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				segDiskLoadingSize += uint64(getBinlogDataMemorySize(fieldBinlog))
 			}
 		}
 	}
@@ -2092,6 +2093,20 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 			expansionFactor = multiplyFactor.deltaDataExpansionFactor
 		}
 		segMemoryLoadingSize += uint64(float64(memSize) * expansionFactor)
+	}
+
+	// PART 5: calculate size of json key stats data
+	jsonStatsMmapEnable := paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool()
+	for _, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
+		if jsonStatsMmapEnable {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segDiskLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			}
+		} else {
+			if !multiplyFactor.TieredEvictionEnabled {
+				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			}
+		}
 	}
 
 	return &ResourceUsage{

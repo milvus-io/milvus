@@ -38,6 +38,28 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 )
 
+type ClientOption func(*clientv3.Config)
+
+// WithDialKeepAlive configures gRPC keepalive and autosync behaviors for the etcd client.
+func WithDialKeepAlive(dialKeepAliveTime, dialKeepAliveTimeout time.Duration) ClientOption {
+	return func(cfg *clientv3.Config) {
+		if dialKeepAliveTime > 0 {
+			cfg.DialKeepAliveTime = dialKeepAliveTime
+		}
+		if dialKeepAliveTimeout > 0 {
+			cfg.DialKeepAliveTimeout = dialKeepAliveTimeout
+		}
+	}
+}
+
+func applyClientOptions(cfg *clientv3.Config, opts ...ClientOption) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(cfg)
+		}
+	}
+}
+
 // GetEtcdClient returns etcd client
 // should only used for test
 func GetEtcdClient(
@@ -48,6 +70,7 @@ func GetEtcdClient(
 	keyFile string,
 	caCertFile string,
 	minVersion string,
+	opts ...ClientOption,
 ) (*clientv3.Client, error) {
 	log.Info("create etcd client",
 		zap.Bool("useEmbedEtcd", useEmbedEtcd),
@@ -58,24 +81,26 @@ func GetEtcdClient(
 		return GetEmbedEtcdClient()
 	}
 	if useSSL {
-		return GetRemoteEtcdSSLClient(endpoints, certFile, keyFile, caCertFile, minVersion)
+		return GetRemoteEtcdSSLClient(endpoints, certFile, keyFile, caCertFile, minVersion, opts...)
 	}
-	return GetRemoteEtcdClient(endpoints)
+	return GetRemoteEtcdClient(endpoints, opts...)
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints
-func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
-	return clientv3.New(clientv3.Config{
+func GetRemoteEtcdClient(endpoints []string, opts ...ClientOption) (*clientv3.Client, error) {
+	cfg := clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 		DialOptions: []grpc.DialOption{
 			grpc.WithBlock(),
 		},
-	})
+	}
+	applyClientOptions(&cfg, opts...)
+	return clientv3.New(cfg)
 }
 
-func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string) (*clientv3.Client, error) {
-	return clientv3.New(clientv3.Config{
+func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string, opts ...ClientOption) (*clientv3.Client, error) {
+	cfg := clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 		Username:    userName,
@@ -83,15 +108,17 @@ func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string) 
 		DialOptions: []grpc.DialOption{
 			grpc.WithBlock(),
 		},
-	})
+	}
+	applyClientOptions(&cfg, opts...)
+	return clientv3.New(cfg)
 }
 
-func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
+func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string, opts ...ClientOption) (*clientv3.Client, error) {
 	var cfg clientv3.Config
-	return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, cfg)
+	return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, cfg, opts...)
 }
 
-func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string, cfg clientv3.Config) (*clientv3.Client, error) {
+func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string, cfg clientv3.Config, opts ...ClientOption) (*clientv3.Client, error) {
 	cfg.Endpoints = endpoints
 	cfg.DialTimeout = 5 * time.Second
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
@@ -130,6 +157,7 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 	}
 
 	cfg.DialOptions = append(cfg.DialOptions, grpc.WithBlock())
+	applyClientOptions(&cfg, opts...)
 
 	return clientv3.New(cfg)
 }
@@ -145,18 +173,19 @@ func CreateEtcdClient(
 	keyFile string,
 	caCertFile string,
 	minVersion string,
+	opts ...ClientOption,
 ) (*clientv3.Client, error) {
 	if !enableAuth || useEmbedEtcd {
-		return GetEtcdClient(useEmbedEtcd, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion)
+		return GetEtcdClient(useEmbedEtcd, useSSL, endpoints, certFile, keyFile, caCertFile, minVersion, opts...)
 	}
 	log.Info("create etcd client(enable auth)",
 		zap.Bool("useSSL", useSSL),
 		zap.Any("endpoints", endpoints),
 		zap.String("minVersion", minVersion))
 	if useSSL {
-		return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, clientv3.Config{Username: userName, Password: password})
+		return GetRemoteEtcdSSLClientWithCfg(endpoints, certFile, keyFile, caCertFile, minVersion, clientv3.Config{Username: userName, Password: password}, opts...)
 	}
-	return GetRemoteEtcdClientWithAuth(endpoints, userName, password)
+	return GetRemoteEtcdClientWithAuth(endpoints, userName, password, opts...)
 }
 
 func min(a, b int) int {

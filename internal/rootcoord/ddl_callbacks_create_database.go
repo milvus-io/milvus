@@ -58,10 +58,16 @@ func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.Create
 	if err != nil {
 		return errors.Wrap(err, "failed to tidy database cipher properties")
 	}
+
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, properties)
 	if exist && !timestamptz.IsTimezoneValid(tz) {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
+
+	if err := hookutil.CreateEZByDBProperties(properties); err != nil {
+		return errors.Wrap(err, "failed to create ez by db properties")
+	}
+
 	msg := message.NewCreateDatabaseMessageBuilderV2().
 		WithHeader(&message.CreateDatabaseMessageHeader{
 			DbName: req.GetDbName(),

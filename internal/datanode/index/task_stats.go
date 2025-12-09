@@ -261,7 +261,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats := srw.GetLogs()
+	binlogs, stats, bm25stats, _ := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
@@ -592,26 +592,31 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		}
 		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
 
-		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
+		statsResult, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
 		if err != nil {
 			return err
 		}
-		memorySize := int64(0)
-		for _, file := range uploaded {
-			memorySize += file
+
+		// calculate log size (disk size) from file sizes
+		var logSize int64
+		for _, fileSize := range statsResult.Files {
+			logSize += fileSize
 		}
 
 		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
 			FieldID:                field.GetFieldID(),
 			Version:                version,
 			BuildID:                taskID,
-			Files:                  lo.Keys(uploaded),
+			Files:                  lo.Keys(statsResult.Files),
 			JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
-			MemorySize:             memorySize,
+			MemorySize:             statsResult.MemSize,
+			LogSize:                logSize,
 		}
 		log.Info("field enable json key index, create json key index done",
 			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(uploaded)),
+			zap.Strings("files", lo.Keys(statsResult.Files)),
+			zap.Int64("memorySize", statsResult.MemSize),
+			zap.Int64("logSize", logSize),
 		)
 	}
 

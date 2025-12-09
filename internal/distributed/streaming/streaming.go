@@ -134,6 +134,9 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// ForwardService returns the forward service of the wal.
+	ForwardService() ForwardService
+
 	// Replicate returns the replicate service of the wal.
 	Replicate() ReplicateService
 

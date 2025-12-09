@@ -37,8 +37,8 @@ type aliProvider struct {
 	params    map[string]any
 }
 
-func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (modelProvider, error) {
-	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.DashscopeAKEnvStr)
+func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials, extraInfo *models.ModelExtraInfo) (modelProvider, error) {
+	apiKey, url, err := models.ParseAKAndURL(credentials, params, conf, models.DashscopeAKEnvStr, extraInfo)
 	if err != nil {
 		return nil, err
 	}

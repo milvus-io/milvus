@@ -26,7 +26,9 @@
 #include "Schema.h"
 #include "SystemProperty.h"
 #include "arrow/util/key_value_metadata.h"
+#include "common/Consts.h"
 #include "milvus-storage/common/constants.h"
+#include "pb/common.pb.h"
 #include "protobuf_utils.h"
 
 namespace milvus {
@@ -58,6 +60,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
                        "repetitive dynamic field");
             schema->set_dynamic_field_id(field_id);
         }
+
+        auto [has_setting, enabled] =
+            GetBoolFromRepeatedKVs(child.type_params(), MMAP_ENABLED_KEY);
+        if (has_setting) {
+            schema->mmap_fields_[field_id] = enabled;
+        }
     };
 
     for (const milvus::proto::schema::FieldSchema& child :
@@ -71,6 +79,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             process_field(sub_field);
         }
     }
+
+    std::tie(schema->has_mmap_setting_, schema->mmap_enabled_) =
+        GetBoolFromRepeatedKVs(schema_proto.properties(), MMAP_ENABLED_KEY);
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
@@ -111,6 +122,29 @@ Schema::ConvertToArrowSchema() const {
     return arrow::schema(arrow_fields);
 }
 
+proto::schema::CollectionSchema
+Schema::ToProto() const {
+    proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_enable_dynamic_field(dynamic_field_id_opt_.has_value());
+
+    for (const auto& field_id : field_ids_) {
+        const auto& meta = fields_.at(field_id);
+        auto* field_proto = schema_proto.add_fields();
+        *field_proto = meta.ToProto();
+
+        if (primary_field_id_opt_.has_value() &&
+            field_id == primary_field_id_opt_.value()) {
+            field_proto->set_is_primary_key(true);
+        }
+        if (dynamic_field_id_opt_.has_value() &&
+            field_id == dynamic_field_id_opt_.value()) {
+            field_proto->set_is_dynamic(true);
+        }
+    }
+
+    return schema_proto;
+}
+
 std::unique_ptr<std::vector<FieldMeta>>
 Schema::AbsentFields(Schema& old_schema) const {
     std::vector<FieldMeta> result;
@@ -122,6 +156,16 @@ Schema::AbsentFields(Schema& old_schema) const {
     }
 
     return std::make_unique<std::vector<FieldMeta>>(result);
+}
+
+std::pair<bool, bool>
+Schema::MmapEnabled(const FieldId& field_id) const {
+    auto it = mmap_fields_.find(field_id);
+    // fallback to  collection-level config
+    if (it == mmap_fields_.end()) {
+        return {has_mmap_setting_, mmap_enabled_};
+    }
+    return {true, it->second};
 }
 
 }  // namespace milvus

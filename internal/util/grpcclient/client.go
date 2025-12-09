@@ -379,7 +379,7 @@ func (c *ClientBase[T]) verifySession(ctx context.Context) error {
 	}
 	c.lastSessionCheck.Store(time.Now())
 	if c.sess != nil {
-		sessions, _, getSessionErr := c.sess.GetSessions(c.GetRole())
+		sessions, _, getSessionErr := c.sess.GetSessions(ctx, c.GetRole())
 		if getSessionErr != nil {
 			// Only log but not handle this error as it is an auxiliary logic
 			log.Warn("fail to get session", zap.Error(getSessionErr))

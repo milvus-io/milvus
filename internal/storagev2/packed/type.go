@@ -18,6 +18,7 @@ package packed
 #include <stdlib.h>
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
 */
@@ -25,6 +26,7 @@ import "C"
 
 import (
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/arrio"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 )
 
@@ -32,11 +34,23 @@ type PackedWriter struct {
 	cPackedWriter C.CPackedWriter
 }
 
+type FFIPackedWriter struct {
+	basePath      string
+	cWriterHandle C.WriterHandle
+	cProperties   *C.Properties
+}
+
 type PackedReader struct {
 	cPackedReader C.CPackedReader
 	arr           *cdata.CArrowArray
 	schema        *arrow.Schema
 	currentBatch  arrow.Record
+}
+
+type FFIPackedReader struct {
+	cPackedReader C.CFFIPackedReader
+	recordReader  arrio.Reader
+	schema        *arrow.Schema
 }
 
 type (

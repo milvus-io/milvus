@@ -172,14 +172,6 @@ ChunkTranslator::get_cells(
 
     auto data_type = field_meta_.get_data_type();
 
-    std::filesystem::path folder;
-
-    if (use_mmap_) {
-        folder = std::filesystem::path(mmap_dir_path_) /
-                 std::to_string(segment_id_) / std::to_string(field_id_);
-        std::filesystem::create_directories(folder);
-    }
-
     for (auto cid : cids) {
         std::unique_ptr<milvus::Chunk> chunk = nullptr;
         if (!use_mmap_) {
@@ -192,7 +184,11 @@ ChunkTranslator::get_cells(
             chunk = create_chunk(field_meta_, array_vec);
         } else {
             // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
-            auto filepath = folder / std::to_string(cid);
+            auto filepath =
+                std::filesystem::path(mmap_dir_path_) /
+                fmt::format("seg_{}_fid_{}_{}", segment_id_, field_id_, cid);
+            std::filesystem::create_directories(
+                std::filesystem::path(mmap_dir_path_));
 
             LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
                      segment_id_,
@@ -205,7 +201,8 @@ ChunkTranslator::get_cells(
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_, array_vec, filepath.string());
+            chunk = create_chunk(
+                field_meta_, array_vec, filepath.string(), load_priority_);
         }
         cells.emplace_back(cid, std::move(chunk));
     }

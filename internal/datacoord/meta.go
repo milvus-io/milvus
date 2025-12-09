@@ -1177,6 +1177,23 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 	}
 }
 
+func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update manifest failed - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		// skip empty manifest update and same manifest
+		if manifestPath == "" || segment.ManifestPath == manifestPath {
+			return false
+		}
+		segment.ManifestPath = manifestPath
+		return true
+	}
+}
+
 func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
@@ -1693,6 +1710,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			// visible after stats and index
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
+			ManifestPath:   seg.GetManifest(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1731,7 +1749,9 @@ func (m *meta) completeMixCompactionMutation(
 		zap.String("type", t.GetType().String()),
 		zap.Int64("collectionID", t.CollectionID),
 		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()))
+		zap.String("channel", t.GetChannel()),
+		zap.Int64("planID", t.GetPlanID()),
+	)
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]int)}
 	var compactFromSegIDs []int64
@@ -1761,6 +1781,12 @@ func (m *meta) completeMixCompactionMutation(
 
 		// metrics mutation for compaction from segments
 		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+
+		log.Info("compact from segment",
+			zap.Int64("segmentID", cloned.GetID()),
+			zap.Int64("segment size", cloned.getSegmentSize()),
+			zap.Int64("num rows", cloned.GetNumOfRows()),
+		)
 	}
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
@@ -1793,7 +1819,8 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				IsSorted:     compactToSegment.GetIsSorted(),
+				ManifestPath: compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -1809,6 +1836,7 @@ func (m *meta) completeMixCompactionMutation(
 			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
 			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
 			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+			zap.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
@@ -2283,6 +2311,7 @@ func (m *meta) completeSortCompactionMutation(
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
 		IsSorted:                  true,
+		ManifestPath:              resultSegment.GetManifest(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
@@ -2302,7 +2331,9 @@ func (m *meta) completeSortCompactionMutation(
 
 	log = log.With(zap.Int64s("compactFrom", []int64{oldSegment.GetID()}), zap.Int64("compactTo", segment.GetID()))
 
-	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", segment.GetNumOfRows()))
+	log.Info("meta update: prepare for complete stats mutation - complete",
+		zap.Int64("num rows", segment.GetNumOfRows()),
+		zap.Int64("segment size", segment.getSegmentSize()))
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, nil, err

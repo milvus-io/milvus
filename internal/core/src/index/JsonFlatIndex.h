@@ -211,9 +211,6 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
             json_path = json_path.substr(1);
         }
 
-        LOG_INFO("Create JsonFlatIndexQueryExecutor with json_path: {}",
-                 json_path);
-
         return std::make_shared<JsonFlatIndexQueryExecutor<T>>(json_path,
                                                                *this);
     }

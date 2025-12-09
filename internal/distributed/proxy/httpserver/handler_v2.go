@@ -34,12 +34,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -48,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -81,6 +84,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+RefreshLoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.refreshLoadCollection))))
 	router.POST(CollectionCategory+ReleaseAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.releaseCollection))))
 	router.POST(CollectionCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReqWithProperties{} }, wrapperTraceLog(h.alterCollectionProperties))))
+	router.POST(CollectionCategory+AddFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAddFunction{} }, wrapperTraceLog(h.addCollectionFunction))))
+	router.POST(CollectionCategory+AlterFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionAlterFunction{} }, wrapperTraceLog(h.alterCollectionFunction))))
+	router.POST(CollectionCategory+DropFunctionAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionDropFunction{} }, wrapperTraceLog(h.dropCollectionFunction))))
 	router.POST(CollectionCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropCollectionPropertiesReq{} }, wrapperTraceLog(h.dropCollectionProperties))))
 	router.POST(CollectionCategory+CompactAction, timeoutMiddleware(wrapperPost(func() any { return &CompactReq{} }, wrapperTraceLog(h.compact))))
 	router.POST(CollectionCategory+CompactionStateAction, timeoutMiddleware(wrapperPost(func() any { return &GetCompactionStateReq{} }, wrapperTraceLog(h.getcompactionState))))
@@ -333,6 +339,18 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 	return nil
 }
 
+func checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface{}) error {
+	username, ok := c.Get(ContextUsername)
+	if !ok || username.(string) == "" {
+		return merr.ErrNeedAuthenticate
+	}
+	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	if authErr != nil {
+		return authErr
+	}
+	return nil
+}
+
 func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	return wrapperProxyWithLimit(ctx, c, req, checkAuth, ignoreErr, fullMethod, false, nil, handler)
 }
@@ -366,7 +384,19 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		username = ""
 	}
 
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, handler)
+	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
+		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
+		newCtx := reqCtx
+		if token, ok := ginCtx.Get(ContextToken); ok {
+			newCtx = metadata.NewIncomingContext(reqCtx, metadata.MD{
+				util.HeaderAuthorize: []string{token.(string)},
+			})
+		}
+		return interceptor(newCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
+			return handler(ctx, req)
+		})
+	}
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, forwardHandler)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
@@ -393,6 +423,7 @@ func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq a
 			DbName:         dbName,
 			CollectionName: collectionName,
 		}
+		// handle at rootcoord side
 		resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/HasCollection", func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.HasCollection(reqCtx, req.(*milvuspb.HasCollectionRequest))
 		})
@@ -410,6 +441,7 @@ func (h *HandlersV2) listCollections(ctx context.Context, c *gin.Context, anyReq
 		DbName: dbName,
 	}
 	c.Set(ContextRequest, req)
+	// handle at rootcoord side
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ShowCollections", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ShowCollections(reqCtx, req.(*milvuspb.ShowCollectionsRequest))
 	})
@@ -678,6 +710,74 @@ func (h *HandlersV2) alterCollectionProperties(ctx context.Context, c *gin.Conte
 	c.Set(ContextRequest, req)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollection", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterCollection(reqCtx, req.(*milvuspb.AlterCollectionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionAddFunction)
+	req := &milvuspb.AddCollectionFunctionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+	}
+
+	req.FunctionSchema = fSchema
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddCollectionFunction(reqCtx, req.(*milvuspb.AddCollectionFunctionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) alterCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionAlterFunction)
+	req := &milvuspb.AlterCollectionFunctionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		FunctionName:   httpReq.FunctionName,
+	}
+	fSchema, err := genFunctionSchema(ctx, &httpReq.Function)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
+			HTTPReturnMessage: err.Error(),
+		})
+	}
+
+	req.FunctionSchema = fSchema
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AlterCollectionFunction(reqCtx, req.(*milvuspb.AlterCollectionFunctionRequest))
+	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) dropCollectionFunction(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionDropFunction)
+	req := &milvuspb.DropCollectionFunctionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		FunctionName:   httpReq.FunctionName,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/DropCollectionFunction", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.DropCollectionFunction(reqCtx, req.(*milvuspb.DropCollectionFunctionRequest))
 	})
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
@@ -1858,6 +1958,7 @@ func (h *HandlersV2) dropDatabaseProperties(ctx context.Context, c *gin.Context,
 func (h *HandlersV2) listDatabases(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	req := &milvuspb.ListDatabasesRequest{}
 	c.Set(ContextRequest, req)
+	// handle at rootcoord side
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListDatabases", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListDatabases(reqCtx, req.(*milvuspb.ListDatabasesRequest))
 	})
@@ -2641,15 +2742,6 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ListImportsAuthPlaceholder{
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListImports", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
@@ -2657,13 +2749,29 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		returnData := make(map[string]interface{})
 		records := make([]map[string]interface{}, 0)
 		response := resp.(*internalpb.ListImportsResponse)
-		for i, jobID := range response.GetJobIDs() {
+		jobIDs := response.GetJobIDs()
+		states := response.GetStates()
+		progresses := response.GetProgresses()
+		reasons := response.GetReasons()
+		collections := response.GetCollectionNames()
+
+		for i, jobID := range jobIDs {
+			collection := collections[i]
+			if h.checkAuth {
+				err = checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
+					DbName:         dbName,
+					CollectionName: collection,
+				})
+				if err != nil {
+					continue
+				}
+			}
 			jobDetail := make(map[string]interface{})
 			jobDetail["jobId"] = jobID
-			jobDetail["collectionName"] = response.GetCollectionNames()[i]
-			jobDetail["state"] = response.GetStates()[i].String()
-			jobDetail["progress"] = response.GetProgresses()[i]
-			reason := response.GetReasons()[i]
+			jobDetail["collectionName"] = collection
+			jobDetail["state"] = states[i].String()
+			jobDetail["progress"] = progresses[i]
+			reason := reasons[i]
 			if reason != "" {
 				jobDetail["reason"] = reason
 			}
@@ -2722,19 +2830,24 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.GetImportProgressAuthPlaceholder{
-			DbName: dbName,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err == nil {
 		response := resp.(*internalpb.GetImportProgressResponse)
+		if h.checkAuth {
+			err := checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
+				DbName:         dbName,
+				CollectionName: response.GetCollectionName(),
+			})
+			if err != nil {
+				HTTPReturn(c, http.StatusForbidden, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+		}
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
 		returnData["createTime"] = response.GetCreateTime()

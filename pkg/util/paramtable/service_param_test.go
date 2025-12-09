@@ -121,9 +121,37 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.CompactionMaxParallelReads.GetAsInt(), 8)
 		assert.Equal(t, wpCfg.ReaderMaxBatchSize.GetAsSize(), int64(16*1024*1024))
 		assert.Equal(t, wpCfg.ReaderMaxFetchThreads.GetAsInt(), 32)
+		assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(72*60*60))
+		assert.Equal(t, wpCfg.FencePolicyConditionWrite.GetValue(), "auto")
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "default")
+	})
+
+	t.Run("test woodpeckerConfig RetentionTTL fallback", func(t *testing.T) {
+		// Test fallback key behavior: when main key doesn't exist, use fallback key
+		{
+			testBt := NewBaseTable(SkipRemote(true))
+			testBt.Save("streaming.walTruncate.retentionInterval", "48h")
+			testBt.Remove("woodpecker.logstore.retentionPolicy.ttl")
+			var testSParams ServiceParam
+			testSParams.init(testBt)
+			wpCfg := &testSParams.WoodpeckerCfg
+			// Should use fallback key value
+			assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(48*60*60))
+		}
+
+		// Test main key priority: when main key exists, use main key instead of fallback
+		{
+			testBt := NewBaseTable(SkipRemote(true))
+			testBt.Save("woodpecker.logstore.retentionPolicy.ttl", "24h")
+			testBt.Save("streaming.walTruncate.retentionInterval", "48h")
+			var testSParams ServiceParam
+			testSParams.init(testBt)
+			wpCfg := &testSParams.WoodpeckerCfg
+			// Should use main key value, not fallback
+			assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(24*60*60))
+		}
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {

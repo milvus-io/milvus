@@ -19,8 +19,6 @@ type AckManager struct {
 	notAckHeap            typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum allocated but not ack timestamp in list.
 	// Actually, the notAckHeap can be replaced by a list because of the the allocate operation is protected by mutex,
 	// keep it as a heap to make the code more readable.
-	ackHeap typeutil.Heap[*Acker] // A minimum heap of timestampAck to search minimum ack timestamp in list.
-	// It is used to detect the concurrent operation to find the last confirmed message id.
 	acknowledgedDetails  sortedDetails         // All ack details which time tick less than lastConfirmedTimeTick will be temporarily kept here until sync operation happens.
 	lastConfirmedManager *lastConfirmedManager // The last confirmed message id manager.
 	metrics              *metricsutil.TimeTickMetrics
@@ -36,7 +34,6 @@ func NewAckManager(
 		mu:                    sync.Mutex{},
 		lastAllocatedTimeTick: 0,
 		notAckHeap:            typeutil.NewHeap[*Acker](&ackersOrderByTimestamp{}),
-		ackHeap:               typeutil.NewHeap[*Acker](&ackersOrderByEndTimestamp{}),
 		lastConfirmedTimeTick: lastConfirmedTimeTick,
 		lastConfirmedManager:  newLastConfirmedManager(lastConfirmedMessageID),
 		metrics:               metrics,
@@ -108,7 +105,6 @@ func (ta *AckManager) ack(acker *Acker) {
 
 	acker.acknowledged = true
 	acker.detail.EndTimestamp = ta.lastAllocatedTimeTick
-	ta.ackHeap.Push(acker)
 	ta.metrics.CountAcknowledgeTimeTick(acker.ackDetail().IsSync)
 	ta.popUntilLastAllAcknowledged()
 }
@@ -129,16 +125,6 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 	ta.lastConfirmedTimeTick = acknowledgedDetails[len(acknowledgedDetails)-1].BeginTimestamp
 	ta.metrics.UpdateLastConfirmedTimeTick(ta.lastConfirmedTimeTick)
 
-	// pop all EndTimestamp is less than lastConfirmedTimeTick.
-	// All the messages which EndTimetick less than lastConfirmedTimeTick have been committed into wal.
-	// So the MessageID of those messages is dense and continuous.
-	confirmedDetails := make(sortedDetails, 0, 5)
-	for ta.ackHeap.Len() > 0 && ta.ackHeap.Peek().detail.EndTimestamp < ta.lastConfirmedTimeTick {
-		ack := ta.ackHeap.Pop()
-		confirmedDetails = append(confirmedDetails, ack.ackDetail())
-	}
-	ta.lastConfirmedManager.AddConfirmedDetails(confirmedDetails, ta.lastConfirmedTimeTick)
-	// TODO: cache update operation is also performed here.
-
+	ta.lastConfirmedManager.AddConfirmedDetails(acknowledgedDetails, ta.lastConfirmedTimeTick)
 	ta.acknowledgedDetails = append(ta.acknowledgedDetails, acknowledgedDetails...)
 }

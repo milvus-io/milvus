@@ -14,6 +14,8 @@
 #include <memory>
 #include <limits>
 
+#include "common/EasyAssert.h"
+#include "common/common_type_c.h"
 #include "pb/cgo_msg.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 
@@ -27,6 +29,7 @@
 #include "log/Log.h"
 #include "mmap/Types.h"
 #include "monitor/scope_metric.h"
+#include "pb/segcore.pb.h"
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -45,6 +48,48 @@
 #include "common/GeometryCache.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
+
+/**
+ * @brief Create a segment from a collection.
+ * @param col The collection to create the segment from.
+ * @param seg_type The type of segment to create.
+ * @param segment_id The ID of the segment to create.
+ * @param is_sorted_by_pk Whether the data in the sealed segment is sorted by primary key.
+ * @return A unique pointer to a SegmentInterface object.
+ */
+std::unique_ptr<milvus::segcore::SegmentInterface>
+CreateSegment(milvus::segcore::Collection* col,
+              SegmentType seg_type,
+              int64_t segment_id,
+              bool is_sorted_by_pk) {
+    std::unique_ptr<milvus::segcore::SegmentInterface> segment;
+    switch (seg_type) {
+        case Growing: {
+            auto seg = milvus::segcore::CreateGrowingSegment(
+                col->get_schema(),
+                col->get_index_meta(),
+                segment_id,
+                milvus::segcore::SegcoreConfig::default_config());
+            segment = std::move(seg);
+            break;
+        }
+        case Sealed:
+        case Indexing:
+            segment = milvus::segcore::CreateSealedSegment(
+                col->get_schema(),
+                col->get_index_meta(),
+                segment_id,
+                milvus::segcore::SegcoreConfig::default_config(),
+                is_sorted_by_pk);
+            break;
+
+        default:
+            ThrowInfo(
+                milvus::UnexpectedError, "invalid segment type: {}", seg_type);
+    }
+    return segment;
+}
+
 CStatus
 NewSegment(CCollection collection,
            SegmentType seg_type,
@@ -56,34 +101,55 @@ NewSegment(CCollection collection,
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        std::unique_ptr<milvus::segcore::SegmentInterface> segment;
-        switch (seg_type) {
-            case Growing: {
-                auto seg = milvus::segcore::CreateGrowingSegment(
-                    col->get_schema(),
-                    col->get_index_meta(),
-                    segment_id,
-                    milvus::segcore::SegcoreConfig::default_config());
-                segment = std::move(seg);
-                break;
-            }
-            case Sealed:
-            case Indexing:
-                segment = milvus::segcore::CreateSealedSegment(
-                    col->get_schema(),
-                    col->get_index_meta(),
-                    segment_id,
-                    milvus::segcore::SegcoreConfig::default_config(),
-                    is_sorted_by_pk);
-                break;
-
-            default:
-                ThrowInfo(milvus::UnexpectedError,
-                          "invalid segment type: {}",
-                          seg_type);
-        }
+        auto segment =
+            CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
 
         *newSegment = segment.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+NewSegmentWithLoadInfo(CCollection collection,
+                       SegmentType seg_type,
+                       int64_t segment_id,
+                       CSegmentInterface* newSegment,
+                       bool is_sorted_by_pk,
+                       const uint8_t* load_info_blob,
+                       const int64_t load_info_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(load_info_blob, "load info is null");
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
+        AssertInfo(suc, "unmarshal load info failed");
+
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
+
+        auto segment =
+            CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
+        segment->SetLoadInfo(load_info);
+        *newSegment = segment.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        // TODO unify trace context to op context after supported
+        auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        segment->Load(trace_ctx);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -114,7 +180,7 @@ DeleteSearchResult(CSearchResult search_result) {
     delete res;
 }
 
-CFuture*  // Future<milvus::SearchResult*>
+CFuture*  // Future<milvus::SearchResult>
 AsyncSearch(CTraceContext c_trace,
             CSegmentInterface c_segment,
             CSearchPlan c_plan,
@@ -122,8 +188,8 @@ AsyncSearch(CTraceContext c_trace,
             uint64_t timestamp,
             int32_t consistency_level,
             uint64_t collection_ttl) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
     auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(
         c_placeholder_group);
 
@@ -136,7 +202,7 @@ AsyncSearch(CTraceContext c_trace,
          phg_ptr,
          timestamp,
          consistency_level,
-         collection_ttl](milvus::futures::CancellationToken cancel_token) {
+         collection_ttl](folly::CancellationToken cancel_token) {
             // save trace context into search_info
             auto& trace_ctx = plan->plan_node_->search_info_.trace_ctx_;
             trace_ctx.traceID = c_trace.traceID;
@@ -148,8 +214,12 @@ AsyncSearch(CTraceContext c_trace,
 
             segment->LazyCheckSchema(plan->schema_);
 
-            auto search_result = segment->Search(
-                plan, phg_ptr, timestamp, consistency_level, collection_ttl);
+            auto search_result = segment->Search(plan,
+                                                 phg_ptr,
+                                                 timestamp,
+                                                 cancel_token,
+                                                 consistency_level,
+                                                 collection_ttl);
             if (!milvus::PositivelyRelated(
                     plan->plan_node_->search_info_.metric_type_)) {
                 for (auto& dis : search_result->distances_) {
@@ -212,7 +282,7 @@ AsyncRetrieve(CTraceContext c_trace,
          limit_size,
          ignore_non_pk,
          consistency_level,
-         collection_ttl](milvus::futures::CancellationToken cancel_token) {
+         collection_ttl](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
@@ -224,6 +294,7 @@ AsyncRetrieve(CTraceContext c_trace,
                                                      timestamp,
                                                      limit_size,
                                                      ignore_non_pk,
+                                                     cancel_token,
                                                      consistency_level,
                                                      collection_ttl);
 
@@ -247,7 +318,7 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
         [c_trace, segment, plan, offsets, len](
-            milvus::futures::CancellationToken cancel_token) {
+            folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span(

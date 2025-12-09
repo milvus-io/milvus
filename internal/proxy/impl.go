@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -1167,6 +1166,169 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return act.result, nil
+}
+
+func (node *Proxy) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionFunction")
+	defer sp.End()
+	method := "AddCollectionFunction"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &addCollectionFunctionTask{
+		ctx:                          ctx,
+		Condition:                    NewTaskCondition(ctx),
+		AddCollectionFunctionRequest: request,
+		mixCoord:                     node.mixCoord,
+	}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionFunction")
+	defer sp.End()
+	method := "AlterCollectionFunction"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &alterCollectionFunctionTask{
+		ctx:                            ctx,
+		Condition:                      NewTaskCondition(ctx),
+		AlterCollectionFunctionRequest: request,
+		mixCoord:                       node.mixCoord,
+	}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("collection", request.FunctionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
+}
+
+func (node *Proxy) DropCollectionFunction(ctx context.Context, request *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropCollectionFunction")
+	defer sp.End()
+	method := "DropCollectionFunction"
+	tr := timerecord.NewTimeRecorder(method)
+	task := &dropCollectionFunctionTask{
+		ctx:                           ctx,
+		Condition:                     NewTaskCondition(ctx),
+		DropCollectionFunctionRequest: request,
+		mixCoord:                      node.mixCoord,
+	}
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+
+		return merr.Status(err), nil
+	}
+
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return task.result, nil
 }
 
 func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
@@ -2293,6 +2455,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			Status: merr.Status(err),
 		}, nil
 	}
+
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -6299,40 +6462,6 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) runAnalyzer(req *milvuspb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	analyzer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
-	if err != nil {
-		return nil, err
-	}
-
-	defer analyzer.Destroy()
-
-	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
-	for i, text := range req.GetPlaceholder() {
-		stream := analyzer.NewTokenStream(string(text))
-		defer stream.Destroy()
-
-		results[i] = &milvuspb.AnalyzerResult{
-			Tokens: make([]*milvuspb.AnalyzerToken, 0),
-		}
-
-		for stream.Advance() {
-			var token *milvuspb.AnalyzerToken
-			if req.GetWithDetail() {
-				token = stream.DetailedToken()
-			} else {
-				token = &milvuspb.AnalyzerToken{Token: stream.Token()}
-			}
-
-			if req.GetWithHash() {
-				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
-			}
-			results[i].Tokens = append(results[i].Tokens, token)
-		}
-	}
-	return results, nil
-}
-
 func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RunAnalyzer")
 	defer sp.End()
@@ -6350,20 +6479,19 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 
+	// build and run analyzer at any streaming node/query node
+	// if collection and field not set
 	if req.GetCollectionName() == "" {
-		results, err := node.runAnalyzer(req)
-		if err != nil {
-			return &milvuspb.RunAnalyzerResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-
-		return &milvuspb.RunAnalyzerResponse{
-			Status:  merr.Status(nil),
-			Results: results,
-		}, nil
+		return node.mixCoord.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			AnalyzerParams: req.GetAnalyzerParams(),
+			Placeholder:    req.GetPlaceholder(),
+			WithDetail:     req.GetWithDetail(),
+			WithHash:       req.GetWithHash(),
+		})
 	}
 
+	// run builded analyzer by delegator
+	// collection must loaded
 	if err := validateRunAnalyzer(req); err != nil {
 		return &milvuspb.RunAnalyzerResponse{
 			Status: merr.Status(merr.WrapErrAsInputError(err)),

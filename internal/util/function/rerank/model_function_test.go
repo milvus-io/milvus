@@ -61,19 +61,19 @@ func (s *RerankModelSuite) TestNewProvider() {
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "unknown"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Unknow rerank model provider")
 	}
 
 	{
-		_, err := newProvider([]*commonpb.KeyValuePair{})
+		_, err := newProvider([]*commonpb.KeyValuePair{}, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Lost rerank params")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank function lost params endpoint")
 	}
 	{
@@ -82,8 +82,8 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 			{Key: models.MaxClientBatchSizeParamKey, Value: "-1"},
 		}
-		_, err := newProvider(params)
-		s.ErrorContains(err, "Rerank function params max_batch must > 0")
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.ErrorContains(err, "must be greater than 0")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
@@ -91,7 +91,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 			{Key: models.MaxClientBatchSizeParamKey, Value: "NotNum"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "is not a valid numbe")
 	}
 	{
@@ -99,7 +99,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "vllm"},
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -108,7 +108,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 			{Key: models.VllmTruncateParamName, Value: "unknow"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 	{
@@ -122,7 +122,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 				key: "false",
 			}
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank provider: [vllm] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
@@ -133,7 +133,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "tei"},
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -142,7 +142,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 			{Key: models.TruncateParamKey, Value: "unknow"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 	{
@@ -153,7 +153,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
 			{Key: models.TruncationDirectionParamKey, Value: "unknow"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.Error(err)
 	}
 	{
@@ -163,7 +163,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.TruncateParamKey, Value: "true"},
 			{Key: models.TruncationDirectionParamKey, Value: "Left"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -177,7 +177,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 				key: "false",
 			}
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank provider: [tei] is disabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
@@ -188,7 +188,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "siliconflow"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "siliconflow rerank model name is required")
 	}
 	{
@@ -197,7 +197,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.ModelNameParamKey, Value: "siliconflow-test"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -209,7 +209,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.MaxChunksPerDocParamKey, Value: "10"},
 			{Key: models.OverlapTokensParamKey, Value: "10"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -217,7 +217,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "cohere"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "cohere rerank model name is required")
 	}
 	{
@@ -228,7 +228,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
 			{Key: models.MaxTKsPerDocParamKey, Value: "10"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -236,7 +236,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "voyageai"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "voyageai rerank model name is required")
 	}
 	{
@@ -247,7 +247,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
 			{Key: models.TruncateParamKey, Value: "true"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
@@ -255,7 +255,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "ali"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "ali rerank model name is required")
 	}
 	{
@@ -265,7 +265,7 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: models.CredentialParamKey, Value: "mock"},
 			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
 		}
-		_, err := newProvider(params)
+		_, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 }
@@ -282,7 +282,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 			{Key: providerParamName, Value: "vllm"},
 			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
-		provder, err := newProvider(params)
+		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.ErrorContains(err, "Call service failed")
@@ -298,7 +298,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 			{Key: providerParamName, Value: "vllm"},
 			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
-		provder, err := newProvider(params)
+		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.ErrorContains(err, "Call service failed")
@@ -314,7 +314,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 			{Key: providerParamName, Value: "vllm"},
 			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
-		provder, err := newProvider(params)
+		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)
@@ -334,7 +334,7 @@ func (s *RerankModelSuite) TestCallTEI() {
 			{Key: providerParamName, Value: "tei"},
 			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
-		provder, err := newProvider(params)
+		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)
@@ -351,7 +351,7 @@ func (s *RerankModelSuite) TestCallTEI() {
 			{Key: providerParamName, Value: "tei"},
 			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
-		provder, err := newProvider(params)
+		provder, err := newProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.ErrorContains(err, "Call service failed")
@@ -370,7 +370,7 @@ func (s *RerankModelSuite) TestCallSiliconFlow() {
 			{Key: models.ModelNameParamKey, Value: "siliconflow-test"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		provder, err := newSiliconflowProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		provder, err := newSiliconflowProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2"})
 		s.NoError(err)
@@ -390,7 +390,7 @@ func (s *RerankModelSuite) TestCallCohere() {
 			{Key: models.ModelNameParamKey, Value: "cohere-test"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		provder, err := newCohereProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		provder, err := newCohereProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2"})
 		s.NoError(err)
@@ -414,7 +414,7 @@ func (s *RerankModelSuite) TestCallVoyageAI() {
 			{Key: models.ModelNameParamKey, Value: "voyageai-test"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		provder, err := newVoyageaiProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		provder, err := newVoyageaiProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)
@@ -436,7 +436,7 @@ func (s *RerankModelSuite) TestCallAli() {
 			{Key: models.ModelNameParamKey, Value: "ali-test"},
 			{Key: models.CredentialParamKey, Value: "mock"},
 		}
-		provder, err := newAliProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		provder, err := newAliProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}), &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
 		s.NoError(err)
@@ -471,43 +471,43 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 	}
 	{
 		functionSchema.InputFieldNames = []string{"text", "ts"}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank model only supports single input")
 	}
 	{
 		functionSchema.InputFieldNames = []string{"ts"}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank model only support varchar")
 		functionSchema.InputFieldNames = []string{"text"}
 	}
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: queryKeyName, Value: `NotJson`}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Parse rerank params [queries] failed")
 	}
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: queryKeyName, Value: `[]`}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Rerank function lost params queries")
 	}
 	{
 		functionSchema.Params[2] = &commonpb.KeyValuePair{Key: queryKeyName, Value: `["test"]`}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
 		schema.Fields[0] = &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 	}
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: providerParamName, Value: `notExist`}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Unknow rerank model provider")
 	}
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: "NotExist", Value: `notExist`}
-		_, err := newModelFunction(schema, functionSchema)
+		_, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.ErrorContains(err, "Lost rerank params")
 	}
 }
@@ -546,7 +546,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		// empty
 		{
 			nq := int64(1)
-			f, err := newModelFunction(schema, functionSchema)
+			f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 			s.NoError(err)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{}, f.GetInputFieldIDs(), false)
 			ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
@@ -558,7 +558,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		// no input field exist
 		{
 			nq := int64(1)
-			f, err := newModelFunction(schema, functionSchema)
+			f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "noExist", 1000)
 			s.NoError(err)
 
@@ -601,7 +601,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 	{
 		nq := int64(1)
 		{
-			f, err := newModelFunction(schema, functionSchema)
+			f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 			s.NoError(err)
 			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
@@ -610,7 +610,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		}
 		{
 			functionSchema.Params[2].Value = `["q1"]`
-			f, err := newModelFunction(schema, functionSchema)
+			f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 			s.NoError(err)
 			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
@@ -623,7 +623,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		{
 			nq := int64(3)
 			functionSchema.Params[2].Value = `["q1", "q2", "q3"]`
-			f, err := newModelFunction(schema, functionSchema)
+			f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 			s.NoError(err)
 			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
@@ -639,7 +639,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 	{
 		nq := int64(1)
 		functionSchema.Params[2].Value = `["q1"]`
-		f, err := newModelFunction(schema, functionSchema)
+		f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 		// empty
@@ -653,7 +653,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 	// nq = 1
 	{
 		nq := int64(1)
-		f, err := newModelFunction(schema, functionSchema)
+		f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		// ts/id data: 0 - 9
 		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
@@ -669,7 +669,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 	{
 		nq := int64(3)
 		functionSchema.Params[2].Value = `["q1", "q2", "q3"]`
-		f, err := newModelFunction(schema, functionSchema)
+		f, err := newModelFunction(schema, functionSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
 		s.NoError(err)
 		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_VarChar, "text", 101)

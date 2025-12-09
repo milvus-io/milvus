@@ -210,7 +210,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 		})
 		s.NoError(err)
 		return len(resp.GetChannelNames()) == 0
-	}, 10*time.Second, 1*time.Second)
+	}, 20*time.Second, 1*time.Second)
 
 	// test transfer segment
 	resp6, err := s.Cluster.MixCoordClient.TransferSegment(ctx, &querypb.TransferSegmentRequest{

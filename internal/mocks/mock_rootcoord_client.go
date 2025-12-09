@@ -107,6 +107,80 @@ func (_c *MockRootCoordClient_AddCollectionField_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// AddCollectionFunction provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddCollectionFunction")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFunctionRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddCollectionFunctionRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddCollectionFunctionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_AddCollectionFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddCollectionFunction'
+type MockRootCoordClient_AddCollectionFunction_Call struct {
+	*mock.Call
+}
+
+// AddCollectionFunction is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.AddCollectionFunctionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) AddCollectionFunction(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AddCollectionFunction_Call {
+	return &MockRootCoordClient_AddCollectionFunction_Call{Call: _e.mock.On("AddCollectionFunction",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_AddCollectionFunction_Call) Run(run func(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AddCollectionFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.AddCollectionFunctionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_AddCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AddCollectionFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_AddCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.AddCollectionFunctionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AddCollectionFunction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocID provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -473,6 +547,80 @@ func (_c *MockRootCoordClient_AlterCollectionField_Call) Return(_a0 *commonpb.St
 }
 
 func (_c *MockRootCoordClient_AlterCollectionField_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionFieldRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AlterCollectionField_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// AlterCollectionFunction provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionFunction")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFunctionRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionFunctionRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionFunctionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_AlterCollectionFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionFunction'
+type MockRootCoordClient_AlterCollectionFunction_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionFunction is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.AlterCollectionFunctionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) AlterCollectionFunction(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AlterCollectionFunction_Call {
+	return &MockRootCoordClient_AlterCollectionFunction_Call{Call: _e.mock.On("AlterCollectionFunction",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_AlterCollectionFunction_Call) Run(run func(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption)) *MockRootCoordClient_AlterCollectionFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionFunctionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_AlterCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_AlterCollectionFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_AlterCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterCollectionFunctionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_AlterCollectionFunction_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1776,6 +1924,80 @@ func (_c *MockRootCoordClient_DropCollection_Call) Return(_a0 *commonpb.Status, 
 }
 
 func (_c *MockRootCoordClient_DropCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_DropCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropCollectionFunction provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCollectionFunction")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionFunctionRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropCollectionFunctionRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropCollectionFunctionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DropCollectionFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCollectionFunction'
+type MockRootCoordClient_DropCollectionFunction_Call struct {
+	*mock.Call
+}
+
+// DropCollectionFunction is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.DropCollectionFunctionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DropCollectionFunction(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropCollectionFunction_Call {
+	return &MockRootCoordClient_DropCollectionFunction_Call{Call: _e.mock.On("DropCollectionFunction",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DropCollectionFunction_Call) Run(run func(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DropCollectionFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.DropCollectionFunctionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DropCollectionFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_DropCollectionFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DropCollectionFunction_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCollectionFunctionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_DropCollectionFunction_Call {
 	_c.Call.Return(run)
 	return _c
 }

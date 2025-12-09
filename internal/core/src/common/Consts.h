@@ -112,6 +112,8 @@ const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
 const std::string ELEMENT_TYPE_KEY = "element_type";
 const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
+const std::string SEGMENT_MANIFEST_KEY = "segment_manifest";
+const std::string LOON_FFI_PROPERTIES_KEY = "loon_ffi_properties";
 
 // storage version
 const int64_t STORAGE_V1 = 1;
@@ -126,3 +128,5 @@ const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
 
 // EPSILON value for comparing float numbers
 const float EPSILON = 0.0000000119;
+const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
+const std::string MMAP_ENABLED_KEY = "mmap.enabled";

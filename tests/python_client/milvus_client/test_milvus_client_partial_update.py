@@ -111,7 +111,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         """
         # step 1: create collection with all datatype schema
         client = self._client()
-        schema = cf.gen_all_datatype_collection_schema(dim=default_dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=default_dim, enable_struct_array_field=False)
         index_params = self.prepare_index_params(client)[0]
         text_sparse_emb_field_name = "text_sparse_emb"
 
@@ -141,7 +141,8 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         
         vector_field_type = [DataType.FLOAT16_VECTOR,
                             DataType.BFLOAT16_VECTOR, 
-                            DataType.INT8_VECTOR]
+                            DataType.INT8_VECTOR,
+                            DataType.FLOAT_VECTOR]
         # fields to be updated
         update_fields_name = []
         scalar_update_name = []
@@ -163,6 +164,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         expected = [{field: new_rows[i][field] for field in scalar_update_name}
                     for i in range(default_nb)]
 
+        expected = cf.convert_timestamptz(expected, ct.default_timestamptz_field_name, "UTC")
         result = self.query(client, collection_name, filter=f"{primary_key_field_name} >= 0",
                 check_task=CheckTasks.check_query_results,
                 output_fields=scalar_update_name,
@@ -201,7 +203,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         
         # Create schema with all data types
-        schema = cf.gen_all_datatype_collection_schema(dim=dim)
+        schema = cf.gen_all_datatype_collection_schema(dim=dim, enable_struct_array_field=False)
 
         # Create index parameters
         index_params = client.prepare_index_params()
@@ -231,7 +233,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         primary_key_field_name = schema.fields[0].name
         for i in range(len(schema.fields)):
             update_field_name = schema.fields[i if i != 0 else 1].name
-            new_row = cf.gen_partial_row_data_by_schema(nb=nb, schema=schema, 
+            new_row = cf.gen_row_data_by_schema(nb=nb, schema=schema, 
                                                         desired_field_names=[primary_key_field_name, update_field_name])
             client.upsert(collection_name, new_row, partial_update=True)
 
@@ -446,7 +448,7 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.upsert(client, collection_name, rows, partial_update=True)
         
         # step 3: Partial Update the nullable field with null
-        new_row = cf.gen_partial_row_data_by_schema(
+        new_row = cf.gen_row_data_by_schema(
             nb=default_nb, 
             schema=schema, 
             desired_field_names=[default_primary_key_field_name, default_int32_field_name], 
@@ -1219,14 +1221,12 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_partial_update_same_pk_same_field(self):
         """
-        target:  Test PU will success and query will success
+        target: Test upsert with duplicate primary keys in the same batch will fail
         method:
             1. Create a collection
             2. Insert rows
-            3. Upsert the rows with same pk and same field
-            4. Query the rows
-            5. Upsert the rows with same pk and different field
-        expected: Step 2 -> 4 should success 5 should fail
+            3. Upsert a batch with duplicate primary keys (all rows have pk=0)
+        expected: Step 3 should fail with duplicate primary keys error
         """
         # step 1: create collection
         client = self._client()
@@ -1234,30 +1234,25 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_int32_field_name, DataType.INT32, nullable=True)
-        index_params = self.prepare_index_params(client)[0] 
+        index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
+        self.create_collection(client, collection_name, default_dim, schema=schema,
                                consistency_level="Strong", index_params=index_params)
-        
+
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, rows, partial_update=True)
 
-        # step 3: Upsert the rows with same pk and same field
-        new_rows = [{default_primary_key_field_name: 0, 
+        # step 3: Upsert a batch with duplicate primary keys - should fail
+        new_rows = [{default_primary_key_field_name: 0,
                     default_int32_field_name: i} for i in range(default_nb)]
-        self.upsert(client, collection_name, new_rows, partial_update=True)
-
-        # step 4: Query the rows
-        result = self.query(client, collection_name, filter=f"{default_primary_key_field_name} == 0",
-                   check_task=CheckTasks.check_query_results,
-                   output_fields=[default_int32_field_name],
-                   check_items={exp_res: [new_rows[-1]],
-                                "pk_name": default_primary_key_field_name})[0]
-        assert len(result) == 1
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "duplicate primary keys are not allowed in the same batch"}
+        self.upsert(client, collection_name, new_rows, partial_update=True,
+                    check_task=CheckTasks.err_res, check_items=error)
 
         self.drop_collection(client, collection_name)
 

@@ -113,14 +113,14 @@ func (s *mixCoordImpl) Register() error {
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
 		log.Info("MixCoord Register Finished")
-		s.session.LivenessCheck(s.ctx, func() {
-			log.Error("MixCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
-			os.Exit(1)
-		})
 	}
 	if s.enableActiveStandBy {
 		go func() {
 			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+				if s.ctx.Err() == context.Canceled {
+					log.Info("standby process canceled due to server shutdown")
+					return
+				}
 				log.Error("failed to activate standby server", zap.Error(err))
 				panic(err)
 			}
@@ -461,6 +461,18 @@ func (s *mixCoordImpl) AlterCollection(ctx context.Context, req *milvuspb.AlterC
 
 func (s *mixCoordImpl) AlterCollectionField(ctx context.Context, req *milvuspb.AlterCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.AlterCollectionField(ctx, req)
+}
+
+func (s *mixCoordImpl) AddCollectionFunction(ctx context.Context, req *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.AddCollectionFunction(ctx, req)
+}
+
+func (s *mixCoordImpl) AlterCollectionFunction(ctx context.Context, req *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.AlterCollectionFunction(ctx, req)
+}
+
+func (s *mixCoordImpl) DropCollectionFunction(ctx context.Context, req *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DropCollectionFunction(ctx, req)
 }
 
 func (s *mixCoordImpl) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
@@ -1191,6 +1203,14 @@ func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQ
 
 func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return s.queryCoordServer.ListLoadedSegments(ctx, req)
+}
+
+func (s *mixCoordImpl) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return s.queryCoordServer.RunAnalyzer(ctx, req)
+}
+
+func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
 }
 
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
