@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -120,7 +121,7 @@ func (fs *forwardServiceImpl) forwardLegacyProxy(ctx context.Context, request an
 		opt(&optForwardOption)
 	}
 	if optForwardOption.authToken != "" {
-		ctx = contextutil.SetToIncomingContext(ctx, util.HeaderAuthorize, optForwardOption.authToken)
+		ctx = contextutil.SetToIncomingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode(optForwardOption.authToken))
 	}
 
 	var result proto.Message
