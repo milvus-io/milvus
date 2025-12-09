@@ -23,8 +23,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -62,11 +62,12 @@ func (s *WriteSuite) TestInsert() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		partName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
 
-		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		mockInsert := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Insert).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 			s.Equal(collName, ir.GetCollectionName())
 			s.Equal(partName, ir.GetPartitionName())
 			s.Require().Len(ir.GetFieldsData(), 5)
@@ -82,7 +83,8 @@ func (s *WriteSuite) TestInsert() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockInsert.UnPatch()
 
 		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -103,11 +105,12 @@ func (s *WriteSuite) TestInsert() {
 	})
 
 	s.Run("dynamic_schema", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		partName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collName, s.schemaDyn)
 
-		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		mockInsert := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Insert).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ir *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 			s.Equal(collName, ir.GetCollectionName())
 			s.Equal(partName, ir.GetPartitionName())
 			s.Require().Len(ir.GetFieldsData(), 6)
@@ -123,7 +126,8 @@ func (s *WriteSuite) TestInsert() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockInsert.UnPatch()
 
 		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -145,14 +149,16 @@ func (s *WriteSuite) TestInsert() {
 	})
 
 	s.Run("bad_input", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
 		// bs, err := proto.Marshal(s.schema.ProtoMessage())
 		// s.Require().NoError(err)
-		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		mockDescribeCollection := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
 			CollectionName: collName,
 			Schema:         s.schema.ProtoMessage(),
-		}, nil)
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
 
 		type badCase struct {
 			tag   string
@@ -213,10 +219,12 @@ func (s *WriteSuite) TestInsert() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
 
-		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockInsert := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Insert).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockInsert.UnPatch()
 
 		_, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -241,11 +249,12 @@ func (s *WriteSuite) TestUpsert() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		partName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
 
-		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		mockUpsert := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Upsert).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
 			s.Equal(collName, ur.GetCollectionName())
 			s.Equal(partName, ur.GetPartitionName())
 			s.Require().Len(ur.GetFieldsData(), 5)
@@ -261,7 +270,8 @@ func (s *WriteSuite) TestUpsert() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockUpsert.UnPatch()
 
 		result, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -282,11 +292,12 @@ func (s *WriteSuite) TestUpsert() {
 	})
 
 	s.Run("dynamic_schema", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		partName := fmt.Sprintf("part_%s", s.randString(6))
 		s.setupCache(collName, s.schemaDyn)
 
-		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		mockUpsert := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Upsert).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ur *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
 			s.Equal(collName, ur.GetCollectionName())
 			s.Equal(partName, ur.GetPartitionName())
 			s.Require().Len(ur.GetFieldsData(), 6)
@@ -302,7 +313,8 @@ func (s *WriteSuite) TestUpsert() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockUpsert.UnPatch()
 
 		result, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -324,6 +336,7 @@ func (s *WriteSuite) TestUpsert() {
 	})
 
 	s.Run("bad_input", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
 
@@ -395,10 +408,12 @@ func (s *WriteSuite) TestUpsert() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
 
-		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockUpsert := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Upsert).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockUpsert.UnPatch()
 
 		_, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
@@ -452,7 +467,8 @@ func (s *WriteSuite) TestDelete() {
 
 		for _, tc := range cases {
 			s.Run(tc.tag, func() {
-				s.mock.EXPECT().Delete(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, dr *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+				defer mockey.UnPatchAll()
+				mockDelete := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Delete).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, dr *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 					s.Equal(collName, dr.GetCollectionName())
 					s.Equal(partName, dr.GetPartitionName())
 					s.Equal(tc.expectExpr, dr.GetExpr())
@@ -460,7 +476,9 @@ func (s *WriteSuite) TestDelete() {
 						Status:    merr.Success(),
 						DeleteCnt: 100,
 					}, nil
-				}).Once()
+				}).Build()
+				defer mockDelete.UnPatch()
+
 				result, err := s.client.Delete(ctx, tc.input)
 				s.NoError(err)
 				s.EqualValues(100, result.DeleteCount)

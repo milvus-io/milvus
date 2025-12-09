@@ -22,13 +22,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -65,13 +65,14 @@ func TestResourceGroupHandlerV2(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	// mock proxy
-	mockProxy := mocks.NewMockProxy(t)
-	mockProxy.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-	mockProxy.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&milvuspb.DescribeResourceGroupResponse{}, nil)
-	mockProxy.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-	mockProxy.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{}, nil)
-	mockProxy.EXPECT().UpdateResourceGroups(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-	mockProxy.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	mockProxy := &proxy.Proxy{}
+	mockey.Mock((*proxy.Proxy).CreateResourceGroup).Return(merr.Success(), nil).Build()
+	mockey.Mock((*proxy.Proxy).DescribeResourceGroup).Return(&milvuspb.DescribeResourceGroupResponse{}, nil).Build()
+	mockey.Mock((*proxy.Proxy).DropResourceGroup).Return(merr.Success(), nil).Build()
+	mockey.Mock((*proxy.Proxy).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{}, nil).Build()
+	mockey.Mock((*proxy.Proxy).UpdateResourceGroups).Return(merr.Success(), nil).Build()
+	mockey.Mock((*proxy.Proxy).TransferReplica).Return(merr.Success(), nil).Build()
+	defer mockey.UnPatchAll()
 
 	// setup test server
 	testServer := initHTTPServerV2(mockProxy, false)

@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 
-	mock "github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -25,20 +25,18 @@ const (
 type MockSuiteBase struct {
 	suite.Suite
 
-	lis  *bufconn.Listener
-	svr  *grpc.Server
-	mock *MilvusServiceServer
+	lis *bufconn.Listener
+	svr *grpc.Server
 
-	client *Client
+	client        *Client
+	connectMocker *mockey.Mocker
 }
 
 func (s *MockSuiteBase) SetupSuite() {
 	s.lis = bufconn.Listen(bufSize)
 	s.svr = grpc.NewServer()
 
-	s.mock = &MilvusServiceServer{}
-
-	milvuspb.RegisterMilvusServiceServer(s.svr, s.mock)
+	milvuspb.RegisterMilvusServiceServer(s.svr, &milvuspb.UnimplementedMilvusServiceServer{})
 
 	go func() {
 		s.T().Log("start mock server")
@@ -46,10 +44,19 @@ func (s *MockSuiteBase) SetupSuite() {
 			s.Fail("failed to start mock server", err.Error())
 		}
 	}()
-	s.setupConnect()
+
+	// Setup Connect mock for client initialization
+	s.connectMocker = mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Connect).Return(&milvuspb.ConnectResponse{
+		Status:     &commonpb.Status{},
+		Identifier: 1,
+	}, nil).Build()
 }
 
 func (s *MockSuiteBase) TearDownSuite() {
+	if s.connectMocker != nil {
+		s.connectMocker.UnPatch()
+		s.connectMocker = nil
+	}
 	s.svr.Stop()
 	s.lis.Close()
 }
@@ -68,31 +75,29 @@ func (s *MockSuiteBase) SetupTest() {
 		},
 	})
 	s.Require().NoError(err)
-	s.setupConnect()
 
 	s.client = c
 }
 
 func (s *MockSuiteBase) TearDownTest() {
-	s.client.Close(context.Background())
-	s.client = nil
-}
-
-func (s *MockSuiteBase) resetMock() {
-	// MetaCache.reset()
-	if s.mock != nil {
-		s.mock.Calls = nil
-		s.mock.ExpectedCalls = nil
-		s.setupConnect()
+	if s.client != nil {
+		s.client.Close(context.Background())
+		s.client = nil
 	}
+	// Reapply Connect mock after UnPatchAll() in subtests
+	s.reapplyConnectMock()
 }
 
-func (s *MockSuiteBase) setupConnect() {
-	s.mock.EXPECT().Connect(mock.Anything, mock.AnythingOfType("*milvuspb.ConnectRequest")).
-		Return(&milvuspb.ConnectResponse{
-			Status:     &commonpb.Status{},
-			Identifier: 1,
-		}, nil).Maybe()
+// reapplyConnectMock re-establishes the Connect mock after mockey.UnPatchAll() is called in subtests.
+// This ensures the Connect mock is available for the next test's SetupTest().
+func (s *MockSuiteBase) reapplyConnectMock() {
+	if s.connectMocker != nil {
+		s.connectMocker.UnPatch()
+	}
+	s.connectMocker = mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).Connect).Return(&milvuspb.ConnectResponse{
+		Status:     &commonpb.Status{},
+		Identifier: 1,
+	}, nil).Build()
 }
 
 func (s *MockSuiteBase) setupCache(collName string, schema *entity.Schema) {
@@ -100,67 +105,6 @@ func (s *MockSuiteBase) setupCache(collName string, schema *entity.Schema) {
 		Name:   collName,
 		Schema: schema,
 	})
-}
-
-func (s *MockSuiteBase) setupHasCollection(collNames ...string) {
-	s.mock.EXPECT().HasCollection(mock.Anything, mock.AnythingOfType("*milvuspb.HasCollectionRequest")).
-		Call.Return(func(ctx context.Context, req *milvuspb.HasCollectionRequest) *milvuspb.BoolResponse {
-		resp := &milvuspb.BoolResponse{Status: &commonpb.Status{}}
-		for _, collName := range collNames {
-			if req.GetCollectionName() == collName {
-				resp.Value = true
-				break
-			}
-		}
-		return resp
-	}, nil)
-}
-
-func (s *MockSuiteBase) setupHasCollectionError(errorCode commonpb.ErrorCode, err error) {
-	s.mock.EXPECT().HasCollection(mock.Anything, mock.AnythingOfType("*milvuspb.HasCollectionRequest")).
-		Return(&milvuspb.BoolResponse{
-			Status: &commonpb.Status{ErrorCode: errorCode},
-		}, err)
-}
-
-func (s *MockSuiteBase) setupHasPartition(collName string, partNames ...string) {
-	s.mock.EXPECT().HasPartition(mock.Anything, mock.AnythingOfType("*milvuspb.HasPartitionRequest")).
-		Call.Return(func(ctx context.Context, req *milvuspb.HasPartitionRequest) *milvuspb.BoolResponse {
-		resp := &milvuspb.BoolResponse{Status: &commonpb.Status{}}
-		if req.GetCollectionName() == collName {
-			for _, partName := range partNames {
-				if req.GetPartitionName() == partName {
-					resp.Value = true
-					break
-				}
-			}
-		}
-		return resp
-	}, nil)
-}
-
-func (s *MockSuiteBase) setupHasPartitionError(errorCode commonpb.ErrorCode, err error) {
-	s.mock.EXPECT().HasPartition(mock.Anything, mock.AnythingOfType("*milvuspb.HasPartitionRequest")).
-		Return(&milvuspb.BoolResponse{
-			Status: &commonpb.Status{ErrorCode: errorCode},
-		}, err)
-}
-
-func (s *MockSuiteBase) setupDescribeCollection(_ string, schema *entity.Schema) {
-	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.AnythingOfType("*milvuspb.DescribeCollectionRequest")).
-		Call.Return(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) *milvuspb.DescribeCollectionResponse {
-		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Schema: schema.ProtoMessage(),
-		}
-	}, nil)
-}
-
-func (s *MockSuiteBase) setupDescribeCollectionError(errorCode commonpb.ErrorCode, err error) {
-	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.AnythingOfType("*milvuspb.DescribeCollectionRequest")).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{ErrorCode: errorCode},
-		}, err)
 }
 
 func (s *MockSuiteBase) getInt64FieldData(name string, data []int64) *schemapb.FieldData {

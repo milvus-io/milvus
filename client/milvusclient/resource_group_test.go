@@ -22,9 +22,9 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -43,16 +43,22 @@ func (s *ResourceGroupSuite) TestListResourceGroups() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
+		defer mockey.UnPatchAll()
+		mockListResourceGroups := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListResourceGroups).Return(&milvuspb.ListResourceGroupsResponse{
 			ResourceGroups: []string{"rg1", "rg2"},
-		}, nil).Once()
+		}, nil).Build()
+		defer mockListResourceGroups.UnPatch()
+
 		rgs, err := s.client.ListResourceGroups(ctx, NewListResourceGroupsOption())
 		s.NoError(err)
 		s.Equal([]string{"rg1", "rg2"}, rgs)
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockListResourceGroups := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListResourceGroups).Return(nil, errors.New("mocked")).Build()
+		defer mockListResourceGroups.UnPatch()
+
 		_, err := s.client.ListResourceGroups(ctx, NewListResourceGroupsOption())
 		s.Error(err)
 	})
@@ -63,21 +69,27 @@ func (s *ResourceGroupSuite) TestCreateResourceGroup() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, crgr *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+		mockCreateResourceGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateResourceGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, crgr *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 			s.Equal(rgName, crgr.GetResourceGroup())
 			s.Equal(int32(5), crgr.GetConfig().GetRequests().GetNodeNum())
 			s.Equal(int32(10), crgr.GetConfig().GetLimits().GetNodeNum())
 			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-		}).Once()
+		}).Build()
+		defer mockCreateResourceGroup.UnPatch()
+
 		opt := NewCreateResourceGroupOption(rgName).WithNodeLimit(10).WithNodeRequest(5)
 		err := s.client.CreateResourceGroup(ctx, opt)
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		mockCreateResourceGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateResourceGroup).Return(nil, errors.New("mocked")).Build()
+		defer mockCreateResourceGroup.UnPatch()
+
 		opt := NewCreateResourceGroupOption(rgName).WithNodeLimit(10).WithNodeRequest(5)
 		err := s.client.CreateResourceGroup(ctx, opt)
 		s.Error(err)
@@ -89,19 +101,25 @@ func (s *ResourceGroupSuite) TestDropResourceGroup() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, drgr *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+		mockDropResourceGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropResourceGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, drgr *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
 			s.Equal(rgName, drgr.GetResourceGroup())
 			return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-		}).Once()
+		}).Build()
+		defer mockDropResourceGroup.UnPatch()
+
 		opt := NewDropResourceGroupOption(rgName)
 		err := s.client.DropResourceGroup(ctx, opt)
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		mockDropResourceGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropResourceGroup).Return(nil, errors.New("mocked")).Build()
+		defer mockDropResourceGroup.UnPatch()
+
 		opt := NewDropResourceGroupOption(rgName)
 		err := s.client.DropResourceGroup(ctx, opt)
 		s.Error(err)
@@ -113,6 +131,7 @@ func (s *ResourceGroupSuite) TestDescribeResourceGroup() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		limit := rand.Int31n(10) + 1
 		request := rand.Int31n(10) + 1
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
@@ -126,7 +145,7 @@ func (s *ResourceGroupSuite) TestDescribeResourceGroup() {
 			Address:  s.randString(6),
 			HostName: s.randString(10),
 		}
-		s.mock.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, drgr *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
+		mockDescribeResourceGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeResourceGroup).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, drgr *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
 			s.Equal(rgName, drgr.GetResourceGroup())
 			return &milvuspb.DescribeResourceGroupResponse{
 				ResourceGroup: &milvuspb.ResourceGroup{
@@ -157,7 +176,9 @@ func (s *ResourceGroupSuite) TestDescribeResourceGroup() {
 					},
 				},
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockDescribeResourceGroup.UnPatch()
+
 		opt := NewDescribeResourceGroupOption(rgName)
 		rg, err := s.client.DescribeResourceGroup(ctx, opt)
 		s.NoError(err)
@@ -175,8 +196,11 @@ func (s *ResourceGroupSuite) TestDescribeResourceGroup() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		mockDescribeResourceGroup := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeResourceGroup).Return(nil, errors.New("mocked")).Build()
+		defer mockDescribeResourceGroup.UnPatch()
+
 		opt := NewDescribeResourceGroupOption(rgName)
 		_, err := s.client.DescribeResourceGroup(ctx, opt)
 		s.Error(err)
@@ -188,6 +212,7 @@ func (s *ResourceGroupSuite) TestUpdateResourceGroup() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		limit := rand.Int31n(10) + 1
 		request := rand.Int31n(10) + 1
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
@@ -196,7 +221,7 @@ func (s *ResourceGroupSuite) TestUpdateResourceGroup() {
 		labels := map[string]string{
 			"label1": s.randString(10),
 		}
-		s.mock.EXPECT().UpdateResourceGroups(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, urgr *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+		mockUpdateResourceGroups := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).UpdateResourceGroups).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, urgr *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
 			config, ok := urgr.GetResourceGroups()[rgName]
 			s.Require().True(ok)
 			s.Equal(request, config.GetRequests().GetNodeNum())
@@ -209,7 +234,9 @@ func (s *ResourceGroupSuite) TestUpdateResourceGroup() {
 			}))
 			s.Equal(labels, entity.KvPairsMap(config.GetNodeFilter().GetNodeLabels()))
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockUpdateResourceGroups.UnPatch()
+
 		opt := NewUpdateResourceGroupOption(rgName, &entity.ResourceGroupConfig{
 			Requests: entity.ResourceGroupLimit{NodeNum: request},
 			Limits:   entity.ResourceGroupLimit{NodeNum: limit},
@@ -230,8 +257,11 @@ func (s *ResourceGroupSuite) TestUpdateResourceGroup() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().UpdateResourceGroups(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		mockUpdateResourceGroups := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).UpdateResourceGroups).Return(nil, errors.New("mocked")).Build()
+		defer mockUpdateResourceGroups.UnPatch()
+
 		opt := NewUpdateResourceGroupOption(rgName, &entity.ResourceGroupConfig{})
 		err := s.client.UpdateResourceGroup(ctx, opt)
 		s.Error(err)
@@ -243,28 +273,34 @@ func (s *ResourceGroupSuite) TestTransferReplica() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("rg_%s", s.randString(6))
 		dbName := fmt.Sprintf("db_%s", s.randString(6))
 		from := fmt.Sprintf("rg_%s", s.randString(6))
 		to := fmt.Sprintf("rg_%s", s.randString(6))
 		replicaNum := rand.Int63n(10) + 1
-		s.mock.EXPECT().TransferReplica(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, tr *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
+		mockTransferReplica := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).TransferReplica).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, tr *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
 			s.Equal(collName, tr.GetCollectionName())
 			s.Equal(dbName, tr.GetDbName())
 			s.Equal(from, tr.GetSourceResourceGroup())
 			s.Equal(to, tr.GetTargetResourceGroup())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockTransferReplica.UnPatch()
+
 		opt := NewTransferReplicaOption(collName, from, to, replicaNum).WithDBName(dbName)
 		err := s.client.TransferReplica(ctx, opt)
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		rgName := fmt.Sprintf("rg_%s", s.randString(6))
 		from := fmt.Sprintf("rg_%s", s.randString(6))
 		to := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+		mockTransferReplica := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).TransferReplica).Return(nil, errors.New("mocked")).Build()
+		defer mockTransferReplica.UnPatch()
+
 		opt := NewTransferReplicaOption(rgName, from, to, 1)
 		err := s.client.TransferReplica(ctx, opt)
 		s.Error(err)
@@ -276,6 +312,7 @@ func (s *ResourceGroupSuite) TestDescribeReplica() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("rg_%s", s.randString(6))
 		replicas := map[int64]*entity.ReplicaInfo{
 			1: {
@@ -288,7 +325,7 @@ func (s *ResourceGroupSuite) TestDescribeReplica() {
 				NumOutboundNode: map[string]int32{"dml_1": 1},
 			},
 		}
-		s.mock.EXPECT().GetReplicas(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, grr *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+		mockGetReplicas := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetReplicas).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, grr *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 			return &milvuspb.GetReplicasResponse{
 				Replicas: lo.MapToSlice(replicas, func(_ int64, r *entity.ReplicaInfo) *milvuspb.ReplicaInfo {
 					return &milvuspb.ReplicaInfo{
@@ -306,7 +343,9 @@ func (s *ResourceGroupSuite) TestDescribeReplica() {
 					}
 				}),
 			}, nil
-		}).Once()
+		}).Build()
+		defer mockGetReplicas.UnPatch()
+
 		result, err := s.client.DescribeReplica(ctx, NewDescribeReplicaOption(collName))
 		s.NoError(err)
 		for _, replica := range result {
@@ -318,8 +357,11 @@ func (s *ResourceGroupSuite) TestDescribeReplica() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		collName := fmt.Sprintf("rg_%s", s.randString(6))
-		s.mock.EXPECT().GetReplicas(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
+		mockGetReplicas := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).GetReplicas).Return(nil, errors.New("mock")).Build()
+		defer mockGetReplicas.UnPatch()
+
 		_, err := s.client.DescribeReplica(ctx, NewDescribeReplicaOption(collName))
 		s.Error(err)
 	})

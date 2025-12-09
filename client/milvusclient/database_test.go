@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	mock "github.com/stretchr/testify/mock"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -22,10 +22,12 @@ func (s *DatabaseSuite) TestListDatabases() {
 	defer cancel()
 
 	s.Run("success", func() {
-		s.mock.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		defer mockey.UnPatchAll()
+		mockListDatabases := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListDatabases).Return(&milvuspb.ListDatabasesResponse{
 			Status:  merr.Success(),
 			DbNames: []string{"default", "db1"},
-		}, nil).Once()
+		}, nil).Build()
+		defer mockListDatabases.UnPatch()
 
 		names, err := s.client.ListDatabase(ctx, NewListDatabaseOption())
 		s.NoError(err)
@@ -33,7 +35,9 @@ func (s *DatabaseSuite) TestListDatabases() {
 	})
 
 	s.Run("failure", func() {
-		s.mock.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		defer mockey.UnPatchAll()
+		mockListDatabases := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).ListDatabases).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockListDatabases.UnPatch()
 
 		_, err := s.client.ListDatabase(ctx, NewListDatabaseOption())
 		s.Error(err)
@@ -45,19 +49,23 @@ func (s *DatabaseSuite) TestCreateDatabase() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().CreateDatabase(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cdr *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
+		mockCreateDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateDatabase).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, cdr *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 			s.Equal(dbName, cdr.GetDbName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockCreateDatabase.UnPatch()
 
 		err := s.client.CreateDatabase(ctx, NewCreateDatabaseOption(dbName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockCreateDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).CreateDatabase).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockCreateDatabase.UnPatch()
 
 		err := s.client.CreateDatabase(ctx, NewCreateDatabaseOption(dbName))
 		s.Error(err)
@@ -69,19 +77,23 @@ func (s *DatabaseSuite) TestDropDatabase() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().DropDatabase(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ddr *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
+		mockDropDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropDatabase).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, ddr *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
 			s.Equal(dbName, ddr.GetDbName())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockDropDatabase.UnPatch()
 
 		err := s.client.DropDatabase(ctx, NewDropDatabaseOption(dbName))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockDropDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DropDatabase).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDropDatabase.UnPatch()
 
 		err := s.client.DropDatabase(ctx, NewDropDatabaseOption(dbName))
 		s.Error(err)
@@ -93,13 +105,9 @@ func (s *DatabaseSuite) TestUseDatabase() {
 	defer cancel()
 
 	s.Run("success", func() {
+		// Note: Connect is already mocked in SetupSuite, so we don't need to mock it again.
+		// The existing Connect mock returns a valid ConnectResponse.
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().Connect(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cr *milvuspb.ConnectRequest) (*milvuspb.ConnectResponse, error) {
-			return &milvuspb.ConnectResponse{
-				Status:     merr.Success(),
-				ServerInfo: &commonpb.ServerInfo{},
-			}, nil
-		}).Once()
 
 		err := s.client.UseDatabase(ctx, NewUseDatabaseOption(dbName))
 		s.NoError(err)
@@ -113,16 +121,18 @@ func (s *DatabaseSuite) TestDescribeDatabase() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
 		key := fmt.Sprintf("key_%s", s.randString(4))
 		value := s.randString(6)
-		s.mock.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&milvuspb.DescribeDatabaseResponse{
+		mockDescribeDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeDatabase).Return(&milvuspb.DescribeDatabaseResponse{
 			Status: merr.Success(),
 			DbName: dbName,
 			Properties: []*commonpb.KeyValuePair{
 				{Key: key, Value: value},
 			},
-		}, nil).Once()
+		}, nil).Build()
+		defer mockDescribeDatabase.UnPatch()
 
 		db, err := s.client.DescribeDatabase(ctx, NewDescribeDatabaseOption(dbName))
 		s.NoError(err)
@@ -131,8 +141,10 @@ func (s *DatabaseSuite) TestDescribeDatabase() {
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockDescribeDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).DescribeDatabase).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockDescribeDatabase.UnPatch()
 
 		_, err := s.client.DescribeDatabase(ctx, NewDescribeDatabaseOption(dbName))
 		s.Error(err)
@@ -144,22 +156,26 @@ func (s *DatabaseSuite) TestAlterDatabaseProperties() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
 		key := fmt.Sprintf("key_%s", s.randString(4))
 		value := s.randString(6)
-		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, adr *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+		mockAlterDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterDatabase).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, adr *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
 			s.Equal(dbName, adr.GetDbName())
 			s.Len(adr.GetProperties(), 1)
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterDatabase.UnPatch()
 
 		err := s.client.AlterDatabaseProperties(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty(key, value))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockAlterDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterDatabase).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterDatabase.UnPatch()
 
 		err := s.client.AlterDatabaseProperties(ctx, NewAlterDatabasePropertiesOption(dbName).WithProperty("key", "value"))
 		s.Error(err)
@@ -171,20 +187,24 @@ func (s *DatabaseSuite) TestDropDatabaseProperties() {
 	defer cancel()
 
 	s.Run("success", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
 		key := fmt.Sprintf("key_%s", s.randString(4))
-		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, adr *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+		mockAlterDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterDatabase).To(func(_ *milvuspb.UnimplementedMilvusServiceServer, ctx context.Context, adr *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
 			s.Equal([]string{key}, adr.GetDeleteKeys())
 			return merr.Success(), nil
-		}).Once()
+		}).Build()
+		defer mockAlterDatabase.UnPatch()
 
 		err := s.client.DropDatabaseProperties(ctx, NewDropDatabasePropertiesOption(dbName, key))
 		s.NoError(err)
 	})
 
 	s.Run("failure", func() {
+		defer mockey.UnPatchAll()
 		dbName := fmt.Sprintf("dt_%s", s.randString(6))
-		s.mock.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		mockAlterDatabase := mockey.Mock((*milvuspb.UnimplementedMilvusServiceServer).AlterDatabase).Return(nil, merr.WrapErrServiceInternal("mocked")).Build()
+		defer mockAlterDatabase.UnPatch()
 
 		err := s.client.DropDatabaseProperties(ctx, NewDropDatabasePropertiesOption(dbName, "key"))
 		s.Error(err)
