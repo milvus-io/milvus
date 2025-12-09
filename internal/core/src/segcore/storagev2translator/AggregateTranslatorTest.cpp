@@ -42,8 +42,10 @@ namespace cachinglayer = milvus::cachinglayer;
 // Minimal mock ChunkReader for testing
 class MockChunkReader : public milvus_storage::api::ChunkReader {
  public:
-    explicit MockChunkReader(size_t num_cells, const std::vector<int64_t>& rows_per_cell)
-        : num_cells_(num_cells), rows_per_cell_(rows_per_cell) {}
+    explicit MockChunkReader(size_t num_cells,
+                             const std::vector<int64_t>& rows_per_cell)
+        : num_cells_(num_cells), rows_per_cell_(rows_per_cell) {
+    }
 
     size_t
     total_number_of_chunks() const override {
@@ -61,7 +63,8 @@ class MockChunkReader : public milvus_storage::api::ChunkReader {
     }
 
     arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
-    get_chunks(const std::vector<int64_t>& indices, int64_t parallel_degree) override {
+    get_chunks(const std::vector<int64_t>& indices,
+               int64_t parallel_degree) override {
         return arrow::Status::NotImplemented("Mock - use read_cells override");
     }
 
@@ -142,14 +145,16 @@ class MockManifestGroupTranslator : public ManifestGroupTranslator {
         for (const auto& batch : record_batches) {
             int64_arrays.push_back(batch->column(0));
         }
-        chunks[FieldId(1)] = create_chunk(field_metas.at(FieldId(1)), int64_arrays);
+        chunks[FieldId(1)] =
+            create_chunk(field_metas.at(FieldId(1)), int64_arrays);
 
         // Field 2 (float)
         arrow::ArrayVector float_arrays;
         for (const auto& batch : record_batches) {
             float_arrays.push_back(batch->column(1));
         }
-        chunks[FieldId(2)] = create_chunk(field_metas.at(FieldId(2)), float_arrays);
+        chunks[FieldId(2)] =
+            create_chunk(field_metas.at(FieldId(2)), float_arrays);
 
         return std::make_unique<GroupChunk>(chunks);
     }
@@ -162,16 +167,18 @@ class MockManifestGroupTranslator : public ManifestGroupTranslator {
     static std::unordered_map<FieldId, FieldMeta>
     CreateFieldMetas() {
         std::unordered_map<FieldId, FieldMeta> field_metas;
-        field_metas.emplace(FieldId(1), FieldMeta(FieldName("field1"),
-                                                  FieldId(1),
-                                                  DataType::INT64,
-                                                  false,
-                                                  std::nullopt));
-        field_metas.emplace(FieldId(2), FieldMeta(FieldName("field2"),
-                                                  FieldId(2),
-                                                  DataType::FLOAT,
-                                                  false,
-                                                  std::nullopt));
+        field_metas.emplace(FieldId(1),
+                            FieldMeta(FieldName("field1"),
+                                      FieldId(1),
+                                      DataType::INT64,
+                                      false,
+                                      std::nullopt));
+        field_metas.emplace(FieldId(2),
+                            FieldMeta(FieldName("field2"),
+                                      FieldId(2),
+                                      DataType::FLOAT,
+                                      false,
+                                      std::nullopt));
         return field_metas;
     }
 };

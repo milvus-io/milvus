@@ -447,9 +447,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto chunk_reader = std::move(chunk_reader_result).ValueOrDie();
 
-    LOG_INFO("[StorageV2] segment {} loads manifest cg index {} with aggregation factor 4",
-             this->get_segment_id(),
-             index);
+    LOG_INFO(
+        "[StorageV2] segment {} loads manifest cg index {} with aggregation "
+        "factor 4",
+        this->get_segment_id(),
+        index);
 
     auto manifest_translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -460,14 +462,14 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             use_mmap,
             column_group->columns.size(),
             segment_load_info_.priority());
-    
+
     // Wrap with AggregateTranslator for zero-copy aggregation
     auto translator =
         std::make_unique<storagev2translator::AggregateTranslator>(
             std::move(manifest_translator),
             4  // Default aggregation factor
         );
-    
+
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
