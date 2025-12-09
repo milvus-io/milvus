@@ -161,13 +161,10 @@ func newMetricsNodeMemoryQuerier(nodeManager session.NodeManager, mixCoord types
 	}
 }
 
-// Verify metricsNodeMemoryQuerier implements CollectionTopologyQuerier
 var _ CollectionTopologyQuerier = (*metricsNodeMemoryQuerier)(nil)
 
-// GetCollectionTopology retrieves topology information for a collection
 func (q *metricsNodeMemoryQuerier) GetCollectionTopology(ctx context.Context, collectionID int64) (*CollectionTopology, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
-
 	if q.mixCoord == nil {
 		return nil, fmt.Errorf("mixCoord not available for topology query")
 	}
@@ -188,7 +185,7 @@ func (q *metricsNodeMemoryQuerier) GetCollectionTopology(ctx context.Context, co
 	}
 
 	// Get QueryNode sessions from etcd to filter out embedded nodes
-	sessions, _, err := q.session.GetSessions(typeutil.QueryNodeRole)
+	sessions, _, err := q.session.GetSessions(ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("failed to get QueryNode sessions", zap.Error(err))
 		return nil, err
@@ -204,8 +201,8 @@ func (q *metricsNodeMemoryQuerier) GetCollectionTopology(ctx context.Context, co
 			}
 		}
 	}
-	log.Info("excluding embedded QueryNode", zap.Int64s("nodeIDs", lo.Keys(embeddedNodeIDs)))
 
+	log.Info("excluding embedded QueryNode", zap.Int64s("nodeIDs", lo.Keys(embeddedNodeIDs)))
 	rsp, err := q.mixCoord.GetQcMetrics(ctx, req)
 	if err = merr.CheckRPCCall(rsp, err); err != nil {
 		return nil, err

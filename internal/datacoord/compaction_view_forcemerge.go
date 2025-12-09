@@ -290,7 +290,7 @@ func (v *ForceMergeSegmentView) calculateMaxSafeSize() float64 {
 		log.Info("force merge on standalone not pooling mode, half the max size",
 			zap.Float64("qnMaxSafeSize", qnMaxSafeSize),
 			zap.Float64("dnMaxSafeSize", dnMaxSafeSize),
-			zap.Float64("maxSafeSize", maxSafeSize),
+			zap.Float64("maxSafeSize/2", maxSafeSize/2),
 			zap.Float64("configMaxSize", v.configMaxSize))
 		// dn and qn are co-located, half the min
 		return maxSafeSize * 0.5

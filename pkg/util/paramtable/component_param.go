@@ -3916,7 +3916,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorIndex = ParamItem{
 		Key:          "queryNode.mmap.vectorIndex",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3931,7 +3931,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarField = ParamItem{
 		Key:          "queryNode.mmap.scalarField",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3946,7 +3946,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapScalarIndex = ParamItem{
 		Key:          "queryNode.mmap.scalarIndex",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3971,7 +3971,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.GrowingMmapEnabled = ParamItem{
 		Key:          "queryNode.mmap.growingMmapEnabled",
 		Version:      "2.4.6",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		FallbackKeys: []string{"queryNode.growingMmapEnabled"},
 		Doc: `Enable memory mapping (mmap) to optimize the handling of growing raw data.
 By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
