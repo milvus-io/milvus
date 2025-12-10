@@ -13,6 +13,7 @@ from deepdiff import DeepDiff
 
 epsilon = ct.epsilon
 
+
 def deep_approx_compare(x, y, epsilon=epsilon):
     """
     Recursively compares two objects for approximate equality, handling floating-point precision.
@@ -76,6 +77,7 @@ import re
 # Pre-compile regex patterns for better performance
 _GEO_PATTERN = re.compile(r'(POINT|LINESTRING|POLYGON)\s+\(')
 _WHITESPACE_PATTERN = re.compile(r'\s+')
+
 
 def normalize_geo_string(s):
     """
@@ -141,6 +143,7 @@ def normalize_value(value):
     # Return as-is for other types
     return value
 
+
 def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
     """
     Compares two lists of dictionaries for equality (order-insensitive) with floating-point tolerance.
@@ -183,6 +186,7 @@ def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
 
     return True
 
+
 def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon):
     """
     Compare two lists of dictionaries for equality (order-insensitive) with floating-point tolerance using DeepDiff.
@@ -202,6 +206,7 @@ def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon)
         )
         if diff:
             log.debug(f"[COMPARE_LISTS] Found differences at row {i}: {diff}")
+
 
 def ip_check(ip):
     if ip == "localhost":
