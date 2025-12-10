@@ -35,7 +35,6 @@ PayloadWriter::PayloadWriter(const DataType column_type, int dim, bool nullable)
     AssertInfo(column_type != DataType::VECTOR_SPARSE_U32_F32,
                "PayloadWriter for Sparse Float Vector should be created "
                "using the constructor without dimension");
-    AssertInfo(nullable == false, "only scalcar type support null now");
     init_dimension(dim);
 }
 
@@ -63,7 +62,7 @@ PayloadWriter::init_dimension(int dim) {
     }
 
     dimension_ = dim;
-    builder_ = CreateArrowBuilder(column_type_, element_type_, dim);
+    builder_ = CreateArrowBuilder(column_type_, element_type_, dim, nullable_);
     schema_ = CreateArrowSchema(column_type_, dim, nullable_);
 }
 
@@ -112,8 +111,10 @@ PayloadWriter::finish() {
 
     std::shared_ptr<parquet::ArrowWriterProperties> arrow_properties =
         parquet::default_arrow_writer_properties();
-    if (column_type_ == DataType::VECTOR_ARRAY) {
-        // For VectorArray, we need to store schema metadata
+    if (column_type_ == DataType::VECTOR_ARRAY ||
+        (nullable_ && IsVectorDataType(column_type_) &&
+         !IsSparseFloatVectorDataType(column_type_))) {
+        // For VectorArray and nullable vectors, we need to store schema metadata
         parquet::ArrowWriterProperties::Builder arrow_props_builder;
         arrow_props_builder.store_schema();
         arrow_properties = arrow_props_builder.build();

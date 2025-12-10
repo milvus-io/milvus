@@ -336,9 +336,13 @@ BaseEventData::Serialize() {
                     auto row = static_cast<
                         const knowhere::sparse::SparseRow<SparseValueType>*>(
                         field_data->RawValue(offset));
-                    payload_writer->add_one_binary_payload(
-                        static_cast<const uint8_t*>(row->data()),
-                        row->data_byte_size());
+                    if (row) {
+                        payload_writer->add_one_binary_payload(
+                            static_cast<const uint8_t*>(row->data()),
+                            row->data_byte_size());
+                    } else {
+                        payload_writer->add_one_binary_payload(nullptr, -1);
+                    }
                 }
                 break;
             }

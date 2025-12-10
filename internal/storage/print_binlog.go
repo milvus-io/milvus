@@ -303,7 +303,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			fmt.Printf("\t\t%d : %s\n", i, val[i])
 		}
 	case schemapb.DataType_BinaryVector:
-		val, dim, err := reader.GetBinaryVectorFromPayload()
+		val, dim, _, _, err := reader.GetBinaryVectorFromPayload()
 		if err != nil {
 			return err
 		}
@@ -318,7 +318,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			fmt.Println()
 		}
 	case schemapb.DataType_Float16Vector:
-		val, dim, err := reader.GetFloat16VectorFromPayload()
+		val, dim, _, _, err := reader.GetFloat16VectorFromPayload()
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			fmt.Println()
 		}
 	case schemapb.DataType_BFloat16Vector:
-		val, dim, err := reader.GetBFloat16VectorFromPayload()
+		val, dim, _, _, err := reader.GetBFloat16VectorFromPayload()
 		if err != nil {
 			return err
 		}
@@ -349,7 +349,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		}
 
 	case schemapb.DataType_FloatVector:
-		val, dim, err := reader.GetFloatVectorFromPayload()
+		val, dim, _, _, err := reader.GetFloatVectorFromPayload()
 		if err != nil {
 			return err
 		}
@@ -359,6 +359,20 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			for j := 0; j < dim; j++ {
 				idx := i*dim + j
 				fmt.Printf(" %f", val[idx])
+			}
+			fmt.Println()
+		}
+	case schemapb.DataType_Int8Vector:
+		val, dim, _, _, err := reader.GetInt8VectorFromPayload()
+		if err != nil {
+			return err
+		}
+		length := len(val) / dim
+		for i := 0; i < length; i++ {
+			fmt.Printf("\t\t%d :", i)
+			for j := 0; j < dim; j++ {
+				idx := i*dim + j
+				fmt.Printf(" %d", val[idx])
 			}
 			fmt.Println()
 		}
@@ -397,7 +411,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_SparseFloatVector:
-		sparseData, _, err := reader.GetSparseFloatVectorFromPayload()
+		sparseData, _, _, err := reader.GetSparseFloatVectorFromPayload()
 		if err != nil {
 			return err
 		}
