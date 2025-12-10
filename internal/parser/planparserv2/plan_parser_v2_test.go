@@ -912,6 +912,9 @@ func TestCreateRetrievePlan(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	_, err := CreateRetrievePlan(schema, "Int64Field > 0", nil)
 	assert.NoError(t, err)
+
+	_, err = CreateRetrievePlan(schema, "id > -9223372036854775808", nil)
+	assert.NoError(t, err)
 }
 
 func TestCreateSearchPlan(t *testing.T) {
@@ -1007,7 +1010,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`"str" != false`,
 		`VarCharField != FloatField`,
 		`FloatField == VarCharField`,
-		`A == -9223372036854775808`,
+		`A == -9223372036854775809`,
 		// ---------------------- relational --------------------
 		//`not_in_schema < 1`, // maybe in json
 		//`1 <= not_in_schema`, // maybe in json
