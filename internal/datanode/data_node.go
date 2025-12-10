@@ -102,8 +102,6 @@ type DataNode struct {
 	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
 	pool                   *conc.Pool[any]
 
-	totalSlot int64
-
 	metricsRequest *metricsinfo.MetricsRequest
 }
 
@@ -119,7 +117,6 @@ func NewDataNode(ctx context.Context) *DataNode {
 		compactionExecutor:     compactor.NewExecutor(),
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
-		totalSlot:              index.CalculateNodeSlots(),
 	}
 	sc := index.NewTaskScheduler(ctx2)
 	node.storageFactory = NewChunkMgrFactory()

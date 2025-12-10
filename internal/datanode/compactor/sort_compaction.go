@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -27,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -422,58 +424,68 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 		return nil, err
 	}
 
-	textIndexLogs := make(map[int64]*datapb.TextIndexStats)
+	// Concurrent create text index for all match-enabled fields
+	var (
+		mu            sync.Mutex
+		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
+	)
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
 	for _, field := range t.plan.GetSchema().GetFields() {
+		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableMatch() {
 			continue
 		}
 		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
-		// create text index and upload the text index files.
-		files, err := getInsertFiles(field.GetFieldID())
-		if err != nil {
-			return nil, err
-		}
 
-		buildIndexParams := &indexcgopb.BuildIndexInfo{
-			BuildID:                   t.GetPlanID(),
-			CollectionID:              collectionID,
-			PartitionID:               partitionID,
-			SegmentID:                 segmentID,
-			IndexVersion:              0, // always zero
-			InsertFiles:               files,
-			FieldSchema:               field,
-			StorageConfig:             newStorageConfig,
-			CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
-			StorageVersion:            t.storageVersion,
-			Manifest:                  t.manifest,
-		}
+		eg.Go(func() error {
+			files, err := getInsertFiles(field.GetFieldID())
+			if err != nil {
+				return err
+			}
 
-		if t.storageVersion == storage.StorageV2 {
-			buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
-				insertBinlogs,
-				t.compactionParams.StorageConfig,
-				collectionID,
-				partitionID,
-				segmentID)
-		}
-		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
-		if err != nil {
-			return nil, err
-		}
-		textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-			FieldID: field.GetFieldID(),
-			Version: 0,
-			BuildID: taskID,
-			Files:   lo.Keys(uploaded),
-		}
-		elapse := t.tr.RecordSpan()
-		log.Info("field enable match, create text index done",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(uploaded)),
-			zap.Duration("elapse", elapse),
-		)
+			buildIndexParams := &indexcgopb.BuildIndexInfo{
+				BuildID:                   t.GetPlanID(),
+				CollectionID:              collectionID,
+				PartitionID:               partitionID,
+				SegmentID:                 segmentID,
+				IndexVersion:              0, // always zero
+				InsertFiles:               files,
+				FieldSchema:               field,
+				StorageConfig:             newStorageConfig,
+				CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
+				StorageVersion:            t.storageVersion,
+				Manifest:                  t.manifest,
+			}
+
+			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
+				FieldID: field.GetFieldID(),
+				Version: 0,
+				BuildID: taskID,
+				Files:   lo.Keys(uploaded),
+			}
+			mu.Unlock()
+
+			log.Info("field enable match, create text index done",
+				zap.Int64("segmentID", segmentID),
+				zap.Int64("field id", field.GetFieldID()),
+				zap.Strings("files", lo.Keys(uploaded)),
+			)
+			return nil
+		})
 	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
 	return textIndexLogs, nil
 }
