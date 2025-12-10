@@ -143,6 +143,9 @@ func TestGetSegmentSize(t *testing.T) {
 
 	assert.Equal(t, int64(3), segment.getSegmentSize())
 	assert.Equal(t, int64(3), segment.getSegmentSize())
+	assert.Equal(t, int64(1), segment.getFieldBinlogSize(1))
+	assert.Equal(t, int64(1), segment.getFieldBinlogSize(2))
+	assert.Equal(t, int64(1), segment.getFieldBinlogSize(3))
 }
 
 func TestIsDeltaLogExists(t *testing.T) {

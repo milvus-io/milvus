@@ -514,6 +514,21 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 	return s.size.Load()
 }
 
+func (s *SegmentInfo) getFieldBinlogSize(fieldID int64) int64 {
+	var size int64
+	for _, binlogs := range s.GetBinlogs() {
+		if binlogs.GetFieldID() == fieldID {
+			for _, l := range binlogs.GetBinlogs() {
+				size += l.GetMemorySize()
+			}
+		}
+	}
+	if size <= 0 {
+		return s.getSegmentSize()
+	}
+	return size
+}
+
 // Any edits on deltalogs of flushed segments will reset deltaRowcount to -1
 func (s *SegmentInfo) getDeltaCount() int64 {
 	if s.deltaRowcount.Load() < 0 || s.GetState() != commonpb.SegmentState_Flushed {

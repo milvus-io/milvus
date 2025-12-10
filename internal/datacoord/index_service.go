@@ -70,7 +70,8 @@ func (s *Server) createIndexForSegment(ctx context.Context, segment *SegmentInfo
 	indexParams := s.meta.indexMeta.GetIndexParams(segment.CollectionID, indexID)
 	indexType := GetIndexType(indexParams)
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-	taskSlot := calculateIndexTaskSlot(segment.getSegmentSize(), isVectorIndex)
+	fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
+	taskSlot := calculateIndexTaskSlot(segment.getFieldBinlogSize(fieldID), isVectorIndex)
 	segIndex := &model.SegmentIndex{
 		SegmentID:      segment.ID,
 		CollectionID:   segment.CollectionID,

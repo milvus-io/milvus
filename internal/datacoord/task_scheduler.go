@@ -123,7 +123,8 @@ func (s *taskScheduler) reloadFromMeta() {
 			indexParams := s.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-			taskSlot := calculateIndexTaskSlot(segment.getSegmentSize(), isVectorIndex)
+			fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
+			taskSlot := calculateIndexTaskSlot(segment.getFieldBinlogSize(fieldID), isVectorIndex)
 			task := &indexBuildTask{
 				taskID: segIndex.BuildID,
 				nodeID: segIndex.NodeID,
