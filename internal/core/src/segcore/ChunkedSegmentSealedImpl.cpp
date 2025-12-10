@@ -486,6 +486,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
             get_segment_id(),
+            GroupChunkType::DEFAULT,
             index,
             std::move(chunk_reader),
             field_metas,
