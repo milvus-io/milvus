@@ -29,6 +29,66 @@ func (_m *MockCluster) EXPECT() *MockCluster_Expecter {
 	return &MockCluster_Expecter{mock: &_m.Mock}
 }
 
+// ComputePhraseMatchSlop provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputePhraseMatchSlop")
+	}
+
+	var r0 *querypb.ComputePhraseMatchSlopResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ComputePhraseMatchSlopRequest) *querypb.ComputePhraseMatchSlopResponse); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ComputePhraseMatchSlopResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *querypb.ComputePhraseMatchSlopRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
+type MockCluster_ComputePhraseMatchSlop_Call struct {
+	*mock.Call
+}
+
+// ComputePhraseMatchSlop is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.ComputePhraseMatchSlopRequest
+func (_e *MockCluster_Expecter) ComputePhraseMatchSlop(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_ComputePhraseMatchSlop_Call {
+	return &MockCluster_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_ComputePhraseMatchSlop_Call) Run(run func(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest)) *MockCluster_ComputePhraseMatchSlop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*querypb.ComputePhraseMatchSlopRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_ComputePhraseMatchSlop_Call) Return(_a0 *querypb.ComputePhraseMatchSlopResponse, _a1 error) *MockCluster_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, int64, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)) *MockCluster_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropIndex provides a mock function with given fields: ctx, nodeID, req
 func (_m *MockCluster) DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, nodeID, req)

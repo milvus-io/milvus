@@ -29,6 +29,65 @@ func (_m *MockQueryNodeServer) EXPECT() *MockQueryNodeServer_Expecter {
 	return &MockQueryNodeServer_Expecter{mock: &_m.Mock}
 }
 
+// ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) ComputePhraseMatchSlop(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputePhraseMatchSlop")
+	}
+
+	var r0 *querypb.ComputePhraseMatchSlopResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) *querypb.ComputePhraseMatchSlopResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ComputePhraseMatchSlopResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
+type MockQueryNodeServer_ComputePhraseMatchSlop_Call struct {
+	*mock.Call
+}
+
+// ComputePhraseMatchSlop is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ComputePhraseMatchSlopRequest
+func (_e *MockQueryNodeServer_Expecter) ComputePhraseMatchSlop(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
+	return &MockQueryNodeServer_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_ComputePhraseMatchSlop_Call) Run(run func(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest)) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ComputePhraseMatchSlopRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_ComputePhraseMatchSlop_Call) Return(_a0 *querypb.ComputePhraseMatchSlopResponse, _a1 error) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) Delete(_a0 context.Context, _a1 *querypb.DeleteRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1240,65 +1299,6 @@ func (_c *MockQueryNodeServer_RunAnalyzer_Call) Return(_a0 *milvuspb.RunAnalyzer
 }
 
 func (_c *MockQueryNodeServer_RunAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)) *MockQueryNodeServer_RunAnalyzer_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
-func (_m *MockQueryNodeServer) ComputePhraseMatchSlop(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ComputePhraseMatchSlop")
-	}
-
-	var r0 *querypb.ComputePhraseMatchSlopResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) *querypb.ComputePhraseMatchSlopResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*querypb.ComputePhraseMatchSlopResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockQueryNodeServer_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
-type MockQueryNodeServer_ComputePhraseMatchSlop_Call struct {
-	*mock.Call
-}
-
-// ComputePhraseMatchSlop is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.ComputePhraseMatchSlopRequest
-func (_e *MockQueryNodeServer_Expecter) ComputePhraseMatchSlop(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
-	return &MockQueryNodeServer_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop", _a0, _a1)}
-}
-
-func (_c *MockQueryNodeServer_ComputePhraseMatchSlop_Call) Run(run func(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest)) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.ComputePhraseMatchSlopRequest))
-	})
-	return _c
-}
-
-func (_c *MockQueryNodeServer_ComputePhraseMatchSlop_Call) Return(_a0 *querypb.ComputePhraseMatchSlopResponse, _a1 error) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockQueryNodeServer_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)) *MockQueryNodeServer_ComputePhraseMatchSlop_Call {
 	_c.Call.Return(run)
 	return _c
 }
