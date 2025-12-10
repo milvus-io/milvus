@@ -99,6 +99,7 @@ func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	h.EXPECT().HandleCreateSegment(mock.Anything, mock.Anything).Return(nil)
 	h.EXPECT().HandleFlush(mock.Anything).Return(nil)
 	h.EXPECT().HandleManualFlush(mock.Anything).Return(nil)
+	h.EXPECT().HandleFlushAll(mock.Anything, mock.Anything).Return(nil)
 
 	ddn := ddNode{
 		ctx:          context.Background(),
@@ -131,14 +132,24 @@ func TestFlowGraph_DDNode_OperateFlush(t *testing.T) {
 	assert.NoError(t, err)
 	immutableManualFlushMsg := manualFlushMsg.WithTimeTick(3).IntoImmutableMessage(mock_message.NewMockMessageID(t))
 
+	flushAllMsg, err := message.NewFlushAllMessageBuilderV2().
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
+		WithVChannel("v1").
+		BuildMutable()
+	assert.NoError(t, err)
+	immutableFlushAllMsg := flushAllMsg.WithTimeTick(4).IntoImmutableMessage(mock_message.NewMockMessageID(t))
+
 	msg1, err := adaptor.NewCreateSegmentMessageBody(immutableCreateSegmentMsg)
 	assert.NoError(t, err)
 	msg2, err := adaptor.NewFlushMessageBody(immutableFlushMsg)
 	assert.NoError(t, err)
 	msg3, err := adaptor.NewManualFlushMessageBody(immutableManualFlushMsg)
 	assert.NoError(t, err)
+	msg4, err := adaptor.NewFlushAllMessageBody(immutableFlushAllMsg)
+	assert.NoError(t, err)
 
-	tsMessages := []msgstream.TsMsg{msg1, msg2, msg3}
+	tsMessages := []msgstream.TsMsg{msg1, msg2, msg3, msg4}
 	var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 	outputMsgs := ddn.Operate([]Msg{msgStreamMsg})
 	assert.NotNil(t, outputMsgs)

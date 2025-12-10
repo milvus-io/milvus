@@ -14,33 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+package datacoord
 
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
-type MsgHandler interface {
-	HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error
-
-	HandleFlush(flushMsg message.ImmutableFlushMessageV2) error
-
-	HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error
-
-	HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error
-
-	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
-
-	HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error
-}
-
-func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-	return &internalpb.ImportFile{
-		Id:    file.GetId(),
-		Paths: file.GetPaths(),
-	}
+func (s *DDLCallbacks) flushAllV2AckCallback(ctx context.Context, result message.BroadcastResultFlushAllMessageV2) error {
+	// An empty callback to indicate it's a ddl or dcl operation.
+	return nil
 }
