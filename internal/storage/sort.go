@@ -131,8 +131,26 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		return nil
 	}
 
-	for _, idx := range indices {
-		if err := rb.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
+	// Batch append consecutive rows from the same record
+	for i := 0; i < len(indices); {
+		// Find the end of consecutive range (same ri and consecutive i)
+		ri := indices[i].ri
+		startI := indices[i].i
+		endI := startI
+		i++
+
+		for ; i < len(indices); i++ {
+			idx := indices[i]
+			// Check if this index is consecutive with the previous one
+			if idx.ri == ri && idx.i == endI+1 {
+				endI = idx.i
+			} else {
+				break
+			}
+		}
+
+		// Batch append the consecutive range
+		if err := rb.Append(records[ri], startI, endI+1); err != nil {
 			return 0, err
 		}
 

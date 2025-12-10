@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -422,14 +423,23 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 		return nil, err
 	}
 
-	textIndexLogs := make(map[int64]*datapb.TextIndexStats)
+	// Concurrent create text index for all match-enabled fields
+	var (
+		mu            sync.Mutex
+		wg            sync.WaitGroup
+		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
+		errCh         = make(chan error, len(t.plan.GetSchema().GetFields()))
+	)
+
 	for _, field := range t.plan.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableMatch() {
 			continue
 		}
+
+		field := field
 		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
-		// create text index and upload the text index files.
+
 		files, err := getInsertFiles(field.GetFieldID())
 		if err != nil {
 			return nil, err
@@ -456,23 +466,41 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				partitionID,
 				segmentID)
 		}
-		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
-		if err != nil {
-			return nil, err
-		}
-		textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-			FieldID: field.GetFieldID(),
-			Version: 0,
-			BuildID: taskID,
-			Files:   lo.Keys(uploaded),
-		}
-		elapse := t.tr.RecordSpan()
-		log.Info("field enable match, create text index done",
-			zap.Int64("segmentID", segmentID),
-			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(uploaded)),
-			zap.Duration("elapse", elapse),
-		)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			mu.Lock()
+			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
+				FieldID: field.GetFieldID(),
+				Version: 0,
+				BuildID: taskID,
+				Files:   lo.Keys(uploaded),
+			}
+			mu.Unlock()
+
+			log.Info("field enable match, create text index done",
+				zap.Int64("segmentID", segmentID),
+				zap.Int64("field id", field.GetFieldID()),
+				zap.Strings("files", lo.Keys(uploaded)),
+			)
+		}()
 	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errCh)
+
+	// Check for any errors
+	if err := <-errCh; err != nil {
+		return nil, err
+	}
+
 	return textIndexLogs, nil
 }
