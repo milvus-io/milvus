@@ -30,6 +30,7 @@ enum SegmentLevel {
 
 service DataCoord {
   rpc Flush(FlushRequest) returns (FlushResponse) {}
+  // FlushAll flushes all data in the cluster.
   rpc FlushAll(FlushAllRequest) returns(FlushAllResponse) {}
 
 
@@ -176,13 +177,12 @@ message FlushResult {
 }
 
 message FlushAllRequest {
-  common.MsgBase base = 1;
-  string dbName = 2;  // Deprecated: use flush_targets instead
-  
-  // List of specific databases and collections to flush
-  repeated FlushAllTarget flush_targets = 3;
+  common.MsgBase base                   = 1;
+  string dbName                         = 2 [deprecated = true];
+  repeated FlushAllTarget flush_targets = 3 [deprecated = true];
 }
 
+// Deprecated: FlushAll semantics changed to flushing the entire cluster.
 // Specific collection to flush with database context
 // This message allows targeting specific collections within a database for flush operations  
 message FlushAllTarget {
@@ -194,11 +194,11 @@ message FlushAllTarget {
 }
 
 message FlushAllResponse {
-  common.Status status = 1;
-  uint64 flushTs = 2;
-  
-  // Detailed flush results for each target
-  repeated FlushResult flush_results = 3;
+  common.Status status               = 1;
+  uint64 flushTs                     = 2 [deprecated = true];
+  repeated FlushResult flush_results = 3 [deprecated = true];
+  map<string, uint64> flush_all_tss  = 4; // pchannel -> FlushAllMsg'ts
+  milvus.ClusterInfo cluster_info    = 5;
 }
 
 message FlushChannelsRequest {
