@@ -24,6 +24,7 @@ RUN cd tests/go_client && go mod download
 
 # Copy the source code into the container
 COPY client client
+COPY pkg pkg
 COPY tests/go_client tests/go_client
 
 WORKDIR /milvus/tests/go_client
