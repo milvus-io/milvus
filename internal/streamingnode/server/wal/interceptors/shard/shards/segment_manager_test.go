@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
@@ -65,6 +66,7 @@ func TestSegmentAllocManager(t *testing.T) {
 
 	result, err := m.AllocRows(&AssignSegmentRequest{
 		TimeTick: 110,
+		Level:    datapb.SegmentLevel_L1,
 	})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrTimeTickTooOld)
@@ -76,6 +78,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 120,
 		},
+		Level: datapb.SegmentLevel_L1,
 	})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrTooLargeInsert)
@@ -87,6 +90,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 50,
 		},
+		Level: datapb.SegmentLevel_L1,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -101,6 +105,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 70,
 		},
+		Level: datapb.SegmentLevel_L1,
 	})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrNotEnoughSpace)
@@ -113,6 +118,7 @@ func TestSegmentAllocManager(t *testing.T) {
 			BinarySize: 50,
 		},
 		TxnSession: &mockedSession{},
+		Level:      datapb.SegmentLevel_L1,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

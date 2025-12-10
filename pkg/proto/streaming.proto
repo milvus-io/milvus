@@ -627,6 +627,7 @@ message CollectionInfoOfVChannel {
     int64 collection_id = 1; // collection id.
     repeated PartitionInfoOfVChannel partitions  = 2; // partitions.
     repeated CollectionSchemaOfVChannel schemas = 3; // The schemas of the vchannel.
+    uint64 last_l0_flush_time_tick = 4; // the time tick of last l0 flush message on collection-level.
 }
 
 // CollectionSchemaOfVChannel is the collection schema in vchannel.
@@ -639,6 +640,7 @@ message CollectionSchemaOfVChannel {
 // PartitionInfoOfVChannel is the partition info in vchannel.
 message PartitionInfoOfVChannel {
     int64 partition_id = 1; // partition id.
+    uint64 last_l0_flush_time_tick = 2; // the time tick of last l0 flush message on partition.
 }
 
 // VChannelState is the state of vchannel
@@ -686,12 +688,13 @@ message SegmentAssignmentStat {
     uint64 max_binary_size                    = 1;
     uint64 modified_rows                      = 2;
     uint64 modified_binary_size               = 3;
-    int64 create_timestamp                    = 4;
-    int64 last_modified_timestamp             = 5;
+    int64 create_timestamp                    = 4 [deprecated = true]; // lost the accuracy of timetick, use create_segment_time_tick instead.
+    int64 last_modified_timestamp             = 5 [deprecated = true]; // lost the accuracy of timetick, use last_modified_time_tick instead.
     uint64 binlog_counter                     = 6;
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
     data.SegmentLevel level                   = 8; // The level of the segment, only L0 or L1.
     uint64 max_rows                           = 9; // The max rows of the segment.
+    uint64 last_modified_time_tick            = 10; // The timetick of last modified message in wal.
 }
 
 // The WALCheckpoint that is used to recovery the wal scanner.

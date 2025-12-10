@@ -48,7 +48,7 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 		return err
 	}
 	logger := log.With(log.FieldMessage(createSegmentMsg))
-	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, vchannel, h.PartitionId, h.SegmentId); err != nil {
+	if err := impl.wbMgr.CreateNewGrowingSegment(ctx, createSegmentMsg); err != nil {
 		logger.Warn("fail to create new growing segment")
 		return err
 	}

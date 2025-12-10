@@ -45,28 +45,19 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 
 // waitUntilGrowingSegmentReady waits until the growing segment is ready if msg is insert.
 func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context, msg message.MutableMessage) error {
-	if msg.MessageType() == message.MessageTypeInsert {
-		insertMessage := message.MustAsMutableInsertMessageV1(msg)
-		h := insertMessage.Header()
-		if len(h.Partitions) != 1 {
-			// TODO: We will support multi-partition insert in the future.
-			panic("insert message should only have one partition")
+	if msg.MessageType() == message.MessageTypeInsert || msg.MessageType() == message.MessageTypeDelete {
+		ready, err := r.shardManager.WaitUntilGrowingSegmentReady(msg)
+		if err != nil {
+			return err
 		}
-		for _, partition := range h.Partitions {
-			uniqueKey := shards.PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: partition.PartitionId}
-			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
-			if err != nil {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-ready:
-				// do nothing
-				return nil
-			case <-r.gracefulStop:
-				return status.NewOnShutdownError("redo interceptor is on shutdown")
-			}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ready:
+			// do nothing
+			return nil
+		case <-r.gracefulStop:
+			return status.NewOnShutdownError("redo interceptor is on shutdown")
 		}
 	}
 	return nil
