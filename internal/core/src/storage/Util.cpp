@@ -1103,22 +1103,22 @@ CreateFieldData(const DataType& type,
                 type, nullable, total_num_rows);
         case DataType::VECTOR_FLOAT:
             return std::make_shared<FieldData<FloatVector>>(
-                dim, type, total_num_rows);
+                dim, type, nullable, total_num_rows);
         case DataType::VECTOR_BINARY:
             return std::make_shared<FieldData<BinaryVector>>(
-                dim, type, total_num_rows);
+                dim, type, nullable, total_num_rows);
         case DataType::VECTOR_FLOAT16:
             return std::make_shared<FieldData<Float16Vector>>(
-                dim, type, total_num_rows);
+                dim, type, nullable, total_num_rows);
         case DataType::VECTOR_BFLOAT16:
             return std::make_shared<FieldData<BFloat16Vector>>(
-                dim, type, total_num_rows);
+                dim, type, nullable, total_num_rows);
         case DataType::VECTOR_SPARSE_U32_F32:
             return std::make_shared<FieldData<SparseFloatVector>>(
-                type, total_num_rows);
+                type, nullable, total_num_rows);
         case DataType::VECTOR_INT8:
             return std::make_shared<FieldData<Int8Vector>>(
-                dim, type, total_num_rows);
+                dim, type, nullable, total_num_rows);
         case DataType::VECTOR_ARRAY:
             return std::make_shared<FieldData<VectorArray>>(
                 dim, element_type, total_num_rows);
