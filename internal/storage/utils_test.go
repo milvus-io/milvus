@@ -2558,3 +2558,280 @@ func TestFillMissingFields(t *testing.T) {
 		assert.Equal(t, 0, field101.RowNum())
 	})
 }
+
+func TestInsertDataWithMissingFieldBeforeRequired(t *testing.T) {
+	dim := 8
+	numRows := 3
+
+	// Schema where nullable field (101) comes BEFORE required field (102)
+	schema := &schemapb.CollectionSchema{
+		Name: "test_missing_field_order",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.RowIDField,
+				Name:         common.RowIDFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      common.TimeStampField,
+				Name:         common.TimeStampFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				// This nullable field will be MISSING from message
+				// It comes BEFORE the required field in schema order
+				FieldID:  101,
+				Name:     "nullable_field",
+				DataType: schemapb.DataType_Int64,
+				Nullable: true,
+			},
+			{
+				// This required field EXISTS in message but comes AFTER nullable field
+				// Old bug: fillMissingFields was called when processing field 101,
+				// at which point field 102 was not yet in insertData, causing false error
+				FieldID:  102,
+				Name:     "required_field",
+				DataType: schemapb.DataType_Int64,
+				Nullable: false,
+			},
+			{
+				FieldID: 103,
+				Name:    "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: strconv.Itoa(dim)},
+				},
+				DataType: schemapb.DataType_FloatVector,
+			},
+		},
+	}
+
+	// Message has field 102 (required) but NOT field 101 (nullable)
+	msg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+			NumRows:    uint64(numRows),
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1, 2, 3},
+			Timestamps: []uint64{100, 200, 300},
+			FieldsData: []*schemapb.FieldData{
+				// pk field (100)
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "pk",
+					FieldId:   100,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+							},
+						},
+					},
+				},
+				// Note: nullable_field (101) is intentionally MISSING
+				// required_field (102) - EXISTS in message
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "required_field",
+					FieldId:   102,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{100, 200, 300}},
+							},
+						},
+					},
+				},
+				// vec field (103)
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "vec",
+					FieldId:   103,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: int64(dim),
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*dim)},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	insertData, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+	assert.NotNil(t, insertData)
+
+	field102, exists102 := insertData.Data[102]
+	assert.True(t, exists102, "required_field should be present")
+	assert.Equal(t, numRows, field102.RowNum())
+
+	// Verify nullable field was filled with nulls
+	field101, exists101 := insertData.Data[101]
+	assert.True(t, exists101, "nullable_field should be filled")
+	int64Field := field101.(*Int64FieldData)
+	assert.Equal(t, numRows, len(int64Field.ValidData))
+	for _, valid := range int64Field.ValidData {
+		assert.False(t, valid, "nullable field should have all null values")
+	}
+}
+
+func TestInsertDataWithStructAndMissingField(t *testing.T) {
+	dim := 8
+	numRows := 3
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_struct_missing_field",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.RowIDField,
+				Name:         common.RowIDFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      common.TimeStampField,
+				Name:         common.TimeStampFieldName,
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: false,
+			},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID: 101,
+				Name:    "vec",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: strconv.Itoa(dim)},
+				},
+				DataType: schemapb.DataType_FloatVector,
+			},
+			{
+				// This nullable field will be missing from the message
+				FieldID:  102,
+				Name:     "nullable_field",
+				DataType: schemapb.DataType_Int64,
+				Nullable: true,
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 103,
+				Name:    "struct_array",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  104,
+						Name:     "struct_array[name]",
+						DataType: schemapb.DataType_VarChar,
+					},
+					{
+						FieldID:  105,
+						Name:     "struct_array[age]",
+						DataType: schemapb.DataType_Int64,
+					},
+				},
+			},
+		},
+	}
+
+	// Create message with struct subfields but WITHOUT the nullable field (102)
+	msg := &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{},
+		InsertRequest: &msgpb.InsertRequest{
+			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+			NumRows:    uint64(numRows),
+			Version:    msgpb.InsertDataVersion_ColumnBased,
+			RowIDs:     []int64{1, 2, 3},
+			Timestamps: []uint64{100, 200, 300},
+			FieldsData: []*schemapb.FieldData{
+				// pk field (100)
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "pk",
+					FieldId:   100,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}},
+							},
+						},
+					},
+				},
+				// vec field (101)
+				{
+					Type:      schemapb.DataType_FloatVector,
+					FieldName: "vec",
+					FieldId:   101,
+					Field: &schemapb.FieldData_Vectors{
+						Vectors: &schemapb.VectorField{
+							Dim: int64(dim),
+							Data: &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{Data: make([]float32, numRows*dim)},
+							},
+						},
+					},
+				},
+				// Note: nullable_field (102) is intentionally missing
+				// struct_array[name] (104)
+				{
+					Type:      schemapb.DataType_VarChar,
+					FieldName: "struct_array[name]",
+					FieldId:   104,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_StringData{
+								StringData: &schemapb.StringArray{Data: []string{"alice", "bob", "charlie"}},
+							},
+						},
+					},
+				},
+				// struct_array[age] (105)
+				{
+					Type:      schemapb.DataType_Int64,
+					FieldName: "struct_array[age]",
+					FieldId:   105,
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{25, 30, 35}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	insertData, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+	assert.NotNil(t, insertData)
+
+	// Verify struct subfields are present
+	_, exists104 := insertData.Data[104]
+	assert.True(t, exists104, "struct_array[name] should be present")
+	_, exists105 := insertData.Data[105]
+	assert.True(t, exists105, "struct_array[age] should be present")
+
+	// Verify nullable field was filled with nulls
+	field102, exists102 := insertData.Data[102]
+	assert.True(t, exists102, "nullable_field should be filled")
+	int64Field := field102.(*Int64FieldData)
+	assert.Equal(t, numRows, len(int64Field.ValidData))
+	// All values should be null
+	for _, valid := range int64Field.ValidData {
+		assert.False(t, valid, "nullable field should have all null values")
+	}
+}

@@ -21,7 +21,7 @@ class RemoteOutputStream : public milvus::OutputStream {
     explicit RemoteOutputStream(
         std::shared_ptr<arrow::io::OutputStream>&& output_stream);
 
-    ~RemoteOutputStream() override = default;
+    ~RemoteOutputStream() override;
 
     size_t
     Tell() const override;

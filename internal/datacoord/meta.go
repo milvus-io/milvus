@@ -36,13 +36,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -94,15 +94,17 @@ type meta struct {
 	channelCPs   *channelCPs // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	indexMeta          *indexMeta
-	analyzeMeta        *analyzeMeta
-	partitionStatsMeta *partitionStatsMeta
-	compactionTaskMeta *compactionTaskMeta
-	statsTaskMeta      *statsTaskMeta
+	indexMeta                  *indexMeta
+	analyzeMeta                *analyzeMeta
+	partitionStatsMeta         *partitionStatsMeta
+	compactionTaskMeta         *compactionTaskMeta
+	statsTaskMeta              *statsTaskMeta
+	externalCollectionTaskMeta *externalCollectionTaskMeta
 
 	// File Resource Meta
-	resourceMeta map[string]*model.FileResource
-	resourceLock lock.RWMutex
+	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
+	resourceVersion uint64
+	resourceLock    lock.RWMutex
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -183,6 +185,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO: add external collection task meta
+	// ectm, err := newExternalCollectionTaskMeta(ctx, catalog)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
@@ -195,7 +204,8 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		partitionStatsMeta: psm,
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
-		resourceMeta:       make(map[string]*model.FileResource),
+		// externalCollectionTaskMeta: ectm,
+		resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -1749,7 +1759,9 @@ func (m *meta) completeMixCompactionMutation(
 		zap.String("type", t.GetType().String()),
 		zap.Int64("collectionID", t.CollectionID),
 		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()))
+		zap.String("channel", t.GetChannel()),
+		zap.Int64("planID", t.GetPlanID()),
+	)
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]int)}
 	var compactFromSegIDs []int64
@@ -1779,6 +1791,12 @@ func (m *meta) completeMixCompactionMutation(
 
 		// metrics mutation for compaction from segments
 		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+
+		log.Info("compact from segment",
+			zap.Int64("segmentID", cloned.GetID()),
+			zap.Int64("segment size", cloned.getSegmentSize()),
+			zap.Int64("num rows", cloned.GetNumOfRows()),
+		)
 	}
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
@@ -1828,6 +1846,7 @@ func (m *meta) completeMixCompactionMutation(
 			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
 			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
 			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+			zap.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
@@ -2322,7 +2341,9 @@ func (m *meta) completeSortCompactionMutation(
 
 	log = log.With(zap.Int64s("compactFrom", []int64{oldSegment.GetID()}), zap.Int64("compactTo", segment.GetID()))
 
-	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", segment.GetNumOfRows()))
+	log.Info("meta update: prepare for complete stats mutation - complete",
+		zap.Int64("num rows", segment.GetNumOfRows()),
+		zap.Int64("segment size", segment.getSegmentSize()))
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, nil, err
@@ -2408,20 +2429,21 @@ func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
 
-	resources, err := m.catalog.ListFileResource(ctx)
+	resources, version, err := m.catalog.ListFileResource(ctx)
 	if err != nil {
 		return err
 	}
 
-	m.resourceMeta = make(map[string]*model.FileResource)
+	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
 		m.resourceMeta[resource.Name] = resource
 	}
+	m.resourceVersion = version
 	return nil
 }
 
 // AddFileResource add file resource to meta
-func (m *meta) AddFileResource(ctx context.Context, resource *model.FileResource) error {
+func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
 
@@ -2429,12 +2451,13 @@ func (m *meta) AddFileResource(ctx context.Context, resource *model.FileResource
 		return merr.WrapErrAsInputError(fmt.Errorf("create resource failed: resource name exist"))
 	}
 
-	err := m.catalog.SaveFileResource(ctx, resource)
+	err := m.catalog.SaveFileResource(ctx, resource, m.resourceVersion+1)
 	if err != nil {
 		return err
 	}
 
 	m.resourceMeta[resource.Name] = resource
+	m.resourceVersion += 1
 	return nil
 }
 
@@ -2444,21 +2467,22 @@ func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
 	defer m.resourceLock.Unlock()
 
 	if resource, ok := m.resourceMeta[name]; ok {
-		err := m.catalog.RemoveFileResource(ctx, resource.ID)
+		err := m.catalog.RemoveFileResource(ctx, resource.Id, m.resourceVersion+1)
 		if err != nil {
 			return err
 		}
 
 		delete(m.resourceMeta, name)
+		m.resourceVersion += 1
 	}
 
 	return nil
 }
 
 // ListFileResource list file resources from meta
-func (m *meta) ListFileResource(ctx context.Context) []*model.FileResource {
+func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
 	m.resourceLock.RLock()
 	defer m.resourceLock.RUnlock()
 
-	return lo.Values(m.resourceMeta)
+	return lo.Values(m.resourceMeta), m.resourceVersion
 }

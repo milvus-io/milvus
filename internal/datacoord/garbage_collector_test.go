@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
@@ -205,7 +206,8 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
 		})
-		gc.recycleDroppedSegments(context.TODO())
+		signal := make(chan gcCmd)
+		gc.recycleDroppedSegments(context.TODO(), signal)
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:])
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:])
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:])
@@ -224,7 +226,8 @@ func Test_garbageCollector_scan(t *testing.T) {
 		})
 		gc.start()
 		gc.recycleUnusedBinlogFiles(context.TODO())
-		gc.recycleDroppedSegments(context.TODO())
+		signal := make(chan gcCmd)
+		gc.recycleDroppedSegments(context.TODO(), signal)
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
@@ -431,7 +434,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedIndexes(context.TODO())
+		gc.recycleUnusedIndexes(context.TODO(), nil)
 	})
 
 	t.Run("fail", func(t *testing.T) {
@@ -442,7 +445,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 		).Return(errors.New("fail"))
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedIndexes(context.TODO())
+		gc.recycleUnusedIndexes(context.TODO(), nil)
 	})
 }
 
@@ -588,7 +591,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
-		gc.recycleUnusedSegIndexes(context.TODO())
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
 
 	t.Run("fail", func(t *testing.T) {
@@ -606,7 +609,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
-		gc.recycleUnusedSegIndexes(context.TODO())
+		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
 }
 
@@ -1386,6 +1389,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 	cm := &mocks.ChunkManager{}
 	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
+	signal := make(chan gcCmd)
 	gc := newGarbageCollector(
 		m,
 		newMockHandlerWithMeta(m),
@@ -1393,7 +1397,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	gc.recycleDroppedSegments(context.TODO())
+	gc.recycleDroppedSegments(context.TODO(), signal)
 
 	/*
 		A    B
@@ -1451,7 +1455,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	gc.recycleDroppedSegments(context.TODO())
+	gc.recycleDroppedSegments(context.TODO(), signal)
 	/*
 
 		A: processed prior to C, C is not GCed yet and C is not indexed, A is not GCed in this turn
@@ -1467,7 +1471,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segD = gc.meta.GetSegment(context.TODO(), segID+3)
 	assert.Nil(t, segD)
 
-	gc.recycleDroppedSegments(context.TODO())
+	gc.recycleDroppedSegments(context.TODO(), signal)
 	/*
 		A: compacted became false due to C is GCed already, A should be GCed since dropTolernace is meet
 		B: compacted became false due to C is GCed already, B should be GCed since dropTolerance is meet
@@ -1499,7 +1503,7 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 
 	t.Run("list channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
-		gc.recycleChannelCPMeta(context.TODO())
+		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
@@ -1520,20 +1524,20 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		}).Maybe()
 
 	t.Run("skip drop channel due to collection is available", func(t *testing.T) {
-		gc.recycleChannelCPMeta(context.TODO())
+		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
 	t.Run("drop channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
-		gc.recycleChannelCPMeta(context.TODO())
+		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
 	t.Run("channel cp gc ok", func(t *testing.T) {
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
-		gc.recycleChannelCPMeta(context.TODO())
+		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
 	})
 }
@@ -1629,10 +1633,10 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, time.Second)
+		err := gc.Pause(ctx, -1, "", time.Second)
 		s.NoError(err)
 
-		err = gc.Resume(ctx)
+		err = gc.Resume(ctx, -1, "")
 		s.Error(err)
 	})
 
@@ -1650,15 +1654,15 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, time.Minute)
+		err := gc.Pause(ctx, -1, "", time.Minute)
 		s.NoError(err)
 
-		s.NotZero(gc.pauseUntil.Load())
+		s.NotZero(gc.pauseUntil.PauseUntil())
 
-		err = gc.Resume(ctx)
+		err = gc.Resume(ctx, -1, "")
 		s.NoError(err)
 
-		s.Zero(gc.pauseUntil.Load())
+		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
 	s.Run("pause_before_until", func() {
@@ -1675,16 +1679,16 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		defer gc.close()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := gc.Pause(ctx, time.Minute)
+		err := gc.Pause(ctx, -1, "", time.Minute)
 		s.NoError(err)
 
-		until := gc.pauseUntil.Load()
+		until := gc.pauseUntil.PauseUntil()
 		s.NotZero(until)
 
-		err = gc.Pause(ctx, time.Second)
+		err = gc.Pause(ctx, -1, "", time.Second)
 		s.NoError(err)
 
-		second := gc.pauseUntil.Load()
+		second := gc.pauseUntil.PauseUntil()
 
 		s.Equal(until, second)
 	})
@@ -1701,15 +1705,62 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 		defer cancel()
-		err := gc.Pause(ctx, time.Minute)
+		err := gc.Pause(ctx, -1, "", time.Minute)
 		s.Error(err)
 
-		s.Zero(gc.pauseUntil.Load())
+		s.Zero(gc.pauseUntil.PauseUntil())
 
-		err = gc.Resume(ctx)
+		err = gc.Resume(ctx, -1, "")
 		s.Error(err)
 
-		s.Zero(gc.pauseUntil.Load())
+		s.Zero(gc.pauseUntil.PauseUntil())
+	})
+
+	s.Run("pause_collection", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ticket := uuid.NewString()
+		err := gc.Pause(ctx, 100, ticket, time.Minute)
+		s.NoError(err)
+
+		until, has := gc.pausedCollection.Get(100)
+		firstPauseUntil := until.PauseUntil()
+		s.True(has)
+		s.NotZero(firstPauseUntil)
+
+		ticket2 := uuid.NewString()
+		err = gc.Pause(ctx, 100, ticket2, time.Second*30)
+		s.NoError(err)
+
+		second, has := gc.pausedCollection.Get(100)
+		secondPauseUntil := second.PauseUntil()
+		s.True(has)
+
+		s.Equal(firstPauseUntil, secondPauseUntil)
+
+		err = gc.Resume(ctx, 100, ticket2)
+		s.NoError(err)
+
+		afterResume, has := gc.pausedCollection.Get(100)
+		s.True(has)
+		afterUntil := afterResume.PauseUntil()
+		s.Equal(firstPauseUntil, afterUntil)
+
+		err = gc.Resume(ctx, 100, ticket)
+
+		_, has = gc.pausedCollection.Get(100)
+		s.False(has)
 	})
 }
 
@@ -1727,7 +1778,7 @@ func (s *GarbageCollectorSuite) TestRunRecycleTaskWithPauser() {
 	defer cancel()
 
 	cnt := 0
-	gc.runRecycleTaskWithPauser(ctx, "test", time.Second, func(ctx context.Context) {
+	gc.runRecycleTaskWithPauser(ctx, "test", time.Second, func(ctx context.Context, signal <-chan gcCmd) {
 		cnt++
 	})
 	s.Equal(cnt, 2)
@@ -1753,7 +1804,8 @@ func (s *GarbageCollectorSuite) TestAvoidGCLoadedSegments() {
 		},
 	})
 
-	gc.recycleDroppedSegments(context.TODO())
+	signal := make(chan gcCmd)
+	gc.recycleDroppedSegments(context.TODO(), signal)
 	seg := s.meta.GetSegment(context.TODO(), 1)
 	s.NotNil(seg)
 }

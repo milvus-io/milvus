@@ -148,6 +148,12 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
@@ -216,16 +222,14 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
             res_view |= temp_valid_view;
         }
 
-        if (!index->CanSkipShared(pointer)) {
-            // process shared data, need to check if the value is empty
-            // which match the semantics of exists in Json.h
-            index->ExecuteForSharedData(
-                op_ctx_,
-                pointer,
-                [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                    res_view[row_id] = !bson.IsBsonValueEmpty(offset);
-                });
-        }
+        // process shared data, need to check if the value is empty
+        // which match the semantics of exists in Json.h
+        index->ExecuteForSharedData(
+            op_ctx_,
+            pointer,
+            [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+            });
     }
 
     TargetBitmap result;

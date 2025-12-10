@@ -46,7 +46,7 @@ func NewRunner(ctx context.Context, cfg *configs.Config) *Runner {
 
 func (r *Runner) watchByPrefix(prefix string) {
 	defer r.wg.Done()
-	_, revision, err := r.session.GetSessions(prefix)
+	_, revision, err := r.session.GetSessions(r.ctx, prefix)
 	fn := func() { r.Stop() }
 	console.AbnormalExitIf(err, r.backupFinished.Load(), console.AddCallbacks(fn))
 	watcher := r.session.WatchServices(prefix, revision, nil)
@@ -128,7 +128,7 @@ func (r *Runner) CheckCompatible() bool {
 }
 
 func (r *Runner) checkSessionsWithPrefix(prefix string) error {
-	sessions, _, err := r.session.GetSessions(prefix)
+	sessions, _, err := r.session.GetSessions(r.ctx, prefix)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (r *Runner) checkSessionsWithPrefix(prefix string) error {
 }
 
 func (r *Runner) checkMySelf() error {
-	sessions, _, err := r.session.GetSessions(Role)
+	sessions, _, err := r.session.GetSessions(r.ctx, Role)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,6 @@ func (r *Runner) CheckSessions() error {
 
 func (r *Runner) RegisterSession() error {
 	r.session.Register()
-	r.session.LivenessCheck(r.ctx, func() {})
 	return nil
 }
 
@@ -246,7 +245,7 @@ func (r *Runner) waitUntilSessionExpired() {
 }
 
 func (r *Runner) Stop() {
-	r.session.Revoke(time.Second)
+	r.session.Stop()
 	r.waitUntilSessionExpired()
 	r.cancel()
 	r.wg.Wait()

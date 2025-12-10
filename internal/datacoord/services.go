@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -1805,13 +1804,25 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 			status.Reason = fmt.Sprintf("pause duration not valid, %s", err.Error())
 			return status, nil
 		}
-		if err := s.garbageCollector.Pause(ctx, time.Duration(pauseSeconds)*time.Second); err != nil {
+
+		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
+
+		if err := s.garbageCollector.Pause(ctx, collectionID, ticket, time.Duration(pauseSeconds)*time.Second); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil
 		}
 	case datapb.GcCommand_Resume:
-		if err := s.garbageCollector.Resume(ctx); err != nil {
+		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
+		if err := s.garbageCollector.Resume(ctx, collectionID, ticket); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil
@@ -2035,9 +2046,9 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		return merr.Status(err), nil
 	}
 
-	// Convert to model.FileResource
-	resource := &model.FileResource{
-		ID:   id,
+	// Convert to internalpb.FileResourceInfo
+	resource := &internalpb.FileResourceInfo{
+		Id:   id,
 		Name: req.GetName(),
 		Path: req.GetPath(),
 	}
@@ -2047,6 +2058,10 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		log.Ctx(ctx).Warn("AddFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	s.fileManager.Notify()
+
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("AddFileResource success")
 	return merr.Success(), nil
@@ -2066,6 +2081,10 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 		log.Ctx(ctx).Warn("RemoveFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	s.fileManager.Notify()
+
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("RemoveFileResource success")
 	return merr.Success(), nil
@@ -2081,9 +2100,9 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 
 	log.Ctx(ctx).Info("receive ListFileResources request")
 
-	resources := s.meta.ListFileResource(ctx)
+	resources, _ := s.meta.ListFileResource(ctx)
 
-	// Convert model.FileResource to milvuspb.FileResourceInfo
+	// Convert internal.FileResourceInfo to milvuspb.FileResourceInfo
 	fileResources := make([]*milvuspb.FileResourceInfo, 0, len(resources))
 	for _, resource := range resources {
 		fileResources = append(fileResources, &milvuspb.FileResourceInfo{
@@ -2097,4 +2116,55 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 		Status:    merr.Success(),
 		Resources: fileResources,
 	}, nil
+}
+
+// CreateExternalCollection creates an external collection in datacoord
+// This is a skeleton implementation - details to be filled in later
+func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("dbName", req.GetDbName()),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.Int64("dbID", req.GetDbID()),
+		zap.Int64("collectionID", req.GetCollectionID()))
+
+	log.Info("receive CreateExternalCollection request")
+
+	// Check if server is healthy
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		log.Warn("server is not healthy", zap.Error(err))
+		return &datapb.CreateExternalCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Create collection info and add to meta
+	// This will make the collection visible to inspectors
+	// The collection schema already contains external_source and external_spec fields
+	collInfo := &collectionInfo{
+		ID:            req.GetCollectionID(),
+		Schema:        req.GetCollectionSchema(),
+		Partitions:    req.GetPartitionIDs(),
+		Properties:    make(map[string]string),
+		DatabaseID:    req.GetDbID(),
+		DatabaseName:  req.GetDbName(),
+		VChannelNames: req.GetVirtualChannelNames(),
+	}
+
+	s.meta.AddCollection(collInfo)
+
+	log.Info("CreateExternalCollection: collection added to meta",
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.String("externalSource", req.GetCollectionSchema().GetExternalSource()),
+		zap.String("externalSpec", req.GetCollectionSchema().GetExternalSpec()))
+
+	return &datapb.CreateExternalCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+// first sync file resource data to qc when all coord init finished
+func (s *Server) SyncFileResources(ctx context.Context) error {
+	resources, version := s.meta.ListFileResource(ctx)
+	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
 }

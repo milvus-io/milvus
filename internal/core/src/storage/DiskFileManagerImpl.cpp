@@ -59,6 +59,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     plugin_context_ = fileManagerContext.plugin_context;
+    loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -316,6 +317,11 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         std::sort(slices.second.begin(), slices.second.end());
     }
 
+    // TODO: remove this log when #45590 is solved
+    LOG_INFO("CacheIndexToDisk: caching {} files to {}",
+             index_slices.size(),
+             local_index_prefix);
+
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
@@ -361,6 +367,8 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         }
 
         local_paths_.emplace_back(local_index_file_name);
+        // TODO: remove this log when #45590 is solved
+        LOG_INFO("CacheIndexToDisk: cached file {}", local_index_file_name);
     }
 }
 
@@ -652,12 +660,28 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     uint32_t var_dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(var_dim);
 
-    auto field_datas = GetFieldDatasFromStorageV2(all_remote_files,
-                                                  GetFieldDataMeta().field_id,
-                                                  data_type.value(),
-                                                  element_type.value(),
-                                                  dim,
-                                                  fs_);
+    std::vector<FieldDataPtr> field_datas;
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    auto manifest_path_str = manifest.value_or("");
+    if (manifest_path_str != "") {
+        AssertInfo(
+            loon_ffi_properties_ != nullptr,
+            "loon ffi properties is null when build index with manifest");
+        field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                loon_ffi_properties_,
+                                                field_meta_,
+                                                data_type,
+                                                dim,
+                                                element_type);
+    } else {
+        field_datas = GetFieldDatasFromStorageV2(all_remote_files,
+                                                 GetFieldDataMeta().field_id,
+                                                 data_type.value(),
+                                                 element_type.value(),
+                                                 dim,
+                                                 fs_);
+    }
     for (auto& field_data : field_datas) {
         num_rows += uint32_t(field_data->get_num_rows());
         cache_raw_data_to_disk_common<T>(field_data,
@@ -719,6 +743,13 @@ DiskFileManagerImpl::RemoveTextLogFiles() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveJsonStatsSharedIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalJsonStatsSharedIndexPrefix());
 }
 
 void

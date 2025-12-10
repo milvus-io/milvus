@@ -183,55 +183,54 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                 memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
 
             for (const auto& block : blocks) {
-                futures.emplace_back(pool.Submit([block,
-                                                  fs,
-                                                  file,
-                                                  file_idx,
-                                                  schema,
-                                                  reader_memory_limit]() {
-                    AssertInfo(fs != nullptr,
-                               "[StorageV2] file system is nullptr");
-                    auto row_group_reader =
-                        std::make_shared<milvus_storage::FileRowGroupReader>(
+                futures.emplace_back(pool.Submit(
+                    [block, fs, file, file_idx, schema, reader_memory_limit]() {
+                        AssertInfo(fs != nullptr,
+                                   "[StorageV2] file system is nullptr");
+                        auto result = milvus_storage::FileRowGroupReader::Make(
                             fs,
                             file,
                             schema,
                             reader_memory_limit,
                             milvus::storage::GetReaderProperties());
-                    AssertInfo(row_group_reader != nullptr,
-                               "[StorageV2] row group reader is nullptr");
-                    row_group_reader->SetRowGroupOffsetAndCount(block.offset,
-                                                                block.count);
-                    LOG_INFO(
-                        "[StorageV2] read row groups from file {} with offset "
-                        "{} and count "
-                        "{}",
-                        file,
-                        block.offset,
-                        block.count);
-                    auto ret = std::make_shared<ArrowDataWrapper>();
-                    for (int64_t i = 0; i < block.count; ++i) {
-                        std::shared_ptr<arrow::Table> table;
+                        AssertInfo(
+                            result.ok(),
+                            "[StorageV2] Failed to create row group reader: " +
+                                result.status().ToString());
+                        auto row_group_reader = result.ValueOrDie();
                         auto status =
-                            row_group_reader->ReadNextRowGroup(&table);
+                            row_group_reader->SetRowGroupOffsetAndCount(
+                                block.offset, block.count);
                         AssertInfo(status.ok(),
-                                   "[StorageV2] Failed to read row group " +
-                                       std::to_string(block.offset + i) +
-                                       " from file " + file + " with error " +
-                                       status.ToString());
-                        ret->arrow_tables.push_back(
-                            {file_idx,
-                             static_cast<size_t>(block.offset + i),
-                             table});
-                    }
-                    auto close_status = row_group_reader->Close();
-                    AssertInfo(close_status.ok(),
-                               "[StorageV2] Failed to close row group reader "
-                               "for file " +
-                                   file + " with error " +
-                                   close_status.ToString());
-                    return ret;
-                }));
+                                   "[StorageV2] Failed to set row group offset "
+                                   "and count " +
+                                       std::to_string(block.offset) + " and " +
+                                       std::to_string(block.count) +
+                                       " with error " + status.ToString());
+                        auto ret = std::make_shared<ArrowDataWrapper>();
+                        for (int64_t i = 0; i < block.count; ++i) {
+                            std::shared_ptr<arrow::Table> table;
+                            auto status =
+                                row_group_reader->ReadNextRowGroup(&table);
+                            AssertInfo(status.ok(),
+                                       "[StorageV2] Failed to read row group " +
+                                           std::to_string(block.offset + i) +
+                                           " from file " + file +
+                                           " with error " + status.ToString());
+                            ret->arrow_tables.push_back(
+                                {file_idx,
+                                 static_cast<size_t>(block.offset + i),
+                                 table});
+                        }
+                        auto close_status = row_group_reader->Close();
+                        AssertInfo(
+                            close_status.ok(),
+                            "[StorageV2] Failed to close row group reader "
+                            "for file " +
+                                file + " with error " +
+                                close_status.ToString());
+                        return ret;
+                    }));
             }
 
             for (auto& future : futures) {

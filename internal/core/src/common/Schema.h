@@ -375,6 +375,24 @@ class Schema {
     std::unique_ptr<std::vector<FieldMeta>>
     AbsentFields(Schema& old_schema) const;
 
+    /**
+     * @brief Determines whether the specified field should use mmap for data loading.
+     *
+     * This function checks mmap settings at the field level first. If no field-level
+     * setting is found, it falls back to the collection-level mmap configuration.
+     *
+     * @param field The field ID to check mmap settings for.
+     *
+     * @return A pair of booleans:
+     *         - first:  Whether an mmap setting exists (at field or collection level).
+     *         - second: Whether mmap is enabled (only meaningful when first is true).
+     *
+     * @note If no mmap setting exists at any level, first will be false and second
+     *       should be ignored.
+     */
+    std::pair<bool, bool>
+    MmapEnabled(const FieldId& field) const;
+
     // Find the first array field belonging to a struct (cached)
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name);
@@ -400,6 +418,11 @@ class Schema {
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
+
+    // mmap settings
+    bool has_mmap_setting_ = false;
+    bool mmap_enabled_ = false;
+    std::unordered_map<FieldId, bool> mmap_fields_;
 
     // Cache for struct_name -> first array field mapping
     std::unordered_map<std::string, const FieldMeta*> struct_array_field_cache_;

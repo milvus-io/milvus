@@ -561,14 +561,16 @@ func constructSearchRequest(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     nil,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
@@ -2593,7 +2595,11 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		hash := testutils.GenerateHashKeys(nb)
+		// upsert require pk unique in same batch
+		hash := make([]uint32, nb)
+		for i := 0; i < nb; i++ {
+			hash[i] = uint32(i)
+		}
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
@@ -5550,7 +5556,7 @@ func TestHighlightTask(t *testing.T) {
 		err := task.OnEnqueue()
 		assert.NoError(t, err)
 		assert.NotNil(t, task.Base)
-		assert.Equal(t, commonpb.MsgType_RunAnalyzer, task.Base.MsgType)
+		assert.Equal(t, commonpb.MsgType_Undefined, task.Base.MsgType)
 		assert.Equal(t, paramtable.GetNodeID(), task.Base.SourceID)
 	})
 

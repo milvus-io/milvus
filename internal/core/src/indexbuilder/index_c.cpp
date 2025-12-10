@@ -17,6 +17,7 @@
 #include "indexbuilder/type_c.h"
 #include "log/Log.h"
 #include "storage/PluginLoader.h"
+#include "storage/loon_ffi/util.h"
 
 #ifdef __linux__
 #include <malloc.h>
@@ -177,6 +178,7 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->storage_version() == STORAGE_V2) {
         config[SEGMENT_INSERT_FILES_KEY] =
             get_segment_insert_files(info->segment_insert_files());
+        config[SEGMENT_MANIFEST_KEY] = info->manifest();
     }
     config[DIM_KEY] = info->dim();
     config[DATA_TYPE_KEY] = info->field_schema().data_type();
@@ -251,6 +253,11 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
+        if (build_index_info->manifest() != "") {
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
+                ToCStorageConfig(storage_config));
+            fileManagerContext.set_loon_ffi_properties(loon_properties);
+        }
 
         if (build_index_info->has_storage_plugin_context()) {
             auto cipherPlugin =
@@ -314,6 +321,9 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             get_storage_config(build_index_info->storage_config());
         auto config = get_config(build_index_info);
 
+        auto loon_properties =
+            MakePropertiesFromStorageConfig(ToCStorageConfig(storage_config));
+
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
             build_index_info->collectionid(),
@@ -350,6 +360,12 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
 
+        if (build_index_info->manifest() != "") {
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
+                ToCStorageConfig(storage_config));
+            fileManagerContext.set_loon_ffi_properties(loon_properties);
+        }
+
         if (build_index_info->has_storage_plugin_context()) {
             auto cipherPlugin =
                 milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
@@ -358,6 +374,13 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
                 build_index_info->storage_plugin_context().encryption_zone_id(),
                 build_index_info->storage_plugin_context().collection_id(),
                 build_index_info->storage_plugin_context().encryption_key());
+
+            auto plugin_context = std::make_shared<CPluginContext>();
+            plugin_context->ez_id =
+                build_index_info->storage_plugin_context().encryption_zone_id();
+            plugin_context->collection_id =
+                build_index_info->storage_plugin_context().collection_id();
+            fileManagerContext.set_plugin_context(plugin_context);
         }
 
         auto field_schema =
@@ -435,6 +458,12 @@ BuildTextIndex(ProtoLayoutInterface result,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager, fs);
 
+        if (build_index_info->manifest() != "") {
+            auto loon_properties = MakeInternalPropertiesFromStorageConfig(
+                ToCStorageConfig(storage_config));
+            fileManagerContext.set_loon_ffi_properties(loon_properties);
+        }
+
         if (build_index_info->has_storage_plugin_context()) {
             auto cipherPlugin =
                 milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
@@ -443,6 +472,12 @@ BuildTextIndex(ProtoLayoutInterface result,
                 build_index_info->storage_plugin_context().encryption_zone_id(),
                 build_index_info->storage_plugin_context().collection_id(),
                 build_index_info->storage_plugin_context().encryption_key());
+            auto plugin_context = std::make_shared<CPluginContext>();
+            plugin_context->ez_id =
+                build_index_info->storage_plugin_context().encryption_zone_id();
+            plugin_context->collection_id =
+                build_index_info->storage_plugin_context().collection_id();
+            fileManagerContext.set_plugin_context(plugin_context);
         }
 
         auto scalar_index_engine_version =

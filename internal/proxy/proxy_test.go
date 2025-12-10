@@ -629,18 +629,19 @@ func constructTestSearchRequest(dbName, collectionName, floatVecField, expr stri
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 expr,
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: false,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
@@ -725,42 +726,23 @@ func constructTestEmbeddingListSearchRequest(dbName, collectionName, structFVec,
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 expr,
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: false,
-	}
-}
-
-// Helper functions for TestProxy
-func constructPrimaryKeysPlaceholderGroup(int64Field string, insertedIDs []int64) *commonpb.PlaceholderGroup {
-	expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIDs[0])
-	exprBytes := []byte(expr)
-
-	return &commonpb.PlaceholderGroup{
-		Placeholders: []*commonpb.PlaceholderValue{
-			{
-				Tag:    "$0",
-				Type:   commonpb.PlaceholderType_None,
-				Values: [][]byte{exprBytes},
-			},
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
 		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
 func constructSearchByPksRequest(t *testing.T, dbName, collectionName, floatVecField, int64Field string, insertedIDs []int64, nprobe, topk, roundDecimal int) *milvuspb.SearchRequest {
-	plg := constructPrimaryKeysPlaceholderGroup(int64Field, insertedIDs)
-	plgBs, err := proto.Marshal(plg)
-	assert.NoError(t, err)
-
 	params := make(map[string]string)
 	params["nprobe"] = strconv.Itoa(nprobe)
 	b, err := json.Marshal(params)
@@ -774,18 +756,25 @@ func constructSearchByPksRequest(t *testing.T, dbName, collectionName, floatVecF
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 "",
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: true,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            "",
+		SearchInput: &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: insertedIDs,
+					},
+				},
+			},
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 

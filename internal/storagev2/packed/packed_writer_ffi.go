@@ -21,6 +21,7 @@ package packed
 #include "milvus-storage/ffi_c.h"
 #include "segcore/packed_writer_c.h"
 #include "segcore/column_groups_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
 */
@@ -92,10 +93,41 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		}), "|")
 	}), ",")
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, map[string]string{
+	extra := map[string]string{
 		PropertyWriterPolicy:             "schema_based",
 		PropertyWriterSchemaBasedPattern: pattern,
-	})
+	}
+
+	// Configure CMEK encryption if plugin context is provided
+	if storagePluginContext != nil {
+		var cKey *C.char
+		var cMeta *C.char
+
+		encKey := C.CString(storagePluginContext.EncryptionKey)
+		defer C.free(unsafe.Pointer(encKey))
+
+		// Prepare plugin context for FFI call to retrieve encryption parameters
+		var pluginContext C.CPluginContext
+		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
+		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
+		pluginContext.key = encKey
+
+		// Get encryption key and metadata from cipher plugin via FFI
+		status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			return nil, err
+		}
+
+		// Set encryption properties for the writer
+		extra[PropertyWriterEncEnable] = "true"
+		extra[PropertyWriterEncKey] = C.GoString(cKey)
+		C.free(unsafe.Pointer(cKey))
+		extra[PropertyWriterEncMeta] = C.GoString(cMeta)
+		C.free(unsafe.Pointer(cMeta))
+		extra[PropertyWriterEncAlgo] = "AES_GCM_V1"
+	}
+
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -133,9 +165,9 @@ func (pw *FFIPackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 }
 
 func (pw *FFIPackedWriter) Close() (string, error) {
-	var manifest *C.char
+	var cColumnGroups C.ColumnGroupsHandle
 
-	result := C.writer_close(pw.cWriterHandle, nil, nil, 0, &manifest)
+	result := C.writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleFFIResult(result); err != nil {
 		return "", err
 	}
@@ -143,7 +175,10 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	cBasePath := C.CString(pw.basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 	var transationHandle C.TransactionHandle
-	result = C.transaction_begin(cBasePath, pw.cProperties, &transationHandle)
+
+	// TODO pass version
+	// use -1 as latest
+	result = C.transaction_begin(cBasePath, pw.cProperties, &transationHandle, C.int64_t(-1))
 	if err := HandleFFIResult(result); err != nil {
 		return "", err
 	}
@@ -157,25 +192,14 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	// #define LOON_TRANSACTION_RESOLVE_MERGE 1
 	// #define LOON_TRANSACTION_RESOLVE_MAX 2
 
-	var commitResult C.bool
-	result = C.transaction_commit(transationHandle, C.int16_t(0), C.int16_t(0), manifest, &commitResult)
+	var commitResult C.TransactionCommitResult
+	result = C.transaction_commit(transationHandle, C.int16_t(0), C.int16_t(0), cColumnGroups, &commitResult)
 	if err := HandleFFIResult(result); err != nil {
 		return "", err
 	}
 
-	defer C.transaction_destroy(transationHandle)
-
-	var readVersion C.int64_t
-
-	// TODO: not atomic, need to get version from transaction
-	var cOutManifest *C.char
-	result = C.get_latest_column_groups(cBasePath, pw.cProperties, &cOutManifest, &readVersion)
-	if err := HandleFFIResult(result); err != nil {
-		return "", err
-	}
-	outManifest := C.GoString(cOutManifest)
-	log.Info("FFI writer closed with output manifest", zap.String("manifest", outManifest), zap.Int64("version", int64(readVersion)))
+	log.Info("FFI writer closed", zap.Int64("version", int64(commitResult.committed_version)))
 
 	defer C.properties_free(pw.cProperties)
-	return MarshalManifestPath(pw.basePath, int64(readVersion)), nil
+	return MarshalManifestPath(pw.basePath, int64(commitResult.committed_version)), nil
 }

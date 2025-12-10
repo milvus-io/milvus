@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -336,6 +337,18 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 	return nil
 }
 
+func checkAuthorizationHelper(ctx context.Context, c *gin.Context, req interface{}) error {
+	username, ok := c.Get(ContextUsername)
+	if !ok || username.(string) == "" {
+		return merr.ErrNeedAuthenticate
+	}
+	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	if authErr != nil {
+		return authErr
+	}
+	return nil
+}
+
 func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, fullMethod string, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	return wrapperProxyWithLimit(ctx, c, req, checkAuth, ignoreErr, fullMethod, false, nil, handler)
 }
@@ -369,7 +382,16 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		username = ""
 	}
 
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, handler)
+	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
+		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
+		if token, ok := ginCtx.Get(ContextToken); ok {
+			interceptor = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token.(string)))
+		}
+		return interceptor(reqCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
+			return handler(ctx, req)
+		})
+	}
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, forwardHandler)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
@@ -396,6 +418,7 @@ func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq a
 			DbName:         dbName,
 			CollectionName: collectionName,
 		}
+		// handle at rootcoord side
 		resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/HasCollection", func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.HasCollection(reqCtx, req.(*milvuspb.HasCollectionRequest))
 		})
@@ -413,6 +436,7 @@ func (h *HandlersV2) listCollections(ctx context.Context, c *gin.Context, anyReq
 		DbName: dbName,
 	}
 	c.Set(ContextRequest, req)
+	// handle at rootcoord side
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ShowCollections", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ShowCollections(reqCtx, req.(*milvuspb.ShowCollectionsRequest))
 	})
@@ -1365,7 +1389,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req.SearchParams = searchParams
-	req.PlaceholderGroup = placeholderGroup
+	req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+		PlaceholderGroup: placeholderGroup,
+	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
@@ -1483,14 +1509,16 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchReq := &milvuspb.SearchRequest{
-			DbName:           dbName,
-			CollectionName:   httpReq.CollectionName,
-			Dsl:              subReq.Filter,
-			PlaceholderGroup: placeholderGroup,
-			DslType:          commonpb.DslType_BoolExprV1,
-			OutputFields:     httpReq.OutputFields,
-			PartitionNames:   httpReq.PartitionNames,
-			SearchParams:     searchParams,
+			DbName:         dbName,
+			CollectionName: httpReq.CollectionName,
+			Dsl:            subReq.Filter,
+			SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+				PlaceholderGroup: placeholderGroup,
+			},
+			DslType:        commonpb.DslType_BoolExprV1,
+			OutputFields:   httpReq.OutputFields,
+			PartitionNames: httpReq.PartitionNames,
+			SearchParams:   searchParams,
 		}
 		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
 		req.Requests = append(req.Requests, searchReq)
@@ -1929,6 +1957,7 @@ func (h *HandlersV2) dropDatabaseProperties(ctx context.Context, c *gin.Context,
 func (h *HandlersV2) listDatabases(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	req := &milvuspb.ListDatabasesRequest{}
 	c.Set(ContextRequest, req)
+	// handle at rootcoord side
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListDatabases", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListDatabases(reqCtx, req.(*milvuspb.ListDatabasesRequest))
 	})
@@ -2712,15 +2741,6 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ListImportsAuthPlaceholder{
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/ListImports", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
@@ -2728,13 +2748,29 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		returnData := make(map[string]interface{})
 		records := make([]map[string]interface{}, 0)
 		response := resp.(*internalpb.ListImportsResponse)
-		for i, jobID := range response.GetJobIDs() {
+		jobIDs := response.GetJobIDs()
+		states := response.GetStates()
+		progresses := response.GetProgresses()
+		reasons := response.GetReasons()
+		collections := response.GetCollectionNames()
+
+		for i, jobID := range jobIDs {
+			collection := collections[i]
+			if h.checkAuth {
+				err = checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
+					DbName:         dbName,
+					CollectionName: collection,
+				})
+				if err != nil {
+					continue
+				}
+			}
 			jobDetail := make(map[string]interface{})
 			jobDetail["jobId"] = jobID
-			jobDetail["collectionName"] = response.GetCollectionNames()[i]
-			jobDetail["state"] = response.GetStates()[i].String()
-			jobDetail["progress"] = response.GetProgresses()[i]
-			reason := response.GetReasons()[i]
+			jobDetail["collectionName"] = collection
+			jobDetail["state"] = states[i].String()
+			jobDetail["progress"] = progresses[i]
+			reason := reasons[i]
 			if reason != "" {
 				jobDetail["reason"] = reason
 			}
@@ -2793,19 +2829,24 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	}
 	c.Set(ContextRequest, req)
 
-	if h.checkAuth {
-		err := checkAuthorizationV2(ctx, c, false, &milvuspb.GetImportProgressAuthPlaceholder{
-			DbName: dbName,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	resp, err := wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/GetImportProgress", func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err == nil {
 		response := resp.(*internalpb.GetImportProgressResponse)
+		if h.checkAuth {
+			err := checkAuthorizationHelper(ctx, c, &milvuspb.ImportAuthPlaceholder{
+				DbName:         dbName,
+				CollectionName: response.GetCollectionName(),
+			})
+			if err != nil {
+				HTTPReturn(c, http.StatusForbidden, gin.H{
+					HTTPReturnCode:    merr.Code(err),
+					HTTPReturnMessage: err.Error(),
+				})
+				return nil, err
+			}
+		}
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
 		returnData["createTime"] = response.GetCreateTime()

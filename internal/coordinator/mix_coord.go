@@ -18,6 +18,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -113,10 +114,6 @@ func (s *mixCoordImpl) Register() error {
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
 		log.Info("MixCoord Register Finished")
-		s.session.LivenessCheck(s.ctx, func() {
-			log.Error("MixCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
-			os.Exit(1)
-		})
 	}
 	if s.enableActiveStandBy {
 		go func() {
@@ -213,6 +210,10 @@ func (s *mixCoordImpl) initInternal() error {
 	if err := s.queryCoordServer.Start(); err != nil {
 		log.Error("queryCoord start failed", zap.Error(err))
 		return err
+	}
+
+	if err := s.datacoordServer.SyncFileResources(s.ctx); err != nil {
+		log.Error("init file resources failed", zap.Error(err))
 	}
 	return nil
 }
@@ -886,6 +887,10 @@ func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 	return s.queryCoordServer.GetMetrics(ctx, in)
 }
 
+func (s *mixCoordImpl) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	return s.queryCoordServer.SyncFileResource(ctx, resources, version)
+}
+
 // QueryCoordServer
 func (s *mixCoordImpl) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ActivateChecker(ctx, req)
@@ -1234,4 +1239,9 @@ func (s *mixCoordImpl) RemoveFileResource(ctx context.Context, req *milvuspb.Rem
 // ListFileResources list file resources
 func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.datacoordServer.ListFileResources(ctx, req)
+}
+
+// CreateExternalCollection creates an external collection
+func (s *mixCoordImpl) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
+	return s.datacoordServer.CreateExternalCollection(ctx, req)
 }

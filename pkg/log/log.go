@@ -45,7 +45,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var _globalL, _globalP, _globalS, _globalR atomic.Value
+var _globalL, _globalP, _globalS, _globalR, _globalCleanup atomic.Value
 
 var (
 	_globalLevelLogger sync.Map
@@ -122,7 +122,13 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	if err != nil {
 		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
 	}
-	core := NewTextCore(newZapTextEncoder(cfg), output, level)
+	var core zapcore.Core
+	if cfg.AsyncWriteEnable {
+		core = NewAsyncTextIOCore(cfg, output, level)
+		registerCleanup(core.(*asyncTextIOCore).Stop)
+	} else {
+		core = NewTextCore(newZapTextEncoder(cfg), output, level)
+	}
 	opts = append(cfg.buildOptions(output), opts...)
 	lg := zap.New(core, opts...)
 	r := &ZapProperties{
@@ -212,12 +218,28 @@ func fatalL() *zap.Logger {
 	return v.(*zap.Logger)
 }
 
+// Cleanup cleans up the global logger and sugared logger.
+func Cleanup() {
+	cleanup := _globalCleanup.Load()
+	if cleanup != nil {
+		cleanup.(func())()
+	}
+}
+
 // ReplaceGlobals replaces the global Logger and SugaredLogger.
 // It's safe for concurrent use.
 func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
 	_globalL.Store(logger)
 	_globalS.Store(logger.Sugar())
 	_globalP.Store(props)
+}
+
+// registerCleanup registers a cleanup function to be called when the global logger is cleaned up.
+func registerCleanup(cleanup func()) {
+	oldCleanup := _globalCleanup.Swap(cleanup)
+	if oldCleanup != nil {
+		oldCleanup.(func())()
+	}
 }
 
 func replaceLeveledLoggers(debugLogger *zap.Logger) {

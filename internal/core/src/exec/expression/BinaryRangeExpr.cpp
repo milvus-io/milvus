@@ -173,6 +173,15 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 template <typename T>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
+    if (!has_offset_input_ && is_pk_field_ &&
+        segment_->type() == SegmentType::Sealed) {
+        if (pk_type_ == DataType::VARCHAR) {
+            return ExecRangeVisitorImplForPk<std::string_view>(context);
+        } else {
+            return ExecRangeVisitorImplForPk<int64_t>(context);
+        }
+    }
+
     if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
@@ -327,6 +336,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             TargetBitmapView valid_res,
             HighPrecisionType val1,
             HighPrecisionType val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,
@@ -489,6 +504,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val1,
             ValueType val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true, filter_type>
                 func;
@@ -732,9 +753,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                     }
                 }
             };
-        if (!index->CanSkipShared(pointer)) {
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
-        }
+        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -794,6 +813,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             ValueType val1,
             ValueType val2,
             int index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
                 func;
@@ -882,6 +907,47 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+template <typename T>
+VectorPtr
+PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            PkInnerType;
+
+    if (!arg_inited_) {
+        lower_arg_.SetValue<PkInnerType>(expr_->lower_val_);
+        upper_arg_.SetValue<PkInnerType>(expr_->upper_val_);
+        arg_inited_ = true;
+    }
+
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    if (cached_index_chunk_id_ != 0) {
+        cached_index_chunk_id_ = 0;
+        cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
+        auto cache_view = cached_index_chunk_res_->view();
+
+        PkType lower_pk = lower_arg_.GetValue<PkInnerType>();
+        PkType upper_pk = upper_arg_.GetValue<PkInnerType>();
+        segment_->pk_binary_range(op_ctx_,
+                                  lower_pk,
+                                  expr_->lower_inclusive_,
+                                  upper_pk,
+                                  expr_->upper_inclusive_,
+                                  cache_view);
+    }
+
+    TargetBitmap result;
+    result.append(
+        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 }  // namespace exec

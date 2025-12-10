@@ -72,7 +72,8 @@ struct FileManagerContext {
      * @param properties Shared pointer to Properties object
      */
     void
-    set_loon_ffi_properties(std::shared_ptr<Properties> properties) {
+    set_loon_ffi_properties(
+        std::shared_ptr<milvus_storage::api::Properties> properties) {
         loon_ffi_properties = std::move(properties);
     }
 
@@ -82,7 +83,7 @@ struct FileManagerContext {
     milvus_storage::ArrowFileSystemPtr fs;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
-    std::shared_ptr<Properties> loon_ffi_properties;
+    std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
 };
 
 #define FILEMANAGER_TRY try {
@@ -223,7 +224,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
-    std::shared_ptr<Properties> loon_ffi_properties_;
+    std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
 };
 

@@ -155,6 +155,7 @@ type resourceEstimateFactor struct {
 	EnableInterminSegmentIndex      bool
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
+	jsonKeyStatsExpansionFactor     float64
 	TieredEvictionEnabled           bool
 	TieredEvictableMemoryCacheRatio float64
 	TieredEvictableDiskCacheRatio   float64
@@ -1572,19 +1573,22 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 	logicalDiskUsageLimit := uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()) * paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 
 	if predictLogicalMemUsage > logicalMemUsageLimit {
-		return 0, 0, fmt.Errorf("Logical memory usage checking for segment loading failed, predictLogicalMemUsage = %v MB, LogicalMemUsageLimit = %v MB, decrease the evictableMemoryCacheRatio (current: %v) if you want to load more segments",
-			logutil.ToMB(float64(predictLogicalMemUsage)),
-			logutil.ToMB(float64(logicalMemUsageLimit)),
-			paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		log.Warn("logical memory usage checking for segment loading failed",
+			zap.String("resourceType", "Memory"),
+			zap.Float64("predictLogicalMemUsageMB", logutil.ToMB(float64(predictLogicalMemUsage))),
+			zap.Float64("logicalMemUsageLimitMB", logutil.ToMB(float64(logicalMemUsageLimit))),
+			zap.Float64("evictableMemoryCacheRatio", paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()),
 		)
+		return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Memory")
 	}
 
 	if predictLogicalDiskUsage > logicalDiskUsageLimit {
-		return 0, 0, fmt.Errorf("Logical disk usage checking for segment loading failed, predictLogicalDiskUsage = %v MB, LogicalDiskUsageLimit = %v MB, decrease the evictableDiskCacheRatio (current: %v) if you want to load more segments",
+		log.Warn(fmt.Sprintf("Logical disk usage checking for segment loading failed, predictLogicalDiskUsage = %v MB, LogicalDiskUsageLimit = %v MB, decrease the evictableDiskCacheRatio (current: %v) if you want to load more segments",
 			logutil.ToMB(float64(predictLogicalDiskUsage)),
 			logutil.ToMB(float64(logicalDiskUsageLimit)),
 			paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
-		)
+		))
+		return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Disk")
 	}
 
 	return predictLogicalMemUsage - logicalMemUsage, predictLogicalDiskUsage - logicalDiskUsage, nil
@@ -1610,12 +1614,13 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	maxFactor := resourceEstimateFactor{
-		memoryUsageFactor:          paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:     paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		EnableInterminSegmentIndex: paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:     paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:      paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		memoryUsageFactor:           paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
+		memoryIndexUsageFactor:      paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
+		EnableInterminSegmentIndex:  paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
+		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
+		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
+		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -1679,20 +1684,26 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	} else {
 		// fallback to original segment loading logic
 		if predictMemUsage > uint64(float64(totalMem)*paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-			return 0, 0, fmt.Errorf("load segment failed, OOM if load, maxSegmentSize = %v MB,  memUsage = %v MB, predictMemUsage = %v MB, totalMem = %v MB thresholdFactor = %f",
-				logutil.ToMB(float64(maxSegmentSize)),
-				logutil.ToMB(float64(memUsage)),
-				logutil.ToMB(float64(predictMemUsage)),
-				logutil.ToMB(float64(totalMem)),
-				paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
+			log.Warn("load segment failed, OOM if load",
+				zap.String("resourceType", "Memory"),
+				zap.Float64("maxSegmentSizeMB", logutil.ToMB(float64(maxSegmentSize))),
+				zap.Float64("memUsageMB", logutil.ToMB(float64(memUsage))),
+				zap.Float64("predictMemUsageMB", logutil.ToMB(float64(predictMemUsage))),
+				zap.Float64("totalMemMB", logutil.ToMB(float64(totalMem))),
+				zap.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()),
+			)
+			return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Memory")
 		}
 
 		if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
-			return 0, 0, merr.WrapErrServiceDiskLimitExceeded(float32(predictDiskUsage), float32(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()), fmt.Sprintf("load segment failed, disk space is not enough, diskUsage = %v MB, predictDiskUsage = %v MB, totalDisk = %v MB, thresholdFactor = %f",
-				logutil.ToMB(float64(diskUsage)),
-				logutil.ToMB(float64(predictDiskUsage)),
-				logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()))),
-				paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()))
+			log.Warn("load segment failed, disk space is not enough",
+				zap.String("resourceType", "Disk"),
+				zap.Float64("diskUsageMB", logutil.ToMB(float64(diskUsage))),
+				zap.Float64("predictDiskUsageMB", logutil.ToMB(float64(predictDiskUsage))),
+				zap.Float64("totalDiskMB", logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())))),
+				zap.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()),
+			)
+			return 0, 0, merr.WrapErrSegmentRequestResourceFailed("Disk")
 		}
 	}
 
@@ -2094,9 +2105,24 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		segMemoryLoadingSize += uint64(float64(memSize) * expansionFactor)
 	}
 
+	// PART 5: calculate size of json key stats data
+	jsonStatsMmapEnable := paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool()
+	needWarmup := paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue() == "sync"
+	for _, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
+		if jsonStatsMmapEnable {
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				segDiskLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			}
+		} else {
+			if !multiplyFactor.TieredEvictionEnabled || needWarmup {
+				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * multiplyFactor.jsonKeyStatsExpansionFactor)
+			}
+		}
+	}
+
 	// per struct memory size, used to keep mapping between row id and element id
 	var structArrayOffsetsSize uint64
-	// PART 5: calculate size of struct array offsets
+	// PART 6: calculate size of struct array offsets
 	// The memory size is 4 * row_count + 4 * total_element_count
 	// We cannot easily get the element count, so we estimate it by the row count * 10
 	rowCount := uint64(loadInfo.GetNumOfRows())
@@ -2297,10 +2323,13 @@ func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresh
 			}
 		}
 		if minId == -1 {
-			return fmt.Errorf("load segment failed, GPU OOM if loaded, GpuMemUsage(bytes) = %v, usedGpuMem(bytes) = %v, maxGPUMem(bytes) = %v",
-				fieldGpuMem,
-				usedGpuMem,
-				maxGpuMemSize)
+			log.Warn("load segment failed, GPU OOM if loaded",
+				zap.String("resourceType", "GPU"),
+				zap.Uint64("gpuMemUsageBytes", fieldGpuMem),
+				zap.Any("usedGpuMemBytes", usedGpuMem),
+				zap.Any("maxGpuMemBytes", maxGpuMemSize),
+			)
+			return merr.WrapErrSegmentRequestResourceFailed("GPU")
 		}
 		currentGpuMem[minId] += minGpuMem
 	}

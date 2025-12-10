@@ -6,6 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -30,6 +31,18 @@ func newWatcher() *watcher {
 type watcher struct {
 	cond                    *syncutil.ContextCond
 	lastVersionedAssignment types.VersionedStreamingNodeAssignments
+}
+
+func (w *watcher) GetLatestStreamingVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
+	w.cond.L.Lock()
+	for w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1 {
+		if err := w.cond.Wait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	last := w.lastVersionedAssignment.StreamingVersion
+	w.cond.L.Unlock()
+	return last, nil
 }
 
 func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error) {

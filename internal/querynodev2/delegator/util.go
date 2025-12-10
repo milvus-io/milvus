@@ -5,6 +5,7 @@ import (
 	"sort"
 	"unicode/utf8"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func BuildSparseFieldData(field *schemapb.FieldSchema, sparseArray *schemapb.SparseFloatArray) *schemapb.FieldData {
@@ -104,53 +106,78 @@ func mergeOffsets(input SpanList) SpanList {
 	return offsets
 }
 
-func fetchFragmentsFromOffsets(text string, span SpanList, fragmentSize int64, numOfFragments int64) []*querypb.HighlightFragment {
+func bytesOffsetToRuneOffset(text string, spans SpanList) error {
+	byteOffsetSet := typeutil.NewSet[int64]()
+	for _, span := range spans {
+		byteOffsetSet.Insert(span[0])
+		byteOffsetSet.Insert(span[1])
+	}
+	offsetMap := map[int64]int64{0: 0, int64(len(text)): int64(utf8.RuneCountInString(text))}
+
+	cnt := int64(0)
+	for i := range text {
+		if byteOffsetSet.Contain(int64(i)) {
+			offsetMap[int64(i)] = cnt
+		}
+		cnt++
+	}
+
+	// convert spans from byte offsets to rune offsets
+	for i, span := range spans {
+		startOffset, ok := offsetMap[span[0]]
+		if !ok {
+			return errors.Errorf("start offset: %d not found (text: %d bytes)", span[0], len(text))
+		}
+		endOffset, ok := offsetMap[span[1]]
+		if !ok {
+			return errors.Errorf("end offset: %d not found (text: %d bytes)", span[1], len(text))
+		}
+		spans[i][0] = startOffset
+		spans[i][1] = endOffset
+	}
+	return nil
+}
+
+func fetchFragmentsFromOffsets(text string, spans SpanList, fragmentOffset int64, fragmentSize int64, numOfFragments int64) []*querypb.HighlightFragment {
 	result := make([]*querypb.HighlightFragment, 0)
-	endPosition := int(fragmentSize)
-	nowOffset := 0
-	frag := &querypb.HighlightFragment{
-		StartOffset: 0,
-	}
+	textRuneLen := int64(utf8.RuneCountInString(text))
 
-	next := func() {
-		endPosition += int(fragmentSize)
-		frag.EndOffset = int64(nowOffset)
-		result = append(result, frag)
+	var frag *querypb.HighlightFragment = nil
+	next := func(span *Span) bool {
+		startOffset := max(0, span[0]-fragmentOffset)
+		endOffset := min(max(span[1], startOffset+fragmentSize), textRuneLen)
+		if frag != nil {
+			result = append(result, frag)
+		}
+		if len(result) >= int(numOfFragments) {
+			frag = nil
+			return false
+		}
 		frag = &querypb.HighlightFragment{
-			StartOffset: int64(nowOffset),
+			StartOffset: startOffset,
+			EndOffset:   endOffset,
+			Offsets:     []int64{span[0], span[1]},
 		}
+		return true
 	}
 
-	cursor := 0
-	spanNum := len(span)
-	for i, r := range text {
-		nowOffset += utf8.RuneLen(r)
-
-		// append if span was included in current fragment
-		for ; cursor < spanNum && span[cursor][1] <= int64(nowOffset); cursor++ {
-			if span[cursor][0] >= frag.StartOffset {
-				frag.Offsets = append(frag.Offsets, span[cursor][0], span[cursor][1])
-			} else {
-				// if some span cross fragment start, append the part in current fragment
-				frag.Offsets = append(frag.Offsets, frag.StartOffset, span[cursor][1])
-			}
-		}
-
-		if i >= endPosition {
-			// if some span cross fragment end, append the part in current fragment
-			if cursor < spanNum && span[cursor][0] < int64(nowOffset) {
-				frag.Offsets = append(frag.Offsets, span[cursor][0], int64(nowOffset))
-			}
-			next()
-			// skip all if no span remain or get enough num of fragments
-			if cursor >= spanNum || int64(len(result)) >= numOfFragments {
+	for i, span := range spans {
+		if frag == nil || span[0] > frag.EndOffset {
+			if !next(&span) {
 				break
 			}
+		} else {
+			// append rune offset to fragment
+			frag.Offsets = append(frag.Offsets, spans[i][0], spans[i][1])
+			// extend fragment end offset if this span goes beyond current boundary
+			if span[1] > frag.EndOffset {
+				frag.EndOffset = span[1]
+			}
 		}
 	}
 
-	if nowOffset > int(frag.StartOffset) {
-		next()
+	if frag != nil {
+		result = append(result, frag)
 	}
 	return result
 }

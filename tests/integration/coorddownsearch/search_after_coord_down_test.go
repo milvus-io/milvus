@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
@@ -174,6 +175,24 @@ func (s *CoordDownSearch) checkCollections() bool {
 	return notLoaded == 0
 }
 
+func (s *CoordDownSearch) waitLeaderServiceable() {
+	checkQNLeaderServiceable := func() bool {
+		for _, c := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
+			resp, err := c.GetDataDistribution(context.TODO(), &querypb.GetDataDistributionRequest{})
+			s.NoError(err)
+			for _, v := range resp.GetLeaderViews() {
+				if !v.GetStatus().GetServiceable() {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for !checkQNLeaderServiceable() {
+		time.Sleep(time.Millisecond * 100)
+	}
+}
+
 func (s *CoordDownSearch) search(collectionName string, dim int, consistencyLevel commonpb.ConsistencyLevel) {
 	c := s.Cluster
 	var err error
@@ -275,6 +294,9 @@ func (s *CoordDownSearch) setupData() {
 	wg.Wait()
 	log.Info("=========================Data injection finished=========================")
 	s.checkCollections()
+	s.waitLeaderServiceable()
+	// wait for qc get new distribution
+	time.Sleep(paramtable.Get().QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond) + time.Second)
 	log.Info(fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName, Dim, commonpb.ConsistencyLevel_Eventually)
 	log.Info("=========================Search finished=========================")

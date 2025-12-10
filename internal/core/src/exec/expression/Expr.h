@@ -922,10 +922,39 @@ class SegmentExpr : public Expr {
                          values...);
                 }
             } else {
+                // Chunk is skipped by SkipIndex.
+                // We still need to:
+                // 1. Apply valid_data to handle nullable fields
+                // 2. Call func with nullptr to update internal cursors
+                //    (e.g., processed_cursor for bitmap_input indexing)
                 ApplyValidData(valid_data,
                                res + processed_size,
                                valid_res + processed_size,
                                size);
+                // Call func with nullptr to update internal cursors
+                if constexpr (NeedSegmentOffsets) {
+                    std::vector<int32_t> segment_offsets_array(size);
+                    for (int64_t j = 0; j < size; ++j) {
+                        segment_offsets_array[j] = static_cast<int32_t>(
+                            size_per_chunk_ * i + data_pos + j);
+                    }
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
             }
 
             processed_size += size;
@@ -1056,6 +1085,11 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
+                // Chunk is skipped by SkipIndex.
+                // We still need to:
+                // 1. Apply valid_data to handle nullable fields
+                // 2. Call func with nullptr to update internal cursors
+                //    (e.g., processed_cursor for bitmap_input indexing)
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
@@ -1078,6 +1112,25 @@ class SegmentExpr : public Expr {
                                    res + processed_size,
                                    valid_res + processed_size,
                                    size);
+                }
+                // Call func with nullptr to update internal cursors
+                if constexpr (NeedSegmentOffsets) {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
                 }
             }
 

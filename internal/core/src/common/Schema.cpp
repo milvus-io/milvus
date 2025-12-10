@@ -26,7 +26,9 @@
 #include "Schema.h"
 #include "SystemProperty.h"
 #include "arrow/util/key_value_metadata.h"
+#include "common/Consts.h"
 #include "milvus-storage/common/constants.h"
+#include "pb/common.pb.h"
 #include "protobuf_utils.h"
 
 namespace milvus {
@@ -61,6 +63,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         if (child.name() == namespace_field_name) {
             schema->set_namespace_field_id(field_id);
         }
+
+        auto [has_setting, enabled] =
+            GetBoolFromRepeatedKVs(child.type_params(), MMAP_ENABLED_KEY);
+        if (has_setting) {
+            schema->mmap_fields_[field_id] = enabled;
+        }
     };
 
     for (const milvus::proto::schema::FieldSchema& child :
@@ -74,6 +82,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             process_field(sub_field);
         }
     }
+
+    std::tie(schema->has_mmap_setting_, schema->mmap_enabled_) =
+        GetBoolFromRepeatedKVs(schema_proto.properties(), MMAP_ENABLED_KEY);
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");
@@ -150,6 +161,16 @@ Schema::AbsentFields(Schema& old_schema) const {
     return std::make_unique<std::vector<FieldMeta>>(result);
 }
 
+std::pair<bool, bool>
+Schema::MmapEnabled(const FieldId& field_id) const {
+    auto it = mmap_fields_.find(field_id);
+    // fallback to  collection-level config
+    if (it == mmap_fields_.end()) {
+        return {has_mmap_setting_, mmap_enabled_};
+    }
+    return {true, it->second};
+}
+
 const FieldMeta&
 Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) {
     auto cache_it = struct_array_field_cache_.find(struct_name);
@@ -185,5 +206,4 @@ Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) {
     struct_array_field_cache_[struct_name] = found_field_meta;
     return *found_field_meta;
 }
-
 }  // namespace milvus

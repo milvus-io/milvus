@@ -320,6 +320,10 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForArray(EvalCtx& context);
 
+    template <typename T>
+    VectorPtr
+    ExecRangeVisitorImplForPk(EvalCtx& context);
+
  private:
     std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr> expr_;
     int64_t overflow_check_pos_{0};

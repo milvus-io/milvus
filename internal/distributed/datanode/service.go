@@ -399,3 +399,7 @@ func (s *Server) QueryTask(ctx context.Context, request *workerpb.QueryTaskReque
 func (s *Server) DropTask(ctx context.Context, request *workerpb.DropTaskRequest) (*commonpb.Status, error) {
 	return s.datanode.DropTask(ctx, request)
 }
+
+func (s *Server) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	return s.datanode.SyncFileResource(ctx, req)
+}

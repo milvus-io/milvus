@@ -371,6 +371,72 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res,
                     check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_duplicate_pk_int64(self):
+        """
+        target: test upsert with duplicate primary keys (Int64)
+        method:
+            1. create collection with Int64 primary key
+            2. upsert data with duplicate primary keys in the same batch
+        expected: raise error - duplicate primary keys are not allowed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        # 2. upsert with duplicate PKs: 1, 2, 1 (duplicate)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: 1.0, default_string_field_name: "first"},
+            {default_primary_key_field_name: 2, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: 2.0, default_string_field_name: "second"},
+            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: 1.1, default_string_field_name: "duplicate"},
+        ]
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "duplicate primary keys are not allowed in the same batch"}
+        self.upsert(client, collection_name, rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_upsert_duplicate_pk_varchar(self):
+        """
+        target: test upsert with duplicate primary keys (VarChar)
+        method:
+            1. create collection with VarChar primary key
+            2. upsert data with duplicate primary keys in the same batch
+        expected: raise error - duplicate primary keys are not allowed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = default_dim
+        # 1. create collection with VarChar primary key
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, max_length=64, is_primary=True,
+                         auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. upsert with duplicate PKs: "a", "b", "a" (duplicate)
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {default_primary_key_field_name: "a", default_vector_field_name: list(rng.random((1, dim))[0]),
+             default_float_field_name: 1.0},
+            {default_primary_key_field_name: "b", default_vector_field_name: list(rng.random((1, dim))[0]),
+             default_float_field_name: 2.0},
+            {default_primary_key_field_name: "a", default_vector_field_name: list(rng.random((1, dim))[0]),
+             default_float_field_name: 1.1},
+        ]
+        error = {ct.err_code: 1100,
+                 ct.err_msg: "duplicate primary keys are not allowed in the same batch"}
+        self.upsert(client, collection_name, rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
     """ Test case of search interface """
@@ -551,342 +617,3 @@ class TestMilvusClientUpsertValid(TestMilvusClientV2Base):
             self.drop_partition(client, collection_name, partition_name)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
-
-
-class TestMilvusClientUpsertDedup(TestMilvusClientV2Base):
-    """Test case for upsert deduplication functionality"""
-
-    @pytest.fixture(scope="function", params=["COSINE", "L2"])
-    def metric_type(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_dedup_int64_pk(self):
-        """
-        target: test upsert with duplicate int64 primary keys in same batch
-        method: 
-            1. create collection with int64 primary key
-            2. upsert data with duplicate primary keys [1, 2, 3, 2, 1]
-            3. query to verify only last occurrence is kept
-        expected: only 3 unique records exist, with data from last occurrence
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
-        # 2. upsert data with duplicate PKs: [1, 2, 3, 2, 1]
-        # Expected: keep last occurrence -> [3, 2, 1] at indices [2, 3, 4]
-        rng = np.random.default_rng(seed=19530)
-        rows = [
-            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 1.0, default_string_field_name: "str_1_first"},
-            {default_primary_key_field_name: 2, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 2.0, default_string_field_name: "str_2_first"},
-            {default_primary_key_field_name: 3, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 3.0, default_string_field_name: "str_3"},
-            {default_primary_key_field_name: 2, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 2.1, default_string_field_name: "str_2_last"},
-            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 1.1, default_string_field_name: "str_1_last"},
-        ]
-        
-        results = self.upsert(client, collection_name, rows)[0]
-        # After deduplication, should only have 3 records
-        assert results['upsert_count'] == 3
-        
-        # 3. query to verify deduplication - should have only 3 unique records
-        query_results = self.query(client, collection_name, filter="id >= 0")[0]
-        assert len(query_results) == 3
-        
-        # Verify that last occurrence data is kept
-        id_to_data = {item['id']: item for item in query_results}
-        assert 1 in id_to_data
-        assert 2 in id_to_data
-        assert 3 in id_to_data
-        
-        # Check that data from last occurrence is preserved
-        assert id_to_data[1]['float'] == 1.1
-        assert id_to_data[1]['varchar'] == "str_1_last"
-        assert id_to_data[2]['float'] == 2.1
-        assert id_to_data[2]['varchar'] == "str_2_last"
-        assert id_to_data[3]['float'] == 3.0
-        assert id_to_data[3]['varchar'] == "str_3"
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_dedup_varchar_pk(self):
-        """
-        target: test upsert with duplicate varchar primary keys in same batch
-        method: 
-            1. create collection with varchar primary key
-            2. upsert data with duplicate primary keys ["a", "b", "c", "b", "a"]
-            3. query to verify only last occurrence is kept
-        expected: only 3 unique records exist, with data from last occurrence
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        
-        # 1. create collection with varchar primary key
-        schema = self.create_schema(client, enable_dynamic_field=True)[0]
-        schema.add_field("id", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        schema.add_field("age", DataType.INT64)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
-                               index_params=index_params, consistency_level="Strong")
-        
-        # 2. upsert data with duplicate PKs: ["a", "b", "c", "b", "a"]
-        # Expected: keep last occurrence -> ["c", "b", "a"] at indices [2, 3, 4]
-        rng = np.random.default_rng(seed=19530)
-        rows = [
-            {"id": "a", default_vector_field_name: list(rng.random((1, default_dim))[0]), 
-             "age": 10},
-            {"id": "b", default_vector_field_name: list(rng.random((1, default_dim))[0]), 
-             "age": 20},
-            {"id": "c", default_vector_field_name: list(rng.random((1, default_dim))[0]), 
-             "age": 30},
-            {"id": "b", default_vector_field_name: list(rng.random((1, default_dim))[0]), 
-             "age": 21},
-            {"id": "a", default_vector_field_name: list(rng.random((1, default_dim))[0]), 
-             "age": 11},
-        ]
-        
-        results = self.upsert(client, collection_name, rows)[0]
-        # After deduplication, should only have 3 records
-        assert results['upsert_count'] == 3
-        
-        # 3. query to verify deduplication
-        query_results = self.query(client, collection_name, filter='id in ["a", "b", "c"]')[0]
-        assert len(query_results) == 3
-        
-        # Verify that last occurrence data is kept
-        id_to_data = {item['id']: item for item in query_results}
-        assert "a" in id_to_data
-        assert "b" in id_to_data
-        assert "c" in id_to_data
-        
-        # Check that data from last occurrence is preserved
-        assert id_to_data["a"]["age"] == 11
-        assert id_to_data["b"]["age"] == 21
-        assert id_to_data["c"]["age"] == 30
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_dedup_all_duplicates(self):
-        """
-        target: test upsert when all records have same primary key
-        method: 
-            1. create collection
-            2. upsert 5 records with same primary key
-            3. query to verify only 1 record exists
-        expected: only 1 record exists with data from last occurrence
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
-        # 2. upsert data where all have same PK (id=1)
-        rng = np.random.default_rng(seed=19530)
-        rows = [
-            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: i * 1.0, default_string_field_name: f"version_{i}"} 
-            for i in range(5)
-        ]
-        
-        results = self.upsert(client, collection_name, rows)[0]
-        # After deduplication, should only have 1 record
-        assert results['upsert_count'] == 1
-        
-        # 3. query to verify only 1 record exists
-        query_results = self.query(client, collection_name, filter="id == 1")[0]
-        assert len(query_results) == 1
-        
-        # Verify it's the last occurrence (i=4)
-        assert query_results[0]['float'] == 4.0
-        assert query_results[0]['varchar'] == "version_4"
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_dedup_no_duplicates(self):
-        """
-        target: test upsert with no duplicate primary keys
-        method: 
-            1. create collection
-            2. upsert data with unique primary keys
-            3. query to verify all records exist
-        expected: all records exist as-is
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
-        # 2. upsert data with unique PKs
-        rng = np.random.default_rng(seed=19530)
-        nb = 10
-        rows = [
-            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: i * 1.0, default_string_field_name: str(i)} 
-            for i in range(nb)
-        ]
-        
-        results = self.upsert(client, collection_name, rows)[0]
-        # No deduplication should occur
-        assert results['upsert_count'] == nb
-        
-        # 3. query to verify all records exist
-        query_results = self.query(client, collection_name, filter=f"id >= 0")[0]
-        assert len(query_results) == nb
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_upsert_dedup_large_batch(self):
-        """
-        target: test upsert deduplication with large batch
-        method: 
-            1. create collection
-            2. upsert large batch with 50% duplicate primary keys
-            3. query to verify correct number of records
-        expected: only unique records exist
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
-        # 2. upsert large batch where each ID appears twice
-        rng = np.random.default_rng(seed=19530)
-        nb = 500
-        unique_ids = nb // 2  # 250 unique IDs
-        
-        rows = []
-        for i in range(nb):
-            pk = i % unique_ids  # This creates duplicates: 0,1,2...249,0,1,2...249
-            rows.append({
-                default_primary_key_field_name: pk, 
-                default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                default_float_field_name: float(i),  # Different value for each row
-                default_string_field_name: f"batch_{i}"
-            })
-        
-        results = self.upsert(client, collection_name, rows)[0]
-        # After deduplication, should only have unique_ids records
-        assert results['upsert_count'] == unique_ids
-        
-        # 3. query to verify correct number of records
-        query_results = self.query(client, collection_name, filter=f"id >= 0", limit=1000)[0]
-        assert len(query_results) == unique_ids
-        
-        # Verify that last occurrence is kept (should have higher float values)
-        for item in query_results:
-            pk = item['id']
-            # Last occurrence of pk is at index (pk + unique_ids)
-            expected_float = float(pk + unique_ids)
-            assert item['float'] == expected_float
-            assert item['varchar'] == f"batch_{pk + unique_ids}"
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_dedup_with_partition(self):
-        """
-        target: test upsert deduplication works correctly with partitions
-        method: 
-            1. create collection with partition
-            2. upsert data with duplicates to specific partition
-            3. query to verify deduplication in partition
-        expected: deduplication works within partition
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str("partition")
-        
-        # 1. create collection and partition
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.create_partition(client, collection_name, partition_name)
-        
-        # 2. upsert data with duplicates to partition
-        rng = np.random.default_rng(seed=19530)
-        rows = [
-            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 1.0, default_string_field_name: "first"},
-            {default_primary_key_field_name: 2, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 2.0, default_string_field_name: "unique"},
-            {default_primary_key_field_name: 1, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-             default_float_field_name: 1.1, default_string_field_name: "last"},
-        ]
-        
-        results = self.upsert(client, collection_name, rows, partition_name=partition_name)[0]
-        assert results['upsert_count'] == 2
-        
-        # 3. query partition to verify deduplication
-        query_results = self.query(client, collection_name, filter="id >= 0", 
-                                   partition_names=[partition_name])[0]
-        assert len(query_results) == 2
-        
-        # Verify correct data
-        id_to_data = {item['id']: item for item in query_results}
-        assert id_to_data[1]['float'] == 1.1
-        assert id_to_data[1]['varchar'] == "last"
-        assert id_to_data[2]['float'] == 2.0
-        assert id_to_data[2]['varchar'] == "unique"
-        
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_upsert_dedup_with_vectors(self):
-        """
-        target: test upsert deduplication preserves correct vector data
-        method: 
-            1. create collection
-            2. upsert data with duplicate PKs but different vectors
-            3. search to verify correct vector is preserved
-        expected: vector from last occurrence is preserved
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        
-        # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        
-        # 2. upsert data with duplicate PK=1 but different vectors
-        # Create distinctly different vectors for easy verification
-        first_vector = [1.0] * default_dim  # All 1.0
-        last_vector = [2.0] * default_dim   # All 2.0
-        
-        rows = [
-            {default_primary_key_field_name: 1, default_vector_field_name: first_vector,
-             default_float_field_name: 1.0, default_string_field_name: "first"},
-            {default_primary_key_field_name: 2, default_vector_field_name: [0.5] * default_dim,
-             default_float_field_name: 2.0, default_string_field_name: "unique"},
-            {default_primary_key_field_name: 1, default_vector_field_name: last_vector,
-             default_float_field_name: 1.1, default_string_field_name: "last"},
-        ]
-        
-        results = self.upsert(client, collection_name, rows)[0]
-        assert results['upsert_count'] == 2
-        
-        # 3. query to get vector data
-        query_results = self.query(client, collection_name, filter="id == 1", 
-                                   output_fields=["id", "vector", "float", "varchar"])[0]
-        assert len(query_results) == 1
-        
-        # Verify it's the last occurrence with last_vector
-        result = query_results[0]
-        assert result['float'] == 1.1
-        assert result['varchar'] == "last"
-        # Vector should be last_vector (all 2.0)
-        assert all(abs(v - 2.0) < 0.001 for v in result['vector'])
-        
-        self.drop_collection(client, collection_name)

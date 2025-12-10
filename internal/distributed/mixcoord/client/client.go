@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
@@ -67,7 +68,7 @@ type Client struct {
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
 func NewClient(ctx context.Context) (types.MixCoordClient, error) {
-	sess := sessionutil.NewSession(ctx)
+	sess := sessionutil.NewSession(context.Background())
 	if sess == nil {
 		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Ctx(ctx).Debug("New MixCoord Client failed", zap.Error(err))
@@ -109,7 +110,7 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) MixCoordClient {
 func (c *Client) getMixCoordAddr() (string, error) {
 	log := log.Ctx(c.ctx)
 	key := c.grpcClient.GetRole()
-	msess, _, err := c.sess.GetSessions(key)
+	msess, _, err := c.sess.GetSessions(c.ctx, key)
 	if err != nil {
 		log.Debug("MixCoordClient GetSessions failed", zap.Any("key", key))
 		return "", err
@@ -134,7 +135,7 @@ func (c *Client) getMixCoordAddr() (string, error) {
 // compatible with standalone mode upgrade from 2.5, shoule be removed in 3.0
 func (c *Client) getCompatibleMixCoordAddr() (string, error) {
 	log := log.Ctx(c.ctx)
-	msess, _, err := c.sess.GetSessions(typeutil.RootCoordRole)
+	msess, _, err := c.sess.GetSessions(c.ctx, typeutil.RootCoordRole)
 	if err != nil {
 		log.Debug("mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
 		return "", errors.New("find no available mixcoord, check mixcoord state")
@@ -893,6 +894,17 @@ func (c *Client) FlushAll(ctx context.Context, req *datapb.FlushAllRequest, opts
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.FlushAllResponse, error) {
 		return client.FlushAll(ctx, req)
+	})
+}
+
+func (c *Client) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest, opts ...grpc.CallOption) (*datapb.CreateExternalCollectionResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.CreateExternalCollectionResponse, error) {
+		return client.CreateExternalCollection(ctx, req)
 	})
 }
 

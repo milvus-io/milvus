@@ -40,6 +40,12 @@ const (
 
 	PropertyWriterPolicy             = "writer.policy"
 	PropertyWriterSchemaBasedPattern = "writer.split.schema_based.patterns"
+
+	// CMEK (Customer Managed Encryption Keys) writer properties
+	PropertyWriterEncEnable = "writer.enc.enable"    // Enable encryption for written data
+	PropertyWriterEncKey    = "writer.enc.key"       // Encryption key for data encryption
+	PropertyWriterEncMeta   = "writer.enc.meta"      // Encoded metadata containing zone ID, collection ID, and key version
+	PropertyWriterEncAlgo   = "writer.enc.algorithm" // Encryption algorithm (e.g., "AES_GCM_V1")
 )
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig

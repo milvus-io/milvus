@@ -17,15 +17,12 @@
 package replicatestream
 
 import (
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -33,7 +30,6 @@ type ReplicateMetrics interface {
 	StartReplicate(msg message.ImmutableMessage)
 	OnSent(msg message.ImmutableMessage)
 	OnConfirmed(msg message.ImmutableMessage)
-	OnNoIncomingMessages()
 	OnInitiate()
 	OnConnect()
 	OnDisconnect()
@@ -91,21 +87,10 @@ func (m *replicateMetrics) OnConfirmed(msg message.ImmutableMessage) {
 		m.replicateInfo.GetTargetChannelName(),
 	).Observe(float64(replicateDuration.Milliseconds()))
 
-	now := time.Now()
-	confirmedTime := tsoutil.PhysicalTime(msg.TimeTick())
-	lag := now.Sub(confirmedTime)
-	metrics.CDCReplicateLag.WithLabelValues(
+	metrics.CDCLastReplicatedTimeTick.WithLabelValues(
 		m.replicateInfo.GetSourceChannelName(),
 		m.replicateInfo.GetTargetChannelName(),
-	).Set(float64(lag.Milliseconds()))
-}
-
-// OnNoIncomingMessages is called when there are no incoming messages.
-func (m *replicateMetrics) OnNoIncomingMessages() {
-	metrics.CDCReplicateLag.WithLabelValues(
-		m.replicateInfo.GetSourceChannelName(),
-		m.replicateInfo.GetTargetChannelName(),
-	).Set(0)
+	).Set(float64(msg.TimeTick()))
 }
 
 func (m *replicateMetrics) OnInitiate() {

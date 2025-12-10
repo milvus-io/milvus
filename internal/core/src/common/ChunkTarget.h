@@ -53,9 +53,12 @@ class ChunkTarget {
 
 class MmapChunkTarget : public ChunkTarget {
  public:
-    explicit MmapChunkTarget(std::string file_path, size_t cap)
+    explicit MmapChunkTarget(std::string file_path,
+                             size_t cap,
+                             storage::io::Priority io_prio)
         : file_path_(std::move(file_path)), cap_(cap) {
-        file_writer_ = std::make_unique<storage::FileWriter>(file_path_);
+        file_writer_ =
+            std::make_unique<storage::FileWriter>(file_path_, io_prio);
     }
 
     void

@@ -28,12 +28,12 @@
 #include <aws/s3/model/ListObjectsRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-#include "storage/MinioChunkManager.h"
-#include "storage/AliyunSTSClient.h"
-#include "storage/TencentCloudSTSClient.h"
-#include "storage/AliyunCredentialsProvider.h"
-#include "storage/TencentCloudCredentialsProvider.h"
-#include "storage/HuaweiCloudCredentialsProvider.h"
+#include "storage/minio/MinioChunkManager.h"
+#include "storage/aliyun/AliyunSTSClient.h"
+#include "storage/aliyun/AliyunCredentialsProvider.h"
+#include "storage/tencent/TencentCloudSTSClient.h"
+#include "storage/tencent/TencentCloudCredentialsProvider.h"
+#include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
