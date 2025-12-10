@@ -58,10 +58,10 @@ class ElementFilterIterator : public VectorIterator {
     std::shared_ptr<VectorIterator> base_iterator_;
 
     // Execution context for expression evaluation
-    const exec::ExecContext* exec_context_;
+    exec::ExecContext* exec_context_;
 
     // Expression set containing element-level filter expression
-    const exec::ExprSet* expr_set_;
+    exec::ExprSet* expr_set_;
 
     // Cache of filtered elements ready to be consumed
     std::deque<std::pair<int64_t, float>> filtered_buffer_;

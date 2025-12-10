@@ -172,7 +172,7 @@ Schema::MmapEnabled(const FieldId& field_id) const {
 }
 
 const FieldMeta&
-Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) {
+Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
     auto cache_it = struct_array_field_cache_.find(struct_name);
     if (cache_it != struct_array_field_cache_.end()) {
         return *cache_it->second;
