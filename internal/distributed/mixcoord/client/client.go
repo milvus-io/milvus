@@ -1950,38 +1950,14 @@ func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 }
 
 // TruncateCollection truncate collection
-func (c *Client) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.TruncateCollectionResponse, error) {
 		return client.TruncateCollection(ctx, in)
-	})
-}
-
-// DropSegmentsByTime drop segments that were updated before the flush timestamp for truncating collection
-func (c *Client) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
-	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-		return client.DropSegmentsByTime(ctx, req)
-	})
-}
-
-// ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
-func (c *Client) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
-	)
-	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
-		return client.ManualUpdateCurrentTarget(ctx, req)
 	})
 }
 

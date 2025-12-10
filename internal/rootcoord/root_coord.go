@@ -982,9 +982,11 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 }
 
 // TruncateCollection truncate collection
-func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 	metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("TruncateCollection")
@@ -997,13 +999,17 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	if err := c.broadcastTruncateCollection(ctx, in); err != nil {
 		logger.Info("failed to truncate collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("TruncateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	logger.Info("done to truncate collection")
-	return merr.Success(), nil
+	return &milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, nil
 }
 
 // HasCollection check collection existence

@@ -1215,16 +1215,16 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 }
 
 // TruncateCollection truncate collection
-func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.rootcoordServer.TruncateCollection(ctx, req)
 }
 
 // DropSegmentsByTime drop segments by time for TruncateCollection
-func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
-	return s.datacoordServer.DropSegmentsByTime(ctx, req)
+func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	return s.datacoordServer.DropSegmentsByTime(ctx, collectionID, flushTsList)
 }
 
 // ManualUpdateCurrentTarget manually update current target for TruncateCollection
-func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
-	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, req)
+func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
 }

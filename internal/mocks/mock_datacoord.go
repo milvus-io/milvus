@@ -567,65 +567,6 @@ func (_c *MockDataCoord_DropIndex_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// DropSegmentsByTime provides a mock function with given fields: _a0, _a1
-func (_m *MockDataCoord) DropSegmentsByTime(_a0 context.Context, _a1 *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DropSegmentsByTime")
-	}
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSegmentsByTimeRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropSegmentsByTimeRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockDataCoord_DropSegmentsByTime_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentsByTime'
-type MockDataCoord_DropSegmentsByTime_Call struct {
-	*mock.Call
-}
-
-// DropSegmentsByTime is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *datapb.DropSegmentsByTimeRequest
-func (_e *MockDataCoord_Expecter) DropSegmentsByTime(_a0 interface{}, _a1 interface{}) *MockDataCoord_DropSegmentsByTime_Call {
-	return &MockDataCoord_DropSegmentsByTime_Call{Call: _e.mock.On("DropSegmentsByTime", _a0, _a1)}
-}
-
-func (_c *MockDataCoord_DropSegmentsByTime_Call) Run(run func(_a0 context.Context, _a1 *datapb.DropSegmentsByTimeRequest)) *MockDataCoord_DropSegmentsByTime_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.DropSegmentsByTimeRequest))
-	})
-	return _c
-}
-
-func (_c *MockDataCoord_DropSegmentsByTime_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_DropSegmentsByTime_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockDataCoord_DropSegmentsByTime_Call) RunAndReturn(run func(context.Context, *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error)) *MockDataCoord_DropSegmentsByTime_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // DropVirtualChannel provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) DropVirtualChannel(_a0 context.Context, _a1 *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	ret := _m.Called(_a0, _a1)

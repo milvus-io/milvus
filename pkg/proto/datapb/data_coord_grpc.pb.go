@@ -73,7 +73,6 @@ const (
 	DataCoord_AddFileResource_FullMethodName             = "/milvus.proto.data.DataCoord/AddFileResource"
 	DataCoord_RemoveFileResource_FullMethodName          = "/milvus.proto.data.DataCoord/RemoveFileResource"
 	DataCoord_ListFileResources_FullMethodName           = "/milvus.proto.data.DataCoord/ListFileResources"
-	DataCoord_DropSegmentsByTime_FullMethodName          = "/milvus.proto.data.DataCoord/DropSegmentsByTime"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -140,7 +139,6 @@ type DataCoordClient interface {
 	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
-	DropSegmentsByTime(ctx context.Context, in *DropSegmentsByTimeRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type dataCoordClient struct {
@@ -603,15 +601,6 @@ func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.Li
 	return out, nil
 }
 
-func (c *dataCoordClient) DropSegmentsByTime(ctx context.Context, in *DropSegmentsByTimeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, DataCoord_DropSegmentsByTime_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
@@ -676,7 +665,6 @@ type DataCoordServer interface {
 	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
 	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
 	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
-	DropSegmentsByTime(context.Context, *DropSegmentsByTimeRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -832,9 +820,6 @@ func (UnimplementedDataCoordServer) RemoveFileResource(context.Context, *milvusp
 }
 func (UnimplementedDataCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
-}
-func (UnimplementedDataCoordServer) DropSegmentsByTime(context.Context, *DropSegmentsByTimeRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DropSegmentsByTime not implemented")
 }
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1748,24 +1733,6 @@ func _DataCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataCoord_DropSegmentsByTime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DropSegmentsByTimeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).DropSegmentsByTime(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_DropSegmentsByTime_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).DropSegmentsByTime(ctx, req.(*DropSegmentsByTimeRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1972,10 +1939,6 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFileResources",
 			Handler:    _DataCoord_ListFileResources_Handler,
-		},
-		{
-			MethodName: "DropSegmentsByTime",
-			Handler:    _DataCoord_DropSegmentsByTime_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

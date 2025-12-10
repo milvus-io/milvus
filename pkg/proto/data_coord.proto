@@ -110,8 +110,6 @@ service DataCoord {
   rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
   rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
   rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
-
-  rpc DropSegmentsByTime(DropSegmentsByTimeRequest) returns (common.Status) {}
 }
 
 service DataNode {

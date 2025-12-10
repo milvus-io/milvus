@@ -1094,8 +1094,3 @@ message DropIndexRequest {
     string channel = 4;
     bool need_transfer = 5;
 }
-
-message ManualUpdateCurrentTargetRequest {
-    common.MsgBase base = 1;
-    int64 collectionID = 2;
-}

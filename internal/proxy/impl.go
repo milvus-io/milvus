@@ -625,9 +625,11 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 }
 
 // TruncateCollection truncate a collection.
-func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
@@ -655,7 +657,9 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 		log.Warn("TruncateCollection failed to enqueue",
 			zap.Error(err))
 
-		return merr.Status(err), nil
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	log.Debug(
@@ -670,7 +674,9 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 			zap.Uint64("BeginTs", dct.BeginTs()),
 			zap.Uint64("EndTs", dct.EndTs()))
 
-		return merr.Status(err), nil
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
 	log.Info(
@@ -685,7 +691,9 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return dct.result, nil
+	return &milvuspb.TruncateCollectionResponse{
+		Status: dct.result.GetStatus(),
+	}, nil
 }
 
 // HasCollection check if the specific collection exists in Milvus.

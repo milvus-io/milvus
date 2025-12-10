@@ -115,7 +115,7 @@ type RootCoordClient interface {
 	// @param TruncateCollectionRequest, collection name is going to be cleared.
 	//
 	// @return Status
-	TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)
 	// *
 	// @brief This method is used to add collection field.
 	//
@@ -272,8 +272,8 @@ func (c *rootCoordClient) DropCollection(ctx context.Context, in *milvuspb.DropC
 	return out, nil
 }
 
-func (c *rootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
+func (c *rootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	out := new(milvuspb.TruncateCollectionResponse)
 	err := c.cc.Invoke(ctx, RootCoord_TruncateCollection_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -821,7 +821,7 @@ type RootCoordServer interface {
 	// @param TruncateCollectionRequest, collection name is going to be cleared.
 	//
 	// @return Status
-	TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)
+	TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)
 	// *
 	// @brief This method is used to add collection field.
 	//
@@ -944,7 +944,7 @@ func (UnimplementedRootCoordServer) CreateCollection(context.Context, *milvuspb.
 func (UnimplementedRootCoordServer) DropCollection(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropCollection not implemented")
 }
-func (UnimplementedRootCoordServer) TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+func (UnimplementedRootCoordServer) TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TruncateCollection not implemented")
 }
 func (UnimplementedRootCoordServer) AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {

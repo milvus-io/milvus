@@ -2088,45 +2088,28 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 }
 
 // DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
-func (s *Server) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
+func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
+		return err
 	}
 
 	log.Ctx(ctx).Info("receive DropSegmentsByTime request",
-		zap.Int64("collectionID", req.GetCollectionID()))
+		zap.Int64("collectionID", collectionID))
 
-	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
-	if err != nil {
-		log.Ctx(ctx).Warn("get channels by collection id failed", zap.Error(err))
-		return merr.Status(err), nil
-	}
-
-	operators := make([]UpdateOperator, 0)
-	for _, channel := range channels {
-		channelName := channel.GetName()
+	for channelName, flushTs := range flushTsList {
 		// wait until the checkpoint reaches or exceeds the flush timestamp
-		err = s.meta.WatchChannelCheckpoint(ctx, channelName, req.GetFlushTsList()[channelName])
+		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
 		if err != nil {
 			log.Ctx(ctx).Warn("WatchChannelCheckpoint failed", zap.Error(err))
-			return merr.Status(err), nil
+			return err
 		}
-		// get segments to drop
-		segments := s.meta.GetSegmentsByChannel(channelName)
-		for _, segment := range segments {
-			if segment.GetDmlPosition().GetTimestamp() <= req.GetFlushTsList()[channelName] {
-				operators = append(operators, UpdateStatusOperator(segment.GetID(), commonpb.SegmentState_Dropped))
-			}
-		}
-	}
-	// batch set segments state to dropped
-	if len(operators) > 0 {
-		err = s.meta.UpdateSegmentsInfo(ctx, operators...)
+		// drop segments that were updated before the flush timestamp
+		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
 		if err != nil {
-			log.Warn("Failed to batch set segments state to dropped", zap.Error(err))
-			return merr.Status(err), nil
+			log.Warn("TruncateChannelByTime failed", zap.Error(err))
+			return err
 		}
 	}
 
-	return merr.Success(), nil
+	return nil
 }

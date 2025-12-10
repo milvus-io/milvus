@@ -2229,27 +2229,26 @@ func (suite *ServiceSuite) TestManualUpdateCurrentTarget() {
 
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	req := &querypb.ManualUpdateCurrentTargetRequest{
-		CollectionID: collectionID,
-	}
-	resp, err := server.ManualUpdateCurrentTarget(ctx, req)
-	suite.NoError(err)
-	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
+	err := server.ManualUpdateCurrentTarget(ctx, collectionID)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
 	// Restore healthy state
 	server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	// Test collection not loaded case
+	err = server.ManualUpdateCurrentTarget(ctx, collectionID)
+	suite.NoError(err)
+
+	// Load collection for success test cases
+	suite.loadAll()
 
 	// Test success case
 	mockey.PatchConvey("TestManualUpdateCurrentTarget success", suite.T(), func() {
 		m := mockey.Mock(job.WaitCurrentTargetUpdated).Return(nil).Build()
 		defer m.UnPatch()
 
-		req := &querypb.ManualUpdateCurrentTargetRequest{
-			CollectionID: collectionID,
-		}
-		resp, err := server.ManualUpdateCurrentTarget(ctx, req)
+		err := server.ManualUpdateCurrentTarget(ctx, collectionID)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
 	// Test WaitCurrentTargetUpdated error case
@@ -2257,12 +2256,8 @@ func (suite *ServiceSuite) TestManualUpdateCurrentTarget() {
 		m := mockey.Mock(job.WaitCurrentTargetUpdated).Return(errors.New("mock error")).Build()
 		defer m.UnPatch()
 
-		req := &querypb.ManualUpdateCurrentTargetRequest{
-			CollectionID: collectionID,
-		}
-		resp, err := server.ManualUpdateCurrentTarget(ctx, req)
-		suite.NoError(err)
-		suite.NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		err := server.ManualUpdateCurrentTarget(ctx, collectionID)
+		suite.Error(err)
 	})
 }
 

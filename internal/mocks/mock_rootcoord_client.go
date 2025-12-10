@@ -4519,7 +4519,7 @@ func (_c *MockRootCoordClient_ShowSegments_Call) RunAndReturn(run func(context.C
 }
 
 // TruncateCollection provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -4533,16 +4533,16 @@ func (_m *MockRootCoordClient) TruncateCollection(ctx context.Context, in *milvu
 		panic("no return value specified for TruncateCollection")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *milvuspb.TruncateCollectionResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) *milvuspb.TruncateCollectionResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*milvuspb.TruncateCollectionResponse)
 		}
 	}
 
@@ -4582,12 +4582,12 @@ func (_c *MockRootCoordClient_TruncateCollection_Call) Run(run func(ctx context.
 	return _c
 }
 
-func (_c *MockRootCoordClient_TruncateCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_TruncateCollection_Call {
+func (_c *MockRootCoordClient_TruncateCollection_Call) Return(_a0 *milvuspb.TruncateCollectionResponse, _a1 error) *MockRootCoordClient_TruncateCollection_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockRootCoordClient_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_TruncateCollection_Call {
+func (_c *MockRootCoordClient_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)) *MockRootCoordClient_TruncateCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

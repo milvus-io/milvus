@@ -258,7 +258,7 @@ func TestRootCoord_TruncateCollection(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
 

@@ -2426,43 +2426,13 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 	t.Run("server not healthy", func(t *testing.T) {
 		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Abnormal)
-		req := &datapb.DropSegmentsByTimeRequest{
-			CollectionID: collectionID,
-			FlushTsList:  map[string]uint64{channelName: flushTs},
-		}
-		resp, err := s.DropSegmentsByTime(ctx, req)
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
-	})
-
-	t.Run("get channels failed", func(t *testing.T) {
-		s := &Server{}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		mockMixCoord := mocks2.NewMixCoord(t)
-		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock error"))
-		s.mixCoord = mockMixCoord
-
-		req := &datapb.DropSegmentsByTimeRequest{
-			CollectionID: collectionID,
-			FlushTsList:  map[string]uint64{channelName: flushTs},
-		}
-		resp, err := s.DropSegmentsByTime(ctx, req)
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
+		err := s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs})
+		assert.Error(t, err)
 	})
 
 	t.Run("watch channel checkpoint failed", func(t *testing.T) {
 		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
-		mockMixCoord := mocks2.NewMixCoord(t)
-		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        collectionID,
-				VirtualChannelNames: []string{channelName},
-			}, nil)
-		s.mixCoord = mockMixCoord
 
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
@@ -2472,26 +2442,13 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 
-		req := &datapb.DropSegmentsByTimeRequest{
-			CollectionID: collectionID,
-			FlushTsList:  map[string]uint64{channelName: flushTs},
-		}
-		resp, err := s.DropSegmentsByTime(ctxWithTimeout, req)
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
+		err = s.DropSegmentsByTime(ctxWithTimeout, collectionID, map[string]uint64{channelName: flushTs})
+		assert.Error(t, err)
 	})
 
 	t.Run("success - drop segments", func(t *testing.T) {
 		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
-		mockMixCoord := mocks2.NewMixCoord(t)
-		mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        collectionID,
-				VirtualChannelNames: []string{channelName},
-			}, nil)
-		s.mixCoord = mockMixCoord
 
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
@@ -2540,13 +2497,8 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		meta.segments.SetSegment(seg1.ID, seg1)
 		meta.segments.SetSegment(seg2.ID, seg2)
 
-		req := &datapb.DropSegmentsByTimeRequest{
-			CollectionID: collectionID,
-			FlushTsList:  map[string]uint64{channelName: flushTs},
-		}
-		resp, err := s.DropSegmentsByTime(ctx, req)
+		err = s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs})
 		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp))
 
 		// Verify segment 1 is dropped
 		seg1After := meta.GetSegment(ctx, seg1.ID)

@@ -1213,24 +1213,31 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 }
 
 // ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
-func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
+func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("collectionID", collectionID),
 	)
 
 	log.Info("manual update current target request received")
 
 	if err := merr.CheckHealthy(s.State()); err != nil {
 		log.Warn("failed to manual update current target", zap.Error(err))
-		return merr.Status(err), nil
+		return err
 	}
 
-	err := job.WaitCurrentTargetUpdated(ctx, s.targetObserver, req.GetCollectionID())
+	// Check if collection is loaded
+	percentage := s.meta.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
+	if percentage < 0 {
+		log.Info("collection not loaded, skip ManualUpdateCurrentTarget")
+		return nil
+	}
+
+	err := job.WaitCurrentTargetUpdated(ctx, s.targetObserver, collectionID)
 	if err != nil {
 		log.Warn("failed to wait current target updated", zap.Error(err))
-		return merr.Status(err), nil
+		return err
 	}
 
 	log.Info("manual update current target done")
-	return merr.Success(), nil
+	return nil
 }

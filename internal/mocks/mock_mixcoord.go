@@ -2758,34 +2758,22 @@ func (_c *MixCoord_DropRole_Call) RunAndReturn(run func(context.Context, *milvus
 	return _c
 }
 
-// DropSegmentsByTime provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) DropSegmentsByTime(_a0 context.Context, _a1 *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
+// DropSegmentsByTime provides a mock function with given fields: ctx, collectionID, flushTsList
+func (_m *MixCoord) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	ret := _m.Called(ctx, collectionID, flushTsList)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DropSegmentsByTime")
 	}
 
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSegmentsByTimeRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, map[string]uint64) error); ok {
+		r0 = rf(ctx, collectionID, flushTsList)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
+		r0 = ret.Error(0)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropSegmentsByTimeRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // MixCoord_DropSegmentsByTime_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentsByTime'
@@ -2794,25 +2782,26 @@ type MixCoord_DropSegmentsByTime_Call struct {
 }
 
 // DropSegmentsByTime is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *datapb.DropSegmentsByTimeRequest
-func (_e *MixCoord_Expecter) DropSegmentsByTime(_a0 interface{}, _a1 interface{}) *MixCoord_DropSegmentsByTime_Call {
-	return &MixCoord_DropSegmentsByTime_Call{Call: _e.mock.On("DropSegmentsByTime", _a0, _a1)}
+//   - ctx context.Context
+//   - collectionID int64
+//   - flushTsList map[string]uint64
+func (_e *MixCoord_Expecter) DropSegmentsByTime(ctx interface{}, collectionID interface{}, flushTsList interface{}) *MixCoord_DropSegmentsByTime_Call {
+	return &MixCoord_DropSegmentsByTime_Call{Call: _e.mock.On("DropSegmentsByTime", ctx, collectionID, flushTsList)}
 }
 
-func (_c *MixCoord_DropSegmentsByTime_Call) Run(run func(_a0 context.Context, _a1 *datapb.DropSegmentsByTimeRequest)) *MixCoord_DropSegmentsByTime_Call {
+func (_c *MixCoord_DropSegmentsByTime_Call) Run(run func(ctx context.Context, collectionID int64, flushTsList map[string]uint64)) *MixCoord_DropSegmentsByTime_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.DropSegmentsByTimeRequest))
+		run(args[0].(context.Context), args[1].(int64), args[2].(map[string]uint64))
 	})
 	return _c
 }
 
-func (_c *MixCoord_DropSegmentsByTime_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_DropSegmentsByTime_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MixCoord_DropSegmentsByTime_Call) Return(_a0 error) *MixCoord_DropSegmentsByTime_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MixCoord_DropSegmentsByTime_Call) RunAndReturn(run func(context.Context, *datapb.DropSegmentsByTimeRequest) (*commonpb.Status, error)) *MixCoord_DropSegmentsByTime_Call {
+func (_c *MixCoord_DropSegmentsByTime_Call) RunAndReturn(run func(context.Context, int64, map[string]uint64) error) *MixCoord_DropSegmentsByTime_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6434,34 +6423,22 @@ func (_c *MixCoord_ManualCompaction_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
-// ManualUpdateCurrentTarget provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) ManualUpdateCurrentTarget(_a0 context.Context, _a1 *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
+// ManualUpdateCurrentTarget provides a mock function with given fields: ctx, collectionID
+func (_m *MixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ManualUpdateCurrentTarget")
 	}
 
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ManualUpdateCurrentTargetRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
+		r0 = ret.Error(0)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ManualUpdateCurrentTargetRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
 // MixCoord_ManualUpdateCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ManualUpdateCurrentTarget'
@@ -6470,25 +6447,25 @@ type MixCoord_ManualUpdateCurrentTarget_Call struct {
 }
 
 // ManualUpdateCurrentTarget is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.ManualUpdateCurrentTargetRequest
-func (_e *MixCoord_Expecter) ManualUpdateCurrentTarget(_a0 interface{}, _a1 interface{}) *MixCoord_ManualUpdateCurrentTarget_Call {
-	return &MixCoord_ManualUpdateCurrentTarget_Call{Call: _e.mock.On("ManualUpdateCurrentTarget", _a0, _a1)}
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MixCoord_Expecter) ManualUpdateCurrentTarget(ctx interface{}, collectionID interface{}) *MixCoord_ManualUpdateCurrentTarget_Call {
+	return &MixCoord_ManualUpdateCurrentTarget_Call{Call: _e.mock.On("ManualUpdateCurrentTarget", ctx, collectionID)}
 }
 
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Run(run func(_a0 context.Context, _a1 *querypb.ManualUpdateCurrentTargetRequest)) *MixCoord_ManualUpdateCurrentTarget_Call {
+func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MixCoord_ManualUpdateCurrentTarget_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.ManualUpdateCurrentTargetRequest))
+		run(args[0].(context.Context), args[1].(int64))
 	})
 	return _c
 }
 
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Return(_a0 error) *MixCoord_ManualUpdateCurrentTarget_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) RunAndReturn(run func(context.Context, *querypb.ManualUpdateCurrentTargetRequest) (*commonpb.Status, error)) *MixCoord_ManualUpdateCurrentTarget_Call {
+func (_c *MixCoord_ManualUpdateCurrentTarget_Call) RunAndReturn(run func(context.Context, int64) error) *MixCoord_ManualUpdateCurrentTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -8789,23 +8766,23 @@ func (_c *MixCoord_TransferSegment_Call) RunAndReturn(run func(context.Context, 
 }
 
 // TruncateCollection provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) TruncateCollection(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+func (_m *MixCoord) TruncateCollection(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for TruncateCollection")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *milvuspb.TruncateCollectionResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) *milvuspb.TruncateCollectionResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*milvuspb.TruncateCollectionResponse)
 		}
 	}
 
@@ -8837,12 +8814,12 @@ func (_c *MixCoord_TruncateCollection_Call) Run(run func(_a0 context.Context, _a
 	return _c
 }
 
-func (_c *MixCoord_TruncateCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_TruncateCollection_Call {
+func (_c *MixCoord_TruncateCollection_Call) Return(_a0 *milvuspb.TruncateCollectionResponse, _a1 error) *MixCoord_TruncateCollection_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error)) *MixCoord_TruncateCollection_Call {
+func (_c *MixCoord_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)) *MixCoord_TruncateCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

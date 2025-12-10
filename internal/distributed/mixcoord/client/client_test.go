@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -2669,26 +2668,26 @@ func TestClient_TruncateCollection(t *testing.T) {
 	client.(*Client).grpcClient = mockGrpcClient
 
 	// test success
-	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
 	}, nil)
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
 	assert.Nil(t, err)
 
 	// test return error status
 	mockRC.ExpectedCalls = nil
-	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
 	}, nil)
 
 	rsp, err := client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
-	assert.Error(t, merr.Error(rsp))
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
 	assert.Nil(t, err)
 
 	// test return error
 	mockRC.ExpectedCalls = nil
-	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
 	}, mockErr)
 
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
@@ -2699,115 +2698,5 @@ func TestClient_TruncateCollection(t *testing.T) {
 	defer cancel()
 	time.Sleep(20 * time.Millisecond)
 	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
-func TestClient_DropSegmentsByTime(t *testing.T) {
-	paramtable.Init()
-
-	ctx := context.Background()
-	client, err := NewClient(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
-	defer client.Close()
-
-	mockDC := mocks.NewMockDataCoordClient(t)
-	mockmix := MixCoordClient{
-		DataCoordClient: mockDC,
-	}
-	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
-	mockGrpcClient.EXPECT().Close().Return(nil)
-	mockGrpcClient.EXPECT().GetNodeID().Return(1)
-	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockmix)
-	})
-	client.(*Client).grpcClient = mockGrpcClient
-
-	// test success
-	mockDC.EXPECT().DropSegmentsByTime(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil)
-	_, err = client.DropSegmentsByTime(ctx, &datapb.DropSegmentsByTimeRequest{})
-	assert.Nil(t, err)
-
-	// test return error status
-	mockDC.ExpectedCalls = nil
-	mockDC.EXPECT().DropSegmentsByTime(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}, nil)
-
-	rsp, err := client.DropSegmentsByTime(ctx, &datapb.DropSegmentsByTimeRequest{})
-	assert.Error(t, merr.Error(rsp))
-	assert.Nil(t, err)
-
-	// test return error
-	mockDC.ExpectedCalls = nil
-	mockDC.EXPECT().DropSegmentsByTime(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, mockErr)
-
-	_, err = client.DropSegmentsByTime(ctx, &datapb.DropSegmentsByTimeRequest{})
-	assert.NotNil(t, err)
-
-	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
-	defer cancel()
-	time.Sleep(20 * time.Millisecond)
-	_, err = client.DropSegmentsByTime(ctx, &datapb.DropSegmentsByTimeRequest{})
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
-func TestClient_ManualUpdateCurrentTarget(t *testing.T) {
-	paramtable.Init()
-
-	ctx := context.Background()
-	client, err := NewClient(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, client)
-	defer client.Close()
-
-	mockQC := mocks.NewMockQueryCoordClient(t)
-	mockmix := MixCoordClient{
-		QueryCoordClient: mockQC,
-	}
-	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
-	mockGrpcClient.EXPECT().Close().Return(nil)
-	mockGrpcClient.EXPECT().GetNodeID().Return(1)
-	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
-		return f(mockmix)
-	})
-	client.(*Client).grpcClient = mockGrpcClient
-
-	// test success
-	mockQC.EXPECT().ManualUpdateCurrentTarget(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil)
-	_, err = client.ManualUpdateCurrentTarget(ctx, &querypb.ManualUpdateCurrentTargetRequest{})
-	assert.Nil(t, err)
-
-	// test return error status
-	mockQC.ExpectedCalls = nil
-	mockQC.EXPECT().ManualUpdateCurrentTarget(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}, nil)
-
-	rsp, err := client.ManualUpdateCurrentTarget(ctx, &querypb.ManualUpdateCurrentTargetRequest{})
-	assert.Error(t, merr.Error(rsp))
-	assert.Nil(t, err)
-
-	// test return error
-	mockQC.ExpectedCalls = nil
-	mockQC.EXPECT().ManualUpdateCurrentTarget(mock1.Anything, mock1.Anything).Return(&commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, mockErr)
-
-	_, err = client.ManualUpdateCurrentTarget(ctx, &querypb.ManualUpdateCurrentTargetRequest{})
-	assert.NotNil(t, err)
-
-	// test ctx done
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
-	defer cancel()
-	time.Sleep(20 * time.Millisecond)
-	_, err = client.ManualUpdateCurrentTarget(ctx, &querypb.ManualUpdateCurrentTargetRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
