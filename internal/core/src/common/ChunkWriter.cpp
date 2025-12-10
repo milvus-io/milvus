@@ -344,8 +344,15 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
                 auto binary_values =
                     std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
                         list_array->values());
-                total_size +=
-                    binary_values->length() * binary_values->byte_width();
+                int byte_width = binary_values->byte_width();
+                // Calculate actual values count using list offsets
+                // This handles sliced ListArrays correctly, as values() returns
+                // the entire underlying array, but we only need the values
+                // referenced by this slice
+                const int32_t* list_offsets = list_array->raw_value_offsets();
+                int64_t actual_values_count =
+                    list_offsets[list_array->length()] - list_offsets[0];
+                total_size += actual_values_count * byte_width;
                 break;
             }
             default:
