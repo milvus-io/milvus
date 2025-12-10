@@ -190,6 +190,12 @@ def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon)
     # Normalize both lists to handle type differences
     a_normalized = normalize_value(a)
     b_normalized = normalize_value(b)
+
+    # Check length first
+    if len(a_normalized) != len(b_normalized):
+        log.debug(f"[COMPARE_LISTS] Length mismatch: Query result length({len(a_normalized)}) != Expected result length({len(b_normalized)})")
+        return False
+    
     for i in range(len(a_normalized)):
         diff = DeepDiff(
             a_normalized[i],
@@ -202,6 +208,8 @@ def compare_lists_with_epsilon_ignore_dict_order_deepdiff(a, b, epsilon=epsilon)
         )
         if diff:
             log.debug(f"[COMPARE_LISTS] Found differences at row {i}: {diff}")
+            return False
+    return True
 
 def ip_check(ip):
     if ip == "localhost":

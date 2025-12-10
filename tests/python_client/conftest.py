@@ -58,6 +58,8 @@ def pytest_addoption(parser):
 
     parser.addoption("--tei_reranker_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei rerank endpoint")
     parser.addoption("--vllm_reranker_endpoint", action="store", default="http://vllm-rerank-service.milvus-ci.svc.cluster.local:80", help="vllm rerank endpoint")
+    # L3 test options for alter function tests
+    parser.addoption("--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests")
 
 @pytest.fixture
 def host(request):
@@ -217,6 +219,13 @@ def request_duration(request):
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
+@pytest.fixture
+def tei_endpoint_2(request):
+    endpoint = request.config.getoption("--tei_endpoint_2")
+    if not endpoint:
+        pytest.skip("tei_endpoint_2 not configured")
+    return endpoint
 
 @pytest.fixture
 def tei_reranker_endpoint(request):
