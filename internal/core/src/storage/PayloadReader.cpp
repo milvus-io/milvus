@@ -71,13 +71,40 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
         auto file_meta = arrow_reader->parquet_reader()->metadata();
 
         // dim is unused for sparse float vector
-        dim_ =
-            (IsVectorDataType(column_type_) &&
-             !IsVectorArrayDataType(column_type_) &&
-             !IsSparseFloatVectorDataType(column_type_))
-                ? GetDimensionFromFileMetaData(
-                      file_meta->schema()->Column(column_index), column_type_)
-                : 1;
+        // For nullable vectors, dim is stored in Arrow schema metadata
+        if (IsVectorDataType(column_type_) &&
+            !IsVectorArrayDataType(column_type_) &&
+            !IsSparseFloatVectorDataType(column_type_)) {
+            if (nullable_) {
+                std::shared_ptr<arrow::Schema> arrow_schema;
+                auto st = arrow_reader->GetSchema(&arrow_schema);
+                AssertInfo(st.ok(), "Failed to get arrow schema");
+                AssertInfo(arrow_schema->num_fields() == 1,
+                           "Vector field should have exactly 1 field, got {}",
+                           arrow_schema->num_fields());
+
+                auto field = arrow_schema->field(0);
+                if (field->HasMetadata()) {
+                    auto metadata = field->metadata();
+                    if (metadata->Contains(DIM_KEY)) {
+                        auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
+                        dim_ = std::stoi(dim_str);
+                    } else {
+                        ThrowInfo(DataTypeInvalid,
+                                  "nullable vector field metadata missing "
+                                  "required 'dim' field");
+                    }
+                } else {
+                    ThrowInfo(DataTypeInvalid,
+                              "nullable vector field is missing metadata");
+                }
+            } else {
+                dim_ = GetDimensionFromFileMetaData(
+                    file_meta->schema()->Column(column_index), column_type_);
+            }
+        } else {
+            dim_ = 1;
+        }
 
         // For VectorArray, get element type and dim from Arrow schema metadata
         auto element_type = DataType::NONE;
@@ -133,8 +160,10 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
                 field_data_->FillFieldData(array);
             }
 
-            AssertInfo(field_data_->IsFull(),
-                       "field data hasn't been filled done");
+            if (!nullable_ || !IsVectorDataType(column_type_)) {
+                AssertInfo(field_data_->IsFull(),
+                           "field data hasn't been filled done");
+            }
         } else {
             arrow_reader_ = std::move(arrow_reader);
             record_batch_reader_ = std::move(rb_reader);

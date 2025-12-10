@@ -448,19 +448,19 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 			}
 		}
 	case schemapb.DataType_BinaryVector:
-		if err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim); err != nil {
+		if err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim, singleData.(*BinaryVectorFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_FloatVector:
-		if err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim); err != nil {
+		if err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim, singleData.(*FloatVectorFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_Float16Vector:
-		if err = eventWriter.AddFloat16VectorToPayload(singleData.(*Float16VectorFieldData).Data, singleData.(*Float16VectorFieldData).Dim); err != nil {
+		if err = eventWriter.AddFloat16VectorToPayload(singleData.(*Float16VectorFieldData).Data, singleData.(*Float16VectorFieldData).Dim, singleData.(*Float16VectorFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_BFloat16Vector:
-		if err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim); err != nil {
+		if err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim, singleData.(*BFloat16VectorFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_SparseFloatVector:
@@ -468,7 +468,7 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 			return err
 		}
 	case schemapb.DataType_Int8Vector:
-		if err = eventWriter.AddInt8VectorToPayload(singleData.(*Int8VectorFieldData).Data, singleData.(*Int8VectorFieldData).Dim); err != nil {
+		if err = eventWriter.AddInt8VectorToPayload(singleData.(*Int8VectorFieldData).Data, singleData.(*Int8VectorFieldData).Dim, singleData.(*Int8VectorFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_ArrayOfVector:
@@ -747,6 +747,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 			return length, err
 		}
 		binaryVectorFieldData.Dim = dim
+		if validData != nil && len(validData) > 0 {
+			if binaryVectorFieldData.ValidData == nil {
+				binaryVectorFieldData.ValidData = make([]bool, 0, rowNum)
+			}
+			binaryVectorFieldData.ValidData = append(binaryVectorFieldData.ValidData, validData...)
+			binaryVectorFieldData.Nullable = true
+		}
 		insertData.Data[fieldID] = binaryVectorFieldData
 		return length, nil
 
@@ -763,6 +770,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 			return length, err
 		}
 		float16VectorFieldData.Dim = dim
+		if validData != nil && len(validData) > 0 {
+			if float16VectorFieldData.ValidData == nil {
+				float16VectorFieldData.ValidData = make([]bool, 0, rowNum)
+			}
+			float16VectorFieldData.ValidData = append(float16VectorFieldData.ValidData, validData...)
+			float16VectorFieldData.Nullable = true
+		}
 		insertData.Data[fieldID] = float16VectorFieldData
 		return length, nil
 
@@ -779,6 +793,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 			return length, err
 		}
 		bfloat16VectorFieldData.Dim = dim
+		if validData != nil && len(validData) > 0 {
+			if bfloat16VectorFieldData.ValidData == nil {
+				bfloat16VectorFieldData.ValidData = make([]bool, 0, rowNum)
+			}
+			bfloat16VectorFieldData.ValidData = append(bfloat16VectorFieldData.ValidData, validData...)
+			bfloat16VectorFieldData.Nullable = true
+		}
 		insertData.Data[fieldID] = bfloat16VectorFieldData
 		return length, nil
 
@@ -795,6 +816,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 			return 0, err
 		}
 		floatVectorFieldData.Dim = dim
+		if validData != nil && len(validData) > 0 {
+			if floatVectorFieldData.ValidData == nil {
+				floatVectorFieldData.ValidData = make([]bool, 0, rowNum)
+			}
+			floatVectorFieldData.ValidData = append(floatVectorFieldData.ValidData, validData...)
+			floatVectorFieldData.Nullable = true
+		}
 		insertData.Data[fieldID] = floatVectorFieldData
 		return length, nil
 
@@ -805,6 +833,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		}
 		vec := fieldData.(*SparseFloatVectorFieldData)
 		vec.AppendAllRows(singleData)
+		if validData != nil && len(validData) > 0 {
+			if vec.ValidData == nil {
+				vec.ValidData = make([]bool, 0, rowNum)
+			}
+			vec.ValidData = append(vec.ValidData, validData...)
+			vec.Nullable = true
+		}
 		insertData.Data[fieldID] = vec
 		return singleData.RowNum(), nil
 
@@ -821,6 +856,13 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 			return 0, err
 		}
 		int8VectorFieldData.Dim = dim
+		if validData != nil && len(validData) > 0 {
+			if int8VectorFieldData.ValidData == nil {
+				int8VectorFieldData.ValidData = make([]bool, 0, rowNum)
+			}
+			int8VectorFieldData.ValidData = append(int8VectorFieldData.ValidData, validData...)
+			int8VectorFieldData.Nullable = true
+		}
 		insertData.Data[fieldID] = int8VectorFieldData
 		return length, nil
 

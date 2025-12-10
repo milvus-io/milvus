@@ -231,10 +231,9 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
     const void*
     RawValue(ssize_t offset) const override {
         auto physical_offset = l2p_mapping_.get_physical_offset(offset);
-        AssertInfo(physical_offset >= 0 && physical_offset < get_valid_rows(),
-                   "physical offset {} out of range, get_valid_rows()={}",
-                   physical_offset,
-                   get_valid_rows());
+        if (physical_offset == -1) {
+            return nullptr;
+        }
         return &this->data_[physical_offset * this->dim_];
     }
 
@@ -267,7 +266,13 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
 class FieldDataSparseVectorImpl
     : public FieldDataVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
                                  true> {
+    using Base =
+        FieldDataVectorImpl<knowhere::sparse::SparseRow<SparseValueType>, true>;
+
  public:
+    // Bring base class FillFieldData overloads into scope (for nullable support)
+    using Base::FillFieldData;
+
     explicit FieldDataSparseVectorImpl(DataType data_type,
                                        bool nullable = false,
                                        int64_t total_num_rows = 0)
