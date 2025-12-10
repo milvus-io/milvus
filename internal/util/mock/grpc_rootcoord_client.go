@@ -322,6 +322,6 @@ func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalp
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
 }
 
-func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	return &milvuspb.TruncateCollectionResponse{}, m.Err
 }

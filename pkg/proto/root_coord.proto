@@ -38,7 +38,7 @@ service RootCoord {
      *
      * @return Status
      */
-    rpc TruncateCollection(milvus.TruncateCollectionRequest) returns (common.Status) {}
+    rpc TruncateCollection(milvus.TruncateCollectionRequest) returns (milvus.TruncateCollectionResponse) {}
 
     /**
      * @brief This method is used to add collection field.

@@ -3094,7 +3094,9 @@ func Test_truncateCollectionTask_Execute(t *testing.T) {
 		mock.Anything, // context.Context
 		mock.Anything, // *milvuspb.TruncateCollectionRequest
 		mock.Anything,
-	).Return(&commonpb.Status{}, func(ctx context.Context, request *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) error {
+	).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, func(ctx context.Context, request *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) error {
 		switch request.GetCollectionName() {
 		case "c1":
 			return errors.New("error mock TruncateCollection")
@@ -3118,7 +3120,7 @@ func Test_truncateCollectionTask_Execute(t *testing.T) {
 	tct.TruncateCollectionRequest.CollectionName = "c2"
 	err = tct.Execute(ctx)
 	assert.Error(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, tct.result.GetErrorCode())
+	assert.Equal(t, commonpb.ErrorCode_Success, tct.result.GetStatus().GetErrorCode())
 }
 
 func Test_truncateCollectionTask_PostExecute(t *testing.T) {

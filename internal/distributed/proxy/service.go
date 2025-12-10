@@ -628,7 +628,7 @@ func (s *Server) DropCollection(ctx context.Context, request *milvuspb.DropColle
 }
 
 // TruncateCollection notifies Proxy to truncate a collection
-func (s *Server) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*commonpb.Status, error) {
+func (s *Server) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
 	return s.proxy.TruncateCollection(ctx, request)
 }
 

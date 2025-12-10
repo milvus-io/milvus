@@ -61,7 +61,6 @@ const (
 	QueryCoord_UpdateLoadConfig_FullMethodName           = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
 	QueryCoord_RunAnalyzer_FullMethodName                = "/milvus.proto.query.QueryCoord/RunAnalyzer"
 	QueryCoord_ValidateAnalyzer_FullMethodName           = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
-	QueryCoord_ManualUpdateCurrentTarget_FullMethodName  = "/milvus.proto.query.QueryCoord/ManualUpdateCurrentTarget"
 )
 
 // QueryCoordClient is the client API for QueryCoord service.
@@ -111,7 +110,6 @@ type QueryCoordClient interface {
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ManualUpdateCurrentTarget(ctx context.Context, in *ManualUpdateCurrentTargetRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type queryCoordClient struct {
@@ -474,15 +472,6 @@ func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAna
 	return out, nil
 }
 
-func (c *queryCoordClient) ManualUpdateCurrentTarget(ctx context.Context, in *ManualUpdateCurrentTargetRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, QueryCoord_ManualUpdateCurrentTarget_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // QueryCoordServer is the server API for QueryCoord service.
 // All implementations should embed UnimplementedQueryCoordServer
 // for forward compatibility
@@ -530,7 +519,6 @@ type QueryCoordServer interface {
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
-	ManualUpdateCurrentTarget(context.Context, *ManualUpdateCurrentTargetRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedQueryCoordServer should be embedded to have forward compatible implementations.
@@ -653,9 +641,6 @@ func (UnimplementedQueryCoordServer) RunAnalyzer(context.Context, *RunAnalyzerRe
 }
 func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
-}
-func (UnimplementedQueryCoordServer) ManualUpdateCurrentTarget(context.Context, *ManualUpdateCurrentTargetRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ManualUpdateCurrentTarget not implemented")
 }
 
 // UnsafeQueryCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1371,24 +1356,6 @@ func _QueryCoord_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _QueryCoord_ManualUpdateCurrentTarget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ManualUpdateCurrentTargetRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryCoordServer).ManualUpdateCurrentTarget(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: QueryCoord_ManualUpdateCurrentTarget_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryCoordServer).ManualUpdateCurrentTarget(ctx, req.(*ManualUpdateCurrentTargetRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // QueryCoord_ServiceDesc is the grpc.ServiceDesc for QueryCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1551,10 +1518,6 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateAnalyzer",
 			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
-		},
-		{
-			MethodName: "ManualUpdateCurrentTarget",
-			Handler:    _QueryCoord_ManualUpdateCurrentTarget_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

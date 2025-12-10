@@ -136,17 +136,17 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 
 	// Test TruncateCollection
 	// truncate a collection that collection not exist should return error.
-	status, err = core.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
+	resp, err := core.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: "notExistCollection",
 	})
-	require.Error(t, merr.CheckRPCCall(status, err))
+	require.Error(t, merr.CheckRPCCall(resp.GetStatus(), err))
 	// truncate the collection should be ok.
-	status, err = core.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
+	resp, err = core.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.NoError(t, merr.CheckRPCCall(resp.GetStatus(), err))
 	// verify collection still exists after truncate
 	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
 	require.NoError(t, err)

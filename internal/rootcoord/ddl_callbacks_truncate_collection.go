@@ -19,20 +19,11 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -82,47 +73,17 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 		flushTs := result.TimeTick
 		flushTsList[vchannel] = flushTs
 	}
-	dropSegmentsTr := timerecord.NewTimeRecorder("DropSegmentsByTime")
-	// Drop segments that were updated before the flush timestamp
-	_, err := c.mixCoord.DropSegmentsByTime(ctx, &datapb.DropSegmentsByTimeRequest{
-		CollectionID: header.CollectionId,
-		FlushTsList:  flushTsList,
-	})
-	if err != nil {
-		return err
-	}
-	dropSegmentsDuration := dropSegmentsTr.ElapseSpan()
-	log.Ctx(ctx).Info("mydebug: drop segments by time done",
-		zap.Int64("collectionID", header.CollectionId),
-		zap.Duration("duration", dropSegmentsDuration))
 
-	// Check if the collection is loaded in QueryCoord, if not, skip ManualUpdateCurrentTarget
-	resp, err := c.mixCoord.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
-		CollectionIDs: []int64{header.CollectionId},
-	})
+	// Drop segments that were updated before the flush timestamp
+	err := c.mixCoord.DropSegmentsByTime(ctx, header.CollectionId, flushTsList)
 	if err != nil {
 		return err
 	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		if errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded) {
-			log.Ctx(ctx).Info("collection not loaded, skip ManualUpdateCurrentTarget",
-				zap.Int64("collectionID", header.CollectionId))
-		} else {
-			return errors.New(resp.GetStatus().GetReason())
-		}
-	} else {
-		// Collection is loaded, manually update current target to sync QueryCoord's view
-		updateTargetTr := timerecord.NewTimeRecorder("ManualUpdateCurrentTarget")
-		_, err = c.mixCoord.ManualUpdateCurrentTarget(ctx, &querypb.ManualUpdateCurrentTargetRequest{
-			CollectionID: header.CollectionId,
-		})
-		if err != nil {
-			return err
-		}
-		updateTargetDuration := updateTargetTr.ElapseSpan()
-		log.Ctx(ctx).Info("mydebug: manual update current target done",
-			zap.Int64("collectionID", header.CollectionId),
-			zap.Duration("duration", updateTargetDuration))
+
+	// manually update current target to sync QueryCoord's view
+	err = c.mixCoord.ManualUpdateCurrentTarget(ctx, header.CollectionId)
+	if err != nil {
+		return err
 	}
 
 	return nil

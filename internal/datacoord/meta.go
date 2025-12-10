@@ -2494,6 +2494,49 @@ func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResource
 	return lo.Values(m.resourceMeta), m.resourceVersion
 }
 
+// TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp
+func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flushTs uint64) error {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	segments := m.segments.GetSegmentsBySelector(SegmentFilterFunc(isSegmentHealthy), WithChannel(vChannel))
+	segmentsToDrop := make([]*SegmentInfo, 0)
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]int),
+	}
+
+	for _, segment := range segments {
+		if segment.GetDmlPosition().GetTimestamp() <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+			cloned := segment.Clone()
+			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+			segmentsToDrop = append(segmentsToDrop, cloned)
+		}
+	}
+
+	if len(segmentsToDrop) == 0 {
+		return nil
+	}
+
+	// Persist to etcd
+	segmentsProto := lo.Map(segmentsToDrop, func(seg *SegmentInfo, _ int) *datapb.SegmentInfo {
+		return seg.SegmentInfo
+	})
+	if err := m.catalog.AlterSegments(ctx, segmentsProto); err != nil {
+		log.Ctx(ctx).Warn("Failed to batch set segments state to dropped", zap.Error(err))
+		return err
+	}
+
+	// Update metrics
+	metricMutation.commit()
+
+	// Update memory
+	for _, seg := range segmentsToDrop {
+		m.segments.SetSegment(seg.GetID(), seg)
+	}
+
+	return nil
+}
+
 // WatchChannelCheckpoint waits until the checkpoint of the specified channel
 // reaches or exceeds the target timestamp. Used for TruncateCollection.
 func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {

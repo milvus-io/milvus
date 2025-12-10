@@ -1671,16 +1671,10 @@ func (coord *MixCoordMock) CreateExternalCollection(ctx context.Context, req *ms
 	}, nil
 }
 
-func (coord *MixCoordMock) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
-}
-
-func (coord *MixCoordMock) DropSegmentsByTime(ctx context.Context, req *datapb.DropSegmentsByTimeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
-}
-
-func (coord *MixCoordMock) ManualUpdateCurrentTarget(ctx context.Context, req *querypb.ManualUpdateCurrentTargetRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
+func (coord *MixCoordMock) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	return &milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, nil
 }
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)

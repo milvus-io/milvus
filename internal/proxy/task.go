@@ -683,7 +683,7 @@ type truncateCollectionTask struct {
 	*milvuspb.TruncateCollectionRequest
 	ctx      context.Context
 	mixCoord types.MixCoordClient
-	result   *commonpb.Status
+	result   *milvuspb.TruncateCollectionResponse
 	chMgr    channelsMgr
 }
 
@@ -723,7 +723,7 @@ func (t *truncateCollectionTask) OnEnqueue() error {
 	if t.Base == nil {
 		t.Base = commonpbutil.NewMsgBase()
 	}
-	t.Base.MsgType = commonpb.MsgType_DropCollection
+	t.Base.MsgType = commonpb.MsgType_TruncateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
