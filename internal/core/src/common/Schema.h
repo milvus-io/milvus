@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -368,7 +367,24 @@ class Schema {
         name_ids_.emplace(field_name, field_id);
         id_names_.emplace(field_id, field_name);
 
-        fields_.emplace(field_id, field_meta);
+        // Build struct_array_field_cache_ for ARRAY/VECTOR_ARRAY fields
+        // Field name format: "struct_name[0].field_name"
+        auto data_type = field_meta.get_data_type();
+        if (data_type == DataType::ARRAY ||
+            data_type == DataType::VECTOR_ARRAY) {
+            const std::string& name_str = field_name.get();
+            auto bracket_pos = name_str.find('[');
+            if (bracket_pos != std::string::npos && bracket_pos > 0) {
+                std::string struct_name = name_str.substr(0, bracket_pos);
+                // Only cache the first array field for each struct
+                if (struct_array_field_cache_.find(struct_name) ==
+                    struct_array_field_cache_.end()) {
+                    struct_array_field_cache_[struct_name] = field_id;
+                }
+            }
+        }
+
+        fields_.emplace(field_id, std::move(field_meta));
         field_ids_.emplace_back(field_id);
     }
 
@@ -424,9 +440,8 @@ class Schema {
     bool mmap_enabled_ = false;
     std::unordered_map<FieldId, bool> mmap_fields_;
 
-    mutable std::shared_mutex struct_array_field_cache_mutex_;
-    // Cache for struct_name -> first array field mapping
-    mutable std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+    // Cache for struct_name -> first array field mapping (built during AddField)
+    std::unordered_map<std::string, FieldId> struct_array_field_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

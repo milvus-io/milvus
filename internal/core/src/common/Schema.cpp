@@ -173,47 +173,13 @@ Schema::MmapEnabled(const FieldId& field_id) const {
 
 const FieldMeta&
 Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
-    {
-        std::shared_lock lock(struct_array_field_cache_mutex_);
-        auto cache_it = struct_array_field_cache_.find(struct_name);
-        if (cache_it != struct_array_field_cache_.end()) {
-            return fields_.at(cache_it->second);
-        }
+    auto cache_it = struct_array_field_cache_.find(struct_name);
+    if (cache_it != struct_array_field_cache_.end()) {
+        return fields_.at(cache_it->second);
     }
 
-    FieldId found_field_id;
-    const FieldMeta* found_field_meta = nullptr;
-
-    for (const auto& [field_id, field_meta] : fields_) {
-        const std::string& field_name = field_meta.get_name().get();
-
-        if (field_name.size() > struct_name.size() + 2 &&
-            field_name.substr(0, struct_name.size()) == struct_name &&
-            field_name[struct_name.size()] == '[') {
-            auto data_type = field_meta.get_data_type();
-
-            AssertInfo(data_type == DataType::ARRAY ||
-                           data_type == DataType::VECTOR_ARRAY,
-                       "Expected ARRAY or VECTOR_ARRAY type for struct field");
-
-            found_field_id = field_id;
-            found_field_meta = &field_meta;
-            break;
-        }
-    }
-
-    if (found_field_meta == nullptr) {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "No array field found in struct: {}",
-                  struct_name);
-    }
-
-    // Cache the result (with exclusive lock)
-    {
-        std::unique_lock lock(struct_array_field_cache_mutex_);
-        struct_array_field_cache_[struct_name] = found_field_id;
-    }
-
-    return *found_field_meta;
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "No array field found in struct: {}",
+              struct_name);
 }
 }  // namespace milvus

@@ -82,7 +82,7 @@ PhyVectorSearchNode::GetOutput() {
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
-    auto array_offsets = nullptr;
+    std::shared_ptr<const IArrayOffsets> array_offsets = nullptr;
     if (ph.element_level_) {
         array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
         AssertInfo(array_offsets != nullptr, "Array offsets not available");

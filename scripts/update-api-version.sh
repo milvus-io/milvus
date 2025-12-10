@@ -35,19 +35,32 @@ PROJECT_ROOT=$(cd "$SCRIPTS_DIR/.." && pwd)
 # Update all 4 go.mod files
 echo "Updating milvus-proto version in all go.mod files..."
 
-# Step 1: Update version in all go.mod files (without tidy)
-echo "Step 1: Updating version in all go.mod files..."
-cd "$PROJECT_ROOT" && go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
-cd "$PROJECT_ROOT/client" && go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
-cd "$PROJECT_ROOT/pkg" && go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
-cd "$PROJECT_ROOT/tests/go_client" && go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+# 1. Update main go.mod
+echo "Updating main go.mod..."
+cd "$PROJECT_ROOT"
+go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go mod tidy
 
-# Step 2: Run go mod tidy (sub-modules first, main module last)
-echo "Step 2: Running go mod tidy..."
-cd "$PROJECT_ROOT/pkg" && go mod tidy
-cd "$PROJECT_ROOT/client" && go mod tidy
-cd "$PROJECT_ROOT/tests/go_client" && go mod tidy
-cd "$PROJECT_ROOT" && go mod tidy
+# 2. Update client/go.mod
+echo "Updating client/go.mod..."
+cd "$PROJECT_ROOT/client"
+go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go mod tidy
+
+# 3. Update pkg/go.mod
+echo "Updating pkg/go.mod..."
+cd "$PROJECT_ROOT/pkg"
+go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go mod tidy
+
+# 4. Update tests/go_client/go.mod
+echo "Updating tests/go_client/go.mod..."
+cd "$PROJECT_ROOT/tests/go_client"
+go get -u github.com/milvus-io/milvus-proto/go-api/v2@$update_version
+go mod tidy
+
+# Return to project root
+cd "$PROJECT_ROOT"
 
 # Clean up protobuf examples directory
 EXAMPLE_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty/protobuf/protobuf-src/examples
