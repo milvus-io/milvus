@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestNewVChannelRecoveryInfoFromVChannelMeta(t *testing.T) {
@@ -33,6 +34,9 @@ func TestNewVChannelRecoveryInfoFromVChannelMeta(t *testing.T) {
 }
 
 func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().StreamingCfg.WALRecoverySchemaExpirationTolerance.SwapTempValue("0")
+
 	schema1 := &schemapb.CollectionSchema{
 		Name: "test-collection-1",
 	}
