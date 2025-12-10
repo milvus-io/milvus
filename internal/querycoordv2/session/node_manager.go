@@ -17,6 +17,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -25,7 +26,9 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type Manager interface {
@@ -35,13 +38,16 @@ type Manager interface {
 	Get(nodeID int64) *NodeInfo
 	GetAll() []*NodeInfo
 
-	Suspend(nodeID int64) error
-	Resume(nodeID int64) error
+	MarkResourceExhaustion(nodeID int64, duration time.Duration)
+	IsResourceExhausted(nodeID int64) bool
+	ClearExpiredResourceExhaustion()
+	Start(ctx context.Context)
 }
 
 type NodeManager struct {
-	mu    sync.RWMutex
-	nodes map[int64]*NodeInfo
+	mu        sync.RWMutex
+	nodes     map[int64]*NodeInfo
+	startOnce sync.Once
 }
 
 func (m *NodeManager) Add(node *NodeInfo) {
@@ -135,6 +141,12 @@ type NodeInfo struct {
 	immutableInfo ImmutableNodeInfo
 	state         State
 	lastHeartbeat *atomic.Int64
+
+	// resourceExhaustionExpireAt is the timestamp when the resource exhaustion penalty expires.
+	// When a query node reports resource exhaustion (OOM, disk full, etc.), it gets marked
+	// with a penalty duration during which it won't receive new loading tasks.
+	// Zero value means no active penalty.
+	resourceExhaustionExpireAt time.Time
 }
 
 func (n *NodeInfo) ID() int64 {
@@ -256,5 +268,99 @@ func WithMemCapacity(capacity float64) StatsOption {
 func WithCPUNum(num int64) StatsOption {
 	return func(n *NodeInfo) {
 		n.setCPUNum(num)
+	}
+}
+
+// MarkResourceExhaustion marks a query node as resource exhausted for the specified duration.
+// During this period, the node won't receive new segment/channel loading tasks.
+// If duration is 0 or negative, the resource exhaustion mark is cleared immediately.
+// This is typically called when a query node reports resource exhaustion errors (OOM, disk full, etc.).
+func (m *NodeManager) MarkResourceExhaustion(nodeID int64, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if node, ok := m.nodes[nodeID]; ok {
+		node.mu.Lock()
+		if duration > 0 {
+			node.resourceExhaustionExpireAt = time.Now().Add(duration)
+		} else {
+			node.resourceExhaustionExpireAt = time.Time{}
+		}
+		node.mu.Unlock()
+	}
+}
+
+// IsResourceExhausted checks if a query node is currently marked as resource exhausted.
+// Returns true if the node has an active (non-expired) resource exhaustion mark.
+// This is a pure read-only operation with no side effects - expired marks are not
+// automatically cleared here. Use ClearExpiredResourceExhaustion for cleanup.
+func (m *NodeManager) IsResourceExhausted(nodeID int64) bool {
+	m.mu.RLock()
+	node := m.nodes[nodeID]
+	m.mu.RUnlock()
+
+	if node == nil {
+		return false
+	}
+
+	node.mu.RLock()
+	defer node.mu.RUnlock()
+
+	return !node.resourceExhaustionExpireAt.IsZero() &&
+		time.Now().Before(node.resourceExhaustionExpireAt)
+}
+
+// ClearExpiredResourceExhaustion iterates through all nodes and clears any expired
+// resource exhaustion marks. This is called periodically by the cleanup loop started
+// via Start(). It only clears marks that have already expired; active marks are preserved.
+func (m *NodeManager) ClearExpiredResourceExhaustion() {
+	m.mu.RLock()
+	nodes := make([]*NodeInfo, 0, len(m.nodes))
+	for _, node := range m.nodes {
+		nodes = append(nodes, node)
+	}
+	m.mu.RUnlock()
+
+	now := time.Now()
+	for _, node := range nodes {
+		node.mu.Lock()
+		if !node.resourceExhaustionExpireAt.IsZero() && !now.Before(node.resourceExhaustionExpireAt) {
+			node.resourceExhaustionExpireAt = time.Time{}
+		}
+		node.mu.Unlock()
+	}
+}
+
+// Start begins the background cleanup loop for expired resource exhaustion marks.
+// The cleanup interval is controlled by queryCoord.resourceExhaustionCleanupInterval config.
+// The loop will stop when the provided context is canceled.
+// This method is idempotent - multiple calls will only start one cleanup loop.
+func (m *NodeManager) Start(ctx context.Context) {
+	m.startOnce.Do(func() {
+		go m.cleanupLoop(ctx)
+	})
+}
+
+// cleanupLoop is the internal goroutine that periodically clears expired resource
+// exhaustion marks from all nodes. It supports dynamic interval refresh.
+func (m *NodeManager) cleanupLoop(ctx context.Context) {
+	interval := paramtable.Get().QueryCoordCfg.ResourceExhaustionCleanupInterval.GetAsDuration(time.Second)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("cleanupLoop stopped")
+			return
+		case <-ticker.C:
+			m.ClearExpiredResourceExhaustion()
+			// Support dynamic interval refresh
+			newInterval := paramtable.Get().QueryCoordCfg.ResourceExhaustionCleanupInterval.GetAsDuration(time.Second)
+			if newInterval != interval {
+				interval = newInterval
+				ticker.Reset(interval)
+			}
+		}
 	}
 }
