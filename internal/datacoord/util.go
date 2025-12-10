@@ -378,28 +378,25 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
-func calculateIndexTaskSlot(segmentSize int64) int64 {
-	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if segmentSize > 512*1024*1024 {
-		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
-		return max(taskSlot, 1)
-	} else if segmentSize > 100*1024*1024 {
-		return max(defaultSlots/4, 1)
-	} else if segmentSize > 10*1024*1024 {
-		return max(defaultSlots/16, 1)
-	}
-	return max(defaultSlots/64, 1)
+func calculateStatsTaskSlot(segmentSize int64) (float64, float64) {
+	return Params.DataCoordCfg.StatsTaskCPUFactor.GetAsFloat(), float64(segmentSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.StatsTaskMemoryFactor.GetAsFloat()
 }
 
-func calculateStatsTaskSlot(segmentSize int64) int64 {
-	defaultSlots := Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
-	if segmentSize > 512*1024*1024 {
-		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
-		return max(taskSlot, 1)
-	} else if segmentSize > 100*1024*1024 {
-		return max(defaultSlots/2, 1)
-	} else if segmentSize > 10*1024*1024 {
-		return max(defaultSlots/4, 1)
+func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) (float64, float64) {
+	if isVectorIndex {
+		return Params.DataCoordCfg.VectorIndexTaskCPUFactor.GetAsFloat(), float64(fieldSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.VectorIndexTaskMemoryFactor.GetAsFloat()
 	}
-	return max(defaultSlots/8, 1)
+	return Params.DataCoordCfg.ScalarIndexTaskCPUFactor.GetAsFloat(), float64(fieldSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.ScalarIndexTaskMemoryFactor.GetAsFloat()
+}
+
+func IsVectorIndex(meta *meta, collID, indexID int64) bool {
+	fieldID := meta.indexMeta.GetFieldIDByIndexID(collID, indexID)
+
+	coll := meta.GetCollection(collID)
+	for _, field := range coll.Schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			return typeutil.IsVectorType(field.GetDataType())
+		}
+	}
+	return false
 }
