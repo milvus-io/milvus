@@ -594,26 +594,44 @@ func (data *ArrayFieldData) RowNum() int       { return len(data.Data) }
 func (data *JSONFieldData) RowNum() int        { return len(data.Data) }
 func (data *GeometryFieldData) RowNum() int    { return len(data.Data) }
 func (data *BinaryVectorFieldData) RowNum() int {
+	if data.Nullable {
+		return len(data.ValidData)
+	}
 	return len(data.Data) * 8 / data.Dim
 }
 
 func (data *FloatVectorFieldData) RowNum() int {
+	if data.Nullable {
+		return len(data.ValidData)
+	}
 	return len(data.Data) / data.Dim
 }
 
 func (data *Float16VectorFieldData) RowNum() int {
+	if data.Nullable {
+		return len(data.ValidData)
+	}
 	return len(data.Data) / 2 / data.Dim
 }
 
 func (data *BFloat16VectorFieldData) RowNum() int {
+	if data.Nullable {
+		return len(data.ValidData)
+	}
 	return len(data.Data) / 2 / data.Dim
 }
 
 func (data *SparseFloatVectorFieldData) RowNum() int {
+	if data.Nullable {
+		return len(data.ValidData)
+	}
 	return len(data.Contents)
 }
 
 func (data *Int8VectorFieldData) RowNum() int {
+	if data.Nullable {
+		return len(data.ValidData)
+	}
 	return len(data.Data) / data.Dim
 }
 
