@@ -53,11 +53,14 @@ ExecPlanNodeVisitor::ExecuteTask(
     auto task =
         milvus::exec::Task::Create(DEFAULT_TASK_ID, plan, 0, query_context);
     RowVectorPtr ret = nullptr;
+    int64_t processed_num = 0;
     for (;;) {
         auto result = task->Next();
         if (!result) {
+            Assert(processed_num == query_context->get_active_count());
             break;
         }
+        processed_num += result->size();
         if (ret) {
             auto childrens = result->childrens();
             AssertInfo(childrens.size() == ret->childrens().size(),
@@ -80,8 +83,8 @@ ExecPlanNodeVisitor::ExecuteTask(
             ret = result;
         }
     }
-    span.GetSpan()->SetAttribute("total_rows", ret->size());
-    span.GetSpan()->SetAttribute("matched_rows", ret->count());
+    span.GetSpan()->SetAttribute("total_rows", processed_num);
+    span.GetSpan()->SetAttribute("matched_rows", ret->size());
     return ret;
 }
 
