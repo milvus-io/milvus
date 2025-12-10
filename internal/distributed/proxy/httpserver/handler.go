@@ -374,9 +374,13 @@ func (h *Handlers) handleSearch(c *gin.Context) (interface{}, error) {
 		Nq:                 wrappedReq.Nq,
 	}
 	if len(wrappedReq.BinaryVectors) > 0 {
-		req.PlaceholderGroup = binaryVector2Bytes(wrappedReq.BinaryVectors)
+		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: binaryVector2Bytes(wrappedReq.BinaryVectors),
+		}
 	} else {
-		req.PlaceholderGroup = vector2Bytes(wrappedReq.Vectors)
+		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: vector2Bytes(wrappedReq.Vectors),
+		}
 	}
 	return h.proxy.Search(c, &req)
 }
