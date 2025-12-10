@@ -424,9 +424,9 @@ class Schema {
     bool mmap_enabled_ = false;
     std::unordered_map<FieldId, bool> mmap_fields_;
 
+    mutable std::shared_mutex struct_array_field_cache_mutex_;
     // Cache for struct_name -> first array field mapping
-    mutable std::unordered_map<std::string, const FieldMeta*>
-        struct_array_field_cache_;
+    mutable std::unordered_map<std::string, FieldId> struct_array_field_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
