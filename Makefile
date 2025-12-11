@@ -512,7 +512,7 @@ generate-mockery-querycoord: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/querycoordv2/.mockery.yaml
 
 generate-mockery-querynode-without-cpp:
-	@source $(PWD)/scripts/setenv.sh
+	@source $(PWD)/scripts/setenv.sh && \
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/querynodev2/.mockery.yaml
 
 generate-mockery-querynode: build-cpp generate-mockery-querynode-without-cpp
@@ -572,10 +572,13 @@ generate-mockery-pkg:
 generate-mockery-internal: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/.mockery.yaml
 
+generate-mockery-client:
+	$(MAKE) -C client generate-mockery
+
 generate-mockery-cdc: getdeps
 	$(INSTALL_PATH)/mockery --config $(PWD)/internal/cdc/.mockery.yaml
 
-generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal
+generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-internal generate-mockery-client
 
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
