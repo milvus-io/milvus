@@ -454,7 +454,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 				return checkDelegatorDataReady(replica, ch)
 			})
 
-			if len(readyDelegatorsInChannel) >= 0 {
+			if len(readyDelegatorsInChannel) > 0 {
 				readyDelegatorsInReplica = append(readyDelegatorsInReplica, readyDelegatorsInChannel...)
 			}
 		}
