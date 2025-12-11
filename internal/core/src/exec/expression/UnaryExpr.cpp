@@ -1742,6 +1742,10 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
+    if (!SegmentExpr::CanUseIndex()) {
+        use_index_ = false;
+        return false;
+    }
     bool has_index = pinned_index_.size() > 0;
     switch (val_type) {
         case DataType::STRING:
