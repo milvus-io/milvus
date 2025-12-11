@@ -51,6 +51,8 @@ type Collection struct {
 	EnableDynamicField   bool
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
+	ExternalSource       string
+	ExternalSpec         string
 }
 
 func (c *Collection) Available() bool {
@@ -82,6 +84,8 @@ func (c *Collection) ShallowClone() *Collection {
 		Functions:            c.Functions,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
+		ExternalSource:       c.ExternalSource,
+		ExternalSpec:         c.ExternalSpec,
 	}
 }
 
@@ -110,6 +114,8 @@ func (c *Collection) Clone() *Collection {
 		Functions:            CloneFunctions(c.Functions),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
+		ExternalSource:       c.ExternalSource,
+		ExternalSpec:         c.ExternalSpec,
 	}
 }
 
@@ -158,6 +164,8 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
+			c.ExternalSource = updates.Schema.ExternalSource
+			c.ExternalSpec = updates.Schema.ExternalSpec
 		}
 	}
 }
@@ -198,6 +206,8 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
+		ExternalSource:       coll.Schema.ExternalSource,
+		ExternalSpec:         coll.Schema.ExternalSpec,
 	}
 }
 
@@ -249,6 +259,8 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		EnableDynamicField: coll.EnableDynamicField,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
+		ExternalSource:     coll.ExternalSource,
+		ExternalSpec:       coll.ExternalSpec,
 	}
 
 	if c.withFields {
