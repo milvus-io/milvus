@@ -28,6 +28,8 @@
 #include <NamedType/named_type.hpp>
 
 #include "common/FieldMeta.h"
+#include "common/OffsetMapping.h"
+#include "query/Utils.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -125,8 +127,10 @@ struct OffsetDisPairComparator {
 struct VectorIterator {
  public:
     VectorIterator(int chunk_count,
-                   const std::vector<int64_t>& total_rows_until_chunk = {})
-        : total_rows_until_chunk_(total_rows_until_chunk) {
+                   const std::vector<int64_t>& total_rows_until_chunk,
+                   const milvus::OffsetMapping& offset_mapping)
+        : total_rows_until_chunk_(total_rows_until_chunk),
+          offset_mapping_(&offset_mapping) {
         iterators_.reserve(chunk_count);
     }
 
@@ -141,7 +145,11 @@ struct VectorIterator {
                     origin_pair, top->GetIteratorIdx());
                 heap_.push(off_dis_pair);
             }
-            return top->GetOffDis();
+            auto result = top->GetOffDis();
+            if (offset_mapping_ != nullptr) {
+                result.first = offset_mapping_->GetLogicalOffset(result.first);
+            }
+            return result;
         }
         return std::nullopt;
     }
@@ -195,6 +203,7 @@ struct VectorIterator {
         heap_;
     bool sealed = false;
     std::vector<int64_t> total_rows_until_chunk_;
+    const milvus::OffsetMapping* offset_mapping_ = nullptr;
     //currently, VectorIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
@@ -219,7 +228,8 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         const std::vector<int64_t>& total_rows_until_chunk,
-        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators) {
+        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
+        const milvus::OffsetMapping& offset_mapping) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
                    "wrong state",
@@ -231,7 +241,7 @@ struct SearchResult {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
                 auto vector_iterator = std::make_shared<VectorIterator>(
-                    chunk_count, total_rows_until_chunk);
+                    chunk_count, total_rows_until_chunk, offset_mapping);
                 vector_iterators.emplace_back(vector_iterator);
             }
             const auto& kw_iterator = kw_iterators[i];

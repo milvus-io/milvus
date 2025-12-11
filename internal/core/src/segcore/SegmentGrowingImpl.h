@@ -490,6 +490,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   "RemoveJsonStats not implemented for SegmentGrowingImpl");
     }
 
+    struct ValidResult {
+        int64_t valid_count = 0;
+        std::unique_ptr<bool[]> valid_data;
+        std::vector<int64_t> valid_offsets;
+    };
+
+    ValidResult
+    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                             FieldId field_id,
+                             const int64_t* seg_offsets,
+                             int64_t count) const;
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;
