@@ -58,7 +58,7 @@ TEST_F(ParquetWriterFactoryTest, CreateContextBasicTest) {
     EXPECT_EQ(context.builders_map.size(), column_map_.size());
 
     // Verify metadata
-    EXPECT_FALSE(context.kv_metadata.empty());
+    EXPECT_TRUE(context.kv_metadata.empty());
 
     // Verify column groups
     EXPECT_FALSE(context.column_groups.empty());

@@ -457,6 +457,15 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::string
     GetSharedKeyIndexDir();
 
+    std::string
+    GetMetaFilePath();
+
+    void
+    WriteMetaFile();
+
+    void
+    LoadMetaFile(const std::string& meta_file_path);
+
     void
     AddKeyStats(const std::vector<std::string>& path,
                 JSONType type,
@@ -648,8 +657,6 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::unordered_map<int64_t, std::string> field_id_to_name_map_;
     // field_name vector, the sequece is the same as the order of files
     std::vector<std::string> field_names_;
-    // column_group_id -> schema, the sequence of schemas is the same as the order of files
-    std::map<int64_t, std::shared_ptr<arrow::Schema>> column_group_schemas_;
     // field_name -> column
     mutable std::unordered_map<std::string,
                                std::shared_ptr<milvus::ChunkedColumnInterface>>
@@ -660,6 +667,10 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
     SkipIndex skip_index_;
     cachinglayer::ResourceUsage cell_size_ = {0, 0};
+
+    // Meta file for storing layout type map and other metadata
+    JsonStatsMeta json_stats_meta_;
+    int64_t meta_file_size_{0};
 
     // Friend accessor for unit tests to call private methods safely.
     friend class ::TraverseJsonForBuildStatsAccessor;
