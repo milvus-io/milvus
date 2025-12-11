@@ -225,17 +225,14 @@ class TestGeometryCollection(TestBase):
                 return data
 
         elif spatial_func == "ST_CONTAINS":
-            # Query: large polygon
-            # ST_CONTAINS(query_geom, geo) - query contains data geometry
-            # Data: small points/polygons inside query polygon
-            query_geom = "POLYGON ((10 10, 90 10, 90 90, 10 90, 10 10))"
+            # ST_CONTAINS(geo, query_geom) - data geometry contains query geometry
+            # Data: large polygons that contain the query point
+            # Query: small point that is inside the data polygons
+            query_geom = "POINT (50.00 50.00)"
 
             def generate_geo_data(start_id, count):
                 data = []
                 for i in range(count):
-                    # Points well inside the query polygon
-                    x = 20 + (i % 10) * 6
-                    y = 20 + (i // 10) * 6
                     item = {
                         "id": start_id + i,
                         "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
@@ -243,8 +240,14 @@ class TestGeometryCollection(TestBase):
                     if nullable and i % 5 == 0:
                         item["geo"] = None
                     else:
-                        # Points are easily contained
-                        item["geo"] = f"POINT ({x:.2f} {y:.2f})"
+                        # Large polygons that contain the point (50, 50)
+                        # Create polygons centered around (50, 50) with varying sizes
+                        size = 20 + (i % 5) * 10  # sizes: 20, 30, 40, 50, 60
+                        x1 = 50 - size
+                        y1 = 50 - size
+                        x2 = 50 + size
+                        y2 = 50 + size
+                        item["geo"] = f"POLYGON (({x1} {y1}, {x2} {y1}, {x2} {y2}, {x1} {y2}, {x1} {y1}))"
                     data.append(item)
                 return data
 
@@ -648,3 +651,74 @@ class TestGeometryCollection(TestBase):
         rsp = self.vector_client.vector_query(query_payload)
         assert rsp['code'] == 0
         logger.info(f"Default geometry: spatial query near origin returned {len(rsp.get('data', []))} results")
+
+    @pytest.mark.parametrize("spatial_func", [
+        "ST_INTERSECTS",
+        "ST_CONTAINS",
+        "ST_WITHIN",
+    ])
+    def test_spatial_query_empty_result(self, spatial_func):
+        """
+        target: test spatial query returns empty result when no data matches
+        method: query with geometry that doesn't match any data
+        expected: query returns empty result (edge case)
+        """
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{default_dim}"}},
+                    {"fieldName": "geo", "dataType": "Geometry"}
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"},
+                {"fieldName": "geo", "indexName": "geo_idx", "indexType": "RTREE"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 0
+
+        # Insert data in region (0-50, 0-50)
+        nb = 50
+        data = []
+        for i in range(nb):
+            x = 10 + (i % 10) * 4
+            y = 10 + (i // 10) * 4
+            data.append({
+                "id": i,
+                "vector": preprocessing.normalize([np.array([random.random() for _ in range(default_dim)])])[0].tolist(),
+                "geo": f"POINT ({x:.2f} {y:.2f})"
+            })
+
+        insert_payload = {"collectionName": name, "data": data}
+        rsp = self.vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+        self.wait_collection_load_completed(name)
+
+        # Query with geometry far away from all data (region 200-300, 200-300)
+        # This should return empty results
+        if spatial_func == "ST_INTERSECTS":
+            query_geom = "POLYGON ((200 200, 300 200, 300 300, 200 300, 200 200))"
+        elif spatial_func == "ST_CONTAINS":
+            # Data points cannot contain this distant point
+            query_geom = "POINT (250.00 250.00)"
+        else:  # ST_WITHIN
+            query_geom = "POLYGON ((200 200, 300 200, 300 300, 200 300, 200 200))"
+
+        filter_expr = f"{spatial_func}(geo, '{query_geom}')"
+        query_payload = {
+            "collectionName": name,
+            "filter": filter_expr,
+            "outputFields": ["id", "geo"],
+            "limit": 100
+        }
+        rsp = self.vector_client.vector_query(query_payload)
+        assert rsp['code'] == 0
+        result_count = len(rsp.get('data', []))
+        logger.info(f"{spatial_func} empty result test: query returned {result_count} results")
+        assert result_count == 0, f"{spatial_func} query should return empty result when no data matches"
