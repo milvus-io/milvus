@@ -23,7 +23,6 @@ import (
 const (
 	LinderaDictURLKey = "lindera_download_urls"
 	ResourceMapKey    = "resource_map"
-	DictPathKey       = "local_dict_path"
 	ResourcePathKey   = "resource_path"
 )
 
@@ -39,7 +38,7 @@ func UpdateParams() {
 	cfg := paramtable.Get()
 	params := map[string]any{}
 	params[LinderaDictURLKey] = cfg.FunctionCfg.LinderaDownloadUrls.GetValue()
-	params[DictPathKey] = cfg.FunctionCfg.LocalResourcePath.GetValue()
+	params[ResourcePathKey] = cfg.FunctionCfg.LocalResourcePath.GetValue()
 
 	bytes, err := json.Marshal(params)
 	if err != nil {
@@ -55,12 +54,30 @@ func UpdateParams() {
 	}
 }
 
-func NewAnalyzer(param string) (interfaces.Analyzer, error) {
+func UpdateGlobalResourceInfo(resourceMap map[string]int64) {
+	bytes, err := json.Marshal(map[string]any{"resource_map": resourceMap})
+	if err != nil {
+		log.Panic("update global resource info failed", zap.Error(err))
+	}
+
+	paramPtr := C.CString(string(bytes))
+	defer C.free(unsafe.Pointer(paramPtr))
+
+	status := C.set_tokenizer_option(paramPtr)
+	if err := HandleCStatus(&status, "failed to update global resource info"); err != nil {
+		log.Panic("update global resource info failed", zap.Error(err))
+	}
+}
+
+func NewAnalyzer(param string, extraInfo string) (interfaces.Analyzer, error) {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
+	extraInfoPtr := C.CString(extraInfo)
+	defer C.free(unsafe.Pointer(extraInfoPtr))
+
 	var ptr C.CTokenizer
-	status := C.create_tokenizer(paramPtr, &ptr)
+	status := C.create_tokenizer(paramPtr, extraInfoPtr, &ptr)
 	if err := HandleCStatus(&status, "failed to create analyzer"); err != nil {
 		return nil, err
 	}
@@ -68,13 +85,19 @@ func NewAnalyzer(param string) (interfaces.Analyzer, error) {
 	return NewCAnalyzer(ptr), nil
 }
 
-func ValidateAnalyzer(param string) error {
+func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
-	status := C.validate_tokenizer(paramPtr)
-	if err := HandleCStatus(&status, "failed to create tokenizer"); err != nil {
-		return err
+	extraInfoPtr := C.CString(extraInfo)
+	defer C.free(unsafe.Pointer(extraInfoPtr))
+
+	result := C.validate_tokenizer(paramPtr, extraInfoPtr)
+	if err := HandleCStatus(&result.status, "failed to validate tokenizer"); err != nil {
+		return nil, err
 	}
-	return nil
+
+	ids := unsafe.Slice((*int64)(unsafe.Pointer(result.resource_ids)), result.resource_ids_count)
+	C.free(unsafe.Pointer(result.resource_ids))
+	return ids, nil
 }

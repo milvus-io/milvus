@@ -14,9 +14,20 @@ struct Tokenizer {
     NO_COPY_OR_ASSIGN(Tokenizer);
 
     explicit Tokenizer(std::string&& params) {
-        auto shared_params = std::make_shared<std::string>(std::move(params));
-        auto res =
-            RustResultWrapper(tantivy_create_analyzer(shared_params->c_str()));
+        auto shared_params = std::make_shared<std::string>(params);
+        auto res = RustResultWrapper(
+            tantivy_create_analyzer(shared_params->c_str(), ""));
+        AssertInfo(res.result_->success,
+                   "Tokenizer creation failed: {}",
+                   res.result_->error);
+        ptr_ = res.result_->value.ptr._0;
+    }
+
+    explicit Tokenizer(std::string&& params, std::string&& extra_info) {
+        auto shared_params = std::make_shared<std::string>(params);
+        auto shared_extra_info = std::make_shared<std::string>(extra_info);
+        auto res = RustResultWrapper(tantivy_create_analyzer(
+            shared_params->c_str(), shared_extra_info->c_str()));
         AssertInfo(res.result_->success,
                    "Tokenizer creation failed: {}",
                    res.result_->error);
@@ -67,6 +78,22 @@ set_tokenizer_options(std::string&& params) {
     AssertInfo(res.result_->success,
                "Set analyzer option failed: {}",
                res.result_->error);
+}
+
+std::vector<int64_t>
+validate_analyzer(std::string&& params, std::string&& extra_info) {
+    auto shared_params = std::make_shared<std::string>(params);
+    auto shared_extra_info = std::make_shared<std::string>(extra_info);
+    auto res = RustResultWrapper(tantivy_validate_analyzer(
+        shared_params->c_str(), shared_extra_info->c_str()));
+    AssertInfo(res.result_->success,
+               "Validate analyzer params failed: {}",
+               res.result_->error);
+    auto array_wrapper =
+        RustArrayI64Wrapper(std::move(res.result_->value.rust_array_i64._0));
+    auto* array = array_wrapper.array_.array;
+    auto len = array_wrapper.array_.len;
+    return std::vector<int64_t>(array, array + len);
 }
 
 }  // namespace milvus::tantivy

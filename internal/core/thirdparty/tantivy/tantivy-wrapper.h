@@ -230,7 +230,7 @@ struct TantivyIndexWrapper {
                        const char* analyzer_params) {
         if (reader_ != nullptr) {
             auto res = RustResultWrapper(tantivy_register_tokenizer(
-                reader_, tokenizer_name, analyzer_params));
+                reader_, tokenizer_name, analyzer_params, ""));
             AssertInfo(res.result_->success,
                        "failed to register tokenizer: {}",
                        res.result_->error);

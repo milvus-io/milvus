@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/milvus-io/milvus-proto/go-api/v2/tokenizerpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type mockServer struct {
@@ -32,7 +35,7 @@ func TestAnalyzer(t *testing.T) {
 	// use default analyzer.
 	{
 		m := "{}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, "")
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -48,7 +51,7 @@ func TestAnalyzer(t *testing.T) {
 
 	{
 		m := ""
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, "")
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -65,7 +68,7 @@ func TestAnalyzer(t *testing.T) {
 	// use default tokenizer.
 	{
 		m := "{\"tokenizer\": \"standard\"}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, "")
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -82,7 +85,7 @@ func TestAnalyzer(t *testing.T) {
 	// jieba tokenizer.
 	{
 		m := "{\"tokenizer\": \"jieba\"}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, "")
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -124,7 +127,7 @@ func TestAnalyzer(t *testing.T) {
 		defer stop()
 
 		m := "{\"tokenizer\": {\"type\":\"grpc\", \"endpoint\":\"http://" + addr + "\"}}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, "")
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -138,7 +141,7 @@ func TestAnalyzer(t *testing.T) {
 	// lindera tokenizer.
 	{
 		m := "{\"tokenizer\": {\"type\":\"lindera\", \"dict_kind\": \"ipadic\"}}"
-		tokenizer, err := NewAnalyzer(m)
+		tokenizer, err := NewAnalyzer(m, "")
 		require.NoError(t, err)
 		defer tokenizer.Destroy()
 
@@ -152,24 +155,53 @@ func TestAnalyzer(t *testing.T) {
 
 func TestValidateAnalyzer(t *testing.T) {
 	InitOptions()
+	tempDir, err := os.MkdirTemp(os.TempDir(), "validate_analyzer_*")
+	assert.NoError(t, err)
+	// defer os.RemoveAll(tempDir)
 
 	// valid analyzer
 	{
 		m := "{\"tokenizer\": \"standard\"}"
-		err := ValidateAnalyzer(m)
+		ids, err := ValidateAnalyzer(m, "")
 		assert.NoError(t, err)
+		assert.Equal(t, len(ids), 0)
 	}
 
 	{
 		m := ""
-		err := ValidateAnalyzer(m)
+		_, err := ValidateAnalyzer(m, "")
 		assert.NoError(t, err)
 	}
 
 	// invalid tokenizer
 	{
 		m := "{\"tokenizer\": \"invalid\"}"
-		err := ValidateAnalyzer(m)
+		_, err := ValidateAnalyzer(m, "")
 		assert.Error(t, err)
+	}
+
+	// with user resource
+	{
+		paramtable.Get().Save(paramtable.Get().FunctionCfg.LocalResourcePath.Key, tempDir)
+		UpdateParams()
+		resourceID := 100
+
+		// mock remote resource file
+		dir := filepath.Join(tempDir, "default", fmt.Sprintf("%d", resourceID))
+		err := os.MkdirAll(dir, os.ModePerm)
+		require.NoError(t, err)
+
+		f, err := os.Create(filepath.Join(dir, "jieba.txt"))
+		require.NoError(t, err)
+
+		f.WriteString("stop")
+		f.Close()
+
+		m := "{\"tokenizer\": \"standard\", \"filter\": [{\"type\": \"stop\", \"stop_words_file\": {\"type\": \"remote\",\"resource_name\": \"jieba_dict\", \"file_name\": \"jieba.txt\"}}]}"
+
+		ids, err := ValidateAnalyzer(m, "{\"resource_map\": {\"jieba_dict\": 100}, \"storage_name\": \"default\"}")
+		require.NoError(t, err)
+		assert.Equal(t, len(ids), 1)
+		assert.Equal(t, ids[0], int64(resourceID))
 	}
 }

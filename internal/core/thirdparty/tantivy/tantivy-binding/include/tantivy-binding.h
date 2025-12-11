@@ -302,7 +302,8 @@ RustResult tantivy_phrase_match_query(void *ptr, const char *query, uint32_t slo
 
 RustResult tantivy_register_tokenizer(void *ptr,
                                       const char *tokenizer_name,
-                                      const char *analyzer_params);
+                                      const char *analyzer_params,
+                                      const char *extra_info);
 
 RustResult tantivy_create_index(const char *field_name,
                                 TantivyDataType data_type,
@@ -497,7 +498,9 @@ const char *tantivy_token_stream_get_token(void *token_stream);
 
 TantivyToken tantivy_token_stream_get_detailed_token(void *token_stream);
 
-RustResult tantivy_create_analyzer(const char *analyzer_params);
+RustResult tantivy_create_analyzer(const char *analyzer_params, const char *extra_info);
+
+RustResult tantivy_validate_analyzer(const char *analyzer_params, const char *extra_info);
 
 void *tantivy_clone_analyzer(void *ptr);
 

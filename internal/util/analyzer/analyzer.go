@@ -10,12 +10,12 @@ type (
 	TokenStream interfaces.TokenStream
 )
 
-func NewAnalyzer(param string) (Analyzer, error) {
-	return canalyzer.NewAnalyzer(param)
+func NewAnalyzer(param string, extraInfo string) (Analyzer, error) {
+	return canalyzer.NewAnalyzer(param, extraInfo)
 }
 
-func ValidateAnalyzer(param string) error {
-	return canalyzer.ValidateAnalyzer(param)
+func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
+	return canalyzer.ValidateAnalyzer(param, extraInfo)
 }
 
 func InitOptions() {

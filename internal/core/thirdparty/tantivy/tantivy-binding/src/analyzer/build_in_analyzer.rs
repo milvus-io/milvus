@@ -2,6 +2,7 @@ use tantivy::tokenizer::*;
 
 use super::filter::stop_words;
 use super::filter::*;
+use super::options::FileResourcePathHelper;
 use super::tokenizers::*;
 
 // default build-in analyzer
@@ -15,8 +16,13 @@ pub(crate) fn standard_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
     builder.build()
 }
 
-pub fn chinese_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
-    let builder = jieba_builder(None).unwrap().filter(CnAlphaNumOnlyFilter);
+pub fn chinese_analyzer(
+    stop_words: Vec<String>,
+    helper: &mut FileResourcePathHelper,
+) -> TextAnalyzer {
+    let builder = jieba_builder(None, helper)
+        .unwrap()
+        .filter(CnAlphaNumOnlyFilter);
     if stop_words.len() > 0 {
         return builder.filter(StopWordFilter::remove(stop_words)).build();
     }

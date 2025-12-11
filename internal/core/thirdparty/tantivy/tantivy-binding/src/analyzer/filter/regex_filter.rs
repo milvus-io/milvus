@@ -116,7 +116,7 @@ mod tests {
             }]
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut bining = tokenizer.unwrap();

@@ -259,6 +259,10 @@ func (m *RefManager) CleanResource() {
 	}
 }
 
+func (m *RefManager) Start() {
+	go m.GcLoop()
+}
+
 func (m *RefManager) GcLoop() {
 	ticker := time.NewTicker(15 * time.Minute)
 
@@ -282,6 +286,10 @@ func NewManager(storage storage.ChunkManager, mode Mode) Manager {
 		return &BaseManager{}
 	case SyncMode:
 		return NewSyncManager(storage)
+	case RefMode:
+		manager := NewRefManger()
+		manager.Start()
+		return manager
 	default:
 		panic(fmt.Sprintf("Unknown file resource mananger mod: %v", mode))
 	}

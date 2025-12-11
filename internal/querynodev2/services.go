@@ -1580,7 +1580,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 }
 
 func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
+	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -1665,7 +1665,7 @@ func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 	defer node.lifetime.Done()
 
 	for _, info := range req.AnalyzerInfos {
-		err := analyzer.ValidateAnalyzer(info.GetParams())
+		_, err := analyzer.ValidateAnalyzer(info.GetParams(), "")
 		if err != nil {
 			if info.GetName() != "" {
 				return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err))}, nil

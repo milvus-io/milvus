@@ -45,7 +45,7 @@ TEST(CTokenizer, Default) {
     auto analyzer_params = R"({"tokenizer": "standard"})";
     CTokenizer tokenizer;
     {
-        auto status = create_tokenizer(analyzer_params, &tokenizer);
+        auto status = create_tokenizer(analyzer_params, "", &tokenizer);
         ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
     }
 

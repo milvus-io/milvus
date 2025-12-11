@@ -1,3 +1,4 @@
+use crate::analyzer::options::FileResourcePathHelper;
 use log::warn;
 use serde_json as json;
 use tantivy::tokenizer::*;
@@ -24,24 +25,29 @@ pub fn icu_builder() -> TextAnalyzerBuilder {
 
 pub fn lang_ident_builder(
     params: Option<&json::Map<String, json::Value>>,
-    fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+    helper: &mut FileResourcePathHelper,
+    fc: fn(
+        &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<TextAnalyzer>,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(format!(
             "lang ident tokenizer must be customized"
         )));
     }
-    let tokenizer = LangIdentTokenizer::from_json(params.unwrap(), fc)?;
+    let tokenizer = LangIdentTokenizer::from_json(params.unwrap(), helper, fc)?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
 pub fn jieba_builder(
     params: Option<&json::Map<String, json::Value>>,
+    helper: &mut FileResourcePathHelper,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Ok(TextAnalyzer::builder(JiebaTokenizer::new()).dynamic());
     }
-    let tokenizer = JiebaTokenizer::from_json(params.unwrap())?;
+    let tokenizer = JiebaTokenizer::from_json(params.unwrap(), helper)?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
@@ -83,7 +89,8 @@ pub fn char_group_builder(
 
 pub fn get_builder_with_tokenizer(
     params: &json::Value,
-    fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+    helper: &mut FileResourcePathHelper,
+    fc: fn(&json::Map<String, json::Value>, &mut FileResourcePathHelper) -> Result<TextAnalyzer>,
 ) -> Result<TextAnalyzerBuilder> {
     let name;
     let params_map;
@@ -113,11 +120,11 @@ pub fn get_builder_with_tokenizer(
     match name {
         "standard" => Ok(standard_builder()),
         "whitespace" => Ok(whitespace_builder()),
-        "jieba" => jieba_builder(params_map),
+        "jieba" => jieba_builder(params_map, helper),
         "lindera" => lindera_builder(params_map),
         "char_group" => char_group_builder(params_map),
         "icu" => Ok(icu_builder()),
-        "language_identifier" => lang_ident_builder(params_map, fc),
+        "language_identifier" => lang_ident_builder(params_map, helper, fc),
         "grpc" => grpc_builder(params_map),
         other => {
             warn!("unsupported tokenizer: {}", other);
