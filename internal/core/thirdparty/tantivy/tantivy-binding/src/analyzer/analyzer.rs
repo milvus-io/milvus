@@ -210,7 +210,6 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
         )
     };
 
-    println!("json_extra_info: {:?}", json_extra_info);
     let mut helper = if json_extra_info.is_some() {
         FileResourcePathHelper::from_json(json_extra_info.unwrap())?
     } else {

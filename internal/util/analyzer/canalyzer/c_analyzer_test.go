@@ -184,7 +184,7 @@ func TestValidateAnalyzer(t *testing.T) {
 	{
 		paramtable.Get().Save(paramtable.Get().FunctionCfg.LocalResourcePath.Key, tempDir)
 		UpdateParams()
-		resourceID := 100
+		resourceID := int64(100)
 
 		// mock remote resource file
 		dir := filepath.Join(tempDir, "default", fmt.Sprintf("%d", resourceID))
@@ -202,6 +202,36 @@ func TestValidateAnalyzer(t *testing.T) {
 		ids, err := ValidateAnalyzer(m, "{\"resource_map\": {\"jieba_dict\": 100}, \"storage_name\": \"default\"}")
 		require.NoError(t, err)
 		assert.Equal(t, len(ids), 1)
-		assert.Equal(t, ids[0], int64(resourceID))
+		assert.Equal(t, ids[0], resourceID)
+	}
+
+	// with user resource and update global resource info
+	{
+		paramtable.Get().Save(paramtable.Get().FunctionCfg.LocalResourcePath.Key, tempDir)
+		UpdateParams()
+		resourceID := int64(100)
+
+		// mock remote resource file
+		dir := filepath.Join(tempDir, fmt.Sprintf("%d", resourceID))
+		err := os.MkdirAll(dir, os.ModePerm)
+		require.NoError(t, err)
+
+		f, err := os.Create(filepath.Join(dir, "jieba.txt"))
+		require.NoError(t, err)
+
+		f.WriteString("stop")
+		f.Close()
+
+		m := "{\"tokenizer\": \"standard\", \"filter\": [{\"type\": \"stop\", \"stop_words_file\": {\"type\": \"remote\",\"resource_name\": \"jieba_dict\", \"file_name\": \"jieba.txt\"}}]}"
+
+		// update global resource info
+		err = UpdateGlobalResourceInfo(map[string]int64{"jieba_dict": resourceID})
+		require.NoError(t, err)
+
+		ids, err := ValidateAnalyzer(m, "")
+		require.NoError(t, err)
+
+		assert.Equal(t, len(ids), 1)
+		assert.Equal(t, ids[0], resourceID)
 	}
 }

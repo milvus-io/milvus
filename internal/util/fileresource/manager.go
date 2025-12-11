@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -50,19 +51,19 @@ func InitManager(storage storage.ChunkManager, mode Mode) {
 	})
 }
 
-func Sync(resourceList []*internalpb.FileResourceInfo) error {
+func Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	if GlobalFileManager == nil {
 		log.Error("sync file resource to file manager not init")
 		return nil
 	}
 
-	return GlobalFileManager.Sync(resourceList)
+	return GlobalFileManager.Sync(version, resourceList)
 }
 
 // Manager manage file resource
 type Manager interface {
 	// sync resource to local
-	Sync(resourceList []*internalpb.FileResourceInfo) error
+	Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error
 
 	Download(downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error
 	Release(resources ...*internalpb.FileResourceInfo)
@@ -85,7 +86,9 @@ type BaseManager struct {
 	localPath string
 }
 
-func (m *BaseManager) Sync(resourceList []*internalpb.FileResourceInfo) error { return nil }
+func (m *BaseManager) Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
+	return nil
+}
 func (m *BaseManager) Download(downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error {
 	return nil
 }
@@ -94,23 +97,25 @@ func (m *BaseManager) Mode() Mode                                        { retur
 
 // Manager with Sync Mode
 // mixcoord should sync all node after add or remove file resource.
+// file will download to /<local_resource_path>>/<resource_id>/<file_name>
 type SyncManager struct {
 	BaseManager
 	sync.RWMutex
-	downloader  storage.ChunkManager
-	resourceSet map[int64]struct{}
+	downloader      storage.ChunkManager
+	resourceSet     map[int64]uint64 // resource id -> version
+	resourceIDMap   map[int64]string // resource id -> resource name
+	resourceNameMap map[string]int64 // resource name -> resource id
 }
 
 // sync file to local if file mode was Sync
-func (m *SyncManager) Sync(resourceList []*internalpb.FileResourceInfo) error {
+func (m *SyncManager) Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	m.Lock()
 	defer m.Unlock()
 
 	ctx := context.Background()
-	newSet := make(map[int64]struct{})
 	for _, resource := range resourceList {
-		newSet[resource.GetId()] = struct{}{}
 		if _, ok := m.resourceSet[resource.GetId()]; ok {
+			m.resourceSet[resource.GetId()] = version
 			continue
 		}
 
@@ -139,32 +144,43 @@ func (m *SyncManager) Sync(resourceList []*internalpb.FileResourceInfo) error {
 			log.Info("download resource failed", zap.String("path", resource.GetPath()), zap.Error(err))
 			return err
 		}
+		m.resourceSet[resource.GetId()] = version
+		m.resourceIDMap[resource.GetId()] = resource.GetName()
+		m.resourceNameMap[resource.GetName()] = resource.GetId()
 		log.Info("sync file to local", zap.String("name", fileName))
 	}
 
-	for resourceId := range m.resourceSet {
-		if _, ok := newSet[resourceId]; !ok {
-			err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(resourceId)))
+	for resourceID, resourceVersion := range m.resourceSet {
+		if resourceVersion < version {
+			err := os.RemoveAll(path.Join(m.localPath, fmt.Sprint(resourceID)))
 			if err != nil {
-				log.Warn("remove local resource failed", zap.Error(err))
-				newSet[resourceId] = struct{}{}
+				log.Warn("remove local resource failed", zap.String("name", m.resourceIDMap[resourceID]), zap.Error(err))
 			}
+			delete(m.resourceSet, resourceID)
+			delete(m.resourceNameMap, m.resourceIDMap[resourceID])
+			delete(m.resourceIDMap, resourceID)
 		}
 	}
-	m.resourceSet = newSet
-	return nil
+	return analyzer.UpdateGlobalResourceInfo(m.resourceNameMap)
 }
 
 func (m *SyncManager) Mode() Mode { return SyncMode }
 
 func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
 	return &SyncManager{
-		BaseManager: BaseManager{localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())},
-		downloader:  downloader,
-		resourceSet: make(map[int64]struct{}),
+		BaseManager:     BaseManager{localPath: pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())},
+		downloader:      downloader,
+		resourceSet:     make(map[int64]uint64),
+		resourceIDMap:   make(map[int64]string),
+		resourceNameMap: make(map[string]int64),
 	}
 }
 
+// RefManager only used for datanode.
+// only download file will some one will use it.
+// Should Download before use and Release after use.
+// file will download to /<local_resource_path>>/<storage_name>/<resource_id>/<file_name>
+// and delete file if no one own it for interval times.
 type RefManager struct {
 	BaseManager
 	sync.RWMutex

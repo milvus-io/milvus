@@ -69,7 +69,7 @@ func (suite *BaseManagerSuite) TestSync() {
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := suite.manager.Sync(resources)
+	err := suite.manager.Sync(1, resources)
 	suite.NoError(err)
 }
 
@@ -117,9 +117,11 @@ func (suite *SyncManagerSuite) SetupTest() {
 
 	suite.mockStorage = mocks.NewChunkManager(suite.T())
 	suite.manager = &SyncManager{
-		BaseManager: BaseManager{localPath: suite.tempDir},
-		downloader:  suite.mockStorage,
-		resourceSet: make(map[int64]struct{}),
+		BaseManager:     BaseManager{localPath: suite.tempDir},
+		downloader:      suite.mockStorage,
+		resourceSet:     make(map[int64]uint64),
+		resourceIDMap:   make(map[int64]string),
+		resourceNameMap: make(map[string]int64),
 	}
 }
 
@@ -139,7 +141,7 @@ func (suite *SyncManagerSuite) TestSync_Success() {
 	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test1.file").Return(newMockReader("test content 1"), nil)
 	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test2.file").Return(newMockReader("test content 2"), nil)
 
-	err := suite.manager.Sync(resources)
+	err := suite.manager.Sync(1, resources)
 	suite.NoError(err)
 
 	// Verify files were created
@@ -167,7 +169,7 @@ func (suite *SyncManagerSuite) TestSync_ReaderError() {
 	// Mock reader to return error
 	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/nonexistent.file").Return(nil, io.ErrUnexpectedEOF)
 
-	err := suite.manager.Sync(resources)
+	err := suite.manager.Sync(1, resources)
 	suite.Error(err)
 	suite.ErrorIs(err, io.ErrUnexpectedEOF)
 }
@@ -318,7 +320,7 @@ func (suite *GlobalFunctionsSuite) TestSync_NotInitialized() {
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := Sync(resources)
+	err := Sync(1, resources)
 	suite.NoError(err) // Should not error when not initialized
 }
 
@@ -329,7 +331,7 @@ func (suite *GlobalFunctionsSuite) TestSync_Initialized() {
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := Sync(resources)
+	err := Sync(1, resources)
 	suite.NoError(err)
 }
 

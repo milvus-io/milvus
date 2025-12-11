@@ -15,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -54,10 +55,10 @@ func UpdateParams() {
 	}
 }
 
-func UpdateGlobalResourceInfo(resourceMap map[string]int64) {
+func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {
 	bytes, err := json.Marshal(map[string]any{"resource_map": resourceMap})
 	if err != nil {
-		log.Panic("update global resource info failed", zap.Error(err))
+		return errors.Wrap(err, "marshal global resource info failed")
 	}
 
 	paramPtr := C.CString(string(bytes))
@@ -65,8 +66,9 @@ func UpdateGlobalResourceInfo(resourceMap map[string]int64) {
 
 	status := C.set_tokenizer_option(paramPtr)
 	if err := HandleCStatus(&status, "failed to update global resource info"); err != nil {
-		log.Panic("update global resource info failed", zap.Error(err))
+		return errors.Wrap(err, "update global resource info failed")
 	}
+	return nil
 }
 
 func NewAnalyzer(param string, extraInfo string) (interfaces.Analyzer, error) {

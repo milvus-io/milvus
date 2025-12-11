@@ -1,6 +1,7 @@
 use super::common::*;
 use super::resource_info::{FileResourcePathBuilder, FileResourcePathHelper, ResourceInfo};
 use crate::error::{Result, TantivyBindingError};
+use log::warn;
 use once_cell::sync::Lazy;
 use serde_json as json;
 use std::collections::HashMap;
@@ -61,29 +62,9 @@ impl FileResourcePathBuilder for RuntimeOption {
         file_name: &str,
     ) -> Result<(i64, PathBuf)> {
         let r = self.inner.read().unwrap();
-        let resource_id = r.resource_info.get_resource_id(resource_name).ok_or(
-            TantivyBindingError::InternalError(format!(
-                "file resource: {} not found in local resource list",
-                resource_name
-            )),
-        )?;
-
-        let base = r
-            .params
-            .get(RESOURCE_PATH_KEY)
-            .ok_or(TantivyBindingError::InternalError(
-                "local_resource_path config not init success".to_string(),
-            ))?
-            .as_str()
-            .ok_or("local_resource_path must set as string")?;
-
-        return Ok((
-            resource_id,
-            PathBuf::new()
-                .join(base)
-                .join(resource_id.to_string())
-                .join(file_name),
-        ));
+        return r
+            .resource_info
+            .get_resource_file_path(resource_name, file_name);
     }
 }
 
@@ -147,7 +128,7 @@ impl RuntimeOptionInner {
         }
 
         if key == RESOURCE_MAP_KEY {
-            self.resource_info = ResourceInfo::from_json(&value)?;
+            self.resource_info = ResourceInfo::from_global_json(&value)?;
             return Ok(());
         }
 

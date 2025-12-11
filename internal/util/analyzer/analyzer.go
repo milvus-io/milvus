@@ -18,6 +18,10 @@ func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
 	return canalyzer.ValidateAnalyzer(param, extraInfo)
 }
 
+func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {
+	return canalyzer.UpdateGlobalResourceInfo(resourceMap)
+}
+
 func InitOptions() {
 	canalyzer.InitOptions()
 }
