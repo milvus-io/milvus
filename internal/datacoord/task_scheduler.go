@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
@@ -119,6 +120,11 @@ func (s *taskScheduler) reloadFromMeta() {
 			if segIndex.IsDeleted {
 				continue
 			}
+			indexParams := s.meta.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
+			indexType := GetIndexType(indexParams)
+			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+			fieldID := s.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
+			taskSlot := calculateIndexTaskSlot(segment.getFieldBinlogSize(fieldID), isVectorIndex)
 			task := &indexBuildTask{
 				taskID: segIndex.BuildID,
 				nodeID: segIndex.NodeID,
@@ -127,7 +133,7 @@ func (s *taskScheduler) reloadFromMeta() {
 					State:      segIndex.IndexState,
 					FailReason: segIndex.FailReason,
 				},
-				taskSlot: calculateIndexTaskSlot(segment.getSegmentSize()),
+				taskSlot: taskSlot,
 				req: &workerpb.CreateJobRequest{
 					ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 					BuildID:   segIndex.BuildID,
