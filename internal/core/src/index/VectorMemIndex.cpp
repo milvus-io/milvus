@@ -146,6 +146,27 @@ VectorMemIndex<T>::Serialize(const Config& config) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to serialize index: {}",
                   KnowhereStatusString(stat));
+
+    // Serialize valid_data from offset_mapping if enabled
+    if (offset_mapping_.IsEnabled()) {
+        auto total_count = offset_mapping_.GetTotalCount();
+
+        std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(size_t)]);
+        size_t count = static_cast<size_t>(total_count);
+        std::memcpy(count_buf.get(), &count, sizeof(size_t));
+        ret.Append("valid_data_count", count_buf, sizeof(size_t));
+
+        size_t byte_size = (count + 7) / 8;
+        std::shared_ptr<uint8_t[]> data(new uint8_t[byte_size]);
+        std::memset(data.get(), 0, byte_size);
+        for (size_t i = 0; i < count; ++i) {
+            if (offset_mapping_.IsValid(i)) {
+                data[i / 8] |= (1 << (i % 8));
+            }
+        }
+        ret.Append("valid_data_", data, byte_size);
+    }
+
     Disassemble(ret);
 
     return ret;
@@ -160,6 +181,25 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to Deserialize index: {}",
                   KnowhereStatusString(stat));
+
+    // Deserialize valid_data bitmap and rebuild offset_mapping
+    if (binary_set.Contains("valid_data_count") &&
+        binary_set.Contains("valid_data_")) {
+        knowhere::BinaryPtr ptr;
+        ptr = binary_set.GetByName("valid_data_count");
+        size_t count;
+        std::memcpy(&count, ptr->data.get(), sizeof(size_t));
+
+        ptr = binary_set.GetByName("valid_data_");
+        // Convert bitmap to bool array
+        std::unique_ptr<bool[]> valid_data(new bool[count]);
+        auto bitmap = ptr->data.get();
+        for (size_t i = 0; i < count; ++i) {
+            valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
+        }
+        BuildValidData(valid_data.get(), count);
+    }
+
     SetDim(index_.Dim());
 }
 
@@ -339,17 +379,56 @@ VectorMemIndex<T>::Build(const Config& config) {
     build_config.update(config);
     build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
-    if (!IndexIsSparse(GetIndexType())) {
-        int64_t total_size = 0;
-        int64_t total_num_rows = 0;
-        int64_t dim = 0;
-        for (auto data : field_datas) {
-            total_size += data->Size();
-            total_num_rows += data->get_num_rows();
 
+    bool nullable = false;
+    int64_t total_valid_rows = 0;
+    int64_t total_num_rows = 0;
+    for (auto data : field_datas) {
+        total_valid_rows += data->get_valid_rows();
+        total_num_rows += data->get_num_rows();
+        if (data->IsNullable()) {
+            nullable = true;
+        }
+    }
+    std::unique_ptr<bool[]> valid_data;
+    if (nullable) {
+        valid_data.reset(new bool[total_num_rows]);
+        int64_t chunk_offset = 0;
+        for (auto data : field_datas) {
+            auto rows = data->get_num_rows();
+            // Copy valid data from FieldData (bitmap format to bool array)
+            auto src_bitmap = data->ValidData();
+            for (int64_t i = 0; i < rows; ++i) {
+                valid_data[chunk_offset + i] =
+                    (src_bitmap[i >> 3] >> (i & 7)) & 1;
+            }
+            chunk_offset += rows;
+        }
+    }
+
+    if (!IndexIsSparse(GetIndexType())) {
+        int64_t dim = 0;
+        int64_t total_size = 0;
+        for (auto data : field_datas) {
             AssertInfo(dim == 0 || dim == data->get_dim(),
                        "inconsistent dim value between field datas!");
             dim = data->get_dim();
+            // For embedding list, we need to sum up actual data sizes
+            // For regular vectors, this also works correctly
+            if (elem_type_ == DataType::NONE) {
+                // Regular vector: size = valid_rows * dim * sizeof(T)
+                total_size += data->get_valid_rows() * dim * sizeof(T);
+            } else {
+                // Embedding list: sum up sizes of valid vector arrays
+                auto vec_array_data =
+                    dynamic_cast<FieldData<VectorArray>*>(data.get());
+                if (vec_array_data) {
+                    for (int64_t i = 0; i < vec_array_data->get_valid_rows();
+                         ++i) {
+                        total_size += vec_array_data->DataSize(i);
+                    }
+                }
+            }
         }
 
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
@@ -367,7 +446,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                 data.reset();
             }
         } else {
-            offsets.reserve(total_num_rows + 1);
+            offsets.reserve(total_valid_rows + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
             for (auto data : field_datas) {
@@ -376,7 +455,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                 AssertInfo(vec_array_data != nullptr,
                            "failed to cast field data to vector array");
 
-                auto rows = vec_array_data->get_num_rows();
+                auto rows = vec_array_data->get_valid_rows();
                 for (auto i = 0; i < rows; ++i) {
                     auto size = vec_array_data->DataSize(i);
                     assert(size % bytes_per_vec == 0);
@@ -396,12 +475,12 @@ VectorMemIndex<T>::Build(const Config& config) {
                 data.reset();
             }
 
-            total_num_rows = lim_offset;
+            total_valid_rows = lim_offset;
         }
 
         field_datas.clear();
 
-        auto dataset = GenDataset(total_num_rows, dim, buf.get());
+        auto dataset = GenDataset(total_valid_rows, dim, buf.get());
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
@@ -410,12 +489,13 @@ VectorMemIndex<T>::Build(const Config& config) {
                          const_cast<const size_t*>(offsets.data()));
         }
         BuildWithDataset(dataset, build_config);
+        if (nullable) {
+            BuildValidData(valid_data.get(), total_num_rows);
+        }
     } else {
         // sparse
-        int64_t total_rows = 0;
         int64_t dim = 0;
         for (auto field_data : field_datas) {
-            total_rows += field_data->Length();
             dim = std::max(
                 dim,
                 std::dynamic_pointer_cast<FieldData<SparseFloatVector>>(
@@ -423,28 +503,31 @@ VectorMemIndex<T>::Build(const Config& config) {
                     ->Dim());
         }
         std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
-            total_rows);
+            total_valid_rows);
         int64_t offset = 0;
         for (auto field_data : field_datas) {
             auto ptr = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
             AssertInfo(ptr, "failed to cast field data to sparse rows");
-            for (size_t i = 0; i < field_data->Length(); ++i) {
+            for (size_t i = 0; i < field_data->get_valid_rows(); ++i) {
                 // this does a deep copy of field_data's data.
                 // TODO: avoid copying by enforcing field data to give up
                 // ownership.
-                AssertInfo(dim >= ptr[i].dim(), "bad dim");
+                dim = std::max(dim, static_cast<int64_t>(ptr[i].dim()));
                 vec[offset + i] = ptr[i];
             }
-            offset += field_data->Length();
+            offset += field_data->get_valid_rows();
         }
-        auto dataset = GenDataset(total_rows, dim, vec.data());
+        auto dataset = GenDataset(total_valid_rows, dim, vec.data());
         dataset->SetIsSparse(true);
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
         BuildWithDataset(dataset, build_config);
+        if (nullable) {
+            BuildValidData(valid_data.get(), total_num_rows);
+        }
     }
 }
 
@@ -572,6 +655,10 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 template <typename T>
 std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
+    if (dataset->GetRows() == 0) {
+        return nullptr;
+    }
+
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
         ThrowInfo(ErrorCode::UnexpectedError,

@@ -183,12 +183,17 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                              data_type,
                              dim,
                              std::nullopt,
-                             false,
+                             nullable,
                              default_value};
         }
         auto metric_type = index_map.at("metric_type");
-        return FieldMeta{
-            name, field_id, data_type, dim, metric_type, false, default_value};
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         dim,
+                         metric_type,
+                         nullable,
+                         default_value};
     }
 
     if (IsStringDataType(data_type)) {

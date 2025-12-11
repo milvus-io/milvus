@@ -55,7 +55,11 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                     index.VectorIterators(dataset, search_conf, bitset);
             if (iterators_val.has_value()) {
                 search_result.AssembleChunkVectorIterators(
-                    nq, 1, {0}, iterators_val.value());
+                    nq,
+                    1,
+                    {0},
+                    iterators_val.value(),
+                    index.GetOffsetMapping());
             } else {
                 std::string operator_type = "";
                 if (search_info.group_by_field_id_.has_value()) {

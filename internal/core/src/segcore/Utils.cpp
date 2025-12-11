@@ -435,6 +435,23 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
 }
 
 std::unique_ptr<DataArray>
+CreateEmptyVectorDataArray(int64_t count,
+                           int64_t valid_count,
+                           const void* valid_data,
+                           const FieldMeta& field_meta) {
+    int64_t data_count = (field_meta.is_nullable() && valid_data != nullptr)
+                             ? valid_count
+                             : count;
+    auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);
+    if (field_meta.is_nullable() && valid_data != nullptr) {
+        auto obj = data_array->mutable_valid_data();
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        obj->Add(valid_data_bool, valid_data_bool + count);
+    }
+    return data_array;
+}
+
+std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
                           const void* valid_data,
                           int64_t count,
@@ -660,6 +677,22 @@ CreateVectorDataArrayFrom(const void* data_raw,
 }
 
 std::unique_ptr<DataArray>
+CreateVectorDataArrayFrom(const void* data_raw,
+                          const void* valid_data,
+                          int64_t count,
+                          int64_t valid_count,
+                          const FieldMeta& field_meta) {
+    auto data_array =
+        CreateVectorDataArrayFrom(data_raw, valid_count, field_meta);
+    if (field_meta.is_nullable() && valid_data != nullptr) {
+        auto obj = data_array->mutable_valid_data();
+        auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
+        obj->Add(valid_data_bool, valid_data_bool + count);
+    }
+    return data_array;
+}
+
+std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw,
                     const void* valid_data,
                     int64_t count,
@@ -691,6 +724,21 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
         AssertInfo(data_type == DataType(src_field_data->type()),
                    "merge field data type not consistent");
         if (field_meta.is_vector()) {
+            bool is_valid = true;
+            if (nullable) {
+                auto data = src_field_data->valid_data().data();
+                auto obj = data_array->mutable_valid_data();
+                is_valid = data[src_offset];
+                *(obj->Add()) = is_valid;
+            }
+
+            if (!is_valid) {
+                continue;
+            }
+
+            int64_t physical_offset =
+                merge_base.getValidDataOffset(field_meta.get_id());
+
             auto vector_array = data_array->mutable_vectors();
             auto dim = 0;
             if (!IsSparseFloatVectorDataType(data_type)) {
@@ -700,17 +748,19 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
             if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                 auto data = VEC_FIELD_DATA(src_field_data, float).data();
                 auto obj = vector_array->mutable_float_vector();
-                obj->mutable_data()->Add(data + src_offset * dim,
-                                         data + (src_offset + 1) * dim);
+                obj->mutable_data()->Add(data + physical_offset * dim,
+                                         data + (physical_offset + 1) * dim);
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, float16);
                 auto obj = vector_array->mutable_float16_vector();
-                obj->assign(data, dim * sizeof(float16));
+                obj->assign(data + physical_offset * dim * sizeof(float16),
+                            dim * sizeof(float16));
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
                 auto data = VEC_FIELD_DATA(src_field_data, bfloat16);
                 auto obj = vector_array->mutable_bfloat16_vector();
-                obj->assign(data, dim * sizeof(bfloat16));
+                obj->assign(data + physical_offset * dim * sizeof(bfloat16),
+                            dim * sizeof(bfloat16));
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                 AssertInfo(
                     dim % 8 == 0,
@@ -718,26 +768,28 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto num_bytes = dim / 8;
                 auto data = VEC_FIELD_DATA(src_field_data, binary);
                 auto obj = vector_array->mutable_binary_vector();
-                obj->assign(data + src_offset * num_bytes, num_bytes);
+                obj->assign(data + physical_offset * num_bytes, num_bytes);
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_U32_F32) {
-                auto src = src_field_data->vectors().sparse_float_vector();
+                auto& src_vec = src_field_data->vectors().sparse_float_vector();
                 auto dst = vector_array->mutable_sparse_float_vector();
-                if (src.dim() > dst->dim()) {
-                    dst->set_dim(src.dim());
+                if (src_vec.dim() > dst->dim()) {
+                    dst->set_dim(src_vec.dim());
                 }
                 vector_array->set_dim(dst->dim());
-                *dst->mutable_contents() = src.contents();
+                auto& src_contents = src_vec.contents(physical_offset);
+                *(dst->mutable_contents()->Add()) = src_contents;
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
-                obj->assign(data, dim * sizeof(int8));
+                obj->assign(data + physical_offset * dim * sizeof(int8),
+                            dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-                auto data = src_field_data->vectors().vector_array();
+                auto& data = src_field_data->vectors().vector_array();
                 auto obj = vector_array->mutable_vector_array();
                 obj->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
-                obj->CopyFrom(data);
+                *(obj->mutable_data()->Add()) = data.data(physical_offset);
             } else {
                 ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));
