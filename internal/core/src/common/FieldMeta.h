@@ -125,7 +125,6 @@ class FieldMeta {
           vector_info_(VectorInfo{dim, std::move(metric_type)}),
           default_value_(std::move(default_value)) {
         Assert(IsVectorDataType(type_));
-        Assert(!nullable);
     }
 
     // array of vector type
