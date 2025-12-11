@@ -208,7 +208,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 			return err
 		}
 
-		if err := merr.Error(resp); err != nil {
+		if err := merr.Error(resp.GetStatus()); err != nil {
 			return err
 		}
 	}

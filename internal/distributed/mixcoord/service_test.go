@@ -773,9 +773,9 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("ValidateAnalyzer", func(t *testing.T) {
 		req := &querypb.ValidateAnalyzerRequest{}
-		mockMixCoord.EXPECT().ValidateAnalyzer(mock.Anything, req).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		mockMixCoord.EXPECT().ValidateAnalyzer(mock.Anything, req).Return(&querypb.ValidateAnalyzerResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		resp, err := server.ValidateAnalyzer(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }

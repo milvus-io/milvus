@@ -391,6 +391,17 @@ func (c *Client) DropIndex(ctx context.Context, req *querypb.DropIndexRequest, _
 	})
 }
 
+func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.ValidateAnalyzerResponse, error) {
+		return client.ValidateAnalyzer(ctx, req)
+	})
+}
+
 func (c *Client) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest, _ ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -399,16 +410,5 @@ func (c *Client) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequ
 	)
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.GetHighlightResponse, error) {
 		return client.GetHighlight(ctx, req)
-	})
-}
-
-func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(c.nodeID),
-	)
-	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
-		return client.ValidateAnalyzer(ctx, req)
 	})
 }
