@@ -16,6 +16,7 @@
 #include <aws/core/utils/json/JsonSerializer.h>
 #include <aws/core/http/HttpRequest.h>
 #include <aws/core/utils/DateTime.h>
+#include <iostream>
 
 namespace Aws {
 namespace Http {
@@ -141,7 +142,10 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
     *body << R"({
             "auth": {
             "identity": {
-                "methods": ["token"]
+                "methods": ["token"],
+                "token":{
+                    "duration_seconds": 7200
+                }
             }
             }
         })";
@@ -161,8 +165,10 @@ HuaweiCloudSTSCredentialsClient::callHuaweiCloudSTS(
         result.errorMessage = "Get an empty credential from Huawei Cloud STS";
         return result;
     }
-    auto json = Utils::Json::JsonView(credentialsStr);
+    Aws::Utils::Json::JsonValue jsonValue(credentialsStr);
+    auto json = jsonValue.View();
     auto rootNode = json.GetObject("credential");
+
     if (rootNode.IsNull()) {
         result.errorMessage = "Get credential from STS result failed";
         return result;
