@@ -1218,7 +1218,7 @@ func (s *mixCoordImpl) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	return s.queryCoordServer.RunAnalyzer(ctx, req)
 }
 
-func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
 }
 

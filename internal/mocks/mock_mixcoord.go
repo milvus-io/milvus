@@ -9108,23 +9108,23 @@ func (_c *MixCoord_UpdateStateCode_Call) RunAndReturn(run func(commonpb.StateCod
 }
 
 // ValidateAnalyzer provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (_m *MixCoord) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateAnalyzer")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.ValidateAnalyzerResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *querypb.ValidateAnalyzerResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.ValidateAnalyzerResponse)
 		}
 	}
 
@@ -9156,12 +9156,12 @@ func (_c *MixCoord_ValidateAnalyzer_Call) Run(run func(_a0 context.Context, _a1 
 	return _c
 }
 
-func (_c *MixCoord_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_ValidateAnalyzer_Call {
+func (_c *MixCoord_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnalyzerResponse, _a1 error) *MixCoord_ValidateAnalyzer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MixCoord_ValidateAnalyzer_Call {
+func (_c *MixCoord_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)) *MixCoord_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }
