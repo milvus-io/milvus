@@ -330,6 +330,65 @@ func (_c *MockBroker_ShowCollections_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// ShowPartitions provides a mock function with given fields: ctx, collectionID
+func (_m *MockBroker) ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShowPartitions")
+	}
+
+	var r0 *milvuspb.ShowPartitionsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*milvuspb.ShowPartitionsResponse, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *milvuspb.ShowPartitionsResponse); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ShowPartitionsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_ShowPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowPartitions'
+type MockBroker_ShowPartitions_Call struct {
+	*mock.Call
+}
+
+// ShowPartitions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MockBroker_Expecter) ShowPartitions(ctx interface{}, collectionID interface{}) *MockBroker_ShowPartitions_Call {
+	return &MockBroker_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, collectionID)}
+}
+
+func (_c *MockBroker_ShowPartitions_Call) Run(run func(ctx context.Context, collectionID int64)) *MockBroker_ShowPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBroker_ShowPartitions_Call) Return(_a0 *milvuspb.ShowPartitionsResponse, _a1 error) *MockBroker_ShowPartitions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroker_ShowPartitions_Call) RunAndReturn(run func(context.Context, int64) (*milvuspb.ShowPartitionsResponse, error)) *MockBroker_ShowPartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowPartitionsInternal provides a mock function with given fields: ctx, collectionID
 func (_m *MockBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
 	ret := _m.Called(ctx, collectionID)

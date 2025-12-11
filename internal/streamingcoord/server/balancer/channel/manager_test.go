@@ -399,6 +399,68 @@ func TestAllocVirtualChannels(t *testing.T) {
 	assert.Equal(t, allocVChannels[3], "by-dev-rootcoord-dml_13_1v3")
 }
 
+func TestAllocVirtualChannelsWithPChannels(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	RecoverPChannelStatsManager([]string{})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	// Recover channel manager with two pchannels
+	m, err := RecoverChannelManager(ctx, "by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1")
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
+
+	t.Run("Success", func(t *testing.T) {
+		pchannels := []string{"by-dev-rootcoord-dml_0", "by-dev-rootcoord-dml_1"}
+		collectionID := int64(1001)
+
+		vchannels, err := m.AllocVirtualChannelsWithPChannels(ctx, collectionID, pchannels)
+		assert.NoError(t, err)
+		assert.Len(t, vchannels, 2)
+		assert.Equal(t, "by-dev-rootcoord-dml_0_1001v0", vchannels[0])
+		assert.Equal(t, "by-dev-rootcoord-dml_1_1001v1", vchannels[1])
+	})
+
+	t.Run("PChannelNotFound", func(t *testing.T) {
+		pchannels := []string{"non-existent-pchannel"}
+		collectionID := int64(1002)
+
+		vchannels, err := m.AllocVirtualChannelsWithPChannels(ctx, collectionID, pchannels)
+		assert.Error(t, err)
+		assert.Nil(t, vchannels)
+		assert.Contains(t, err.Error(), "pchannel non-existent-pchannel not found")
+	})
+
+	t.Run("EmptyPChannels", func(t *testing.T) {
+		pchannels := []string{}
+		collectionID := int64(1003)
+
+		vchannels, err := m.AllocVirtualChannelsWithPChannels(ctx, collectionID, pchannels)
+		assert.NoError(t, err)
+		assert.Empty(t, vchannels)
+	})
+
+	t.Run("PartialPChannelNotFound", func(t *testing.T) {
+		// First pchannel exists, second doesn't
+		pchannels := []string{"by-dev-rootcoord-dml_0", "non-existent-pchannel"}
+		collectionID := int64(1004)
+
+		vchannels, err := m.AllocVirtualChannelsWithPChannels(ctx, collectionID, pchannels)
+		assert.Error(t, err)
+		assert.Nil(t, vchannels)
+		assert.Contains(t, err.Error(), "pchannel non-existent-pchannel not found")
+	})
+}
+
 func TestStreamingEnableChecker(t *testing.T) {
 	ctx := context.Background()
 	ResetStaticPChannelStatsManager()

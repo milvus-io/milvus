@@ -134,6 +134,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
@@ -207,6 +208,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
@@ -268,6 +270,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -344,6 +347,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	alloc := allocator.NewMockAllocator(t)
 	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -429,6 +433,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
@@ -617,6 +622,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, 0, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
 
 	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)

@@ -44,9 +44,13 @@ import (
 
 type createCollectionTask struct {
 	*Core
-	Req    *milvuspb.CreateCollectionRequest
-	header *message.CreateCollectionMessageHeader
-	body   *message.CreateCollectionRequest
+	Req             *milvuspb.CreateCollectionRequest
+	header          *message.CreateCollectionMessageHeader
+	body            *message.CreateCollectionRequest
+	preserveFieldID bool
+	// If set, use these pchannels instead of load-balanced allocation.
+	// Used by snapshot restore to preserve pchannel mapping from the source collection.
+	preferredPChannels []string
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -368,17 +372,61 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 }
 
 func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
+	// if schema comes from restore snapshot
+	preservedDynamicFieldID := int64(-1)
+	preservedNamespaceFieldID := int64(-1)
+	if t.preserveFieldID {
+		log.Ctx(ctx).Info("preserve field IDs from schema during create collection", zap.String("collection", t.Req.CollectionName))
+		fields := make([]*schemapb.FieldSchema, 0)
+		// filter out system fields
+		for _, field := range t.body.CollectionSchema.Fields {
+			if field.Name != RowIDFieldName && field.GetFieldID() == 0 {
+				log.Info("field id 0 is not allowed when preserve field ids", zap.String("field", field.Name))
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field id 0 is not allowed when preserve field ids, field: %s", field.Name))
+			}
+
+			if field.GetName() == MetaFieldName {
+				preservedDynamicFieldID = field.GetFieldID()
+				continue
+			}
+			if field.GetName() == NamespaceFieldName {
+				preservedNamespaceFieldID = field.GetFieldID()
+				continue
+			}
+			if field.GetName() == TimeStampFieldName || field.GetName() == RowIDFieldName {
+				continue
+			}
+			fields = append(fields, field)
+		}
+		t.body.CollectionSchema.Fields = fields
+	}
+
 	if err := t.validateSchema(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
+
 	t.appendConsistecyLevel()
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
 	if err := t.handleNamespaceField(ctx, t.body.CollectionSchema); err != nil {
 		return err
 	}
 
-	if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
-		return err
+	if t.preserveFieldID {
+		// cause dynamic field is system field without internal id allocation
+		// we need to restore its field id here
+		for _, field := range t.body.CollectionSchema.Fields {
+			if field.GetName() == MetaFieldName {
+				field.FieldID = preservedDynamicFieldID
+			}
+
+			if field.GetName() == NamespaceFieldName {
+				field.FieldID = preservedNamespaceFieldID
+			}
+		}
+	} else {
+		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
+			return err
+		}
 	}
 
 	// Validate timezone
@@ -450,10 +498,20 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) assignChannels(ctx context.Context) error {
-	vchannels, err := snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
-		CollectionID: t.header.GetCollectionId(),
-		Num:          int(t.Req.GetShardsNum()),
-	})
+	var vchannels []string
+	var err error
+
+	if len(t.preferredPChannels) > 0 {
+		// Use specified pchannels for snapshot restore
+		vchannels, err = snmanager.StaticStreamingNodeManager.AllocVirtualChannelsWithPChannels(
+			ctx, t.header.GetCollectionId(), t.preferredPChannels)
+	} else {
+		// Normal allocation with load balancing
+		vchannels, err = snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
+			CollectionID: t.header.GetCollectionId(),
+			Num:          int(t.Req.GetShardsNum()),
+		})
+	}
 	if err != nil {
 		return err
 	}

@@ -25,6 +25,54 @@ func (_m *MockChunkManager) EXPECT() *MockChunkManager_Expecter {
 	return &MockChunkManager_Expecter{mock: &_m.Mock}
 }
 
+// Copy provides a mock function with given fields: ctx, srcFilePath, dstFilePath
+func (_m *MockChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	ret := _m.Called(ctx, srcFilePath, dstFilePath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Copy")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, srcFilePath, dstFilePath)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockChunkManager_Copy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Copy'
+type MockChunkManager_Copy_Call struct {
+	*mock.Call
+}
+
+// Copy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - srcFilePath string
+//   - dstFilePath string
+func (_e *MockChunkManager_Expecter) Copy(ctx interface{}, srcFilePath interface{}, dstFilePath interface{}) *MockChunkManager_Copy_Call {
+	return &MockChunkManager_Copy_Call{Call: _e.mock.On("Copy", ctx, srcFilePath, dstFilePath)}
+}
+
+func (_c *MockChunkManager_Copy_Call) Run(run func(ctx context.Context, srcFilePath string, dstFilePath string)) *MockChunkManager_Copy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockChunkManager_Copy_Call) Return(_a0 error) *MockChunkManager_Copy_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockChunkManager_Copy_Call) RunAndReturn(run func(context.Context, string, string) error) *MockChunkManager_Copy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Exist provides a mock function with given fields: ctx, filePath
 func (_m *MockChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
 	ret := _m.Called(ctx, filePath)

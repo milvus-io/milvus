@@ -160,6 +160,9 @@ service RootCoord {
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+
+    // Snapshot restore orchestration - coordinates CreateCollection, CreatePartition, and data restore
+    rpc RestoreSnapshot(milvus.RestoreSnapshotRequest) returns (milvus.RestoreSnapshotResponse) {}
 }
 
 message AllocTimestampRequest {

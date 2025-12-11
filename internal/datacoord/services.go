@@ -490,31 +490,6 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	infos := make([]*datapb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	channelCPs := make(map[string]*msgpb.MsgPosition)
 
-	var getChildrenDelta func(id UniqueID) ([]*datapb.FieldBinlog, error)
-	getChildrenDelta = func(id UniqueID) ([]*datapb.FieldBinlog, error) {
-		children, ok := s.meta.GetCompactionTo(id)
-		// double-check the segment, maybe the segment is being dropped concurrently.
-		if !ok {
-			log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
-			err := merr.WrapErrSegmentNotFound(id)
-			return nil, err
-		}
-		allDeltaLogs := make([]*datapb.FieldBinlog, 0)
-		for _, child := range children {
-			clonedChild := child.Clone()
-			// child segment should decompress binlog path
-			binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
-			allDeltaLogs = append(allDeltaLogs, clonedChild.GetDeltalogs()...)
-			allChildrenDeltas, err := getChildrenDelta(child.GetID())
-			if err != nil {
-				return nil, err
-			}
-			allDeltaLogs = append(allDeltaLogs, allChildrenDeltas...)
-		}
-
-		return allDeltaLogs, nil
-	}
-
 	for _, id := range req.SegmentIDs {
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
@@ -527,14 +502,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 				return resp, nil
 			}
 
-			clonedInfo := info.Clone()
 			// We should retrieve the deltalog of all child segments,
 			// but due to the compaction constraint based on indexed segment, there will be at most two generations.
-			allChildrenDeltalogs, err := getChildrenDelta(id)
+			allChildrenDeltalogs, err := s.handler.GetDeltaLogFromCompactTo(ctx, id)
 			if err != nil {
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
+			clonedInfo := info.Clone()
 			clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, allChildrenDeltalogs...)
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
@@ -2105,4 +2080,247 @@ func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.Create
 func (s *Server) SyncFileResources(ctx context.Context) error {
 	resources, version := s.meta.ListFileResource(ctx)
 	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
+}
+
+func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive CreateSnapshot request", zap.String("name", req.GetName()),
+		zap.String("description", req.GetDescription()))
+
+	// Check if snapshot name already exists
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err == nil {
+		log.Warn("CreateSnapshot failed: snapshot name already exists")
+		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", req.GetName())), nil
+	}
+
+	// Start broadcast with collection lock (also validates collection existence)
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	if err != nil {
+		return nil, err
+	}
+	dbName := coll.GetDbName()
+	collectionName := coll.GetCollectionName()
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(dbName),
+		message.NewExclusiveCollectionNameResourceKey(dbName, collectionName),
+		message.NewExclusiveSnapshotNameResourceKey(req.GetName()),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer broadcaster.Close()
+
+	// Broadcast CreateSnapshot message via DDL framework
+	// Snapshot ID is allocated in the callback
+	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
+		WithHeader(&message.CreateSnapshotMessageHeader{
+			CollectionId: req.GetCollectionId(),
+			Name:         req.GetName(),
+			Description:  req.GetDescription(),
+		}).
+		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast(),
+	); err != nil {
+		log.Error("CreateSnapshot broadcast failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("CreateSnapshot completed successfully")
+	return merr.Success(), nil
+}
+
+func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshot", req.GetName()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	log.Info("receive DropSnapshot request")
+
+	// Check if snapshot exists - if not, return success (idempotent)
+	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetName()); err != nil {
+		log.Info("DropSnapshot: snapshot not found, returning success (idempotent)")
+		return merr.Success(), nil
+	}
+
+	// Start broadcast with exclusive snapshot lock to prevent concurrent drop/restore
+	// No collection lock needed - dropping snapshot only affects snapshot metadata
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
+		message.NewSharedClusterResourceKey(),
+		message.NewExclusiveSnapshotNameResourceKey(req.GetName()),
+	)
+	if err != nil {
+		log.Error("DropSnapshot failed to start broadcast", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	defer broadcaster.Close()
+
+	// Broadcast DropSnapshot message via DDL framework
+	if _, err := broadcaster.Broadcast(ctx, message.NewDropSnapshotMessageBuilderV2().
+		WithHeader(&message.DropSnapshotMessageHeader{
+			Name: req.GetName(),
+		}).
+		WithBody(&message.DropSnapshotMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast(),
+	); err != nil {
+		log.Error("DropSnapshot broadcast failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("DropSnapshot completed successfully")
+	return merr.Success(), nil
+}
+
+func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	log := log.Ctx(ctx).With(zap.String("snapshotName", req.GetName()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.DescribeSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("receive DescribeSnapshot request")
+
+	// Delegate to SnapshotManager
+	snapshotData, err := s.snapshotManager.DescribeSnapshot(ctx, req.GetName())
+	if err != nil {
+		log.Error("failed to describe snapshot", zap.Error(err))
+		return &datapb.DescribeSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp := &datapb.DescribeSnapshotResponse{
+		Status:       merr.Success(),
+		SnapshotInfo: snapshotData.SnapshotInfo,
+	}
+	if req.GetIncludeCollectionInfo() {
+		resp.CollectionInfo = snapshotData.Collection
+		resp.IndexInfos = snapshotData.Indexes
+	}
+	return resp, nil
+}
+
+// RestoreSnapshotData restores snapshot data to the target collection.
+// Index restoration is handled by RootCoord DDL callback.
+func (s *Server) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("snapshot", req.GetName()),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("jobID", req.GetJobId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("receive RestoreSnapshotData request")
+
+	// Validate that jobID is provided (must be pre-allocated by RootCoord)
+	if req.GetJobId() <= 0 {
+		err := merr.WrapErrParameterInvalidMsg("jobID must be provided and greater than 0")
+		log.Warn("invalid jobID in request", zap.Error(err))
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Delegate data restore to SnapshotManager
+	if err := s.snapshotManager.RestoreSnapshot(
+		ctx,
+		req.GetName(),
+		req.GetCollectionId(),
+		req.GetJobId(),
+	); err != nil {
+		log.Error("failed to restore snapshot", zap.Error(err))
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("restore job created successfully")
+	return &datapb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  req.GetJobId(),
+	}, nil
+}
+
+func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("jobID", req.GetJobId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.GetRestoreSnapshotStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Delegate to SnapshotManager
+	restoreInfo, err := s.snapshotManager.GetRestoreState(ctx, req.GetJobId())
+	if err != nil {
+		log.Warn("failed to get restore state", zap.Error(err))
+		return &datapb.GetRestoreSnapshotStateResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("get restore state completed",
+		zap.String("state", restoreInfo.GetState().String()),
+		zap.Int32("progress", restoreInfo.GetProgress()))
+
+	return &datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+		Info:   restoreInfo,
+	}, nil
+}
+
+func (s *Server) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ListRestoreSnapshotJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// Delegate to SnapshotManager
+	restoreInfos, err := s.snapshotManager.ListRestoreJobs(ctx, req.GetCollectionId())
+	if err != nil {
+		log.Ctx(ctx).Error("failed to list restore jobs", zap.Error(err))
+		return &datapb.ListRestoreSnapshotJobsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Ctx(ctx).Info("list restore jobs completed",
+		zap.Int("totalJobs", len(restoreInfos)),
+		zap.Int64("filterCollectionId", req.GetCollectionId()))
+
+	return &datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+		Jobs:   restoreInfos,
+	}, nil
+}
+
+func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return &datapb.ListSnapshotsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	log.Info("receive ListSnapshots request")
+
+	// Delegate to SnapshotManager
+	snapshots, err := s.snapshotManager.ListSnapshots(ctx, req.GetCollectionId(), req.GetPartitionId())
+	if err != nil {
+		log.Error("failed to list snapshots", zap.Error(err))
+		return &datapb.ListSnapshotsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: snapshots,
+	}, nil
 }
