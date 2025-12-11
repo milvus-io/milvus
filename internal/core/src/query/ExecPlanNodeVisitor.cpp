@@ -57,7 +57,16 @@ ExecPlanNodeVisitor::ExecuteTask(
     for (;;) {
         auto result = task->Next();
         if (!result) {
-            Assert(processed_num == query_context->get_active_count());
+            if (ret && !ret->childrens().empty()) {
+                auto first_column =
+                    std::dynamic_pointer_cast<ColumnVector>(ret->child(0));
+                if (first_column && first_column->IsBitmap()) {
+                    AssertInfo(processed_num == query_context->get_active_count(),
+                               "processed row count mismatch, expected: {}, actual: {}",
+                               query_context->get_active_count(),
+                               processed_num);
+                }
+            }
             break;
         }
         processed_num += result->size();
@@ -253,14 +262,15 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                "children inside row vector must be of column vector for now");
     tmp_retrieve_result.total_data_cnt_ = first_column->size();
     if (first_column->IsBitmap()) {
-        BitsetTypeView view(first_column->GetRawData(), first_column->size());
         tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
+        BitsetTypeView view(first_column->GetRawData(), first_column->size());
         auto results_pair = segment->find_first(node.limit_, view);
         tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
         tmp_retrieve_result.has_more_result = results_pair.second;
         retrieve_result_opt_ = std::move(tmp_retrieve_result);
     } else {
         // load data in the result vector into retrieve_result
+        tracer::AutoSpan _("Load Column Data", tracer::GetRootSpan());
         auto column_count = result->childrens().size();
         tmp_retrieve_result.field_data_.resize(column_count);
         for (auto i = 0; i < column_count; i++) {
