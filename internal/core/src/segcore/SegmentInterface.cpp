@@ -359,7 +359,6 @@ SegmentInternalInterface::get_real_count() const {
         sources);
 
     plan->plan_node_->plannodes_ = plannode;
-    plan->plan_node_->is_count_ = true;
     auto res = Retrieve(nullptr,
                         plan.get(),
                         MAX_TIMESTAMP,

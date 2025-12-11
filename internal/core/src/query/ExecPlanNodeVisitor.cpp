@@ -84,7 +84,7 @@ ExecPlanNodeVisitor::ExecuteTask(
         }
     }
     span.GetSpan()->SetAttribute("total_rows", processed_num);
-    span.GetSpan()->SetAttribute("matched_rows", ret->size());
+    span.GetSpan()->SetAttribute("matched_rows", processed_num - ret->nullCount());
     return ret;
 }
 
