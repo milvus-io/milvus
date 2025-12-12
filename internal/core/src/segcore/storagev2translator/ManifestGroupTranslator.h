@@ -62,7 +62,8 @@ class ManifestGroupTranslator
         bool use_mmap,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority);
-    ~ManifestGroupTranslator() = default;
+
+    ~ManifestGroupTranslator() override = default;
 
     /**
      * @brief Get the total number of cells (chunks) in this column group
@@ -149,21 +150,39 @@ class ManifestGroupTranslator
         return total_size;
     }
 
- private:
     /**
-     * @brief Load a single chunk from Arrow RecordBatch
+     * @brief Read cells as Arrow RecordBatches without loading into GroupChunks
      *
-     * Converts an Arrow RecordBatch into a GroupChunk containing
-     * field data for all columns in the chunk.
+     * This is the first phase of cell loading, which reads raw data from storage
+     * as Arrow RecordBatches. Separating this from load_group_chunk enables
+     * zero-copy aggregation patterns.
      *
-     * @param record_batch Arrow RecordBatch containing the chunk data
-     * @param cid Cell ID of the chunk being loaded
+     * @param cids List of cell IDs to read
+     * @return Vector of (cell_id, RecordBatch) pairs
+     */
+    virtual std::vector<std::pair<milvus::cachinglayer::cid_t,
+                                  std::shared_ptr<arrow::RecordBatch>>>
+    read_cells(const std::vector<milvus::cachinglayer::cid_t>& cids);
+
+    /**
+     * @brief Load a GroupChunk from a list of Arrow RecordBatches
+     *
+     * This is the second phase of cell loading. It takes multiple RecordBatches
+     * (which can come from consecutive cells) and loads them into a single
+     * GroupChunk. When multiple batches are provided, Arrow arrays are
+     * concatenated at the RecordBatch level before creating chunks, enabling
+     * zero-copy aggregation.
+     *
+     * @param record_batches Vector of RecordBatches to load
+     * @param base_cid Base cell ID for mmap file naming (used for mmap mode)
      * @return GroupChunk containing the loaded field data
      */
-    std::unique_ptr<milvus::GroupChunk>
-    load_group_chunk(const std::shared_ptr<arrow::RecordBatch>& record_batch,
-                     const milvus::cachinglayer::cid_t cid);
+    virtual std::unique_ptr<milvus::GroupChunk>
+    load_group_chunk(
+        const std::vector<std::shared_ptr<arrow::RecordBatch>>& record_batches,
+        const milvus::cachinglayer::cid_t base_cid);
 
+ private:
     int64_t segment_id_;
     int64_t column_group_index_;
     std::string key_;
