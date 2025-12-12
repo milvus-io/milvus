@@ -168,19 +168,19 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		}
 	case schemapb.DataType_BinaryVector:
 		vectors := data.(*storage.BinaryVectorFieldData).Data
-		err = evt.AddBinaryVectorToPayload(vectors, int(dim))
+		err = evt.AddBinaryVectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_FloatVector:
 		vectors := data.(*storage.FloatVectorFieldData).Data
-		err = evt.AddFloatVectorToPayload(vectors, int(dim))
+		err = evt.AddFloatVectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Float16Vector:
 		vectors := data.(*storage.Float16VectorFieldData).Data
-		err = evt.AddFloat16VectorToPayload(vectors, int(dim))
+		err = evt.AddFloat16VectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_BFloat16Vector:
 		vectors := data.(*storage.BFloat16VectorFieldData).Data
-		err = evt.AddBFloat16VectorToPayload(vectors, int(dim))
+		err = evt.AddBFloat16VectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_SparseFloatVector:
 		vectors := data.(*storage.SparseFloatVectorFieldData)
@@ -188,7 +188,7 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		assert.NoError(t, err)
 	case schemapb.DataType_Int8Vector:
 		vectors := data.(*storage.Int8VectorFieldData).Data
-		err = evt.AddInt8VectorToPayload(vectors, int(dim))
+		err = evt.AddInt8VectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_ArrayOfVector:
 		elementType := field.GetElementType()

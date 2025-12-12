@@ -326,6 +326,9 @@ GenerateRandomSparseFloatVector(size_t rows,
                                 size_t cols = kTestSparseDim,
                                 float density = kTestSparseVectorDensity,
                                 int seed = 42) {
+    if (rows == 0) {
+        return nullptr;
+    }
     int32_t num_elements = static_cast<int32_t>(rows * cols * density);
 
     std::mt19937 rng(seed);
