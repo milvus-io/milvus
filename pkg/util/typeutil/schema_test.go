@@ -171,8 +171,9 @@ func TestSchema(t *testing.T) {
 	}
 
 	t.Run("EstimateSizePerRecord", func(t *testing.T) {
+		limit := GetDynamicFieldEstimateLength()
 		size, err := EstimateSizePerRecord(schema)
-		assert.Equal(t, 680+DynamicFieldMaxLength*3, size)
+		assert.Equal(t, 680+limit*4, size)
 		assert.NoError(t, err)
 	})
 

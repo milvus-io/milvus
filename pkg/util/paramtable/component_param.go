@@ -255,7 +255,10 @@ type commonConfig struct {
 	TopicNames             ParamItem `refreshable:"true"`
 	TimeTicker             ParamItem `refreshable:"true"`
 
-	JSONMaxLength ParamItem `refreshable:"false"`
+	JSONMaxLength                 ParamItem `refreshable:"false"`
+	DynamicFieldAvgLength         ParamItem `refreshable:"true"`
+	SparseFloatVectorEstimateSize ParamItem `refreshable:"true"`
+	VarCharEstimateLengthAvg      ParamItem `refreshable:"true"`
 
 	MetricsPort ParamItem `refreshable:"false"`
 
