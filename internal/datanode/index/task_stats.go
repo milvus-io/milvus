@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -286,6 +287,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs)
 
 	debug.FreeOSMemory()
+	elapse := st.tr.RecordSpan()
 	log.Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -295,7 +297,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.String("subTaskType", st.req.GetSubJobType().String()),
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Int64("old rows", numRows),
-		zap.Int("valid rows", numValidRows))
+		zap.Int("valid rows", numValidRows),
+		zap.Duration("elapse", elapse),
+	)
 	return insertLogs, nil
 }
 
@@ -468,14 +472,23 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		return err
 	}
 
-	textIndexLogs := make(map[int64]*datapb.TextIndexStats)
+	// Concurrent create text index for all match-enabled fields
+	var (
+		mu            sync.Mutex
+		wg            sync.WaitGroup
+		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
+		errCh         = make(chan error, len(st.req.GetSchema().GetFields()))
+	)
+
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableMatch() {
 			continue
 		}
+
+		field := field
 		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
-		// create text index and upload the text index files.
+
 		files, err := getInsertFiles(field.GetFieldID(), field.GetNullable())
 		if err != nil {
 			return err
@@ -485,23 +498,39 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		req.InsertLogs = insertBinlogs
 		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
 
-		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
-		if err != nil {
-			return err
-		}
-		textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-			FieldID: field.GetFieldID(),
-			Version: version,
-			BuildID: taskID,
-			Files:   lo.Keys(uploaded),
-		}
-		elapse := st.tr.RecordSpan()
-		log.Info("field enable match, create text index done",
-			zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
-			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(uploaded)),
-			zap.Duration("elapse", elapse),
-		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			mu.Lock()
+			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
+				FieldID: field.GetFieldID(),
+				Version: version,
+				BuildID: taskID,
+				Files:   lo.Keys(uploaded),
+			}
+			mu.Unlock()
+
+			log.Info("field enable match, create text index done",
+				zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
+				zap.Int64("field id", field.GetFieldID()),
+				zap.Strings("files", lo.Keys(uploaded)),
+			)
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errCh)
+
+	// Check for any errors
+	if err := <-errCh; err != nil {
+		return err
 	}
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
@@ -511,6 +540,11 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs)
+	totalElapse := st.tr.RecordSpan()
+	log.Info("create text index done",
+		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
+		zap.Duration("total elapse", totalElapse),
+	)
 	return nil
 }
 
@@ -571,13 +605,23 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		return err
 	}
 
-	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
+	// Concurrent create JSON key index for all enabled fields
+	var (
+		mu                sync.Mutex
+		wg                sync.WaitGroup
+		jsonKeyIndexStats = make(map[int64]*datapb.JsonKeyStats)
+		errCh             = make(chan error, len(st.req.GetSchema().GetFields()))
+	)
+
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableJSONKeyStatsIndex() {
 			continue
 		}
+
+		field := field // capture loop variable
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
+
 		files, err := getInsertFiles(field.GetFieldID())
 		if err != nil {
 			return err
@@ -592,32 +636,49 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		}
 		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
 
-		statsResult, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
-		if err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			statsResult, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
+			if err != nil {
+				errCh <- err
+				return
+			}
 
-		// calculate log size (disk size) from file sizes
-		var logSize int64
-		for _, fileSize := range statsResult.Files {
-			logSize += fileSize
-		}
+			// calculate log size (disk size) from file sizes
+			var logSize int64
+			for _, fileSize := range statsResult.Files {
+				logSize += fileSize
+			}
 
-		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
-			FieldID:                field.GetFieldID(),
-			Version:                version,
-			BuildID:                taskID,
-			Files:                  lo.Keys(statsResult.Files),
-			JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
-			MemorySize:             statsResult.MemSize,
-			LogSize:                logSize,
-		}
-		log.Info("field enable json key index, create json key index done",
-			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(statsResult.Files)),
-			zap.Int64("memorySize", statsResult.MemSize),
-			zap.Int64("logSize", logSize),
-		)
+			mu.Lock()
+			jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
+				FieldID:                field.GetFieldID(),
+				Version:                version,
+				BuildID:                taskID,
+				Files:                  lo.Keys(statsResult.Files),
+				JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
+				MemorySize:             statsResult.MemSize,
+				LogSize:                logSize,
+			}
+			mu.Unlock()
+
+			log.Info("field enable json key index, create json key index done",
+				zap.Int64("field id", field.GetFieldID()),
+				zap.Strings("files", lo.Keys(statsResult.Files)),
+				zap.Int64("memorySize", statsResult.MemSize),
+				zap.Int64("logSize", logSize),
+			)
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+	close(errCh)
+
+	// Check for any errors
+	if err := <-errCh; err != nil {
+		return err
 	}
 
 	totalElapse := st.tr.RecordSpan()
