@@ -13,28 +13,49 @@ runs:
   using: "composite"
   steps:
   - name: Generate CCache Hash
-    env:
-      CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
     run: |
+      CORE_HASH=""
+      if [ -d "internal/core" ]; then
+        # Find all matching files and calculate hash (macOS compatible)
+        FILES=$(find internal/core -type f \( -name "*.cpp" -o -name "*.cc" -o -name "*.c" -o -name "*.h" -o -name "*.hpp" -o -name "CMakeLists.txt" \) 2>/dev/null | sort)
+        if [ -n "$FILES" ]; then
+          CORE_HASH=$(echo "$FILES" | xargs cat 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+        fi
+      fi
       echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
-      echo "Set CCache hash to ${CORE_HASH}"
+      echo "Set CCache hash to ${CORE_HASH:-empty}"
     shell: bash
   - name: Mac Cache CCache Volumes
     uses: actions/cache/save@v4
     with:
       path: /var/tmp/ccache
-      key: macos-ccache-${{ env.corehash }}
-      restore-keys: macos-ccache-
+      key: macos15-ccache-${{ env.corehash }}
+  - name: Generate Go Mod Hash
+    id: go-mod-hash
+    run: |
+      GO_MOD_HASH=""
+      if find . -name "go.sum" -type f | grep -q .; then
+        GO_MOD_HASH=$(find . -name "go.sum" -type f -exec cat {} \; 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+      fi
+      echo "hash=${GO_MOD_HASH}" >> $GITHUB_OUTPUT
+    shell: bash
   - name: Mac Cache Go Mod Volumes
     uses: actions/cache/save@v4
     with:
       path: ~/go/pkg/mod
-      key: macos-go-mod-${{ hashFiles('**/go.sum') }}
-      restore-keys: macos-go-mod-
+      key: macos15-go-mod-${{ steps.go-mod-hash.outputs.hash }}
+  - name: Generate Conan Hash
+    id: conan-hash
+    run: |
+      CONAN_HASH=""
+      if find internal/core -name "conanfile.*" -type f 2>/dev/null | grep -q .; then
+        CONAN_HASH=$(find internal/core -name "conanfile.*" -type f -exec cat {} \; 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+      fi
+      echo "hash=${CONAN_HASH}" >> $GITHUB_OUTPUT
+    shell: bash
   - name: Mac Cache Conan Packages
     uses: actions/cache/save@v4
     with:
       path: ~/.conan
-      key: macos-conan-${{ hashFiles('internal/core/conanfile.*') }}
-      restore-keys: macos-conan-
+      key: macos15-conan-${{ steps.conan-hash.outputs.hash }}
 
