@@ -20,6 +20,7 @@
 #include "arrow/array/array_binary.h"
 #include "arrow/chunked_array.h"
 #include "bitset/detail/element_wise.h"
+#include "bitset/detail/popcount.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -310,6 +311,16 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_INT8:
         case DataType::VECTOR_BINARY: {
+            if (nullable_) {
+                auto binary_array =
+                    std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+                AssertInfo(binary_array != nullptr,
+                           "nullable vector must use BinaryArray");
+                return FillFieldData(binary_array->value_data()->data(),
+                                     binary_array->null_bitmap_data(),
+                                     binary_array->length(),
+                                     binary_array->offset());
+            }
             auto array_info =
                 GetDataInfoFromArray<arrow::FixedSizeBinaryArray,
                                      arrow::Type::type::FIXED_SIZE_BINARY>(
@@ -321,6 +332,20 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "inconsistent data type");
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<knowhere::sparse::SparseRow<SparseValueType>> values;
+
+            if (nullable_) {
+                for (int64_t i = 0; i < element_count; ++i) {
+                    if (arr->IsValid(i)) {
+                        auto view = arr->GetString(i);
+                        values.push_back(
+                            CopyAndWrapSparseRow(view.data(), view.size()));
+                    }
+                }
+                return FillFieldData(values.data(),
+                                     arr->null_bitmap_data(),
+                                     arr->length(),
+                                     arr->offset());
+            }
             for (size_t index = 0; index < element_count; ++index) {
                 auto view = arr->GetString(index);
                 values.push_back(
@@ -571,6 +596,69 @@ template class FieldDataImpl<bfloat16, false>;
 template class FieldDataImpl<knowhere::sparse::SparseRow<SparseValueType>,
                              true>;
 template class FieldDataImpl<VectorArray, true>;
+
+template <typename Type, bool is_type_entire_row>
+void
+FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
+    const void* field_data,
+    const uint8_t* valid_data,
+    ssize_t total_element_count,
+    ssize_t offset) {
+    AssertInfo(this->nullable_, "requires nullable to be true");
+    if (total_element_count == 0) {
+        return;
+    }
+
+    int64_t valid_count = 0;
+    if (valid_data) {
+        int64_t num_bytes = (total_element_count + 7) >> 3;
+        for (int64_t i = 0; i < num_bytes; ++i) {
+            valid_count +=
+                bitset::detail::PopCountHelper<uint8_t>::count(valid_data[i]);
+        }
+    } else {
+        valid_count = total_element_count;
+    }
+
+    std::lock_guard lck(this->tell_mutex_);
+    resize_field_data(this->length_ + total_element_count,
+                      this->valid_count_ + valid_count);
+
+    if (valid_data) {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+            valid_data,
+            offset,
+            this->valid_data_.data(),
+            this->length_,
+            total_element_count);
+    }
+
+    // update logical to physical offset mapping
+    l2p_mapping_.build(valid_data,
+                       this->valid_count_,
+                       this->length_,
+                       total_element_count,
+                       valid_count);
+
+    if (valid_count > 0) {
+        std::copy_n(static_cast<const Type*>(field_data),
+                    valid_count * this->dim_,
+                    this->data_.data() + this->valid_count_ * this->dim_);
+        this->valid_count_ += valid_count;
+    }
+
+    this->null_count_ = total_element_count - valid_count;
+    this->length_ += total_element_count;
+}
+
+// explicit instantiations for FieldDataVectorImpl
+template class FieldDataVectorImpl<uint8_t, false>;
+template class FieldDataVectorImpl<int8_t, false>;
+template class FieldDataVectorImpl<float, false>;
+template class FieldDataVectorImpl<float16, false>;
+template class FieldDataVectorImpl<bfloat16, false>;
+template class FieldDataVectorImpl<knowhere::sparse::SparseRow<SparseValueType>,
+                                   true>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {

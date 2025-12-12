@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -45,17 +46,31 @@ func (s *InsertDataSuite) TestInsertData() {
 		tests := []struct {
 			description string
 			dataType    schemapb.DataType
+			typeParams  []*commonpb.KeyValuePair
+			nullable    bool
 		}{
-			{"nullable bool field", schemapb.DataType_Bool},
-			{"nullable int8 field", schemapb.DataType_Int8},
-			{"nullable int16 field", schemapb.DataType_Int16},
-			{"nullable int32 field", schemapb.DataType_Int32},
-			{"nullable int64 field", schemapb.DataType_Int64},
-			{"nullable float field", schemapb.DataType_Float},
-			{"nullable double field", schemapb.DataType_Double},
-			{"nullable json field", schemapb.DataType_JSON},
-			{"nullable array field", schemapb.DataType_Array},
-			{"nullable string/varchar field", schemapb.DataType_String},
+			{"nullable bool field", schemapb.DataType_Bool, nil, true},
+			{"nullable int8 field", schemapb.DataType_Int8, nil, true},
+			{"nullable int16 field", schemapb.DataType_Int16, nil, true},
+			{"nullable int32 field", schemapb.DataType_Int32, nil, true},
+			{"nullable int64 field", schemapb.DataType_Int64, nil, true},
+			{"nullable float field", schemapb.DataType_Float, nil, true},
+			{"nullable double field", schemapb.DataType_Double, nil, true},
+			{"nullable json field", schemapb.DataType_JSON, nil, true},
+			{"nullable array field", schemapb.DataType_Array, nil, true},
+			{"nullable string/varchar field", schemapb.DataType_String, nil, true},
+			{"nullable binary vector field", schemapb.DataType_BinaryVector, []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}, true},
+			{"nullable float vector field", schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, true},
+			{"nullable float16 vector field", schemapb.DataType_Float16Vector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, true},
+			{"nullable bfloat16 vector field", schemapb.DataType_BFloat16Vector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, true},
+			{"nullable sparse float vector field", schemapb.DataType_SparseFloatVector, nil, true},
+			{"nullable int8 vector field", schemapb.DataType_Int8Vector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, true},
+			{"non-nullable binary vector field", schemapb.DataType_BinaryVector, []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}, false},
+			{"non-nullable float vector field", schemapb.DataType_FloatVector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, false},
+			{"non-nullable float16 vector field", schemapb.DataType_Float16Vector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, false},
+			{"non-nullable bfloat16 vector field", schemapb.DataType_BFloat16Vector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, false},
+			{"non-nullable sparse float vector field", schemapb.DataType_SparseFloatVector, nil, false},
+			{"non-nullable int8 vector field", schemapb.DataType_Int8Vector, []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}, false},
 		}
 
 		for _, test := range tests {
@@ -63,8 +78,9 @@ func (s *InsertDataSuite) TestInsertData() {
 				schema := &schemapb.CollectionSchema{
 					Fields: []*schemapb.FieldSchema{
 						{
-							DataType: test.dataType,
-							Nullable: true,
+							DataType:   test.dataType,
+							Nullable:   test.nullable,
+							TypeParams: test.typeParams,
 						},
 					},
 				}
@@ -115,15 +131,15 @@ func (s *InsertDataSuite) TestInsertData() {
 	s.Run("init by New", func() {
 		s.True(s.iDataEmpty.IsEmpty())
 		s.Equal(0, s.iDataEmpty.GetRowNum())
-		s.Equal(33, s.iDataEmpty.GetMemorySize())
+		s.Equal(161, s.iDataEmpty.GetMemorySize())
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(240, s.iDataOneRow.GetMemorySize())
+		s.Equal(535, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(433, s.iDataTwoRows.GetMemorySize())
+		s.Equal(734, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -147,12 +163,13 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[DoubleField].GetMemorySize(), 1)
 	s.Equal(s.iDataEmpty.Data[StringField].GetMemorySize(), 1)
 	s.Equal(s.iDataEmpty.Data[ArrayField].GetMemorySize(), 1)
-	s.Equal(s.iDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4)
-	s.Equal(s.iDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
-	s.Equal(s.iDataEmpty.Data[Float16VectorField].GetMemorySize(), 4)
-	s.Equal(s.iDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 4)
-	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0)
-	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4)
+	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
+	s.Equal(s.iDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4+9)
+	s.Equal(s.iDataEmpty.Data[FloatVectorField].GetMemorySize(), 4+9)
+	s.Equal(s.iDataEmpty.Data[Float16VectorField].GetMemorySize(), 4+9)
+	s.Equal(s.iDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 4+9)
+	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0+9)
+	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4+9)
 	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 1)
 	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0)
 
@@ -168,12 +185,13 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[StringField].GetMemorySize(), 20)
 	s.Equal(s.iDataOneRow.Data[JSONField].GetMemorySize(), len([]byte(`{"batch":1}`))+16+1)
 	s.Equal(s.iDataOneRow.Data[ArrayField].GetMemorySize(), 3*4+1)
-	s.Equal(s.iDataOneRow.Data[BinaryVectorField].GetMemorySize(), 5)
-	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetMemorySize(), 20)
-	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetMemorySize(), 12)
-	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetMemorySize(), 12)
-	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28)
-	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetMemorySize(), 8)
+	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
+	s.Equal(s.iDataOneRow.Data[BinaryVectorField].GetMemorySize(), 5+9)
+	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetMemorySize(), 20+9)
+	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetMemorySize(), 12+9)
+	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetMemorySize(), 12+9)
+	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28+9)
+	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetMemorySize(), 8+9)
 	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetMemorySize(), 3*4+1)
 	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4)
 
@@ -188,12 +206,13 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[DoubleField].GetMemorySize(), 17)
 	s.Equal(s.iDataTwoRows.Data[StringField].GetMemorySize(), 39)
 	s.Equal(s.iDataTwoRows.Data[ArrayField].GetMemorySize(), 25)
-	s.Equal(s.iDataTwoRows.Data[BinaryVectorField].GetMemorySize(), 6)
-	s.Equal(s.iDataTwoRows.Data[FloatVectorField].GetMemorySize(), 36)
-	s.Equal(s.iDataTwoRows.Data[Float16VectorField].GetMemorySize(), 20)
-	s.Equal(s.iDataTwoRows.Data[BFloat16VectorField].GetMemorySize(), 20)
-	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54)
-	s.Equal(s.iDataTwoRows.Data[Int8VectorField].GetMemorySize(), 12)
+	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
+	s.Equal(s.iDataTwoRows.Data[BinaryVectorField].GetMemorySize(), 6+9)
+	s.Equal(s.iDataTwoRows.Data[FloatVectorField].GetMemorySize(), 36+9)
+	s.Equal(s.iDataTwoRows.Data[Float16VectorField].GetMemorySize(), 20+9)
+	s.Equal(s.iDataTwoRows.Data[BFloat16VectorField].GetMemorySize(), 20+9)
+	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54+9)
+	s.Equal(s.iDataTwoRows.Data[Int8VectorField].GetMemorySize(), 12+9)
 	s.Equal(s.iDataTwoRows.Data[StructSubInt32Field].GetMemorySize(), 3*4+2*4+1)
 	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4)
 }
@@ -252,25 +271,31 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.True(s.iDataEmpty.IsEmpty())
 	s.Equal(0, s.iDataEmpty.GetRowNum())
-	s.Equal(33, s.iDataEmpty.GetMemorySize())
+	s.Equal(161, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
-		RowIDField:             int64(3),
-		TimestampField:         int64(3),
-		BoolField:              true,
-		Int8Field:              int8(3),
-		Int16Field:             int16(3),
-		Int32Field:             int32(3),
-		Int64Field:             int64(3),
-		FloatField:             float32(3),
-		DoubleField:            float64(3),
-		StringField:            "str",
-		BinaryVectorField:      []byte{0},
-		FloatVectorField:       []float32{4, 5, 6, 7},
-		Float16VectorField:     []byte{0, 0, 0, 0, 255, 255, 255, 255},
-		BFloat16VectorField:    []byte{0, 0, 0, 0, 255, 255, 255, 255},
-		SparseFloatVectorField: typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{4, 5, 6}),
-		Int8VectorField:        []int8{-4, -5, 6, 7},
+		RowIDField:                     int64(3),
+		TimestampField:                 int64(3),
+		BoolField:                      true,
+		Int8Field:                      int8(3),
+		Int16Field:                     int16(3),
+		Int32Field:                     int32(3),
+		Int64Field:                     int64(3),
+		FloatField:                     float32(3),
+		DoubleField:                    float64(3),
+		StringField:                    "str",
+		BinaryVectorField:              []byte{0},
+		FloatVectorField:               []float32{4, 5, 6, 7},
+		Float16VectorField:             []byte{0, 0, 0, 0, 255, 255, 255, 255},
+		BFloat16VectorField:            []byte{0, 0, 0, 0, 255, 255, 255, 255},
+		SparseFloatVectorField:         typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{4, 5, 6}),
+		Int8VectorField:                []int8{-4, -5, 6, 7},
+		NullableFloatVectorField:       []float32{1.0, 2.0, 3.0, 4.0},
+		NullableBinaryVectorField:      []byte{1},
+		NullableFloat16VectorField:     []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		NullableBFloat16VectorField:    []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		NullableInt8VectorField:        []int8{1, 2, 3, 4},
+		NullableSparseFloatVectorField: typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{4, 5, 6}),
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
@@ -300,22 +325,28 @@ func (s *InsertDataSuite) SetupTest() {
 	}
 
 	row2 := map[FieldID]interface{}{
-		RowIDField:             int64(1),
-		TimestampField:         int64(1),
-		BoolField:              false,
-		Int8Field:              int8(1),
-		Int16Field:             int16(1),
-		Int32Field:             int32(1),
-		Int64Field:             int64(1),
-		FloatField:             float32(1),
-		DoubleField:            float64(1),
-		StringField:            string("str"),
-		BinaryVectorField:      []byte{0},
-		FloatVectorField:       []float32{4, 5, 6, 7},
-		Float16VectorField:     []byte{1, 2, 3, 4, 5, 6, 7, 8},
-		BFloat16VectorField:    []byte{1, 2, 3, 4, 5, 6, 7, 8},
-		SparseFloatVectorField: typeutil.CreateSparseFloatRow([]uint32{2, 3, 4}, []float32{4, 5, 6}),
-		Int8VectorField:        []int8{-128, -5, 6, 127},
+		RowIDField:                     int64(1),
+		TimestampField:                 int64(1),
+		BoolField:                      false,
+		Int8Field:                      int8(1),
+		Int16Field:                     int16(1),
+		Int32Field:                     int32(1),
+		Int64Field:                     int64(1),
+		FloatField:                     float32(1),
+		DoubleField:                    float64(1),
+		StringField:                    string("str"),
+		BinaryVectorField:              []byte{0},
+		FloatVectorField:               []float32{4, 5, 6, 7},
+		Float16VectorField:             []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		BFloat16VectorField:            []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		SparseFloatVectorField:         typeutil.CreateSparseFloatRow([]uint32{2, 3, 4}, []float32{4, 5, 6}),
+		Int8VectorField:                []int8{-128, -5, 6, 127},
+		NullableFloatVectorField:       nil,
+		NullableBinaryVectorField:      nil,
+		NullableFloat16VectorField:     nil,
+		NullableBFloat16VectorField:    nil,
+		NullableInt8VectorField:        nil,
+		NullableSparseFloatVectorField: nil,
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
