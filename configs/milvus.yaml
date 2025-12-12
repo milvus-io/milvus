@@ -436,6 +436,7 @@ queryCoord:
   checkNodeSessionInterval: 60 # the interval(in seconds) of check querynode cluster session
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
+  stoppingBalanceAssignPolicy: ScoreBased # assign policy for stopping balance, options: RoundRobin, RowCount, ScoreBased
   channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   collectionObserverInterval: 200 # the interval of collection observer
   checkExecutedFlagInterval: 100 # the interval of check executed flag to force to pull dist

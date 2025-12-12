@@ -14,178 +14,228 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package balance provides load balancing functionality for QueryCoord.
+// It contains different balancer implementations that redistribute segments and channels
+// across query nodes to achieve balanced resource utilization.
 package balance
 
 import (
 	"context"
-	"fmt"
-	"sort"
+	"math"
 
-	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-type SegmentAssignPlan struct {
-	Segment      *meta.Segment
-	Replica      *meta.Replica
-	From         int64 // -1 if empty
-	To           int64
-	FromScore    int64
-	ToScore      int64
-	SegmentScore int64
-	LoadPriority commonpb.LoadPriority
-}
-
-func (segPlan *SegmentAssignPlan) String() string {
-	return fmt.Sprintf("SegmentPlan:[collectionID: %d, replicaID: %d, segmentID: %d, from: %d, to: %d, fromScore: %d, toScore: %d, segmentScore: %d]\n",
-		segPlan.Segment.CollectionID, segPlan.Replica.GetID(), segPlan.Segment.ID, segPlan.From, segPlan.To, segPlan.FromScore, segPlan.ToScore, segPlan.SegmentScore)
-}
-
-type ChannelAssignPlan struct {
-	Channel      *meta.DmChannel
-	Replica      *meta.Replica
-	From         int64
-	To           int64
-	FromScore    int64
-	ToScore      int64
-	ChannelScore int64
-}
-
-func (chanPlan *ChannelAssignPlan) String() string {
-	return fmt.Sprintf("ChannelPlan:[collectionID: %d, channel: %s, replicaID: %d, from: %d, to: %d]\n",
-		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.Replica.GetID(), chanPlan.From, chanPlan.To)
-}
-
+// Balance is the interface that all balancers must implement.
+// It defines the contract for balancing segments and channels across query nodes within a replica.
 type Balance interface {
-	AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan
-	AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan
-	BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)
+	// BalanceReplica balances segments and channels across nodes in a replica.
+	// It returns segment assignment plans and channel assignment plans that describe
+	// the movements needed to achieve better balance.
+	BalanceReplica(ctx context.Context, replica *meta.Replica) ([]assign.SegmentAssignPlan, []assign.ChannelAssignPlan)
+
+	// GetAssignPolicy returns the underlying AssignPolicy used for resource assignment.
+	// This allows callers to access the policy for custom assignment operations.
+	GetAssignPolicy() assign.AssignPolicy
 }
 
+// RoundRobinBalancer implements a simple round-robin based load balancing strategy.
+// It balances segments and channels by distributing them evenly across nodes based on count,
+// without considering the actual resource consumption (like row count or memory usage).
+// This balancer is useful for scenarios where uniform distribution is more important than
+// weighted distribution based on actual load.
 type RoundRobinBalancer struct {
-	scheduler   task.Scheduler
-	nodeManager *session.NodeManager
+	scheduler    task.Scheduler
+	nodeManager  *session.NodeManager
+	dist         *meta.DistributionManager
+	meta         *meta.Meta
+	targetMgr    meta.TargetManagerInterface
+	assignPolicy assign.AssignPolicy
 }
 
-func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int64, segments []*meta.Segment, nodes []int64, forceAssign bool) []SegmentAssignPlan {
-	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
-	if !forceAssign {
-		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-			info := b.nodeManager.Get(node)
-			return info != nil && info.GetState() == session.NodeStateNormal
-		})
-	}
-
-	// Filter out query nodes that are currently marked as resource exhausted.
-	// These nodes have recently reported OOM or disk full errors and are under
-	// a penalty period during which they won't receive new loading tasks.
-	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-		return !b.nodeManager.IsResourceExhausted(node)
-	})
-
-	nodesInfo := b.getNodes(nodes)
-	if len(nodesInfo) == 0 {
-		return nil
-	}
-	sort.Slice(nodesInfo, func(i, j int) bool {
-		cnt1, cnt2 := nodesInfo[i].SegmentCnt(), nodesInfo[j].SegmentCnt()
-		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetSegmentTaskDelta(id1, -1), b.scheduler.GetSegmentTaskDelta(id2, -1)
-		return cnt1+delta1 < cnt2+delta2
-	})
-
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
-	ret := make([]SegmentAssignPlan, 0, len(segments))
-	for i, s := range segments {
-		plan := SegmentAssignPlan{
-			Segment: s,
-			From:    -1,
-			To:      nodesInfo[i%len(nodesInfo)].ID(),
-		}
-		ret = append(ret, plan)
-		if len(ret) >= balanceBatchSize {
-			break
-		}
-	}
-	return ret
+// GetAssignPolicy returns the underlying AssignPolicy used by this balancer.
+func (b *RoundRobinBalancer) GetAssignPolicy() assign.AssignPolicy {
+	return b.assignPolicy
 }
 
-func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int64, channels []*meta.DmChannel, nodes []int64, forceAssign bool) []ChannelAssignPlan {
-	nodes = filterSQNIfStreamingServiceEnabled(nodes)
+// BalanceReplica balances segments and channels across nodes within a replica using round-robin strategy.
+// It first attempts to balance channels if AutoBalanceChannel is enabled, then balances segments
+// if no channel plans were generated.
+func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) (segmentPlans []assign.SegmentAssignPlan, channelPlans []assign.ChannelAssignPlan) {
+	log := log.Ctx(ctx).WithRateGroup("qcv2.RoundRobinBalancer", 1, 60).With(
+		zap.Int64("collectionID", replica.GetCollectionID()),
+		zap.Int64("replicaID", replica.GetID()),
+		zap.String("resourceGroup", replica.GetResourceGroup()),
+	)
 
-	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
-	if !forceAssign {
-		versionRangeFilter := semver.MustParseRange(">2.3.x")
-		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-			info := b.nodeManager.Get(node)
-			// balance channel to qn with version < 2.4 is not allowed since l0 segment supported
-			// if watch channel on qn with version < 2.4, it may cause delete data loss
-			return info != nil && info.GetState() == session.NodeStateNormal && versionRangeFilter(info.Version())
-		})
+	if replica.NodesCount() < 2 {
+		log.RatedDebug(60, "replica has less than 2 querynodes, skip balance")
+		return nil, nil
 	}
 
-	// Filter out query nodes that are currently marked as resource exhausted.
-	// These nodes have recently reported OOM or disk full errors and are under
-	// a penalty period during which they won't receive new loading tasks.
-	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
-		return !b.nodeManager.IsResourceExhausted(node)
-	})
-
-	nodesInfo := b.getNodes(nodes)
-	if len(nodesInfo) == 0 {
-		return nil
+	if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
+		channelPlans = b.balanceChannels(ctx, replica)
+	}
+	if len(channelPlans) == 0 {
+		segmentPlans = b.balanceSegments(ctx, replica)
 	}
 
-	plans := make([]ChannelAssignPlan, 0)
-	scoreDelta := make(map[int64]int)
+	if len(segmentPlans) > 0 || len(channelPlans) > 0 {
+		log.Info("balance plan generated",
+			zap.Int("segmentPlans", len(segmentPlans)),
+			zap.Int("channelPlans", len(channelPlans)))
+	}
+	return
+}
+
+// balanceChannels generates channel balance plans for a replica.
+// It requires at least 2 RW nodes to perform balancing.
+func (b *RoundRobinBalancer) balanceChannels(ctx context.Context, replica *meta.Replica) []assign.ChannelAssignPlan {
+	var rwNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodesInfo)
+		rwNodes, _ = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+	} else {
+		rwNodes = replica.GetRWNodes()
 	}
 
-	sort.Slice(nodesInfo, func(i, j int) bool {
-		cnt1, cnt2 := nodesInfo[i].ChannelCnt(), nodesInfo[j].ChannelCnt()
-		id1, id2 := nodesInfo[i].ID(), nodesInfo[j].ID()
-		delta1, delta2 := b.scheduler.GetChannelTaskDelta(id1, -1)+scoreDelta[id1], b.scheduler.GetChannelTaskDelta(id2, -1)+scoreDelta[id2]
-		return cnt1+delta1 < cnt2+delta2
+	if len(rwNodes) < 2 {
+		return nil
+	}
+
+	return b.genChannelPlan(ctx, replica, rwNodes)
+}
+
+// balanceSegments generates segment balance plans for a replica.
+// It requires at least 2 RW nodes to perform balancing.
+func (b *RoundRobinBalancer) balanceSegments(ctx context.Context, replica *meta.Replica) []assign.SegmentAssignPlan {
+	rwNodes := replica.GetRWNodes()
+	if len(rwNodes) < 2 {
+		return nil
+	}
+	return b.genSegmentPlan(ctx, replica, rwNodes)
+}
+
+// genSegmentPlan generates segment balance plans based on segment count per node.
+// It moves segments from nodes with more segments to nodes with fewer segments.
+func (b *RoundRobinBalancer) genSegmentPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64) []assign.SegmentAssignPlan {
+	segmentDist := make(map[int64][]*meta.Segment)
+	totalSegments := 0
+
+	for _, node := range rwNodes {
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
+		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
+			return b.targetMgr.CanSegmentBeMoved(ctx, segment.GetCollectionID(), segment.GetID())
+		})
+		segmentDist[node] = segments
+		totalSegments += len(segments)
+	}
+
+	if totalSegments == 0 {
+		return nil
+	}
+
+	// Calculate average segment count per node
+	average := int(math.Ceil(float64(totalSegments) / float64(len(rwNodes))))
+
+	// Find nodes with fewer segments than average
+	nodesWithLessSegment := make([]int64, 0)
+	segmentsToMove := make([]*meta.Segment, 0)
+
+	for node, segments := range segmentDist {
+		if len(segments) <= average {
+			nodesWithLessSegment = append(nodesWithLessSegment, node)
+			continue
+		}
+
+		// Pick segments to move from nodes with more segments than average
+		segmentsToMove = append(segmentsToMove, segments[average:]...)
+	}
+
+	// Filter out redundant segments (segments that appear multiple times in distribution)
+	segmentsToMove = lo.Filter(segmentsToMove, func(s *meta.Segment, _ int) bool {
+		return len(b.dist.SegmentDistManager.GetByFilter(meta.WithReplica(replica), meta.WithSegmentID(s.GetID()))) == 1
 	})
 
-	for i, c := range channels {
-		plan := ChannelAssignPlan{
-			Channel: c,
-			From:    -1,
-			To:      nodesInfo[i%len(nodesInfo)].ID(),
-		}
-		plans = append(plans, plan)
+	if len(nodesWithLessSegment) == 0 || len(segmentsToMove) == 0 {
+		return nil
 	}
-	return plans
-}
 
-func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	// TODO by chun.han
-	return nil, nil
-}
-
-func (b *RoundRobinBalancer) getNodes(nodes []int64) []*session.NodeInfo {
-	ret := make([]*session.NodeInfo, 0, len(nodes))
-	for _, n := range nodes {
-		node := b.nodeManager.Get(n)
-		if node != nil && !node.IsStoppingState() {
-			ret = append(ret, node)
-		}
+	segmentPlans := b.assignPolicy.AssignSegment(ctx, replica.GetCollectionID(), segmentsToMove, nodesWithLessSegment, false)
+	for i := range segmentPlans {
+		segmentPlans[i].From = segmentPlans[i].Segment.Node
+		segmentPlans[i].Replica = replica
 	}
-	return ret
+
+	return segmentPlans
 }
 
-func NewRoundRobinBalancer(scheduler task.Scheduler, nodeManager *session.NodeManager) *RoundRobinBalancer {
+// genChannelPlan generates channel balance plans based on channel count per node.
+// It moves channels from nodes with more channels to nodes with fewer channels.
+func (b *RoundRobinBalancer) genChannelPlan(ctx context.Context, replica *meta.Replica, rwNodes []int64) []assign.ChannelAssignPlan {
+	channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	if len(channelDist) == 0 {
+		return nil
+	}
+
+	// Calculate average channel count per node
+	average := int(math.Ceil(float64(len(channelDist)) / float64(len(rwNodes))))
+
+	// Find nodes with fewer channels than average
+	nodesWithLessChannel := make([]int64, 0)
+	channelsToMove := make([]*meta.DmChannel, 0)
+
+	for _, node := range rwNodes {
+		channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+		channels = sortIfChannelAtWALLocated(channels)
+
+		if len(channels) <= average {
+			nodesWithLessChannel = append(nodesWithLessChannel, node)
+			continue
+		}
+
+		// Pick channels to move from nodes with more channels than average
+		channelsToMove = append(channelsToMove, channels[average:]...)
+	}
+
+	if len(nodesWithLessChannel) == 0 || len(channelsToMove) == 0 {
+		return nil
+	}
+
+	channelPlans := b.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), channelsToMove, nodesWithLessChannel, false)
+	for i := range channelPlans {
+		channelPlans[i].From = channelPlans[i].Channel.Node
+		channelPlans[i].Replica = replica
+	}
+
+	return channelPlans
+}
+
+// NewRoundRobinBalancer creates a new RoundRobinBalancer instance.
+// It uses the RoundRobin assign policy from the global factory.
+func NewRoundRobinBalancer(
+	scheduler task.Scheduler,
+	nodeManager *session.NodeManager,
+	dist *meta.DistributionManager,
+	meta *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+) *RoundRobinBalancer {
+	policy := assign.GetGlobalAssignPolicyFactory().GetPolicy(assign.PolicyTypeRoundRobin)
 	return &RoundRobinBalancer{
-		scheduler:   scheduler,
-		nodeManager: nodeManager,
+		scheduler:    scheduler,
+		nodeManager:  nodeManager,
+		dist:         dist,
+		meta:         meta,
+		targetMgr:    targetMgr,
+		assignPolicy: policy,
 	}
 }

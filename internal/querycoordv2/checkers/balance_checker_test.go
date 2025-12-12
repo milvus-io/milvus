@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -31,12 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // createMockPriorityQueue creates a mock priority queue for testing
-func createMockPriorityQueue() *balance.PriorityQueue {
-	return balance.NewPriorityQueuePtr()
+func createMockPriorityQueue() *assign.PriorityQueue {
+	return assign.NewPriorityQueuePtr()
 }
 
 // Helper function to create a test BalanceChecker
@@ -46,11 +48,18 @@ func createTestBalanceChecker() *BalanceChecker {
 	}
 	targetMgr := meta.NewTargetManager(nil, nil)
 	nodeMgr := &session.NodeManager{}
+	dist := meta.NewDistributionManager(nodeMgr)
 	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)
-	balancer := balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
-	getBalancerFunc := func() balance.Balance { return balancer }
 
-	return NewBalanceChecker(metaInstance, targetMgr, nodeMgr, scheduler, getBalancerFunc)
+	// Initialize global assign policy factory for testing
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+	assign.InitGlobalAssignPolicyFactory(scheduler, nodeMgr, dist, metaInstance, targetMgr)
+
+	// Initialize global balancer factory for testing
+	balance.ResetGlobalBalancerFactoryForTest()
+	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, metaInstance, targetMgr)
+
+	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler)
 }
 
 // =============================================================================
@@ -335,15 +344,16 @@ func TestBalanceChecker_GetReplicaForStoppingBalance_WithRONodes(t *testing.T) {
 	mockGetByCollection := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "GetByCollection")).Return(replicas).Build()
 	defer mockGetByCollection.UnPatch()
 
-	// Mock replica methods - replica1 has RO nodes, replica2 doesn't
-	mockRONodesCount1 := mockey.Mock((*meta.Replica).RONodesCount).Return(1).Build()
-	defer mockRONodesCount1.UnPatch()
+	// Mock replica methods - replica1 has RO nodes (return 1), replica2 doesn't (return 0)
+	mockRONodesCount := mockey.Mock((*meta.Replica).RONodesCount).Return(mockey.Sequence(1).Times(1).Then(0)).Build()
+	defer mockRONodesCount.UnPatch()
 
-	mockROSQNodesCount1 := mockey.Mock((*meta.Replica).ROSQNodesCount).Return(0).Build()
-	defer mockROSQNodesCount1.UnPatch()
+	mockROSQNodesCount := mockey.Mock((*meta.Replica).ROSQNodesCount).Return(0).Build()
+	defer mockROSQNodesCount.UnPatch()
 
-	mockGetID1 := mockey.Mock((*meta.Replica).GetID).Return(int64(101)).Build()
-	defer mockGetID1.UnPatch()
+	// Mock GetID to return different IDs for each replica
+	mockGetID := mockey.Mock((*meta.Replica).GetID).Return(mockey.Sequence(101).Times(1).Then(102)).Build()
+	defer mockGetID.UnPatch()
 
 	// Skip streaming service mock for simplicity
 
@@ -409,8 +419,9 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_EmptyReplicas(t *testin
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
 	config := balanceConfig{}
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, []int64{}, config)
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, []int64{}, config)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -433,28 +444,28 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	defer mockReplicaGet.UnPatch()
 
 	// Create mock balance plans
-	segmentPlan := balance.SegmentAssignPlan{
+	segmentPlan := assign.SegmentAssignPlan{
 		Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1}},
 		Replica: mockReplica,
 		From:    1,
 		To:      2,
 	}
-	channelPlan := balance.ChannelAssignPlan{
+	channelPlan := assign.ChannelAssignPlan{
 		Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: "test"}},
 		Replica: mockReplica,
 		From:    1,
 		To:      2,
 	}
 
-	mockBalancer := mockey.Mock(checker.getBalancerFunc).To(func() balance.Balance {
+	mockBalancer := mockey.Mock((*balance.BalancerFactory).GetBalancer).To(func(*balance.BalancerFactory) balance.Balance {
 		return balance.NewScoreBasedBalancer(nil, nil, nil, nil, nil)
 	}).Build()
 	defer mockBalancer.UnPatch()
 
 	// Mock balancer.BalanceReplica
 	mockBalanceReplica := mockey.Mock((*balance.ScoreBasedBalancer).BalanceReplica).Return(
-		[]balance.SegmentAssignPlan{segmentPlan},
-		[]balance.ChannelAssignPlan{channelPlan},
+		[]assign.SegmentAssignPlan{segmentPlan},
+		[]assign.ChannelAssignPlan{channelPlan},
 	).Build()
 	defer mockBalanceReplica.UnPatch()
 
@@ -479,7 +490,8 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_Success(t *testing.T) {
 	mockPrintPlans := mockey.Mock(balance.PrintNewBalancePlans).Return().Build()
 	defer mockPrintPlans.UnPatch()
 
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, replicaIDs, config)
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config)
 
 	assert.Len(t, segmentTasks, 1)
 	assert.Len(t, channelTasks, 1)
@@ -497,7 +509,8 @@ func TestBalanceChecker_GenerateBalanceTasksFromReplicas_NilReplica(t *testing.T
 	mockReplicaGet := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(nil).Build()
 	defer mockReplicaGet.UnPatch()
 
-	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, replicaIDs, config)
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+	segmentTasks, channelTasks := checker.generateBalanceTasksFromReplicas(ctx, balancer, replicaIDs, config)
 
 	assert.Empty(t, segmentTasks)
 	assert.Empty(t, channelTasks)
@@ -559,6 +572,10 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockGetAsBool.UnPatch()
 
+		// Mock GetValue for stopping balance assign policy
+		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
+		defer mockGetValue.UnPatch()
+
 		// Mock loadBalanceConfig
 		config := balanceConfig{
 			segmentBatchSize: 5,
@@ -571,9 +588,10 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 		stoppingBalanceCalled := false
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				stoppingBalanceCalled = true
 				return 1, 0 // Return some tasks generated
@@ -616,9 +634,10 @@ func TestBalanceChecker_Check_InactiveChecker(t *testing.T) {
 		processQueueCalled := false
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				processQueueCalled = true
 				return 0, 0
@@ -655,6 +674,10 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		mockStoppingBalanceEnabled := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockStoppingBalanceEnabled.UnPatch()
 
+		// Mock GetValue for stopping balance assign policy
+		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
+		defer mockGetValue.UnPatch()
+
 		// Mock loadBalanceConfig
 		config := balanceConfig{
 			segmentBatchSize: 5,
@@ -667,9 +690,10 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		stoppingBalanceCalled := false
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				// Verify this is stopping balance by checking the function pointers
 				stoppingBalanceCalled = true
@@ -702,6 +726,10 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		mockGetAsBool := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
 		defer mockGetAsBool.UnPatch()
 
+		// Mock GetValue for stopping balance assign policy
+		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
+		defer mockGetValue.UnPatch()
+
 		// Mock loadBalanceConfig
 		config := balanceConfig{
 			segmentBatchSize:    5,
@@ -715,9 +743,10 @@ func TestBalanceChecker_Check_StoppingBalanceEnabled(t *testing.T) {
 		callCount := 0
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				callCount++
 				if callCount == 1 {
@@ -762,6 +791,10 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		mockParams := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(mockey.Sequence(false).Times(1).Then(true)).Build()
 		defer mockParams.UnPatch()
 
+		// Mock GetValue for balancer type
+		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
+		defer mockGetValue.UnPatch()
+
 		// Mock loadBalanceConfig
 		config := balanceConfig{
 			segmentBatchSize:    5,
@@ -776,9 +809,10 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		originalTs := checker.autoBalanceTs
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1 // Generate normal balance tasks
@@ -813,6 +847,10 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		mockParams := mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(mockey.Sequence(false).Times(1).Then(true)).Build()
 		defer mockParams.UnPatch()
 
+		// Mock GetValue for balancer type
+		mockGetValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("RoundRobin").Build()
+		defer mockGetValue.UnPatch()
+
 		// Mock loadBalanceConfig with a large interval
 		config := balanceConfig{
 			segmentBatchSize:    5,
@@ -826,9 +864,10 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		normalBalanceCalled := false
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1
@@ -874,9 +913,10 @@ func TestBalanceChecker_Check_NormalBalanceEnabled(t *testing.T) {
 		normalBalanceCalled := false
 		mockProcessQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 			func(ctx context.Context,
+				balancer balance.Balance,
 				getReplicasFunc func(context.Context, int64) []int64,
-				constructQueueFunc func(context.Context) *balance.PriorityQueue,
-				getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+				constructQueueFunc func(context.Context) *assign.PriorityQueue,
+				getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 			) (int, int) {
 				normalBalanceCalled = true
 				return 0, 1
@@ -923,12 +963,12 @@ func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
 	}
 
 	// Mock constructQueueFunc
-	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *assign.PriorityQueue {
 		return mockQueue
 	}
 
 	// Mock getQueueFunc
-	getQueueFunc := func() *balance.PriorityQueue {
+	getQueueFunc := func() *assign.PriorityQueue {
 		return mockQueue
 	}
 
@@ -944,8 +984,9 @@ func TestBalanceChecker_ProcessBalanceQueue_Success(t *testing.T) {
 	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
 	defer mockSubmitTasks.UnPatch()
 
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	assert.Equal(t, 3, segmentTasks)
@@ -969,16 +1010,17 @@ func TestBalanceChecker_ProcessBalanceQueue_EmptyQueue(t *testing.T) {
 		return []int64{101}
 	}
 
-	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *assign.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() *balance.PriorityQueue {
+	getQueueFunc := func() *assign.PriorityQueue {
 		return mockQueue
 	}
 
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	assert.Equal(t, 0, segmentTasks)
@@ -1010,11 +1052,11 @@ func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
 		return []int64{101}
 	}
 
-	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *assign.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() *balance.PriorityQueue {
+	getQueueFunc := func() *assign.PriorityQueue {
 		return mockQueue
 	}
 
@@ -1035,8 +1077,9 @@ func TestBalanceChecker_ProcessBalanceQueue_BatchSizeLimit(t *testing.T) {
 	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
 	defer mockSubmitTasks.UnPatch()
 
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	// Should stop after first collection due to batch size limits
@@ -1062,11 +1105,11 @@ func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T
 		return []int64{101}
 	}
 
-	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *assign.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() *balance.PriorityQueue {
+	getQueueFunc := func() *assign.PriorityQueue {
 		return mockQueue
 	}
 
@@ -1083,8 +1126,9 @@ func TestBalanceChecker_ProcessBalanceQueue_MultiCollectionDisabled(t *testing.T
 	mockSubmitTasks := mockey.Mock((*BalanceChecker).submitTasks).Return().Build()
 	defer mockSubmitTasks.UnPatch()
 
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	// Should stop after first collection due to multi-collection disabled
@@ -1111,16 +1155,17 @@ func TestBalanceChecker_ProcessBalanceQueue_NoReplicasToBalance(t *testing.T) {
 		return []int64{} // No replicas
 	}
 
-	constructQueueFunc := func(ctx context.Context) *balance.PriorityQueue {
+	constructQueueFunc := func(ctx context.Context) *assign.PriorityQueue {
 		return mockQueue
 	}
 
-	getQueueFunc := func() *balance.PriorityQueue {
+	getQueueFunc := func() *assign.PriorityQueue {
 		return mockQueue
 	}
 
+	balancer := balance.GetGlobalBalancerFactory().GetBalancer()
 	segmentTasks, channelTasks := checker.processBalanceQueue(
-		ctx, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
+		ctx, balancer, getReplicasFunc, constructQueueFunc, getQueueFunc, config,
 	)
 
 	assert.Equal(t, 0, segmentTasks)
@@ -1217,8 +1262,537 @@ func TestBalanceChecker_GetReplicaForStoppingBalance_WithStreamingService(t *tes
 }
 
 // =============================================================================
-// Error Handling Tests
+// Filter Serviceable Collections Tests
 // =============================================================================
+
+func TestBalanceChecker_ConstructNormalBalanceQueue_FilterServiceableCollections(t *testing.T) {
+	t.Run("FilterOutLoadingCollection", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2, 3}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create collections with different load statuses
+		loadedCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+		loadingCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 2,
+				Status:       querypb.LoadStatus_Loading,
+			},
+		}
+		loadedCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 3,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection to return different collections based on ID
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				switch collectionID {
+				case 1:
+					return loadedCollection
+				case 2:
+					return loadingCollection
+				case 3:
+					return loadedCollection2
+				default:
+					return nil
+				}
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				// Return serviceable channels for all collections
+				return []*meta.DmChannel{
+					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+				}
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Should only include loaded collections (1 and 3), not loading collection (2)
+		assert.Equal(t, 2, result.Len())
+
+		// Pop items and verify
+		collectionIDsInQueue := make([]int64, 0)
+		for result.Len() > 0 {
+			item := result.Pop().(*collectionBalanceItem)
+			collectionIDsInQueue = append(collectionIDsInQueue, item.collectionID)
+		}
+		assert.NotContains(t, collectionIDsInQueue, int64(2), "Loading collection should be filtered out")
+		assert.Contains(t, collectionIDsInQueue, int64(1), "Loaded collection 1 should be included")
+		assert.Contains(t, collectionIDsInQueue, int64(3), "Loaded collection 3 should be included")
+	})
+
+	t.Run("FilterOutInvalidStatusCollection", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create collections with different load statuses
+		loadedCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+		invalidCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 2,
+				Status:       querypb.LoadStatus_Invalid,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection to return different collections based on ID
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				switch collectionID {
+				case 1:
+					return loadedCollection
+				case 2:
+					return invalidCollection
+				default:
+					return nil
+				}
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				return []*meta.DmChannel{
+					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+				}
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Should only include loaded collection (1), not invalid collection (2)
+		assert.Equal(t, 1, result.Len())
+
+		item := result.Pop().(*collectionBalanceItem)
+		assert.Equal(t, int64(1), item.collectionID)
+	})
+
+	t.Run("FilterOutNilCollection", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create loaded collection
+		loadedCollection := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection - collection 2 returns nil
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				if collectionID == 1 {
+					return loadedCollection
+				}
+				return nil
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				return []*meta.DmChannel{
+					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+				}
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Should only include collection 1, collection 2 should be filtered out due to nil
+		assert.Equal(t, 1, result.Len())
+
+		item := result.Pop().(*collectionBalanceItem)
+		assert.Equal(t, int64(1), item.collectionID)
+	})
+
+	t.Run("AllCollectionsFiltered", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create collections with non-loaded status
+		loadingCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loading,
+			},
+		}
+		loadingCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 2,
+				Status:       querypb.LoadStatus_Loading,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				switch collectionID {
+				case 1:
+					return loadingCollection1
+				case 2:
+					return loadingCollection2
+				default:
+					return nil
+				}
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter to return serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				return []*meta.DmChannel{
+					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+				}
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Should be empty since all collections are loading
+		assert.Equal(t, 0, result.Len())
+	})
+
+	t.Run("FilterOutCollectionWithNonServiceableChannel", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create loaded collections
+		loadedCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+		loadedCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 2,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				switch collectionID {
+				case 1:
+					return loadedCollection1
+				case 2:
+					return loadedCollection2
+				default:
+					return nil
+				}
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter
+		// Collection 1: all channels serviceable
+		// Collection 2: one channel not serviceable
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				if collectionID == 1 {
+					// All serviceable
+					return []*meta.DmChannel{
+						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+					}
+				} else if collectionID == 2 {
+					// One not serviceable
+					return []*meta.DmChannel{
+						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: false}}},
+					}
+				}
+				return nil
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Should only include collection 1 (all channels serviceable)
+		// Collection 2 should be filtered out (has non-serviceable channel)
+		assert.Equal(t, 1, result.Len())
+
+		item := result.Pop().(*collectionBalanceItem)
+		assert.Equal(t, int64(1), item.collectionID)
+	})
+
+	t.Run("FilterOutCollectionWithNoChannels", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create loaded collections
+		loadedCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+		loadedCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 2,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				switch collectionID {
+				case 1:
+					return loadedCollection1
+				case 2:
+					return loadedCollection2
+				default:
+					return nil
+				}
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter
+		// Collection 1: has serviceable channels
+		// Collection 2: no channels in distribution
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				if collectionID == 1 {
+					return []*meta.DmChannel{
+						{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+					}
+				}
+				// Collection 2 has no channels
+				return nil
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Should only include collection 1 (has channels)
+		// Collection 2 should be filtered out (no channels)
+		assert.Equal(t, 1, result.Len())
+
+		item := result.Pop().(*collectionBalanceItem)
+		assert.Equal(t, int64(1), item.collectionID)
+	})
+
+	t.Run("AllChannelsServiceable", func(t *testing.T) {
+		checker := createTestBalanceChecker()
+		ctx := context.Background()
+
+		// Mock meta.GetAll to return collection IDs
+		collectionIDs := []int64{1, 2}
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return(collectionIDs).Build()
+		defer mockGetAll.UnPatch()
+
+		// Create loaded collections
+		loadedCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 1,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+		loadedCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID: 2,
+				Status:       querypb.LoadStatus_Loaded,
+			},
+		}
+
+		// Mock CollectionManager.GetCollection
+		mockGetCollection := mockey.Mock((*meta.CollectionManager).GetCollection).To(
+			func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+				switch collectionID {
+				case 1:
+					return loadedCollection1
+				case 2:
+					return loadedCollection2
+				default:
+					return nil
+				}
+			}).Build()
+		defer mockGetCollection.UnPatch()
+
+		// Mock ChannelDistManager.GetByCollectionAndFilter
+		// Both collections have all serviceable channels
+		mockGetChannels := mockey.Mock((*meta.ChannelDistManager).GetByCollectionAndFilter).To(
+			func(_ *meta.ChannelDistManager, collectionID int64, _ ...meta.ChannelDistFilter) []*meta.DmChannel {
+				return []*meta.DmChannel{
+					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+					{View: &meta.LeaderView{Status: &querypb.LeaderViewStatus{Serviceable: true}}},
+				}
+			}).Build()
+		defer mockGetChannels.UnPatch()
+
+		// Mock target manager methods
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+
+		mockIsCurrentTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetExist")).Return(true).Build()
+		defer mockIsCurrentTargetExist.UnPatch()
+
+		mockIsCurrentTargetReady := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsCurrentTargetReady")).Return(true).Build()
+		defer mockIsCurrentTargetReady.UnPatch()
+
+		mockGetRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockGetRowCount.UnPatch()
+
+		// Mock paramtable for sort order
+		mockParamValue := mockey.Mock((*paramtable.ParamItem).GetValue).Return("byrowcount").Build()
+		defer mockParamValue.UnPatch()
+
+		result := checker.constructNormalBalanceQueue(ctx)
+
+		// Both collections should be included (all channels serviceable)
+		assert.Equal(t, 2, result.Len())
+	})
+}
 
 func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 	checker := createTestBalanceChecker()
@@ -1230,9 +1804,10 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 
 	mockProcessBalanceQueue := mockey.Mock((*BalanceChecker).processBalanceQueue).To(
 		func(ctx context.Context,
+			balancer balance.Balance,
 			getReplicasFunc func(ctx context.Context, collectionID int64) []int64,
-			constructQueueFunc func(ctx context.Context) *balance.PriorityQueue,
-			getQueueFunc func() *balance.PriorityQueue, config balanceConfig,
+			constructQueueFunc func(ctx context.Context) *assign.PriorityQueue,
+			getQueueFunc func() *assign.PriorityQueue, config balanceConfig,
 		) (int, int) {
 			time.Sleep(150 * time.Millisecond)
 			return 0, 0
