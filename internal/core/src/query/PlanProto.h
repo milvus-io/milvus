@@ -107,11 +107,17 @@ class ProtoParser {
         const proto::plan::TimestamptzArithCompareExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseElementFilterExprs(const proto::plan::ElementFilterExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
     void
     PlanOptionsFromProto(const proto::plan::PlanOption& plan_option_proto,
                          PlanOptions& plan_options);
+
+    SearchInfo
+    ParseSearchInfo(const proto::plan::VectorANNS& anns_proto);
 
  private:
     const SchemaPtr schema;

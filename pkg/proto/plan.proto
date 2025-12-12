@@ -98,6 +98,7 @@ message ColumnInfo {
   schema.DataType element_type = 7;
   bool is_clustering_key = 8;
   bool nullable = 9;
+  bool is_element_level = 10;
 }
 
 message ColumnExpr {
@@ -245,6 +246,12 @@ message RandomSampleExpr {
   Expr predicate = 2;
 }
 
+message ElementFilterExpr {
+  Expr element_expr = 1;
+  string struct_name = 2;
+  Expr predicate = 3;
+}
+
 message AlwaysTrueExpr {}
 
 message Interval {
@@ -285,6 +292,7 @@ message Expr {
     RandomSampleExpr random_sample_expr = 16;
     GISFunctionFilterExpr gisfunction_filter_expr = 17;
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
+    ElementFilterExpr element_filter_expr = 19;
   };
   bool is_template = 20;
 }

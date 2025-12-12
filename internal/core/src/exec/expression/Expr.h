@@ -21,6 +21,8 @@
 #include <string>
 #include <type_traits>
 
+#include "common/Array.h"
+#include "common/ArrayOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -677,6 +679,173 @@ class SegmentExpr : public Expr {
             }
         }
         return input->size();
+    }
+
+    // Process element-level data by element IDs
+    // Handles the type mismatch between storage (ArrayView) and element type
+    // Currently only implemented for sealed chunked segments
+    template <typename ElementType, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessElementLevelByOffsets(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* element_ids,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        auto& skip_index = segment_->GetSkipIndex();
+        if (segment_->type() == SegmentType::Sealed) {
+            AssertInfo(
+                segment_->is_chunked(),
+                "Element-level filtering requires chunked segment for sealed");
+
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            if (!array_offsets) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "IArrayOffsets not found for field {}",
+                          field_id_.get());
+            }
+
+            // Batch process consecutive elements belonging to the same chunk
+            size_t processed_size = 0;
+            size_t i = 0;
+
+            // Reuse these vectors to avoid repeated heap allocations
+            FixedVector<int32_t> offsets;
+            FixedVector<int32_t> elem_indices;
+
+            while (i < element_ids->size()) {
+                // Start of a new chunk batch
+                int64_t element_id = (*element_ids)[i];
+                auto [doc_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+                auto [chunk_id, chunk_offset] =
+                    segment_->get_chunk_by_offset(field_id_, doc_id);
+
+                // Collect consecutive elements belonging to the same chunk
+                offsets.clear();
+                elem_indices.clear();
+                offsets.push_back(chunk_offset);
+                elem_indices.push_back(elem_idx);
+
+                size_t batch_start = i;
+                i++;
+
+                // Look ahead for more elements in the same chunk
+                while (i < element_ids->size()) {
+                    int64_t next_element_id = (*element_ids)[i];
+                    auto [next_doc_id, next_elem_idx] =
+                        array_offsets->ElementIDToRowID(next_element_id);
+                    auto [next_chunk_id, next_chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, next_doc_id);
+
+                    if (next_chunk_id != chunk_id) {
+                        break;  // Different chunk, process current batch
+                    }
+
+                    offsets.push_back(next_chunk_offset);
+                    elem_indices.push_back(next_elem_idx);
+                    i++;
+                }
+
+                // Batch fetch all ArrayViews for this chunk
+                auto pw = segment_->get_views_by_offsets<ArrayView>(
+                    op_ctx_, field_id_, chunk_id, offsets);
+
+                auto [array_vec, valid_data] = pw.get();
+
+                // Process each element in this batch
+                for (size_t j = 0; j < offsets.size(); j++) {
+                    size_t result_idx = batch_start + j;
+
+                    if ((!skip_func ||
+                         !skip_func(skip_index, field_id_, chunk_id)) &&
+                        (!namespace_skip_func_.has_value() ||
+                         !namespace_skip_func_.value()(chunk_id))) {
+                        // Extract element from ArrayView
+                        auto value =
+                            array_vec[j].template get_data<ElementType>(
+                                elem_indices[j]);
+                        bool is_valid = !valid_data.data() || valid_data[j];
+
+                        func.template operator()<FilterType::random>(
+                            &value,
+                            &is_valid,
+                            nullptr,
+                            1,
+                            res + result_idx,
+                            valid_res + result_idx,
+                            values...);
+                    } else {
+                        // Chunk is skipped - handle exactly like ProcessDataByOffsets
+                        if (valid_data.size() > j && !valid_data[j]) {
+                            res[result_idx] = valid_res[result_idx] = false;
+                        }
+                    }
+
+                    processed_size++;
+                }
+            }
+            return processed_size;
+        } else {
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            if (!array_offsets) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "IArrayOffsets not found for field {}",
+                          field_id_.get());
+            }
+
+            auto& skip_index = segment_->GetSkipIndex();
+            size_t processed_size = 0;
+
+            for (size_t i = 0; i < element_ids->size(); i++) {
+                int64_t element_id = (*element_ids)[i];
+
+                auto [doc_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+
+                // Calculate chunk_id and chunk_offset for this doc
+                auto chunk_id = doc_id / size_per_chunk_;
+                auto chunk_offset = doc_id % size_per_chunk_;
+
+                // Get the Array chunk (Growing segment stores Array, not ArrayView)
+                auto pw =
+                    segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+                auto chunk = pw.get();
+                const Array* array_ptr = chunk.data() + chunk_offset;
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += chunk_offset;
+                }
+
+                if ((!skip_func ||
+                     !skip_func(skip_index, field_id_, chunk_id)) &&
+                    (!namespace_skip_func_.has_value() ||
+                     !namespace_skip_func_.value()(chunk_id))) {
+                    // Extract element from Array
+                    auto value = array_ptr->get_data<ElementType>(elem_idx);
+                    bool is_valid = !valid_data || valid_data[0];
+
+                    func.template operator()<FilterType::random>(
+                        &value,
+                        &is_valid,
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
+                } else {
+                    // Chunk is skipped
+                    if (valid_data && !valid_data[0]) {
+                        res[processed_size] = valid_res[processed_size] = false;
+                    }
+                }
+
+                processed_size++;
+            }
+
+            return processed_size;
+        }
     }
 
     // Template parameter to control whether segment offsets are needed (for GIS functions)

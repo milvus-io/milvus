@@ -31,29 +31,37 @@ ParsePlaceholderGroup(const Plan* plan,
 }
 
 bool
-check_data_type(const FieldMeta& field_meta,
-                const milvus::proto::common::PlaceholderType type) {
+check_data_type(
+    const FieldMeta& field_meta,
+    const milvus::proto::common::PlaceholderValue& placeholder_value) {
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
         if (field_meta.get_element_type() == DataType::VECTOR_FLOAT) {
-            return type ==
-                   milvus::proto::common::PlaceholderType::EmbListFloatVector;
+            if (placeholder_value.element_level()) {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::FloatVector;
+            } else {
+                return placeholder_value.type() ==
+                       milvus::proto::common::PlaceholderType::
+                           EmbListFloatVector;
+            }
         } else if (field_meta.get_element_type() == DataType::VECTOR_FLOAT16) {
-            return type ==
+            return placeholder_value.type() ==
                    milvus::proto::common::PlaceholderType::EmbListFloat16Vector;
         } else if (field_meta.get_element_type() == DataType::VECTOR_BFLOAT16) {
-            return type == milvus::proto::common::PlaceholderType::
-                               EmbListBFloat16Vector;
+            return placeholder_value.type() ==
+                   milvus::proto::common::PlaceholderType::
+                       EmbListBFloat16Vector;
         } else if (field_meta.get_element_type() == DataType::VECTOR_BINARY) {
-            return type ==
+            return placeholder_value.type() ==
                    milvus::proto::common::PlaceholderType::EmbListBinaryVector;
         } else if (field_meta.get_element_type() == DataType::VECTOR_INT8) {
-            return type ==
+            return placeholder_value.type() ==
                    milvus::proto::common::PlaceholderType::EmbListInt8Vector;
         }
         return false;
     }
     return static_cast<int>(field_meta.get_data_type()) ==
-           static_cast<int>(type);
+           static_cast<int>(placeholder_value.type());
 }
 
 std::unique_ptr<PlaceholderGroup>
@@ -64,30 +72,33 @@ ParsePlaceholderGroup(const Plan* plan,
     milvus::proto::common::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromArray(blob, blob_len);
     Assert(ok);
-    for (auto& info : ph_group.placeholders()) {
+    for (auto& ph : ph_group.placeholders()) {
         Placeholder element;
-        element.tag_ = info.tag();
+        element.tag_ = ph.tag();
+        element.element_level_ = ph.element_level();
         Assert(plan->tag2field_.count(element.tag_));
         auto field_id = plan->tag2field_.at(element.tag_);
         auto& field_meta = plan->schema_->operator[](field_id);
-        AssertInfo(check_data_type(field_meta, info.type()),
+        AssertInfo(check_data_type(field_meta, ph),
                    "vector type must be the same, field {} - type {}, search "
-                   "info type {}",
+                   "ph type {}",
                    field_meta.get_name().get(),
                    field_meta.get_data_type(),
-                   static_cast<DataType>(info.type()));
-        element.num_of_queries_ = info.values_size();
+                   static_cast<DataType>(ph.type()));
+        element.num_of_queries_ = ph.values_size();
         AssertInfo(element.num_of_queries_ > 0, "must have queries");
-        if (info.type() ==
+        if (ph.type() ==
             milvus::proto::common::PlaceholderType::SparseFloatVector) {
             element.sparse_matrix_ =
-                SparseBytesToRows(info.values(), /*validate=*/true);
+                SparseBytesToRows(ph.values(), /*validate=*/true);
         } else {
-            auto line_size = info.values().Get(0).size();
+            auto line_size = ph.values().Get(0).size();
             auto& target = element.blob_;
 
-            if (field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
-                if (field_meta.get_sizeof() != line_size) {
+            if (field_meta.get_data_type() != DataType::VECTOR_ARRAY ||
+                ph.element_level()) {
+                if (field_meta.get_sizeof() != line_size &&
+                    !ph.element_level()) {
                     ThrowInfo(DimNotMatch,
                               fmt::format(
                                   "vector dimension mismatch, expected vector "
@@ -96,7 +107,7 @@ ParsePlaceholderGroup(const Plan* plan,
                                   line_size));
                 }
                 target.reserve(line_size * element.num_of_queries_);
-                for (auto& line : info.values()) {
+                for (auto& line : ph.values()) {
                     AssertInfo(line_size == line.size(),
                                "vector dimension mismatch, expected vector "
                                "size(byte) {}, actual {}.",
@@ -118,7 +129,7 @@ ParsePlaceholderGroup(const Plan* plan,
 
                 auto bytes_per_vec = milvus::vector_bytes_per_element(
                     field_meta.get_element_type(), dim);
-                for (auto& line : info.values()) {
+                for (auto& line : ph.values()) {
                     target.insert(target.end(), line.begin(), line.end());
                     AssertInfo(
                         line.size() % bytes_per_vec == 0,

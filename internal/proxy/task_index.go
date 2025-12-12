@@ -421,10 +421,22 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
-			// TODO(SpadeA): adjust it when more metric types are supported. Especially, when different metric types
-			// are supported for different element types.
 			if !funcutil.SliceContain(indexparamcheck.EmbListMetrics, metricType) {
-				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "array of vector index does not support metric type: "+metricType)
+				if typeutil.IsDenseFloatVectorType(cit.fieldSchema.ElementType) {
+					if !funcutil.SliceContain(indexparamcheck.FloatVectorMetrics, metricType) {
+						return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "array of vector with float element type does not support metric type: "+metricType)
+					}
+				} else if typeutil.IsBinaryVectorType(cit.fieldSchema.ElementType) {
+					if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
+						return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "array of vector with binary element type does not support metric type: "+metricType)
+					}
+				} else if typeutil.IsIntVectorType(cit.fieldSchema.ElementType) {
+					if !funcutil.SliceContain(indexparamcheck.IntVectorMetrics, metricType) {
+						return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "array of vector with int element type does not support metric type: "+metricType)
+					}
+				} else {
+					return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "array of vector index does not support metric type: "+metricType)
+				}
 			}
 		}
 	}

@@ -67,6 +67,10 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     std::vector<float> distances(size);
     std::vector<int64_t> seg_offsets(size);
     std::vector<GroupByValueType> group_by_values(size);
+    std::vector<int32_t> element_indices;
+    if (search_result->element_level_) {
+        element_indices.resize(size);
+    }
 
     uint32_t index = 0;
     for (int j = 0; j < total_nq_; j++) {
@@ -76,6 +80,10 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
             seg_offsets[index] = search_result->seg_offsets_[offset];
             group_by_values[index] =
                 search_result->group_by_values_.value()[offset];
+            if (search_result->element_level_) {
+                element_indices[index] =
+                    search_result->element_indices_[offset];
+            }
             index++;
             real_topks[j]++;
         }
@@ -84,6 +92,9 @@ GroupReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     search_result->distances_.swap(distances);
     search_result->seg_offsets_.swap(seg_offsets);
     search_result->group_by_values_.value().swap(group_by_values);
+    if (search_result->element_level_) {
+        search_result->element_indices_.swap(element_indices);
+    }
     AssertInfo(search_result->primary_keys_.size() ==
                    search_result->group_by_values_.value().size(),
                "Wrong size for group_by_values size after refresh:{}, "

@@ -2120,8 +2120,18 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		}
 	}
 
+	// per struct memory size, used to keep mapping between row id and element id
+	var structArrayOffsetsSize uint64
+	// PART 6: calculate size of struct array offsets
+	// The memory size is 4 * row_count + 4 * total_element_count
+	// We cannot easily get the element count, so we estimate it by the row count * 10
+	rowCount := uint64(loadInfo.GetNumOfRows())
+	for range len(schema.GetStructArrayFields()) {
+		structArrayOffsetsSize += 4*rowCount + 4*rowCount*10
+	}
+
 	return &ResourceUsage{
-		MemorySize:         segMemoryLoadingSize + indexMemorySize,
+		MemorySize:         segMemoryLoadingSize + indexMemorySize + structArrayOffsetsSize,
 		DiskSize:           segDiskLoadingSize,
 		MmapFieldCount:     mmapFieldCount,
 		FieldGpuMemorySize: fieldGpuMemorySize,
