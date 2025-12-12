@@ -128,8 +128,6 @@ type compactionTrigger struct {
 
 	indexEngineVersionManager IndexEngineVersionManager
 
-	estimateNonDiskSegmentPolicy calUpperLimitPolicy
-	estimateDiskSegmentPolicy    calUpperLimitPolicy
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
 	testingOnly bool
@@ -143,16 +141,14 @@ func newCompactionTrigger(
 	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:                         meta,
-		allocator:                    allocator,
-		signals:                      make(chan *compactionSignal, 100),
-		manualSignals:                make(chan *compactionSignal, 100),
-		inspector:                    inspector,
-		indexEngineVersionManager:    indexVersionManager,
-		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-		handler:                      handler,
-		closeCh:                      lifetime.NewSafeChan(),
+		meta:                      meta,
+		allocator:                 allocator,
+		signals:                   make(chan *compactionSignal, 100),
+		manualSignals:             make(chan *compactionSignal, 100),
+		inspector:                 inspector,
+		indexEngineVersionManager: indexVersionManager,
+		handler:                   handler,
+		closeCh:                   lifetime.NewSafeChan(),
 	}
 }
 
