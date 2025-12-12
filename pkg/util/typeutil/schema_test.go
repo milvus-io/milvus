@@ -177,9 +177,79 @@ func TestSchema(t *testing.T) {
 	}
 
 	t.Run("EstimateSizePerRecord", func(t *testing.T) {
+		limit := GetDynamicFieldEstimateLength()
 		size, err := EstimateSizePerRecord(schema)
-		assert.Equal(t, 680+DynamicFieldMaxLength*4, size)
+		assert.Equal(t, 680+limit*4, size)
 		assert.NoError(t, err)
+	})
+
+	t.Run("VarCharEstimateLengthLimit", func(t *testing.T) {
+		originalLimit := GetVarCharEstimateLength()
+		t.Cleanup(func() { SetVarCharEstimateLength(originalLimit) })
+
+		field := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "1024",
+				},
+			},
+		}
+
+		SetVarCharEstimateLength(128)
+		length, err := getVarFieldLength(field, custom)
+		assert.NoError(t, err)
+		assert.Equal(t, 128, length)
+
+		SetVarCharEstimateLength(4096)
+		length, err = getVarFieldLength(field, custom)
+		assert.NoError(t, err)
+		assert.Equal(t, 1024, length)
+	})
+
+	t.Run("DynamicFieldMaxLengthLimit", func(t *testing.T) {
+		originalLimit := GetDynamicFieldEstimateLength()
+		t.Cleanup(func() { SetDynamicFieldEstimateLength(originalLimit) })
+
+		field := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+		}
+
+		SetDynamicFieldEstimateLength(2048)
+		length, err := getVarFieldLength(field, custom)
+		assert.NoError(t, err)
+		assert.Equal(t, 2048, length)
+
+		SetDynamicFieldEstimateLength(128)
+		length, err = getVarFieldLength(field, custom)
+		assert.NoError(t, err)
+		assert.Equal(t, 128, length)
+	})
+
+	t.Run("SparseFloatVectorEstimateSize", func(t *testing.T) {
+		original := GetSparseFloatVectorEstimateLength()
+		t.Cleanup(func() { SetSparseFloatVectorEstimateLength(original) })
+
+		schemaWithSparse := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  1200,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+		}
+
+		SetSparseFloatVectorEstimateLength(2048)
+		size, err := EstimateSizePerRecord(schemaWithSparse)
+		assert.NoError(t, err)
+		assert.Equal(t, 2048, size)
+
+		SetSparseFloatVectorEstimateLength(64)
+		size, err = EstimateSizePerRecord(schemaWithSparse)
+		assert.NoError(t, err)
+		assert.Equal(t, 64, size)
 	})
 
 	t.Run("SchemaHelper", func(t *testing.T) {
