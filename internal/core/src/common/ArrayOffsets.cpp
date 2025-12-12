@@ -65,7 +65,7 @@ ArrayOffsetsSealed::RowBitsetToElementBitset(
     return {std::move(element_bitset), std::move(valid_element_bitset)};
 }
 
-ArrayOffsetsSealed
+std::shared_ptr<ArrayOffsetsSealed>
 ArrayOffsetsSealed::BuildFromSegment(const void* segment,
                                      const FieldMeta& field_meta) {
     auto seg = static_cast<const segcore::SegmentInternalInterface*>(segment);
@@ -76,7 +76,8 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
             "ArrayOffsetsSealed::BuildFromSegment: empty segment for struct "
             "'{}'",
             field_meta.get_name().get());
-        return ArrayOffsetsSealed({}, {0});
+        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{},
+                                                    std::vector<int32_t>{0});
     }
 
     FieldId field_id = field_meta.get_id();
@@ -158,11 +159,11 @@ ArrayOffsetsSealed::BuildFromSegment(const void* segment,
         row_count,
         total_elements);
 
-    ArrayOffsetsSealed result(std::move(element_row_ids),
-                              std::move(row_to_element_start));
-    result.resource_size_ = 4 * (row_count + 1) + 4 * total_elements;
+    auto result = std::make_shared<ArrayOffsetsSealed>(
+        std::move(element_row_ids), std::move(row_to_element_start));
+    result->resource_size_ = 4 * (row_count + 1) + 4 * total_elements;
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-        cachinglayer::ResourceUsage{result.resource_size_, 0});
+        cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;
 }
 
@@ -217,13 +218,22 @@ ArrayOffsetsGrowing::Insert(int64_t row_id_start,
 
     row_to_element_start_.reserve(row_id_start + count + 1);
 
+    int32_t original_committed_count = committed_row_count_;
+
     for (int64_t i = 0; i < count; ++i) {
         int32_t row_id = row_id_start + i;
         int32_t array_len = array_lengths[i];
 
         if (row_id == committed_row_count_) {
             // Record the start position for this row
-            row_to_element_start_.push_back(element_row_ids_.size());
+            // If sentinel exists at current position, overwrite it; otherwise push_back
+            if (row_to_element_start_.size() >
+                static_cast<size_t>(committed_row_count_)) {
+                row_to_element_start_[committed_row_count_] =
+                    element_row_ids_.size();
+            } else {
+                row_to_element_start_.push_back(element_row_ids_.size());
+            }
 
             // Add row_id for each element (elem_idx computed on access)
             for (int32_t j = 0; j < array_len; ++j) {
@@ -238,12 +248,15 @@ ArrayOffsetsGrowing::Insert(int64_t row_id_start,
 
     DrainPendingRows();
 
-    // Update the sentinel (total element count)
-    if (row_to_element_start_.size() ==
-        static_cast<size_t>(committed_row_count_)) {
-        row_to_element_start_.push_back(element_row_ids_.size());
-    } else {
-        row_to_element_start_[committed_row_count_] = element_row_ids_.size();
+    // Update the sentinel (total element count) only if we committed new rows
+    if (committed_row_count_ > original_committed_count) {
+        if (row_to_element_start_.size() ==
+            static_cast<size_t>(committed_row_count_)) {
+            row_to_element_start_.push_back(element_row_ids_.size());
+        } else {
+            row_to_element_start_[committed_row_count_] =
+                element_row_ids_.size();
+        }
     }
 }
 
@@ -257,7 +270,14 @@ ArrayOffsetsGrowing::DrainPendingRows() {
 
         const auto& pending = it->second;
 
-        row_to_element_start_.push_back(element_row_ids_.size());
+        // If sentinel exists at current position, overwrite it; otherwise push_back
+        if (row_to_element_start_.size() >
+            static_cast<size_t>(committed_row_count_)) {
+            row_to_element_start_[committed_row_count_] =
+                element_row_ids_.size();
+        } else {
+            row_to_element_start_.push_back(element_row_ids_.size());
+        }
 
         for (int32_t j = 0; j < pending.array_len; ++j) {
             element_row_ids_.emplace_back(static_cast<int32_t>(pending.row_id));

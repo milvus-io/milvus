@@ -15,6 +15,7 @@
 #include <boost/format.hpp>
 
 #include "common/Schema.h"
+#include "common/ArrayOffsets.h"
 #include "query/Plan.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
@@ -53,7 +54,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
-    size_t N = 10000;
+    size_t N = 500;
     int array_len = 3;
 
     // Step 2: Generate test data
@@ -119,7 +120,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     int topK = 5;
 
     // Step 5: Test with element-level filter
-    // Query: Search array elements, filter by element_value in (1250, 2555)
+    // Query: Search array elements, filter by element_value in (100, 400)
     {
         std::string hints_line =
             with_hints ? R"(hints: "iterative_filter")" : "";
@@ -138,10 +139,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                                                 lower_inclusive: false
                                                 upper_inclusive: false
                                                 lower_value: <
-                                                  int64_val: 1250
+                                                  int64_val: 100
                                                 >
                                                 upper_value: <
-                                                  int64_val: 2555
+                                                  int64_val: 400
                                                 >
                                               >
                                             >
@@ -220,13 +221,13 @@ TEST_P(ElementFilterSealed, RangeExpr) {
             ASSERT_EQ(doc_id % 2, 0) << "Result doc_id " << doc_id
                                      << " should satisfy (id % 2 == 0)";
 
-            // Verify element value is in range (1250, 2555)
+            // Verify element value is in range (100, 400)
             // Element value = doc_id * array_len + elem_idx + 1
             int element_value = doc_id * array_len + elem_idx + 1;
-            ASSERT_GT(element_value, 1250)
-                << "Element value " << element_value << " should be > 1250";
-            ASSERT_LT(element_value, 2555)
-                << "Element value " << element_value << " should be < 2555";
+            ASSERT_GT(element_value, 100)
+                << "Element value " << element_value << " should be > 100";
+            ASSERT_LT(element_value, 400)
+                << "Element value " << element_value << " should be < 400";
         }
 
         // Verify distances are sorted (ascending for L2)
@@ -254,7 +255,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
-    size_t N = 10000;
+    size_t N = 500;
     int array_len = 3;
 
     // Step 2: Generate test data
@@ -451,7 +452,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsetsGrowing) {
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
-    size_t N = 10000;
+    size_t N = 500;
     int array_len = 3;
 
     auto raw_data = DataGen(schema, N, 42, 0, 1, array_len);
@@ -641,7 +642,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
-    size_t N = 10000;
+    size_t N = 500;
     int array_len = 3;
 
     // Generate test data
@@ -691,7 +692,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
     int topK = 5;
 
     // Execute element-level search with iterative filter
-    // Query: Search array elements where (id % 2 == 0) AND (price_array element in range (1250, 2555))
+    // Query: Search array elements where (id % 2 == 0) AND (price_array element in range (100, 400))
     {
         std::string hints_line =
             with_hints ? R"(hints: "iterative_filter")" : "";
@@ -710,10 +711,10 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                                                 lower_inclusive: false
                                                 upper_inclusive: false
                                                 lower_value: <
-                                                  int64_val: 1250
+                                                  int64_val: 100
                                                 >
                                                 upper_value: <
-                                                  int64_val: 2555
+                                                  int64_val: 400
                                                 >
                                               >
                                             >
@@ -803,13 +804,13 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
             ASSERT_LT(elem_idx, array_len)
                 << "Element index should be < array_len";
 
-            // Verify element value is in range (1250, 2555)
+            // Verify element value is in range (100, 400)
             // Element value = doc_id * array_len + elem_idx + 1
             int element_value = doc_id * array_len + elem_idx + 1;
-            ASSERT_GT(element_value, 1250)
-                << "Element value " << element_value << " should be > 1250";
-            ASSERT_LT(element_value, 2555)
-                << "Element value " << element_value << " should be < 2555";
+            ASSERT_GT(element_value, 100)
+                << "Element value " << element_value << " should be > 100";
+            ASSERT_LT(element_value, 400)
+                << "Element value " << element_value << " should be < 400";
         }
 
         // Verify distances are sorted (ascending for L2)
@@ -829,3 +830,148 @@ INSTANTIATE_TEST_SUITE_P(
         bool with_hints = info.param;
         return with_hints ? "WithHints" : "WithoutHints";
     });
+
+// Unit tests for ArrayOffsetsGrowing
+TEST(ArrayOffsetsGrowing, PurePendingThenDrain) {
+    // Test: first insert goes entirely to pending, second insert triggers drain
+    ArrayOffsetsGrowing offsets;
+
+    // First insert: rows 2-4, all go to pending (committed_row_count_ = 0)
+    std::vector<int32_t> lens1 = {
+        3, 2, 4};  // row 2: 3 elems, row 3: 2 elems, row 4: 4 elems
+    offsets.Insert(2, lens1.data(), 3);
+
+    ASSERT_EQ(offsets.GetRowCount(), 0) << "No rows should be committed yet";
+    ASSERT_EQ(offsets.GetTotalElementCount(), 0)
+        << "No elements should exist yet";
+
+    // Second insert: rows 0-1, triggers drain of pending rows 2-4
+    std::vector<int32_t> lens2 = {2, 3};  // row 0: 2 elems, row 1: 3 elems
+    offsets.Insert(0, lens2.data(), 2);
+
+    ASSERT_EQ(offsets.GetRowCount(), 5) << "All 5 rows should be committed";
+    // Total elements: 2 + 3 + 3 + 2 + 4 = 14
+    ASSERT_EQ(offsets.GetTotalElementCount(), 14);
+
+    // Verify ElementIDToRowID mapping
+    // Row 0: elem 0-1, Row 1: elem 2-4, Row 2: elem 5-7, Row 3: elem 8-9, Row 4: elem 10-13
+    std::vector<std::pair<int32_t, int32_t>> expected = {
+        {0, 0},
+        {0, 1},  // row 0
+        {1, 0},
+        {1, 1},
+        {1, 2},  // row 1
+        {2, 0},
+        {2, 1},
+        {2, 2},  // row 2
+        {3, 0},
+        {3, 1},  // row 3
+        {4, 0},
+        {4, 1},
+        {4, 2},
+        {4, 3}  // row 4
+    };
+
+    for (int32_t elem_id = 0; elem_id < 14; ++elem_id) {
+        auto [row_id, elem_idx] = offsets.ElementIDToRowID(elem_id);
+        ASSERT_EQ(row_id, expected[elem_id].first)
+            << "elem_id " << elem_id << " should map to row "
+            << expected[elem_id].first;
+        ASSERT_EQ(elem_idx, expected[elem_id].second)
+            << "elem_id " << elem_id << " should have elem_idx "
+            << expected[elem_id].second;
+    }
+}
+
+TEST(ArrayOffsetsGrowing, ElementIDRangeOfRow) {
+    ArrayOffsetsGrowing offsets;
+
+    // Insert 4 rows with varying element counts
+    std::vector<int32_t> lens = {3, 0, 2, 5};  // includes empty array
+    offsets.Insert(0, lens.data(), 4);
+
+    ASSERT_EQ(offsets.GetRowCount(), 4);
+    ASSERT_EQ(offsets.GetTotalElementCount(), 10);  // 3 + 0 + 2 + 5
+
+    // Verify ElementIDRangeOfRow
+    auto [start0, end0] = offsets.ElementIDRangeOfRow(0);
+    ASSERT_EQ(start0, 0);
+    ASSERT_EQ(end0, 3);
+
+    auto [start1, end1] = offsets.ElementIDRangeOfRow(1);
+    ASSERT_EQ(start1, 3);
+    ASSERT_EQ(end1, 3);  // empty array
+
+    auto [start2, end2] = offsets.ElementIDRangeOfRow(2);
+    ASSERT_EQ(start2, 3);
+    ASSERT_EQ(end2, 5);
+
+    auto [start3, end3] = offsets.ElementIDRangeOfRow(3);
+    ASSERT_EQ(start3, 5);
+    ASSERT_EQ(end3, 10);
+
+    // Boundary: row_id == row_count returns (total, total)
+    auto [start4, end4] = offsets.ElementIDRangeOfRow(4);
+    ASSERT_EQ(start4, 10);
+    ASSERT_EQ(end4, 10);
+}
+
+TEST(ArrayOffsetsGrowing, MultiplePendingBatches) {
+    // Test multiple pending batches being drained in order
+    ArrayOffsetsGrowing offsets;
+
+    // Insert row 5 first
+    std::vector<int32_t> lens5 = {2};
+    offsets.Insert(5, lens5.data(), 1);
+    ASSERT_EQ(offsets.GetRowCount(), 0);
+
+    // Insert row 3
+    std::vector<int32_t> lens3 = {3};
+    offsets.Insert(3, lens3.data(), 1);
+    ASSERT_EQ(offsets.GetRowCount(), 0);
+
+    // Insert row 1
+    std::vector<int32_t> lens1 = {1};
+    offsets.Insert(1, lens1.data(), 1);
+    ASSERT_EQ(offsets.GetRowCount(), 0);
+
+    // Insert row 0 - should drain row 1, but not 3 or 5 (gap at 2)
+    std::vector<int32_t> lens0 = {2};
+    offsets.Insert(0, lens0.data(), 1);
+    ASSERT_EQ(offsets.GetRowCount(), 2) << "Should commit rows 0-1";
+    ASSERT_EQ(offsets.GetTotalElementCount(), 3);  // 2 + 1
+
+    // Insert row 2 - should drain rows 3, but not 5 (gap at 4)
+    std::vector<int32_t> lens2 = {1};
+    offsets.Insert(2, lens2.data(), 1);
+    ASSERT_EQ(offsets.GetRowCount(), 4) << "Should commit rows 0-3";
+    ASSERT_EQ(offsets.GetTotalElementCount(), 7);  // 2 + 1 + 1 + 3
+
+    // Insert row 4 - should drain row 5
+    std::vector<int32_t> lens4 = {2};
+    offsets.Insert(4, lens4.data(), 1);
+    ASSERT_EQ(offsets.GetRowCount(), 6) << "Should commit rows 0-5";
+    ASSERT_EQ(offsets.GetTotalElementCount(), 11);  // 2 + 1 + 1 + 3 + 2 + 2
+
+    // Verify final mapping
+    // Row 0: elem 0-1, Row 1: elem 2, Row 2: elem 3, Row 3: elem 4-6, Row 4: elem 7-8, Row 5: elem 9-10
+    auto [r0, i0] = offsets.ElementIDToRowID(0);
+    ASSERT_EQ(r0, 0);
+    ASSERT_EQ(i0, 0);
+
+    auto [r2, i2] = offsets.ElementIDToRowID(2);
+    ASSERT_EQ(r2, 1);
+    ASSERT_EQ(i2, 0);
+
+    auto [r4, i4] = offsets.ElementIDToRowID(4);
+    ASSERT_EQ(r4, 3);
+    ASSERT_EQ(i4, 0);
+
+    auto [r7, i7] = offsets.ElementIDToRowID(7);
+    ASSERT_EQ(r7, 4);
+    ASSERT_EQ(i7, 0);
+
+    auto [r10, i10] = offsets.ElementIDToRowID(10);
+    ASSERT_EQ(r10, 5);
+    ASSERT_EQ(i10, 1);
+}

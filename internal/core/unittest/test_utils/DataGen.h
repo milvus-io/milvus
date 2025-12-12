@@ -50,8 +50,6 @@ constexpr int64_t kCollectionID = 1;
 constexpr int64_t kPartitionID = 1;
 constexpr int64_t kSegmentID = 1;
 
-inline std::atomic<int64_t> g_vector_counter(0);
-
 namespace milvus::segcore {
 
 struct GeneratedData {
@@ -568,25 +566,20 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
-    auto generate_float_vector = [&offset](auto& field_meta, int64_t N) {
+    auto generate_float_vector = [&seed, &offset, &random, &distr](
+                                     auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
         bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
-
-        // Get base offset for this call to ensure uniqueness across multiple calls
-        int64_t base_offset = g_vector_counter.fetch_add(N);
-
 #pragma omp parallel for
         for (int n = 0; n < N; ++n) {
             vector<float> data(dim);
             float sum = 0;
 
-            // Each thread uses a unique seed based on base_offset + n
-            std::default_random_engine er(base_offset + n);
-            std::normal_distribution<> distr(0, 1);
-
+            std::default_random_engine er2(seed + n);
+            std::normal_distribution<> distr2(0, 1);
             for (auto& x : data) {
-                x = distr(er) + offset;
+                x = distr2(er2) + offset;
                 sum += x * x;
             }
             if (is_ip) {

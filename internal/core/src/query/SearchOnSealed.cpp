@@ -172,7 +172,13 @@ SearchOnSealedColumn(const Schema& schema,
                              search_info.metric_type_,
                              search_info.round_decimal_);
 
-    if (data_type == DataType::VECTOR_ARRAY && query_offsets == nullptr) {
+    // For element-level search (embedding-search-embedding), we need to use
+    // element count instead of row count
+    bool is_element_level_search =
+        field.get_data_type() == DataType::VECTOR_ARRAY &&
+        query_offsets == nullptr;
+
+    if (is_element_level_search) {
         // embedding-search-embedding on embedding list pattern
         data_type = element_type;
     }
@@ -184,6 +190,14 @@ SearchOnSealedColumn(const Schema& schema,
         auto pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
+
+        // For element-level search, get element count from VectorArrayOffsets
+        if (is_element_level_search) {
+            auto elem_offsets_pw = column->VectorArrayOffsets(op_context, i);
+            // offsets[row_count] gives total element count in this chunk
+            chunk_size = elem_offsets_pw.get()[chunk_size];
+        }
+
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
 

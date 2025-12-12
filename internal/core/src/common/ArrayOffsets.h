@@ -19,6 +19,7 @@
 #include <vector>
 #include <utility>
 #include <map>
+#include <memory>
 #include <shared_mutex>
 #include "cachinglayer/Manager.h"
 #include "common/Types.h"
@@ -96,7 +97,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
         const TargetBitmapView& row_bitset,
         const TargetBitmapView& valid_row_bitset) const override;
 
-    static ArrayOffsetsSealed
+    static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
 
  private:

@@ -2720,8 +2720,8 @@ ChunkedSegmentSealedImpl::load_field_data_common(
 
     // Build ArrayOffsetsSealed outside lock (expensive operation)
     if (field_meta_ptr) {
-        auto new_offsets = std::make_shared<ArrayOffsetsSealed>(
-            ArrayOffsetsSealed::BuildFromSegment(this, *field_meta_ptr));
+        auto new_offsets =
+            ArrayOffsetsSealed::BuildFromSegment(this, *field_meta_ptr);
 
         std::unique_lock lck(mutex_);
         // Double-check after re-acquiring lock

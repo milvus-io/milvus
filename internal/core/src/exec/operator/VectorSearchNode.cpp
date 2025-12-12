@@ -87,6 +87,7 @@ PhyVectorSearchNode::GetOutput() {
         array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
         AssertInfo(array_offsets != nullptr, "Array offsets not available");
         query_context_->set_array_offsets(array_offsets);
+        search_info_.array_offsets_ = array_offsets;
     }
 
     // There are two types of execution: pre-filter and iterative filter
