@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -52,7 +53,7 @@ func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.Tr
 	msg := message.NewTruncateCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(body).
-		WithBroadcast(channels).
+		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -86,5 +87,23 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 		return err
 	}
 
-	return nil
+	return c.meta.RemoveTempCollectionProperty(ctx, header.CollectionId, common.CollectionOnTruncatingKey)
+}
+
+// truncateCollectionV2AckOnceCallback is called when the truncate collection message is acknowledged once
+func (c *DDLCallback) truncateCollectionV2AckOnceCallback(ctx context.Context, result message.AckResultTruncateCollectionMessageV2) error {
+	msg := result.Message
+	// When the ack callback of truncate collection operation is executing,
+	// the compaction and flush operation may be executed in parallel.
+	// So if some vchannel flush a new segment which order after the truncate collection operation,
+	// the segment should not be dropped, but the compaction may compact it with the segment which order before the truncate collection operation.
+	// the new compacted segment can not be dropped as whole, break the design of truncate collection operation.
+	// we need to forbid the compaction of current collection here.
+	collectionID := msg.Header().CollectionId
+	if err := c.meta.SetTempCollectionProperty(ctx, collectionID, common.CollectionOnTruncatingKey, "1"); err != nil {
+		return err
+	}
+
+	// notify datacoord to update their meta cache
+	return c.broker.BroadcastAlteredCollection(ctx, collectionID)
 }

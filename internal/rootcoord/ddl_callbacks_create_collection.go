@@ -86,10 +86,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	msg := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(createCollectionTask.header).
 		WithBody(createCollectionTask.body).
-		WithBroadcast(broadcastChannel,
-			message.NewSharedDBNameResourceKey(createCollectionTask.body.DbName),
-			message.NewExclusiveCollectionNameResourceKey(createCollectionTask.body.DbName, createCollectionTask.body.CollectionName),
-		).
+		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
