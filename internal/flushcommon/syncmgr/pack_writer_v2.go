@@ -82,12 +82,6 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
-	err = bw.prefetchIDs(pack)
-	if err != nil {
-		log.Warn("failed allocate ids for sync task", zap.Error(err))
-		return
-	}
-
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
@@ -241,7 +235,11 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	} else {
 		paths := make([]string, 0)
 		for _, columnGroup := range columnGroups {
-			path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
+			id, err := bw.allocator.AllocOne()
+			if err != nil {
+				return nil, "", err
+			}
+			path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
 			paths = append(paths, path)
 		}
 		w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
