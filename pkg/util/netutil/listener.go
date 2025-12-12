@@ -85,6 +85,7 @@ type netListenerConfig struct {
 	ip                    string
 	highPriorityToUsePort int
 	port                  int
+	preferIPv6Address     bool
 	tlsConfig             *tls.Config
 }
 
@@ -92,12 +93,14 @@ type netListenerConfig struct {
 func getNetListenerConfig(opts ...Opt) *netListenerConfig {
 	defaultConfig := &netListenerConfig{
 		net:                   "tcp",
-		ip:                    funcutil.GetLocalIP(),
 		highPriorityToUsePort: 0,
 		port:                  0,
 	}
 	for _, opt := range opts {
 		opt(defaultConfig)
+	}
+	if len(defaultConfig.ip) == 0 {
+		defaultConfig.ip = funcutil.GetLocalIP(defaultConfig.preferIPv6Address)
 	}
 	return defaultConfig
 }
@@ -116,6 +119,13 @@ func OptNet(net string) Opt {
 func OptIP(ip string) Opt {
 	return func(nlc *netListenerConfig) {
 		nlc.ip = ip
+	}
+}
+
+// OptPreferIPv6Address sets whether prefer to get ipv6 address for the listener.
+func OptPreferIPv6Address(preferIPv6Address bool) Opt {
+	return func(nlc *netListenerConfig) {
+		nlc.preferIPv6Address = preferIPv6Address
 	}
 }
 
