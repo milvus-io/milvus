@@ -64,6 +64,10 @@ const (
 	// MetaFieldName is the field name of dynamic schema
 	MetaFieldName = "$meta"
 
+	// VirtualPKFieldName is the field name of virtual primary key for external collections
+	// Virtual PK format: (segmentID << 32) | offset
+	VirtualPKFieldName = "__virtual_pk__"
+
 	// DefaultShardsNum defines the default number of shards when creating a collection
 	DefaultShardsNum = int32(1)
 

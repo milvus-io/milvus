@@ -156,6 +156,13 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         return schema_proto.default_value();
     }();
 
+    // Helper to set external_field on the result
+    auto set_external_field = [&schema_proto](FieldMeta& meta) {
+        if (!schema_proto.external_field().empty()) {
+            meta.set_external_field(schema_proto.external_field());
+        }
+    };
+
     if (data_type == DataType::VECTOR_ARRAY) {
         // todo(SpadeA): revisit the code when index build for vector array is ready
         int64_t dim = 0;
@@ -163,8 +170,10 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         AssertInfo(type_map.count("dim"), "dim not found");
         dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
 
-        return FieldMeta{
+        auto result = FieldMeta{
             name, field_id, data_type, element_type, dim, std::nullopt};
+        set_external_field(result);
+        return result;
     }
 
     if (IsVectorDataType(data_type)) {
@@ -177,18 +186,22 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
             dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
         }
 
-        if (!index_map.count("metric_type")) {
-            return FieldMeta{name,
-                             field_id,
-                             data_type,
-                             dim,
-                             std::nullopt,
-                             false,
-                             default_value};
-        }
-        auto metric_type = index_map.at("metric_type");
-        return FieldMeta{
-            name, field_id, data_type, dim, metric_type, false, default_value};
+        FieldMeta result = [&]() {
+            if (!index_map.count("metric_type")) {
+                return FieldMeta{name,
+                                 field_id,
+                                 data_type,
+                                 dim,
+                                 std::nullopt,
+                                 false,
+                                 default_value};
+            }
+            auto metric_type = index_map.at("metric_type");
+            return FieldMeta{
+                name, field_id, data_type, dim, metric_type, false, default_value};
+        }();
+        set_external_field(result);
+        return result;
     }
 
     if (IsStringDataType(data_type)) {
@@ -214,7 +227,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
         bool enable_analyzer = get_bool_value("enable_analyzer");
         bool enable_match = get_bool_value("enable_match");
 
-        return FieldMeta{name,
+        auto result = FieldMeta{name,
                          field_id,
                          data_type,
                          max_len,
@@ -223,18 +236,24 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          enable_analyzer,
                          type_map,
                          default_value};
+        set_external_field(result);
+        return result;
     }
 
     if (IsArrayDataType(data_type)) {
-        return FieldMeta{name,
+        auto result = FieldMeta{name,
                          field_id,
                          data_type,
                          DataType(schema_proto.element_type()),
                          nullable,
                          default_value};
+        set_external_field(result);
+        return result;
     }
 
-    return FieldMeta{name, field_id, data_type, nullable, default_value};
+    auto result = FieldMeta{name, field_id, data_type, nullable, default_value};
+    set_external_field(result);
+    return result;
 }
 
 }  // namespace milvus

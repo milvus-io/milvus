@@ -384,17 +384,32 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				}
 			}
 		}
-		if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
-			return errors.Wrap(err, "At LoadDeltaLogs")
+		// Skip delta logs for external collections (they are read-only, no deletions)
+		if !IsExternalCollection(collection.Schema()) {
+			if err = loader.loadDeltalogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
+				return errors.Wrap(err, "At LoadDeltaLogs")
+			}
 		}
 
 		if !segment.BloomFilterExist() {
 			log.Debug("BloomFilterExist", zap.Int64("segid", segment.ID()))
-			bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
-			if err != nil {
-				return errors.Wrap(err, "At LoadBloomFilter")
+			// For external collections, use ExternalSegmentCandidate instead of BloomFilterSet
+			if IsExternalCollection(collection.Schema()) {
+				 candidate := pkoracle.NewExternalSegmentCandidate(
+					loadInfo.GetSegmentID(),
+					loadInfo.GetPartitionID(),
+					segment.Type(),
+				)
+				segment.SetPKCandidate(candidate)
+				log.Info("using ExternalSegmentCandidate for external collection",
+					zap.Int64("segmentID", loadInfo.GetSegmentID()))
+			} else {
+				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
+				if err != nil {
+					return errors.Wrap(err, "At LoadBloomFilter")
+				}
+				segment.SetBloomFilter(bfs)
 			}
-			segment.SetBloomFilter(bfs)
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
@@ -681,6 +696,14 @@ func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, colle
 	segmentID := loadInfo.SegmentID
 	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
 
+	// For external collections, return empty bloom filter set
+	// External collections use ExternalSegmentCandidate for PK checking (set on segment)
+	// and don't have stats logs, so we skip loading bloom filters
+	if IsExternalCollection(collection.Schema()) {
+		log.Info("external collection: returning empty bloom filter set (PK checking via ExternalSegmentCandidate)")
+		return bfs, nil
+	}
+
 	log.Info("loading bloom filter for remote...")
 	pkStatsBinlogs, logType := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
 	err := loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, logType)
@@ -721,12 +744,21 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	log.Info("start loading remote...", zap.Int("segmentNum", segmentNum))
 
 	loadedBfs := typeutil.NewConcurrentSet[*pkoracle.BloomFilterSet]()
+	isExternal := IsExternalCollection(collection.Schema())
+
 	// TODO check memory for bf size
 	loadRemoteFunc := func(idx int) error {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
 		segmentID := loadInfo.SegmentID
 		bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, commonpb.SegmentState_Sealed)
+
+		// For external collections, return empty bloom filter set
+		// External collections don't have stats logs and use ExternalSegmentCandidate for PK checking
+		if isExternal {
+			loadedBfs.Insert(bfs)
+			return nil
+		}
 
 		log.Info("loading bloom filter for remote...")
 		pkStatsBinlogs, logType := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkField.GetFieldID())
@@ -794,10 +826,26 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 ) {
 	storageVersion := loadInfo.GetStorageVersion()
 
+	// Build a map of external field IDs for quick lookup
+	// External fields are skipped during loading (lazy loaded on demand)
+	externalFieldIDs := make(map[int64]bool)
+	isExternalColl := IsExternalCollection(schema)
+	if isExternalColl {
+		for _, field := range schema.GetFields() {
+			if IsExternalField(field) {
+				externalFieldIDs[field.GetFieldID()] = true
+			}
+		}
+	}
+
 	fieldID2IndexInfo := make(map[int64][]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
 		if len(indexInfo.GetIndexFilePaths()) > 0 {
 			fieldID := indexInfo.FieldID
+			// Skip indexes on external fields
+			if externalFieldIDs[fieldID] {
+				continue
+			}
 			fieldID2IndexInfo[fieldID] = append(fieldID2IndexInfo[fieldID], indexInfo)
 		}
 	}
@@ -809,10 +857,19 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		for _, fieldBinlog := range loadInfo.BinlogPaths {
 			fieldID := fieldBinlog.FieldID
 
+			// Skip external fields - they are lazy loaded on demand
+			if externalFieldIDs[fieldID] {
+				continue
+			}
+
 			if fieldID == storagecommon.DefaultShortColumnGroupID {
 				allFields := typeutil.GetAllFieldSchemas(schema)
 				// for short column group, we need to load all fields in the group
 				for _, field := range allFields {
+					// Skip external fields in short column group
+					if externalFieldIDs[field.GetFieldID()] {
+						continue
+					}
 					if infos, ok := fieldID2IndexInfo[field.GetFieldID()]; ok {
 						for _, indexInfo := range infos {
 							fieldInfo := &IndexedFieldInfo{
@@ -842,6 +899,12 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	} else {
 		for _, fieldBinlog := range loadInfo.BinlogPaths {
 			fieldID := fieldBinlog.FieldID
+
+			// Skip external fields - they are lazy loaded on demand
+			if externalFieldIDs[fieldID] {
+				continue
+			}
+
 			if infos, ok := fieldID2IndexInfo[fieldID]; ok {
 				for _, indexInfo := range infos {
 					fieldInfo := &IndexedFieldInfo{

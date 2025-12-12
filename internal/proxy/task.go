@@ -398,6 +398,13 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// For external collections, inject virtual PK field if no PK exists
+	if t.schema.GetExternalSource() != "" {
+		if err := injectVirtualPKForExternalCollection(t.schema); err != nil {
+			return err
+		}
+	}
+
 	// validate primary key definition
 	if err := validatePrimaryKey(t.schema); err != nil {
 		return err

@@ -55,7 +55,10 @@
 #include "index/IndexFactory.h"
 #include "milvus-storage/common/metadata.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/ExternalFieldChunkedColumn.h"
+#include "mmap/VirtualPKChunkedColumn.h"
 #include "mmap/Types.h"
+#include "common/VirtualPK.h"
 #include "monitor/Monitor.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
@@ -351,6 +354,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(const std::string& manifest_path) {
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
+    // For external collections, handle virtual PK and external fields
+    if (schema_->is_external_collection()) {
+        LoadExternalCollectionFields();
+        return;
+    }
+
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<void>> load_group_futures;
     for (int64_t i = 0; i < column_groups->size(); ++i) {
@@ -505,6 +514,49 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                        "to expected {}",
                        offset,
                        num_rows);
+        }
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::LoadExternalCollectionFields() {
+    // Handle virtual PK and external fields for external collections
+    int64_t num_rows = segment_load_info_.num_of_rows();
+    LOG_INFO("Loading external collection fields for segment {} with {} rows",
+             id_,
+             num_rows);
+
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+
+        // Check if this is the virtual PK field
+        if (field_meta.get_name().get() == VIRTUAL_PK_FIELD_NAME) {
+            LOG_INFO("Creating VirtualPKChunkedColumn for segment {} field {}",
+                     id_,
+                     field_id.get());
+            auto column = std::make_shared<VirtualPKChunkedColumn>(id_, num_rows);
+            fields_.wlock()->emplace(field_id, column);
+            set_bit(field_data_ready_bitset_, field_id, true);
+            continue;
+        }
+
+        // Check if this is an external field
+        if (field_meta.is_external_field()) {
+            LOG_INFO(
+                "Creating ExternalFieldChunkedColumn for segment {} field {}",
+                id_,
+                field_id.get());
+            auto column = std::make_shared<ExternalFieldChunkedColumn>(
+                num_rows,
+                field_meta.get_data_type(),
+                field_meta.is_nullable(),
+                field_id,
+                reader_.get());
+            fields_.wlock()->emplace(field_id, column);
+            set_bit(field_data_ready_bitset_, field_id, true);
+            continue;
         }
     }
 }
@@ -2753,6 +2805,14 @@ ChunkedSegmentSealedImpl::FinishLoad() {
         }
         if (IsVectorDataType(field_meta.get_data_type())) {
             // no filling vector fields
+            continue;
+        }
+        // Skip external fields - they are lazily loaded
+        if (field_meta.is_external_field()) {
+            continue;
+        }
+        // Skip virtual PK field for external collections
+        if (field_meta.get_name().get() == VIRTUAL_PK_FIELD_NAME) {
             continue;
         }
         fill_empty_field(field_meta);
