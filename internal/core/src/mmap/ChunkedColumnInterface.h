@@ -141,7 +141,8 @@ class ChunkedColumnInterface {
     BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
                          void* dst,
                          const int64_t* offsets,
-                         int64_t count) = 0;
+                         int64_t count,
+                         bool int_raw_type = false) = 0;
 
     virtual void
     BulkVectorValueAt(milvus::OpContext* op_ctx,

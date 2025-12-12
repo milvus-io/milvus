@@ -35,7 +35,7 @@ class PhyVectorSearchNode : public Operator {
         const std::shared_ptr<const plan::VectorSearchNode>& search_node);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return false;
     }
 

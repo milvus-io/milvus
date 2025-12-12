@@ -28,6 +28,7 @@
 #include "segcore/SegmentInterface.h"
 #include "plan/PlanNodeIdGenerator.h"
 #include "rescores/Scorer.h"
+#include "pb/plan.pb.h"
 
 namespace milvus {
 namespace plan {
@@ -49,7 +50,7 @@ class PlanNode {
         return id_;
     }
 
-    virtual DataType
+    virtual RowTypePtr
     output_type() const = 0;
 
     virtual std::vector<std::shared_ptr<PlanNode>>
@@ -85,7 +86,6 @@ class PlanNode {
 };
 
 using PlanNodePtr = std::shared_ptr<PlanNode>;
-
 class FilterNode : public PlanNode {
  public:
     FilterNode(const PlanNodeId& id,
@@ -100,9 +100,9 @@ class FilterNode : public PlanNode {
                         filter_->type()));
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return sources_[0]->output_type();
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -145,9 +145,9 @@ class FilterBitsNode : public PlanNode {
                         filter_->type()));
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::BOOL;
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -183,6 +183,52 @@ class FilterBitsNode : public PlanNode {
     const expr::TypedExprPtr filter_;
 };
 
+class ProjectNode : public PlanNode {
+ public:
+    ProjectNode(const PlanNodeId& id,
+                std::vector<FieldId>&& field_ids,
+                std::vector<std::string>&& field_names,
+                std::vector<milvus::DataType>&& field_types,
+                std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id),
+          sources_(std::move(sources)),
+          field_ids_(std::move(field_ids)),
+          output_type_(std::make_shared<RowType>(std::move(field_names),
+                                                 std::move(field_types))) {
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    RowTypePtr
+    output_type() const override {
+        return output_type_;
+    }
+
+    std::string_view
+    name() const override {
+        return "ProjectNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("ProjectNode:\n\t[source node:{}]",
+                           SourceToString());
+    }
+
+    const std::vector<FieldId>&
+    FieldsToProject() const {
+        return field_ids_;
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+    const std::vector<FieldId> field_ids_;
+    const RowTypePtr output_type_;
+};
+
 class MvccNode : public PlanNode {
  public:
     MvccNode(const PlanNodeId& id,
@@ -190,9 +236,9 @@ class MvccNode : public PlanNode {
         : PlanNode(id), sources_{std::move(sources)} {
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::BOOL;
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -223,9 +269,9 @@ class RandomSampleNode : public PlanNode {
         : PlanNode(id), factor_(factor), sources_(std::move(sources)) {
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::BOOL;
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -261,9 +307,9 @@ class VectorSearchNode : public PlanNode {
         : PlanNode(id), sources_{std::move(sources)} {
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::BOOL;
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -286,16 +332,17 @@ class VectorSearchNode : public PlanNode {
     const std::vector<PlanNodePtr> sources_;
 };
 
-class GroupByNode : public PlanNode {
+class SearchGroupByNode : public PlanNode {
  public:
-    GroupByNode(const PlanNodeId& id,
-                std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+    SearchGroupByNode(
+        const PlanNodeId& id,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
         : PlanNode(id), sources_{std::move(sources)} {
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::BOOL;
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -305,12 +352,12 @@ class GroupByNode : public PlanNode {
 
     std::string_view
     name() const override {
-        return "GroupByNode";
+        return "SearchGroupByNode";
     }
 
     std::string
     ToString() const override {
-        return fmt::format("GroupByNode:\n\t[source node:{}]",
+        return fmt::format("SearchGroupByNode:\n\t[source node:{}]",
                            SourceToString());
     }
 
@@ -326,9 +373,9 @@ class CountNode : public PlanNode {
         : PlanNode(id), sources_{std::move(sources)} {
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::INT64;
+        return RowType::None;
     }
 
     std::vector<PlanNodePtr>
@@ -363,9 +410,11 @@ class RescoresNode : public PlanNode {
           sources_{std::move(sources)} {
     }
 
-    DataType
+    RowTypePtr
     output_type() const override {
-        return DataType::INT64;
+        return std::make_shared<const RowType>(
+            std::vector<std::string>{"scores"},
+            std::vector<milvus::DataType>{DataType::INT64});
     }
 
     std::vector<PlanNodePtr>
@@ -398,6 +447,74 @@ class RescoresNode : public PlanNode {
     const proto::plan::ScoreOption option_;
     const std::vector<PlanNodePtr> sources_;
     const std::vector<std::shared_ptr<rescores::Scorer>> scorers_;
+};
+
+class AggregationNode : public PlanNode {
+ public:
+    struct Aggregate {
+        /// Function name and input column names.
+        expr::CallExprPtr call_;
+
+        /// Raw input types used to properly identify aggregate function.
+        std::vector<DataType> rawInputTypes_;
+
+        DataType resultType_;
+
+     public:
+        Aggregate(expr::CallExprPtr call) : call_(call) {
+        }
+    };
+
+    AggregationNode(
+        const PlanNodeId& id,
+        std::vector<expr::FieldAccessTypeExprPtr>&& groupingKeys,
+        std::vector<std::string>&& aggNames,
+        std::vector<Aggregate>&& aggregates,
+        int64_t group_limit,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{});
+
+    RowTypePtr
+    output_type() const override {
+        return output_type_;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string
+    ToString() const override {
+        return "";
+    }
+
+    std::string_view
+    name() const override {
+        return "agg";
+    }
+
+    const std::vector<expr::FieldAccessTypeExprPtr>&
+    GroupingKeys() const {
+        return groupingKeys_;
+    }
+
+    const std::vector<Aggregate>&
+    aggregates() const {
+        return aggregates_;
+    }
+
+    int64_t
+    group_limit() const {
+        return group_limit_;
+    }
+
+ private:
+    const std::vector<expr::FieldAccessTypeExprPtr> groupingKeys_;
+    const std::vector<std::string> aggregateNames_;
+    const std::vector<Aggregate> aggregates_;
+    const std::vector<PlanNodePtr> sources_;
+    const RowTypePtr output_type_;
+    const int64_t group_limit_;
 };
 
 enum class ExecutionStrategy {
