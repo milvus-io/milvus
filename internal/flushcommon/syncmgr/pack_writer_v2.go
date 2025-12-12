@@ -137,12 +137,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		return nil, err
 	}
 
-	logs := make(map[int64]*datapb.FieldBinlog)
-	paths := make([]string, 0)
-	for _, columnGroup := range columnGroups {
-		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
-		paths = append(paths, path)
-	}
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
 	rows := rec.Len()
 	var tsFrom uint64 = math.MaxUint64
@@ -156,8 +150,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			tsTo = ts
 		}
 	}
-
-	bucketName := bw.getBucketName()
 
 	var pluginContextPtr *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
@@ -174,6 +166,35 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			}
 		}
 	}
+
+	var logs map[int64]*datapb.FieldBinlog
+	retry.Do(ctx, func() error {
+		var err error
+		logs, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, columnGroups, rec, tsFrom, tsTo)
+		if err != nil {
+			log.Warn("failed to write inserts into storage", zap.Int64("collectionID", pack.collectionID), zap.Int64("segmentID", pack.segmentID), zap.Error(err))
+			return err
+		}
+		return nil
+	}, bw.writeRetryOpts...)
+	return logs, nil
+}
+
+func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
+	pluginContextPtr *indexcgopb.StoragePluginContext,
+	pack *SyncPack,
+	columnGroups []storagecommon.ColumnGroup,
+	rec storage.Record,
+	tsFrom,
+	tsTo uint64,
+) (map[int64]*datapb.FieldBinlog, error) {
+	logs := make(map[int64]*datapb.FieldBinlog)
+	paths := make([]string, 0)
+	for _, columnGroup := range columnGroups {
+		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
+		paths = append(paths, path)
+	}
+	bucketName := bw.getBucketName()
 
 	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
