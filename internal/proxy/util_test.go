@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -4867,146 +4868,180 @@ func TestGetStorageCost(t *testing.T) {
 	})
 }
 
-func TestCheckDuplicatePkExist_Int64PK(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_Int64,
-	}
-
-	t.Run("with duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 2, 3, 1, 4, 2}, // duplicates: 1, 2
-							},
+func TestInjectMinHashPermutations(t *testing.T) {
+	t.Run("MinHash function without permutations - should inject", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "4096",
 						},
+					},
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "128"},
+						{Key: "shingle_size", Value: "3"},
+						{Key: "hash_function", Value: "xxhash64"},
+						{Key: "seed", Value: "42"},
 					},
 				},
 			},
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
-		assert.True(t, hasDup)
+
+		// Verify permutations were injected
+		funSchema := schema.Functions[0]
+		hasPermutations := false
+		var permutationsValue string
+		for _, param := range funSchema.Params {
+			if param.Key == "permutations" {
+				hasPermutations = true
+				permutationsValue = param.Value
+				break
+			}
+		}
+
+		assert.True(t, hasPermutations, "Permutations should be injected")
+		assert.NotEmpty(t, permutationsValue, "Permutations value should not be empty")
+
+		// Verify permutations are valid (a is odd, both within range)
+		for i := 0; i < 128; i++ {
+			assert.Equal(t, uint64(1), permA[i]%2, "permA[%d] should be odd", i)
+			assert.True(t, permA[i] > 0 && permA[i] < (1<<61-1), "permA[%d] should be in valid range", i)
+			assert.True(t, permB[i] >= 0 && permB[i] < (1<<61-1), "permB[%d] should be in valid range", i)
+		}
 	})
 
-	t.Run("without duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_Int64,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 2, 3, 4, 5},
-							},
-						},
+	t.Run("MinHash function with existing permutations - should not inject", func(t *testing.T) {
+		// Pre-generate permutations
+		permA, permB := function.InitializePermutations(64, 100)
+		existingPerms := function.SerializePermutations(permA, permB)
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "text_field", DataType: schemapb.DataType_VarChar},
+				{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "2048"},
+				}}, // 64 * 32 bits
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "text_to_minhash",
+					Type:             schemapb.FunctionType_MinHash,
+					InputFieldNames:  []string{"text_field"},
+					OutputFieldNames: []string{"minhash_output"},
+					Params: []*commonpb.KeyValuePair{
+						{Key: "num_hashes", Value: "64"},
+						{Key: "permutations", Value: existingPerms},
 					},
 				},
 			},
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
-		assert.False(t, hasDup)
+
+		// Verify permutations were not changed
+		funSchema := schema.Functions[0]
+		var permutationsValue string
+		for _, param := range funSchema.Params {
+			if param.Key == "permutations" {
+				permutationsValue = param.Value
+				break
+			}
+		}
+
+		assert.Equal(t, existingPerms, permutationsValue, "Existing permutations should not be modified")
 	})
-}
 
-func TestCheckDuplicatePkExist_VarCharPK(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_VarChar,
-	}
-
-	t.Run("with duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"a", "b", "c", "a", "d"}, // duplicate: "a"
-							},
-						},
-					},
+	t.Run("Non-MinHash function - should not inject", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{Name: "input_field", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+				{Name: "output_field", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{
+					Name:             "bm25_func",
+					Type:             schemapb.FunctionType_BM25,
+					InputFieldNames:  []string{"input_field"},
+					OutputFieldNames: []string{"output_field"},
 				},
 			},
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
+		err := validateFunction(schema, false)
 		assert.NoError(t, err)
-		assert.True(t, hasDup)
+
+		// Verify no permutations were added to BM25 function
+		funSchema := schema.Functions[0]
+		for _, param := range funSchema.Params {
+			assert.NotEqual(t, "permutations", param.Key, "BM25 function should not have permutations")
+		}
 	})
 
-	t.Run("without duplicates", func(t *testing.T) {
-		fieldsData := []*schemapb.FieldData{
-			{
-				FieldName: "id",
-				Type:      schemapb.DataType_VarChar,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: []string{"a", "b", "c", "d", "e"},
-							},
+	t.Run("Deterministic permutations with same seed", func(t *testing.T) {
+		createSchema := func() *schemapb.CollectionSchema {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "text_field", DataType: schemapb.DataType_VarChar},
+					{Name: "minhash_output", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "4096"},
+					}},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{
+						Name:             "text_to_minhash",
+						Type:             schemapb.FunctionType_MinHash,
+						InputFieldNames:  []string{"text_field"},
+						OutputFieldNames: []string{"minhash_output"},
+						Params: []*commonpb.KeyValuePair{
+							{Key: "num_hashes", Value: "128"},
+							{Key: "seed", Value: "999"},
 						},
 					},
 				},
-			},
+			}
 		}
 
-		hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
-		assert.NoError(t, err)
-		assert.False(t, hasDup)
+		schema1 := createSchema()
+		schema2 := createSchema()
+
+		// Inject permutations in both schemas
+		err1 := validateFunction(schema1, false)
+		assert.NoError(t, err1)
+
+		err2 := validateFunction(schema2, false)
+		assert.NoError(t, err2)
+		// Extract permutations from both schemas
+		var perms1, perms2 string
+		for _, param := range schema1.Functions[0].Params {
+			if param.Key == "permutations" {
+				perms1 = param.Value
+				break
+			}
+		}
+		for _, param := range schema2.Functions[0].Params {
+			if param.Key == "permutations" {
+				perms2 = param.Value
+				break
+			}
+		}
+
+		// Same seed should produce identical permutations
+		assert.Equal(t, perms1, perms2, "Same seed should produce identical permutations")
 	})
-}
-
-func TestCheckDuplicatePkExist_EmptyData(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_Int64,
-	}
-
-	hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, []*schemapb.FieldData{})
-	assert.NoError(t, err)
-	assert.False(t, hasDup)
-}
-
-func TestCheckDuplicatePkExist_MissingPrimaryKey(t *testing.T) {
-	primaryFieldSchema := &schemapb.FieldSchema{
-		Name:     "id",
-		FieldID:  100,
-		DataType: schemapb.DataType_Int64,
-	}
-
-	fieldsData := []*schemapb.FieldData{
-		{
-			FieldName: "other_field",
-			Type:      schemapb.DataType_Int64,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{
-							Data: []int64{1, 2, 3},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	hasDup, err := CheckDuplicatePkExist(primaryFieldSchema, fieldsData)
-	assert.Error(t, err)
-	assert.False(t, hasDup)
 }
