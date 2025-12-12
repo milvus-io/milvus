@@ -461,7 +461,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
     data_array->set_field_id(field_meta.get_id().get());
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
-    if (field_meta.is_nullable()) {
+    if (field_meta.is_nullable() && valid_data != nullptr) {
         auto valid_data_ = reinterpret_cast<const bool*>(valid_data);
         auto obj = data_array->mutable_valid_data();
         obj->Add(valid_data_, valid_data_ + count);

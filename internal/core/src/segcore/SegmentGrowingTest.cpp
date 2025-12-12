@@ -695,6 +695,9 @@ TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
             // Verify search results don't contain null vectors
             for (size_t i = 0; i < sr->seg_offsets_.size(); i++) {
                 auto seg_offset = sr->seg_offsets_[i];
+                if (seg_offset < 0) {
+                    continue;
+                }
                 ASSERT_TRUE(valid_data[seg_offset])
                     << "Round " << round
                     << ": Search returned null vector at offset " << seg_offset;

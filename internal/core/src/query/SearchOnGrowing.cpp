@@ -175,7 +175,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
-                                             active_row_count,
+                                             active_count,
                                              info,
                                              index_info,
                                              search_bitset,
@@ -188,7 +188,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
 
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-        auto max_chunk = upper_div(active_row_count, vec_size_per_chunk);
+        auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
         // embedding search embedding on embedding list
         bool embedding_search = false;
@@ -203,7 +203,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             auto row_begin = chunk_id * vec_size_per_chunk;
             auto row_end =
-                std::min(active_row_count, (chunk_id + 1) * vec_size_per_chunk);
+                std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = row_end - row_begin;
 
             query::dataset::RawDataset sub_data;
@@ -316,8 +316,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     std::move(final_qr.mutable_offsets());
             }
             search_result.distances_ = std::move(final_qr.mutable_distances());
-            search_result.seg_offsets_ =
-                std::move(final_qr.mutable_seg_offsets());
             if (offset_mapping.IsEnabled()) {
                 TransformOffset(search_result.seg_offsets_, offset_mapping);
             }

@@ -89,6 +89,10 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
                     if (metadata->Contains(DIM_KEY)) {
                         auto dim_str = metadata->Get(DIM_KEY).ValueOrDie();
                         dim_ = std::stoi(dim_str);
+                        AssertInfo(
+                            dim_ > 0,
+                            "nullable vector dim must be positive, got {}",
+                            dim_);
                     } else {
                         ThrowInfo(DataTypeInvalid,
                                   "nullable vector field metadata missing "

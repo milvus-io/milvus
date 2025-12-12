@@ -35,6 +35,10 @@
 
 namespace milvus::index {
 
+// valid data keys for nullable vector index serialization
+constexpr const char* VALID_DATA_KEY = "valid_data";
+constexpr const char* VALID_DATA_COUNT_KEY = "valid_data_count";
+
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,

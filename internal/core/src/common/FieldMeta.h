@@ -125,6 +125,8 @@ class FieldMeta {
           vector_info_(VectorInfo{dim, std::move(metric_type)}),
           default_value_(std::move(default_value)) {
         Assert(IsVectorDataType(type_));
+        Assert(!default_value_.has_value() &&
+               "vector fields do not support default values");
     }
 
     // array of vector type

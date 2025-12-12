@@ -161,7 +161,7 @@ class ChunkMergeIterator : public VectorIterator {
                        const milvus::OffsetMapping& offset_mapping,
                        const std::vector<int64_t>& total_rows_until_chunk = {},
                        bool larger_is_closer = false)
-        : offset_mapping_(&offset_mapping),               
+        : offset_mapping_(&offset_mapping),
           larger_is_closer_(larger_is_closer),
           heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
@@ -278,20 +278,23 @@ struct SearchResult {
         for (int i = 0, vec_iter_idx = 0; i < kw_iterators.size(); i++) {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
-                auto chunk_merge_iter = std::make_shared<ChunkMergeIterator>(
-                    chunk_count, offset_mapping, total_rows_until_chunk, larger_is_closer);
+                auto chunk_merge_iter =
+                    std::make_shared<ChunkMergeIterator>(chunk_count,
+                                                         offset_mapping,
+                                                         total_rows_until_chunk,
+                                                         larger_is_closer);
                 vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];
             auto chunk_merge_iter =
                 std::static_pointer_cast<ChunkMergeIterator>(
-                    vector_iterators[vec_iter_idx++], offset_mapping);
+                    vector_iterators[vec_iter_idx++]);
             chunk_merge_iter->AddIterator(kw_iterator);
         }
         for (const auto& vector_iter : vector_iterators) {
             // Cast to ChunkMergeIterator to call seal
             auto chunk_merge_iter =
-                std::static_pointer_cast<ChunkMergeIterator>(vector_iter, offset_mapping);
+                std::static_pointer_cast<ChunkMergeIterator>(vector_iter);
             chunk_merge_iter->seal();
         }
         this->vector_iterators_ = vector_iterators;

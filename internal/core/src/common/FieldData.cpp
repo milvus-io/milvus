@@ -316,10 +316,12 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                     std::dynamic_pointer_cast<arrow::BinaryArray>(array);
                 AssertInfo(binary_array != nullptr,
                            "nullable vector must use BinaryArray");
-                return FillFieldData(binary_array->value_data()->data(),
-                                     binary_array->null_bitmap_data(),
-                                     binary_array->length(),
-                                     binary_array->offset());
+                auto data_offset = binary_array->value_offset(0);
+                return FillFieldData(
+                    binary_array->value_data()->data() + data_offset,
+                    binary_array->null_bitmap_data(),
+                    binary_array->length(),
+                    binary_array->offset());
             }
             auto array_info =
                 GetDataInfoFromArray<arrow::FixedSizeBinaryArray,
@@ -611,10 +613,37 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
 
     int64_t valid_count = 0;
     if (valid_data) {
-        int64_t num_bytes = (total_element_count + 7) >> 3;
-        for (int64_t i = 0; i < num_bytes; ++i) {
-            valid_count +=
-                bitset::detail::PopCountHelper<uint8_t>::count(valid_data[i]);
+        int64_t bit_start = offset;
+        int64_t bit_end = offset + total_element_count;
+
+        // Handle head: unaligned bits before first full byte
+        int64_t first_full_byte = (bit_start + 7) / 8;
+        int64_t last_full_byte = bit_end / 8;
+
+        // Process unaligned head bits
+        for (int64_t bit_idx = bit_start;
+             bit_idx < std::min(first_full_byte * 8, bit_end);
+             ++bit_idx) {
+            if ((valid_data[bit_idx >> 3] >> (bit_idx & 7)) & 1) {
+                valid_count++;
+            }
+        }
+
+        // Process aligned full bytes with popcount
+        for (int64_t byte_idx = first_full_byte; byte_idx < last_full_byte;
+             ++byte_idx) {
+            valid_count += bitset::detail::PopCountHelper<uint8_t>::count(
+                valid_data[byte_idx]);
+        }
+
+        // Process unaligned tail bits
+        for (int64_t bit_idx =
+                 std::max(last_full_byte * 8, first_full_byte * 8);
+             bit_idx < bit_end;
+             ++bit_idx) {
+            if ((valid_data[bit_idx >> 3] >> (bit_idx & 7)) & 1) {
+                valid_count++;
+            }
         }
     } else {
         valid_count = total_element_count;
@@ -634,7 +663,7 @@ FieldDataVectorImpl<Type, is_type_entire_row>::FillFieldData(
     }
 
     // update logical to physical offset mapping
-    l2p_mapping_.build(valid_data,
+    l2p_mapping_.build(this->valid_data_.data(),
                        this->valid_count_,
                        this->length_,
                        total_element_count,

@@ -154,7 +154,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
         std::shared_ptr<uint8_t[]> count_buf(new uint8_t[sizeof(size_t)]);
         size_t count = static_cast<size_t>(total_count);
         std::memcpy(count_buf.get(), &count, sizeof(size_t));
-        ret.Append("valid_data_count", count_buf, sizeof(size_t));
+        ret.Append(VALID_DATA_COUNT_KEY, count_buf, sizeof(size_t));
 
         size_t byte_size = (count + 7) / 8;
         std::shared_ptr<uint8_t[]> data(new uint8_t[byte_size]);
@@ -164,7 +164,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
                 data[i / 8] |= (1 << (i % 8));
             }
         }
-        ret.Append("valid_data_", data, byte_size);
+        ret.Append(VALID_DATA_KEY, data, byte_size);
     }
 
     Disassemble(ret);
@@ -183,14 +183,14 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                   KnowhereStatusString(stat));
 
     // Deserialize valid_data bitmap and rebuild offset_mapping
-    if (binary_set.Contains("valid_data_count") &&
-        binary_set.Contains("valid_data_")) {
+    if (binary_set.Contains(VALID_DATA_COUNT_KEY) &&
+        binary_set.Contains(VALID_DATA_KEY)) {
         knowhere::BinaryPtr ptr;
-        ptr = binary_set.GetByName("valid_data_count");
+        ptr = binary_set.GetByName(VALID_DATA_COUNT_KEY);
         size_t count;
         std::memcpy(&count, ptr->data.get(), sizeof(size_t));
 
-        ptr = binary_set.GetByName("valid_data_");
+        ptr = binary_set.GetByName(VALID_DATA_KEY);
         // Convert bitmap to bool array
         std::unique_ptr<bool[]> valid_data(new bool[count]);
         auto bitmap = ptr->data.get();
@@ -384,8 +384,10 @@ VectorMemIndex<T>::Build(const Config& config) {
     int64_t total_valid_rows = 0;
     int64_t total_num_rows = 0;
     for (auto data : field_datas) {
-        total_valid_rows += data->get_valid_rows();
-        total_num_rows += data->get_num_rows();
+        auto num_rows = data->get_num_rows();
+        auto valid_rows = data->get_valid_rows();
+        total_valid_rows += valid_rows;
+        total_num_rows += num_rows;
         if (data->IsNullable()) {
             nullable = true;
         }
@@ -408,13 +410,17 @@ VectorMemIndex<T>::Build(const Config& config) {
 
     if (!IndexIsSparse(GetIndexType())) {
         int64_t dim = 0;
+        int64_t total_size = 0;
         for (auto data : field_datas) {
             AssertInfo(dim == 0 || dim == data->get_dim(),
                        "inconsistent dim value between field datas!");
             dim = data->get_dim();
+            if (elem_type_ == DataType::NONE) {
+                total_size += data->DataSize();
+            } else {
+                total_size += data->Size();
+            }
         }
-
-        int64_t total_size = total_valid_rows * dim * sizeof(T);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
 
         size_t lim_offset = 0;
@@ -425,12 +431,13 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (elem_type_ == DataType::NONE) {
             // TODO: avoid copying
             for (auto data : field_datas) {
-                std::memcpy(buf.get() + offset, data->Data(), data->Size());
-                offset += data->Size();
+                auto valid_size = data->DataSize();
+                std::memcpy(buf.get() + offset, data->Data(), valid_size);
+                offset += valid_size;
                 data.reset();
             }
         } else {
-            offsets.reserve(total_valid_rows + 1);
+            offsets.reserve(total_num_rows + 1);
             offsets.push_back(lim_offset);
             auto bytes_per_vec = vector_bytes_per_element(elem_type_, dim);
             for (auto data : field_datas) {
@@ -439,7 +446,7 @@ VectorMemIndex<T>::Build(const Config& config) {
                 AssertInfo(vec_array_data != nullptr,
                            "failed to cast field data to vector array");
 
-                auto rows = vec_array_data->get_valid_rows();
+                auto rows = vec_array_data->get_num_rows();
                 for (auto i = 0; i < rows; ++i) {
                     auto size = vec_array_data->DataSize(i);
                     assert(size % bytes_per_vec == 0);
@@ -717,6 +724,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
     std::chrono::duration<double> load_duration_sum;
     std::chrono::duration<double> write_disk_duration_sum;
+    std::unique_ptr<storage::DataCodec> valid_data_count_codec;
+    std::unique_ptr<storage::DataCodec> valid_data_codec;
     // load files in two parts:
     // 1. EMB_LIST_META: Written separately to embedding_list_meta_writer_ptr (if embedding list type)
     // 2. All other binaries: Merged and written to file_writer, forming a unified index file for knowhere
@@ -754,6 +763,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                         embedding_list_meta_writer_ptr) {
                         embedding_list_meta_writer_ptr->Write(
                             data->PayloadData(), data->PayloadSize());
+                    } else if (prefix == VALID_DATA_COUNT_KEY) {
+                        valid_data_count_codec = std::move(data);
+                    } else if (prefix == VALID_DATA_KEY) {
+                        valid_data_codec = std::move(data);
                     } else {
                         file_writer.Write(data->PayloadData(),
                                           data->PayloadSize());
@@ -795,6 +808,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                 embedding_list_meta_writer_ptr) {
                 embedding_list_meta_writer_ptr->Write(
                     index_data->PayloadData(), index_data->PayloadSize());
+            } else if (prefix == VALID_DATA_COUNT_KEY) {
+                valid_data_count_codec = std::move(index_data);
+            } else if (prefix == VALID_DATA_KEY) {
+                valid_data_codec = std::move(index_data);
             } else {
                 file_writer.Write(index_data->PayloadData(),
                                   index_data->PayloadSize());
@@ -838,6 +855,20 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
+
+    // Restore valid_data for nullable vector support
+    if (valid_data_count_codec && valid_data_codec) {
+        size_t count;
+        std::memcpy(
+            &count, valid_data_count_codec->PayloadData(), sizeof(size_t));
+
+        std::unique_ptr<bool[]> valid_data(new bool[count]);
+        auto bitmap = valid_data_codec->PayloadData();
+        for (size_t i = 0; i < count; ++i) {
+            valid_data[i] = (bitmap[i / 8] >> (i % 8)) & 1;
+        }
+        BuildValidData(valid_data.get(), count);
+    }
 
     this->mmap_file_raii_ =
         std::make_unique<MmapFileRAII>(local_filepath.value());

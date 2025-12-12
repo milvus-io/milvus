@@ -1767,6 +1767,16 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
         valid_offsets = filter_result.valid_offsets.data();
     }
     auto ret = fill_with_empty(field_id, count, valid_count, valid_data);
+
+    if (!field_meta.is_vector() && column->IsNullable()) {
+        auto dst = ret->mutable_valid_data()->mutable_data();
+        column->BulkIsValid(
+            op_ctx,
+            [&](bool is_valid, size_t offset) { dst[offset] = is_valid; },
+            seg_offsets,
+            count);
+    }
+
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
         case DataType::STRING:
@@ -2343,9 +2353,11 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         return false;
     }
     try {
-        auto column = get_column(field_id);
+        std::shared_ptr<ChunkedColumnInterface> vec_data = get_column(field_id);
+        AssertInfo(
+            vec_data != nullptr, "vector field {} not loaded", field_id.get());
         int64_t row_count = field_meta.is_nullable()
-                                ? column->GetOffsetMapping().GetValidCount()
+                                ? vec_data->GetOffsetMapping().GetValidCount()
                                 : num_rows;
 
         // generate index params
@@ -2358,9 +2370,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         if (row_count < field_binlog_config->GetBuildThreshold()) {
             return false;
         }
-        std::shared_ptr<ChunkedColumnInterface> vec_data = get_column(field_id);
-        AssertInfo(
-            vec_data != nullptr, "vector field {} not loaded", field_id.get());
         auto dim = is_sparse ? std::numeric_limits<uint32_t>::max()
                              : field_meta.get_dim();
         auto interim_index_type = field_binlog_config->GetIndexType();

@@ -223,10 +223,14 @@ SearchOnSealedColumn(const Schema& schema,
         }
     }
     auto vector_chunks = column->GetAllChunks(op_context);
+    const auto& valid_count_per_chunk = column->GetValidCountPerChunk();
     for (int i = 0; i < num_chunk; ++i) {
         auto pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();
         auto chunk_size = column->chunk_row_nums(i);
+        if (offset_mapping.IsEnabled() && !valid_count_per_chunk.empty()) {
+            chunk_size = valid_count_per_chunk[i];
+        }
 
         // For element-level search, get element count from VectorArrayOffsets
         if (is_element_level_search) {
@@ -293,7 +297,6 @@ SearchOnSealedColumn(const Schema& schema,
             result.seg_offsets_ = std::move(final_qr.mutable_offsets());
         }
         result.distances_ = std::move(final_qr.mutable_distances());
-        result.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
         if (offset_mapping.IsEnabled()) {
             TransformOffset(result.seg_offsets_, offset_mapping);
         }

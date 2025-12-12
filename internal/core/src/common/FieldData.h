@@ -179,8 +179,9 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
             if (use_map) {
                 int64_t physical_idx = start_physical;
                 for (int64_t i = 0; i < total_count; ++i) {
+                    int64_t bit_pos = start_logical + i;
                     if (valid_data == nullptr ||
-                        ((valid_data[i >> 3] >> (i & 0x07)) & 1)) {
+                        ((valid_data[bit_pos >> 3] >> (bit_pos & 0x07)) & 1)) {
                         l2p_map[start_logical + i] = physical_idx++;
                     }
                 }
@@ -192,8 +193,9 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
                 }
                 int64_t physical_idx = start_physical;
                 for (int64_t i = 0; i < total_count; ++i) {
+                    int64_t bit_pos = start_logical + i;
                     if (valid_data == nullptr ||
-                        ((valid_data[i >> 3] >> (i & 0x07)) & 1)) {
+                        ((valid_data[bit_pos >> 3] >> (bit_pos & 0x07)) & 1)) {
                         l2p_vec[start_logical + i] = physical_idx++;
                     } else {
                         l2p_vec[start_logical + i] = -1;
@@ -209,7 +211,7 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
         std::lock_guard lck(this->num_rows_mutex_);
         if (num_rows > this->num_rows_) {
             this->num_rows_ = num_rows;
-            this->valid_data_.resize((num_rows + 7) / 8, 0xFF);
+            this->valid_data_.resize((num_rows + 7) / 8, 0x00);
         }
         if (valid_count > this->valid_count_) {
             this->data_.resize(valid_count * this->dim_);
@@ -249,7 +251,7 @@ class FieldDataVectorImpl : public FieldDataImpl<Type, is_type_entire_row> {
     int64_t
     DataSize(ssize_t offset) const override {
         auto dim = this->dim_;
-        AssertInfo(offset < this->valid_count_,
+        AssertInfo(offset < this->get_num_rows(),
                    "field data subscript out of range");
         return sizeof(Type) * dim;
     }

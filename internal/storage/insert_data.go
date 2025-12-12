@@ -497,6 +497,9 @@ func (m *LogicalToPhysicalMapping) Build(validData []bool, startLogical, totalCo
 	if totalCount == 0 {
 		return
 	}
+	if len(validData) < totalCount {
+		return
+	}
 
 	if m.l2pMap == nil {
 		m.l2pMap = make(map[int]int)

@@ -2724,7 +2724,6 @@ func TestPayload_NullableReaderAndWriter(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			t.Logf("Running test case: %s", tc.name)
 			w, err := NewPayloadWriter(schemapb.DataType_SparseFloatVector, WithNullable(true))
 			require.NoError(t, err)
 

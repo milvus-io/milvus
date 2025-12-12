@@ -124,9 +124,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
 
-    auto valid_data_path = local_index_path_prefix + "/valid_data";
+    auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
     if (local_chunk_manager->Exist(valid_data_path)) {
-        auto file_size = local_chunk_manager->Size(valid_data_path);
         size_t count;
         local_chunk_manager->Read(valid_data_path, 0, &count, sizeof(size_t));
         size_t byte_size = (count + 7) / 8;
@@ -321,7 +320,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                   "failed to build index, " + KnowhereStatusString(stat));
 
     if (HasValidData()) {
-        auto valid_data_path = local_index_path_prefix + "/valid_data";
+        auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         size_t count = offset_mapping_.GetTotalCount();
         local_chunk_manager->Write(valid_data_path, 0, &count, sizeof(size_t));
         size_t byte_size = (count + 7) / 8;

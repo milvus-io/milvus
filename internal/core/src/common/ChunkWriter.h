@@ -134,6 +134,7 @@ class NullableVectorChunkWriter final : public ChunkWriterBase {
  public:
     NullableVectorChunkWriter(int64_t dim, bool nullable)
         : ChunkWriterBase(nullable), dim_(dim) {
+        Assert(nullable && "NullableVectorChunkWriter requires nullable=true");
     }
 
     std::pair<size_t, size_t>
@@ -168,7 +169,8 @@ class NullableVectorChunkWriter final : public ChunkWriterBase {
         for (const auto& data : array_vec) {
             auto binary_array =
                 std::static_pointer_cast<arrow::BinaryArray>(data);
-            auto data_ptr = binary_array->value_data()->data();
+            auto data_offset = binary_array->value_offset(0);
+            auto data_ptr = binary_array->value_data()->data() + data_offset;
             int64_t valid_count = data->length() - binary_array->null_count();
             target->write(data_ptr, valid_count * dim_ * sizeof(T));
         }

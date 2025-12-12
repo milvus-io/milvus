@@ -314,7 +314,8 @@ class FieldBitsetImpl : public FieldDataBase {
 
     int64_t
     get_valid_rows() const override {
-        return get_num_rows();
+        ThrowInfo(NotImplemented,
+                  "get_valid_rows() not implemented for bitset");
     }
 
  private:
@@ -499,7 +500,8 @@ class FieldDataImpl : public FieldDataBase {
 
     int64_t
     get_valid_rows() const override {
-        return get_num_rows();
+        std::shared_lock lck(tell_mutex_);
+        return static_cast<int64_t>(length_) - null_count_;
     }
 
     void
