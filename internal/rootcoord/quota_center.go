@@ -306,6 +306,10 @@ func (q *QuotaCenter) watchQuotaAndLimit() {
 	}))
 	pt.Watch(pt.QuotaConfig.DiskQuota.Key, config.NewHandler(pt.QuotaConfig.DiskQuota.Key, func(event *config.Event) {
 		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "cluster").Set(pt.QuotaConfig.DiskQuota.GetAsFloat())
+		// cause db/collection/partition quota will use cluster quota as default, so we need to update them when cluster quota is updated
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "db").Set(pt.QuotaConfig.DiskQuotaPerDB.GetAsFloat())
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "collection").Set(pt.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "partition").Set(pt.QuotaConfig.DiskQuotaPerPartition.GetAsFloat())
 	}))
 	pt.Watch(pt.QuotaConfig.DiskQuotaPerDB.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerDB.Key, func(event *config.Event) {
 		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "db").Set(pt.QuotaConfig.DiskQuotaPerDB.GetAsFloat())
@@ -314,7 +318,7 @@ func (q *QuotaCenter) watchQuotaAndLimit() {
 		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "collection").Set(pt.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())
 	}))
 	pt.Watch(pt.QuotaConfig.DiskQuotaPerPartition.Key, config.NewHandler(pt.QuotaConfig.DiskQuotaPerPartition.Key, func(event *config.Event) {
-		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "collection").Set(pt.QuotaConfig.DiskQuotaPerPartition.GetAsFloat())
+		metrics.DiskQuota.WithLabelValues(paramtable.GetStringNodeID(), "partition").Set(pt.QuotaConfig.DiskQuotaPerPartition.GetAsFloat())
 	}))
 }
 
