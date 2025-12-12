@@ -1660,8 +1660,8 @@ func (coord *MixCoordMock) RunAnalyzer(ctx context.Context, req *querypb.RunAnal
 	}, nil
 }
 
-func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
+func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Success()}, nil
 }
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)

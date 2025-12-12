@@ -109,7 +109,7 @@ type QueryCoordClient interface {
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
-	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 }
 
 type queryCoordClient struct {
@@ -463,8 +463,8 @@ func (c *queryCoordClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerReque
 	return out, nil
 }
 
-func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
+func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error) {
+	out := new(ValidateAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_ValidateAnalyzer_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -518,7 +518,7 @@ type QueryCoordServer interface {
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
-	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
+	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 }
 
 // UnimplementedQueryCoordServer should be embedded to have forward compatible implementations.
@@ -639,7 +639,7 @@ func (UnimplementedQueryCoordServer) UpdateLoadConfig(context.Context, *UpdateLo
 func (UnimplementedQueryCoordServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
 }
-func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 
@@ -1593,7 +1593,7 @@ type QueryNodeClient interface {
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 }
 
 type queryNodeClient struct {
@@ -1911,8 +1911,8 @@ func (c *queryNodeClient) DropIndex(ctx context.Context, in *DropIndexRequest, o
 	return out, nil
 }
 
-func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
+func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error) {
+	out := new(ValidateAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryNode_ValidateAnalyzer_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -1956,7 +1956,7 @@ type QueryNodeServer interface {
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
-	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
+	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 }
 
 // UnimplementedQueryNodeServer should be embedded to have forward compatible implementations.
@@ -2050,7 +2050,7 @@ func (UnimplementedQueryNodeServer) GetHighlight(context.Context, *GetHighlightR
 func (UnimplementedQueryNodeServer) DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropIndex not implemented")
 }
-func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 

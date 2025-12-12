@@ -54,7 +54,7 @@ type Cluster interface {
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
 	DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
-	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)
+	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)
 	Start()
 	Stop()
 }
@@ -300,9 +300,9 @@ func (c *QueryCluster) RunAnalyzer(ctx context.Context, nodeID int64, req *query
 	return resp, err
 }
 
-func (c *QueryCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (c *QueryCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	var (
-		resp *commonpb.Status
+		resp *querypb.ValidateAnalyzerResponse
 		err  error
 	)
 

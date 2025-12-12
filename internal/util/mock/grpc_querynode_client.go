@@ -142,12 +142,12 @@ func (m *GrpcQueryNodeClient) RunAnalyzer(ctx context.Context, in *querypb.RunAn
 	return &milvuspb.RunAnalyzerResponse{}, m.Err
 }
 
-func (m *GrpcQueryNodeClient) GetHighlight(ctx context.Context, in *querypb.GetHighlightRequest, opts ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
-	return &querypb.GetHighlightResponse{}, m.Err
+func (m *GrpcQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
+	return &querypb.ValidateAnalyzerResponse{}, m.Err
 }
 
-func (m *GrpcQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (m *GrpcQueryNodeClient) GetHighlight(ctx context.Context, in *querypb.GetHighlightRequest, opts ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
+	return &querypb.GetHighlightResponse{}, m.Err
 }
 
 func (m *GrpcQueryNodeClient) Close() error {

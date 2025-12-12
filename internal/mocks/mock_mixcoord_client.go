@@ -10593,7 +10593,7 @@ func (_c *MockMixCoordClient_UpdateSegmentStatistics_Call) RunAndReturn(run func
 }
 
 // ValidateAnalyzer provides a mock function with given fields: ctx, in, opts
-func (_m *MockMixCoordClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockMixCoordClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -10607,16 +10607,16 @@ func (_m *MockMixCoordClient) ValidateAnalyzer(ctx context.Context, in *querypb.
 		panic("no return value specified for ValidateAnalyzer")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.ValidateAnalyzerResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) *querypb.ValidateAnalyzerResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.ValidateAnalyzerResponse)
 		}
 	}
 
@@ -10656,12 +10656,12 @@ func (_c *MockMixCoordClient_ValidateAnalyzer_Call) Run(run func(ctx context.Con
 	return _c
 }
 
-func (_c *MockMixCoordClient_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_ValidateAnalyzer_Call {
+func (_c *MockMixCoordClient_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnalyzerResponse, _a1 error) *MockMixCoordClient_ValidateAnalyzer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockMixCoordClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_ValidateAnalyzer_Call {
+func (_c *MockMixCoordClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error)) *MockMixCoordClient_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

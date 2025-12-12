@@ -2476,7 +2476,7 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
-		suite.Require().Equal(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Require().Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	suite.Run("invalid analyzer params", func() {
@@ -2492,7 +2492,7 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
-		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	suite.Run("abnormal node", func() {
@@ -2510,7 +2510,7 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
-		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
 
