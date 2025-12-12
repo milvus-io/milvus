@@ -229,6 +229,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 5)
 		assert.EqualValues(t, Params.HealthCheckTimeout.GetAsInt64(), 3000)
 
+		// Test ReplicaBlacklistDuration default value
+		assert.Equal(t, 30*time.Second, Params.ReplicaBlacklistDuration.GetAsDurationByParse())
+		params.Save("proxy.replicaBlacklistDuration", "60s")
+		assert.Equal(t, 60*time.Second, Params.ReplicaBlacklistDuration.GetAsDurationByParse())
+
+		// Test ReplicaBlacklistCleanupInterval default value
+		assert.Equal(t, 10*time.Second, Params.ReplicaBlacklistCleanupInterval.GetAsDurationByParse())
+		params.Save("proxy.replicaBlacklistCleanupInterval", "30s")
+		assert.Equal(t, 30*time.Second, Params.ReplicaBlacklistCleanupInterval.GetAsDurationByParse())
+
 		params.Save("proxy.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
