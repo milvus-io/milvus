@@ -19,6 +19,32 @@
 namespace milvus::segcore {
 
 void
+StreamReducerHelper::SetNullableVectorValidDataOffsets(
+    const std::map<FieldId, std::unique_ptr<milvus::DataArray>>&
+        output_fields_data,
+    int64_t ki,
+    MergeBase& merge_base) {
+    for (auto field_id : plan_->target_entries_) {
+        auto& field_meta = plan_->schema_->operator[](field_id);
+        if (field_meta.is_vector() && field_meta.is_nullable()) {
+            auto it = output_fields_data.find(field_id);
+            if (it != output_fields_data.end()) {
+                auto& field_data = it->second;
+                if (field_data->valid_data_size() > 0) {
+                    int64_t physical_offset = 0;
+                    for (int64_t j = 0; j < ki; ++j) {
+                        if (field_data->valid_data(j)) {
+                            physical_offset++;
+                        }
+                    }
+                    merge_base.setValidDataOffset(field_id, physical_offset);
+                }
+            }
+        }
+    }
+}
+
+void
 StreamReducerHelper::FillEntryData() {
     for (auto search_result : search_results_to_merge_) {
         auto segment = static_cast<milvus::segcore::SegmentInterface*>(
@@ -98,6 +124,10 @@ StreamReducerHelper::AssembleMergedResult() {
                         }
                         merge_output_data_bases[nq_base_offset + loc] = {
                             &search_result->output_fields_data_, ki};
+                        SetNullableVectorValidDataOffsets(
+                            search_result->output_fields_data_,
+                            ki,
+                            merge_output_data_bases[nq_base_offset + loc]);
                         new_result_offsets[nq_base_offset + loc] = loc;
                         real_topKs[qi]++;
                     }
@@ -127,6 +157,10 @@ StreamReducerHelper::AssembleMergedResult() {
                         }
                         merge_output_data_bases[nq_base_offset + loc] = {
                             &merged_search_result->output_fields_data_, ki};
+                        SetNullableVectorValidDataOffsets(
+                            merged_search_result->output_fields_data_,
+                            ki,
+                            merge_output_data_bases[nq_base_offset + loc]);
                         new_result_offsets[nq_base_offset + loc] = loc;
                         real_topKs[qi]++;
                     }

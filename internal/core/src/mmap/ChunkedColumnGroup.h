@@ -667,6 +667,36 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
     }
 
+    void
+    BuildValidRowIds(milvus::OpContext* op_ctx) override {
+        if (!field_meta_.is_nullable()) {
+            return;
+        }
+        auto total_rows = NumRows();
+        auto total_chunks = num_chunks();
+        valid_data_.resize(total_rows);
+        valid_count_per_chunk_.resize(total_chunks);
+
+        int64_t logical_offset = 0;
+        for (int64_t i = 0; i < total_chunks; i++) {
+            auto group_chunk = group_->GetGroupChunk(op_ctx, i);
+            auto chunk = group_chunk.get()->GetChunk(field_id_);
+            auto rows = chunk->RowNums();
+            int64_t valid_count = 0;
+            for (int64_t j = 0; j < rows; j++) {
+                if (chunk->isValid(j)) {
+                    valid_data_[logical_offset + j] = true;
+                    valid_count++;
+                } else {
+                    valid_data_[logical_offset + j] = false;
+                }
+            }
+            valid_count_per_chunk_[i] = valid_count;
+            logical_offset += rows;
+        }
+        BuildOffsetMapping();
+    }
+
  private:
     std::shared_ptr<ChunkedColumnGroup> group_;
     FieldId field_id_;
