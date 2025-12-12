@@ -1956,3 +1956,40 @@ func TestProxy_ListFileResources(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 }
+
+func TestProxy_ComputePhraseMatchSlop(t *testing.T) {
+	t.Run("proxy not healthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ComputePhraseMatchSlopRequest{
+			AnalyzerParams: `{"tokenizer": "standard"}`,
+			QueryText:      "hello world",
+			DataTexts:      []string{"hello world", "world hello"},
+		}
+
+		resp, err := proxy.ComputePhraseMatchSlop(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("success_with_analyzer_params", func(t *testing.T) {
+		// Create test proxy with mock mixCoord
+		node := createTestProxy()
+		defer node.sched.Close()
+
+		// Mock mixCoord.ComputePhraseMatchSlop
+		mockMixCoord := NewMixCoordMock()
+		node.mixCoord = mockMixCoord
+
+		req := &milvuspb.ComputePhraseMatchSlopRequest{
+			AnalyzerParams: `{"tokenizer": "standard"}`,
+			QueryText:      "hello world",
+			DataTexts:      []string{"hello world", "world hello", "foo bar"},
+		}
+
+		resp, err := node.ComputePhraseMatchSlop(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
