@@ -1003,6 +1003,10 @@ common:
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
+  estimate:
+    varCharLengthAvg: 256 # average length considered per VarChar/Text field when estimating record size
+    dynamicFieldLengthAvg: 512 # average length considered per JSON/Array/Geometry field when estimating record size
+    sparseFloatVectorSize: 1200 # fallback size (bytes) used when estimating sparse float vector fields
   locks:
     metrics:
       enable: false # whether gather statistics for metrics locks
