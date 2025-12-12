@@ -11,6 +11,10 @@ service RerankService {
     rpc Rerank(TextRerankRequest) returns (TextRerankResponse);
 }
 
+service HighlightService {
+    rpc Highlight(HighlightRequest) returns (HighlightResponse);
+}
+
 message Status {
     int32 code = 1;
     string msg = 2;
@@ -67,4 +71,21 @@ message TextRerankResponse {
     Status status = 1;
     map<string, string> extra_info = 2;
     repeated float scores = 3;
+}
+
+message HighlightRequest {
+    string model = 1;
+    string query = 2;
+    repeated string documents = 3;
+    map<string, string> params = 4;
+}
+
+message HighlightResult {
+    repeated string sentences = 1;
+}
+
+message HighlightResponse {
+    Status status = 1;
+    map<string, string> extra_info = 2;
+    repeated HighlightResult results = 3;
 }
