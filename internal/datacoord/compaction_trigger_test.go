@@ -631,7 +631,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Schema:                 schema,
 					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
-					MaxSize:                1342177280,
+					MaxSize:                1073741824,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 					JsonParams:             params,
 				},
