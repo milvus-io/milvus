@@ -48,10 +48,18 @@ WeightScorer::batch_score(milvus::OpContext* op_ctx,
                           const FixedVector<int32_t>& offsets,
                           const TargetBitmap& bitmap,
                           std::vector<std::optional<float>>& boost_scores) {
+    auto bitmap_size = bitmap.size();
     for (auto i = 0; i < offsets.size(); i++) {
-        if (bitmap[offsets[i]] > 0) {
-            set_score(boost_scores[i], mode);
+        auto offset = offsets[i];
+        // Bounds check: offset must be within bitmap size.
+        // Race condition: text index may lag behind vector index,
+        // causing offsets to reference rows not yet in text index.
+        if (offset >= 0 && static_cast<size_t>(offset) < bitmap_size) {
+            if (bitmap[offset] > 0) {
+                set_score(boost_scores[i], mode);
+            }
         }
+        // If offset is out of bounds, treat as "no match" (don't apply boost)
     }
 };
 
@@ -163,9 +171,9 @@ RandomScorer::random_score(milvus::OpContext* op_ctx,
                    "now only support int64 field as seed");
         // TODO: Support varchar and int32 field as random field.
 
-        auto datas = array->scalars().long_data();
-        for (int i = 0; i < datas.data_size(); i++) {
-            auto a = datas.data()[i];
+        auto data = array->scalars().long_data();
+        for (int i = 0; i < data.data_size(); i++) {
+            auto a = data.data()[i];
             auto random_score =
                 hash_to_double(MurmurHash3_x64_64_Special(a, seed_));
             if (idx == nullptr) {
