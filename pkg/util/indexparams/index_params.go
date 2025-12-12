@@ -200,11 +200,19 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 	}
 
-	indexParams[MaxDegreeKey] = maxDegree
-	indexParams[SearchListSizeKey] = searchListSize
-	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
-	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
-	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	defaults := map[string]string{
+		MaxDegreeKey:              maxDegree,
+		SearchListSizeKey:         searchListSize,
+		PQCodeBudgetRatioKey:      pqCodeBudgetGBRatio,
+		NumBuildThreadRatioKey:    buildNumThreadsRatio,
+		SearchCacheBudgetRatioKey: searchCacheBudgetGBRatio,
+	}
+
+	for k, v := range defaults {
+		if _, exist := indexParams[k]; !exist {
+			indexParams[k] = v
+		}
+	}
 
 	return nil
 }
