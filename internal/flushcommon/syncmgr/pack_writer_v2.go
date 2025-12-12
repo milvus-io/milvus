@@ -199,6 +199,9 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return nil, err
 	}
 	if err = w.Write(rec); err != nil {
+		if closeErr := w.Close(); closeErr != nil {
+			log.Error("failed to close writer after write failed", zap.Error(closeErr))
+		}
 		return nil, err
 	}
 	// close first to get compressed size
