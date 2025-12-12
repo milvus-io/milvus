@@ -55,6 +55,7 @@ var MetricFuncMap = map[string]getMetricFunc{
 	"$search_params":         getSearchParams,
 	"$query_params":          getQueryParams,
 	"$template_value_length": getTemplateValueLength,
+	"$expr_template_values":  getExprTemplateValues,
 }
 
 type AccessInfo interface {
@@ -83,6 +84,7 @@ type AccessInfo interface {
 	SearchParams() string
 	QueryParams() string
 	TemplateValueLength() string
+	ExprTemplateValues() string
 	SetActualConsistencyLevel(commonpb.ConsistencyLevel)
 }
 
@@ -201,4 +203,8 @@ func getQueryParams(i AccessInfo) string {
 
 func getTemplateValueLength(i AccessInfo) string {
 	return i.TemplateValueLength()
+}
+
+func getExprTemplateValues(i AccessInfo) string {
+	return i.ExprTemplateValues()
 }
