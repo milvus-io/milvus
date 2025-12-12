@@ -46,7 +46,7 @@ func (s *BM25FunctionRunnerSuite) SetupTest() {
 	}
 }
 
-func (s *BM25FunctionRunnerSuite) TestBM25() {
+func (s *BM25FunctionRunnerSuite) TestBatchRun() {
 	_, err := NewFunctionRunner(s.schema, &schemapb.FunctionSchema{
 		Name:          "test",
 		Type:          schemapb.FunctionType_BM25,
@@ -85,4 +85,24 @@ func (s *BM25FunctionRunnerSuite) TestBM25() {
 	// run after close
 	_, err = runner.BatchRun([]string{"test string", "test string 2"})
 	s.Error(err)
+}
+
+func (s *BM25FunctionRunnerSuite) TestBatchAnalyze() {
+	runner, err := NewFunctionRunner(s.schema, &schemapb.FunctionSchema{
+		Name:           "test",
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	})
+	s.NoError(err)
+
+	analyzer, ok := runner.(Analyzer)
+	s.True(ok)
+
+	result, err := analyzer.BatchAnalyze(true, false, []string{"test string", "test string 2"})
+	s.NoError(err)
+
+	s.Equal(2, len(result))
+	s.Equal(2, len(result[0]))
+	s.Equal(3, len(result[1]))
 }

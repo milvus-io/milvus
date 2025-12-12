@@ -1483,3 +1483,4 @@ function:
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
+    concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
