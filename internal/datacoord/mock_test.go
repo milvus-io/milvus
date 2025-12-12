@@ -949,7 +949,7 @@ func (s *mockMixCoord) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	panic("implement me")
 }
 
-func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	panic("implement me")
 }
 
