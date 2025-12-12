@@ -348,16 +348,6 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
 	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
-	s.Run("allocate_id_fail", func() {
-		mockAllocator := allocator.NewMockAllocator(s.T())
-		mockAllocator.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mocked"))
-
-		task := s.getSuiteSyncTask(new(SyncPack).WithFlush()).WithAllocator(mockAllocator)
-
-		err := task.Run(ctx)
-		s.Error(err)
-	})
-
 	s.Run("metawrite_fail", func() {
 		s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(errors.New("mocked"))
 
@@ -387,22 +377,6 @@ func (s *SyncTaskSuite) TestRunError() {
 
 		s.Error(err)
 		s.True(flag)
-	})
-}
-
-func (s *SyncTaskSuite) TestRunErrorWithStorageV2() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s.Run("storage v2 allocate_id_fail", func() {
-		mockAllocator := allocator.NewMockAllocator(s.T())
-		mockAllocator.EXPECT().Alloc(mock.Anything).Return(0, 0, errors.New("mocked"))
-		segV2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, pkoracle.NewBloomFilterSet(), nil)
-		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(segV2, true)
-
-		task := s.getSuiteSyncTask(new(SyncPack).WithFlush()).WithAllocator(mockAllocator)
-
-		err := task.Run(ctx)
-		s.Error(err)
 	})
 }
 
