@@ -20,7 +20,6 @@ import (
 	"context"
 	"path"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -48,7 +47,6 @@ type BulkPackWriter struct {
 	writeRetryOpts []retry.Option
 
 	// prefetched log ids
-	ids         []int64
 	sizeWritten int64
 }
 
@@ -74,12 +72,6 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
-	err = bw.prefetchIDs(pack)
-	if err != nil {
-		log.Warn("failed allocate ids for sync task", zap.Error(err))
-		return
-	}
-
 	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
@@ -100,45 +92,6 @@ func (bw *BulkPackWriter) Write(ctx context.Context, pack *SyncPack) (
 	size = bw.sizeWritten
 
 	return
-}
-
-// prefetchIDs pre-allcates ids depending on the number of blobs current task contains.
-func (bw *BulkPackWriter) prefetchIDs(pack *SyncPack) error {
-	totalIDCount := 0
-	if len(pack.insertData) > 0 {
-		totalIDCount += len(pack.insertData[0].Data) * 2 // binlogs and statslogs
-	}
-	if pack.isFlush {
-		totalIDCount++ // merged stats log
-	}
-	if pack.deltaData != nil {
-		totalIDCount++
-	}
-	if pack.bm25Stats != nil {
-		totalIDCount += len(pack.bm25Stats)
-		if pack.isFlush {
-			totalIDCount++ // merged bm25 stats
-		}
-	}
-
-	if totalIDCount == 0 {
-		return nil
-	}
-	start, _, err := bw.allocator.Alloc(uint32(totalIDCount))
-	if err != nil {
-		return err
-	}
-	bw.ids = lo.RangeFrom(start, totalIDCount)
-	return nil
-}
-
-func (bw *BulkPackWriter) nextID() int64 {
-	if len(bw.ids) == 0 {
-		panic("pre-fetched ids exhausted")
-	}
-	r := bw.ids[0]
-	bw.ids = bw.ids[1:]
-	return r
 }
 
 func (bw *BulkPackWriter) writeLog(ctx context.Context, blob *storage.Blob,
@@ -180,7 +133,11 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range binlogBlobs {
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, bw.nextID())
+		id, err := bw.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, id)
 		binlog, err := bw.writeLog(ctx, blob, common.SegmentInsertLogPath, k, pack)
 		if err != nil {
 			return nil, err
@@ -213,7 +170,11 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 
 	pkFieldID := serializer.pkField.GetFieldID()
 	binlogs := make([]*datapb.Binlog, 0)
-	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, pkFieldID, bw.nextID())
+	id, err := bw.allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, pkFieldID, id)
 	if binlog, err := bw.writeLog(ctx, batchStatsBlob, common.SegmentStatslogPath, k, pack); err != nil {
 		return nil, err
 	} else {
@@ -260,7 +221,11 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	for fieldID, blob := range bm25Blobs {
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, bw.nextID())
+		id, err := bw.allocator.AllocOne()
+		if err != nil {
+			return nil, err
+		}
+		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, fieldID, id)
 		binlog, err := bw.writeLog(ctx, blob, common.SegmentBm25LogPath, k, pack)
 		if err != nil {
 			return nil, err
@@ -315,7 +280,11 @@ func (bw *BulkPackWriter) writeDelta(ctx context.Context, pack *SyncPack) (*data
 		return nil, err
 	}
 
-	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, bw.nextID())
+	id, err := bw.allocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID, id)
 	deltalog, err := bw.writeLog(ctx, deltaBlob, common.SegmentDeltaLogPath, k, pack)
 	if err != nil {
 		return nil, err
