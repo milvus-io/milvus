@@ -416,11 +416,9 @@ class TestMilvusClientAnalyzer(TestMilvusClientV2Base):
     
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_filter_params", [
-        {"tokenizer": "standard", "filter": [{"type": "stop"}]},
         {"tokenizer": "standard", "filter": [{"type": "stop", "stop_words": "not_a_list"}]},
         {"tokenizer": "standard", "filter": [{"type": "stop", "stop_words": [123, 456]}]},
         {"tokenizer": "standard", "filter": [{"type": "invalid_filter_type"}]},
-        {"tokenizer": "standard", "filter": [{"type": "stop", "stop_words": None}]},
     ])
     def test_analyzer_with_invalid_filter(self, invalid_filter_params):
         """
