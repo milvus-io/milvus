@@ -47,6 +47,8 @@ func NewAggregate(aggregateName string, aggFieldID int64, originalName string) (
 		return &CountAggregate{fieldID: aggFieldID, originalName: originalName}, nil
 	case kSum:
 		return &SumAggregate{fieldID: aggFieldID, originalName: originalName}, nil
+	case kAvg:
+		return &AvgAggregate{fieldID: aggFieldID, originalName: originalName}, nil
 	case kMin:
 		return &MinAggregate{fieldID: aggFieldID, originalName: originalName}, nil
 	case kMax:
@@ -62,6 +64,8 @@ func FromPB(pb *planpb.Aggregate) (AggregateBase, error) {
 		return &CountAggregate{fieldID: pb.GetFieldId()}, nil
 	case planpb.AggregateOp_sum:
 		return &SumAggregate{fieldID: pb.GetFieldId()}, nil
+	case planpb.AggregateOp_avg:
+		return &AvgAggregate{fieldID: pb.GetFieldId()}, nil
 	case planpb.AggregateOp_min:
 		return &MinAggregate{fieldID: pb.GetFieldId()}, nil
 	case planpb.AggregateOp_max:
