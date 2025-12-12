@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -35,33 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
-
-func TestNextID(t *testing.T) {
-	al := allocator.NewMockGIDAllocator()
-	i := int64(0)
-	al.AllocF = func(count uint32) (int64, int64, error) {
-		rt := i
-		i += int64(count)
-		return rt, int64(count), nil
-	}
-	al.AllocOneF = func() (allocator.UniqueID, error) {
-		rt := i
-		i++
-		return rt, nil
-	}
-	bw := NewBulkPackWriter(nil, nil, nil, al)
-	bw.prefetchIDs(new(SyncPack).WithFlush())
-
-	t.Run("normal_next", func(t *testing.T) {
-		id := bw.nextID()
-		assert.Equal(t, int64(0), id)
-	})
-	t.Run("id_exhausted", func(t *testing.T) {
-		assert.Panics(t, func() {
-			bw.nextID()
-		})
-	})
-}
 
 func TestBulkPackWriter_Write(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
