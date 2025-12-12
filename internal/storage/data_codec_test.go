@@ -963,17 +963,17 @@ func TestInsertCodec(t *testing.T) {
 			FloatField:          &FloatFieldData{[]float32{}, nil, false},
 			DoubleField:         &DoubleFieldData{[]float64{}, nil, false},
 			StringField:         &StringFieldData{[]string{}, schemapb.DataType_VarChar, nil, false},
-			BinaryVectorField:   &BinaryVectorFieldData{[]byte{}, 8},
-			FloatVectorField:    &FloatVectorFieldData{[]float32{}, 4},
-			Float16VectorField:  &Float16VectorFieldData{[]byte{}, 4},
-			BFloat16VectorField: &BFloat16VectorFieldData{[]byte{}, 4},
+			BinaryVectorField:   &BinaryVectorFieldData{Data: []byte{}, Dim: 8},
+			FloatVectorField:    &FloatVectorFieldData{Data: []float32{}, Dim: 4},
+			Float16VectorField:  &Float16VectorFieldData{Data: []byte{}, Dim: 4},
+			BFloat16VectorField: &BFloat16VectorFieldData{Data: []byte{}, Dim: 4},
 			SparseFloatVectorField: &SparseFloatVectorFieldData{
 				SparseFloatArray: schemapb.SparseFloatArray{
 					Dim:      0,
 					Contents: [][]byte{},
 				},
 			},
-			Int8VectorField:           &Int8VectorFieldData{[]int8{}, 4},
+			Int8VectorField:           &Int8VectorFieldData{Data: []int8{}, Dim: 4},
 			StructSubInt32Field:       &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil, false},
 			ArrayField:                &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil, false},
 			JSONField:                 &JSONFieldData{[][]byte{}, nil, false},
@@ -1389,11 +1389,11 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertData1.Data[FloatField].GetMemorySize(), 5)
 	assert.Equal(t, insertData1.Data[DoubleField].GetMemorySize(), 9)
 	assert.Equal(t, insertData1.Data[StringField].GetMemorySize(), 18)
-	assert.Equal(t, insertData1.Data[BinaryVectorField].GetMemorySize(), 5)
-	assert.Equal(t, insertData1.Data[FloatVectorField].GetMemorySize(), 20)
-	assert.Equal(t, insertData1.Data[Float16VectorField].GetMemorySize(), 12)
-	assert.Equal(t, insertData1.Data[BFloat16VectorField].GetMemorySize(), 12)
-	assert.Equal(t, insertData1.Data[Int8VectorField].GetMemorySize(), 8)
+	assert.Equal(t, insertData1.Data[BinaryVectorField].GetMemorySize(), 14)
+	assert.Equal(t, insertData1.Data[FloatVectorField].GetMemorySize(), 29)
+	assert.Equal(t, insertData1.Data[Float16VectorField].GetMemorySize(), 21)
+	assert.Equal(t, insertData1.Data[BFloat16VectorField].GetMemorySize(), 21)
+	assert.Equal(t, insertData1.Data[Int8VectorField].GetMemorySize(), 17)
 	assert.Equal(t, insertData1.Data[ArrayField].GetMemorySize(), 3*4+1)
 	assert.Equal(t, insertData1.Data[JSONField].GetMemorySize(), len([]byte(`{"batch":1}`))+16+1)
 	assert.Equal(t, insertData1.Data[StructSubInt32Field].GetMemorySize(), 4*4+1)
@@ -1464,11 +1464,11 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertData2.Data[FloatField].GetMemorySize(), 9)
 	assert.Equal(t, insertData2.Data[DoubleField].GetMemorySize(), 17)
 	assert.Equal(t, insertData2.Data[StringField].GetMemorySize(), 36)
-	assert.Equal(t, insertData2.Data[BinaryVectorField].GetMemorySize(), 6)
-	assert.Equal(t, insertData2.Data[FloatVectorField].GetMemorySize(), 36)
-	assert.Equal(t, insertData2.Data[Float16VectorField].GetMemorySize(), 20)
-	assert.Equal(t, insertData2.Data[BFloat16VectorField].GetMemorySize(), 20)
-	assert.Equal(t, insertData2.Data[Int8VectorField].GetMemorySize(), 12)
+	assert.Equal(t, insertData2.Data[BinaryVectorField].GetMemorySize(), 15)
+	assert.Equal(t, insertData2.Data[FloatVectorField].GetMemorySize(), 45)
+	assert.Equal(t, insertData2.Data[Float16VectorField].GetMemorySize(), 29)
+	assert.Equal(t, insertData2.Data[BFloat16VectorField].GetMemorySize(), 29)
+	assert.Equal(t, insertData2.Data[Int8VectorField].GetMemorySize(), 21)
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
@@ -1482,11 +1482,11 @@ func TestMemorySize(t *testing.T) {
 			FloatField:          &FloatFieldData{[]float32{}, nil, false},
 			DoubleField:         &DoubleFieldData{[]float64{}, nil, false},
 			StringField:         &StringFieldData{[]string{}, schemapb.DataType_VarChar, nil, false},
-			BinaryVectorField:   &BinaryVectorFieldData{[]byte{}, 8},
-			FloatVectorField:    &FloatVectorFieldData{[]float32{}, 4},
-			Float16VectorField:  &Float16VectorFieldData{[]byte{}, 4},
-			BFloat16VectorField: &BFloat16VectorFieldData{[]byte{}, 4},
-			Int8VectorField:     &Int8VectorFieldData{[]int8{}, 4},
+			BinaryVectorField:   &BinaryVectorFieldData{Data: []byte{}, Dim: 8},
+			FloatVectorField:    &FloatVectorFieldData{Data: []float32{}, Dim: 4},
+			Float16VectorField:  &Float16VectorFieldData{Data: []byte{}, Dim: 4},
+			BFloat16VectorField: &BFloat16VectorFieldData{Data: []byte{}, Dim: 4},
+			Int8VectorField:     &Int8VectorFieldData{Data: []int8{}, Dim: 4},
 			StructSubFloatVectorField: &VectorArrayFieldData{
 				Dim:         2,
 				ElementType: schemapb.DataType_FloatVector,
@@ -1505,11 +1505,11 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertDataEmpty.Data[FloatField].GetMemorySize(), 1)
 	assert.Equal(t, insertDataEmpty.Data[DoubleField].GetMemorySize(), 1)
 	assert.Equal(t, insertDataEmpty.Data[StringField].GetMemorySize(), 1)
-	assert.Equal(t, insertDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4)
-	assert.Equal(t, insertDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
-	assert.Equal(t, insertDataEmpty.Data[Float16VectorField].GetMemorySize(), 4)
-	assert.Equal(t, insertDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 4)
-	assert.Equal(t, insertDataEmpty.Data[Int8VectorField].GetMemorySize(), 4)
+	assert.Equal(t, insertDataEmpty.Data[BinaryVectorField].GetMemorySize(), 13)
+	assert.Equal(t, insertDataEmpty.Data[FloatVectorField].GetMemorySize(), 13)
+	assert.Equal(t, insertDataEmpty.Data[Float16VectorField].GetMemorySize(), 13)
+	assert.Equal(t, insertDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 13)
+	assert.Equal(t, insertDataEmpty.Data[Int8VectorField].GetMemorySize(), 13)
 	assert.Equal(t, insertDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0)
 }
 
@@ -1589,13 +1589,13 @@ func TestAddFieldDataToPayload(t *testing.T) {
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{[]byte{}, 8})
+	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{Data: []byte{}, Dim: 8})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_FloatVector, &FloatVectorFieldData{[]float32{}, 4})
+	err = AddFieldDataToPayload(e, schemapb.DataType_FloatVector, &FloatVectorFieldData{Data: []float32{}, Dim: 4})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Float16Vector, &Float16VectorFieldData{[]byte{}, 4})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float16Vector, &Float16VectorFieldData{Data: []byte{}, Dim: 4})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_BFloat16Vector, &BFloat16VectorFieldData{[]byte{}, 8})
+	err = AddFieldDataToPayload(e, schemapb.DataType_BFloat16Vector, &BFloat16VectorFieldData{Data: []byte{}, Dim: 8})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_SparseFloatVector, &SparseFloatVectorFieldData{
 		SparseFloatArray: schemapb.SparseFloatArray{
@@ -1604,7 +1604,7 @@ func TestAddFieldDataToPayload(t *testing.T) {
 		},
 	})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int8Vector, &Int8VectorFieldData{[]int8{}, 4})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int8Vector, &Int8VectorFieldData{Data: []int8{}, Dim: 4})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_ArrayOfVector, &VectorArrayFieldData{
 		Dim:         2,
