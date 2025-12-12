@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -2287,4 +2288,78 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	assert.Error(t, err)
 	_, err = mt.ListPrivilegeGroups(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestMetaTable_TempCollectionProperty(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10) + "/meta"
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
+	require.NoError(t, err)
+	catalog := rootcoord.NewCatalog(catalogKV, ss)
+
+	allocator := mocktso.NewAllocator(t)
+	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
+
+	meta, err := NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	err = meta.AddCollection(context.Background(), &model.Collection{
+		CollectionID: 1,
+		State:        pb.CollectionState_CollectionCreated,
+		DBID:         util.DefaultDBID,
+		Properties:   common.NewKeyValuePairs(map[string]string{}),
+	})
+	require.NoError(t, err)
+
+	err = meta.SetTempCollectionProperty(context.Background(), 1, "key", "value")
+	require.NoError(t, err)
+	coll, err := meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "value", m["key"])
+
+	err = meta.SetTempCollectionProperty(context.Background(), 1, "key", "value2")
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "value2", m["key"])
+
+	err = meta.SetTempCollectionProperty(context.Background(), 1, "key", "value2")
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "value2", m["key"])
+
+	// reload the meta
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "value2", m["key"])
+
+	// remove the temp property
+	meta.RemoveTempCollectionProperty(context.Background(), 1, "key")
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	_, ok := m["key"]
+	require.False(t, ok)
+
+	// reload the meta again
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	_, ok = m["key"]
+	require.False(t, ok)
 }

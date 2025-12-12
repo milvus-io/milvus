@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func TestMain(m *testing.M) {
 
 func initStreamingSystemAndCore(t *testing.T) *Core {
 	kv, _ := kvfactory.GetEtcdAndPath()
-	path := funcutil.RandomString(10)
+	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 
 	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
@@ -117,6 +118,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		msg = msg.WithBroadcastID(1)
 		results := make(map[string]*message.AppendResult)
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
@@ -125,6 +127,20 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 				LastConfirmedMessageID: rmq.NewRmqID(1),
 			}
 		}
+		wg := sync.WaitGroup{}
+		for _, mutableMsg := range msg.SplitIntoMutableMessage() {
+			result := results[mutableMsg.VChannel()]
+			immutableMsg := mutableMsg.WithTimeTick(result.TimeTick).WithLastConfirmed(result.LastConfirmedMessageID).IntoImmutableMessage(result.MessageID)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				retry.Do(context.Background(), func() error {
+					return registry.CallMessageAckOnceCallbacks(context.Background(), immutableMsg)
+				}, retry.AttemptAlways())
+			}()
+		}
+		wg.Wait()
+
 		retry.Do(context.Background(), func() error {
 			log.Info("broadcast message", log.FieldMessage(msg))
 			return registry.CallMessageAckCallback(context.Background(), msg, results)

@@ -18,6 +18,7 @@ func newBroadcastHeaderFromProto(proto *messagespb.BroadcastHeader) *BroadcastHe
 		BroadcastID:  proto.GetBroadcastId(),
 		VChannels:    proto.GetVchannels(),
 		ResourceKeys: rks,
+		AckSyncUp:    proto.GetAckSyncUp(),
 	}
 }
 
@@ -25,12 +26,18 @@ type BroadcastHeader struct {
 	BroadcastID  uint64
 	VChannels    []string
 	ResourceKeys typeutil.Set[ResourceKey]
+	AckSyncUp    bool
 }
 
 // BroadcastResult is the result of broadcast operation.
 type BroadcastResult[H proto.Message, B proto.Message] struct {
 	Message SpecializedBroadcastMessage[H, B]
 	Results map[string]*AppendResult
+}
+
+// AckResult is the result of ack operation.
+type AckResult[H proto.Message, B proto.Message] struct {
+	Message SpecializedImmutableMessage[H, B]
 }
 
 // GetMaxTimeTick returns the max time tick of the broadcast result.

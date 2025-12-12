@@ -219,6 +219,15 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		return nil
 	}
 
+	// TOOD: should be removed at 3.0, after merge the flusher logic into recovery storage.
+	// only for truncate api now.
+	if bh := msg.BroadcastHeader(); bh != nil && bh.AckSyncUp {
+		if err := impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+			impl.logger.Warn("failed to observe message", zap.Error(err))
+			return err
+		}
+	}
+
 	// Do the data sync service management here.
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
