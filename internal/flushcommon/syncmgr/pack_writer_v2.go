@@ -195,7 +195,6 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		if err = w.Write(rec); err != nil {
 			if closeErr := w.Close(); closeErr != nil {
 				log.Error("failed to close writer after write failed", zap.Error(closeErr))
-				return closeErr
 			}
 			return err
 		}
