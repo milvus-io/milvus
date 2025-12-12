@@ -80,6 +80,13 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 		})
 	}
 
+	// Filter out query nodes that are currently marked as resource exhausted.
+	// These nodes have recently reported OOM or disk full errors and are under
+	// a penalty period during which they won't receive new loading tasks.
+	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+		return !b.nodeManager.IsResourceExhausted(node)
+	})
+
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil
@@ -100,7 +107,7 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 			To:      nodesInfo[i%len(nodesInfo)].ID(),
 		}
 		ret = append(ret, plan)
-		if len(ret) > balanceBatchSize {
+		if len(ret) >= balanceBatchSize {
 			break
 		}
 	}
@@ -118,6 +125,14 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 			return info != nil && info.GetState() == session.NodeStateNormal && versionRangeFilter(info.Version())
 		})
 	}
+
+	// Filter out query nodes that are currently marked as resource exhausted.
+	// These nodes have recently reported OOM or disk full errors and are under
+	// a penalty period during which they won't receive new loading tasks.
+	nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+		return !b.nodeManager.IsResourceExhausted(node)
+	})
+
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil
