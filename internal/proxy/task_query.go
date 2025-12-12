@@ -823,7 +823,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d vs %d", retSize, maxOutputSize)
 		}
 
 		cursors[sel]++
