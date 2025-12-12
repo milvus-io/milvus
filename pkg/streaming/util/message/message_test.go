@@ -79,11 +79,11 @@ func TestBroadcast(t *testing.T) {
 	msg, err := NewCreateCollectionMessageBuilderV1().
 		WithHeader(&CreateCollectionMessageHeader{}).
 		WithBody(&msgpb.CreateCollectionRequest{}).
-		WithBroadcast([]string{"v1", "v2"}, NewExclusiveCollectionNameResourceKey("1", "2"), NewImportJobIDResourceKey(1)).
+		WithBroadcast([]string{"v1", "v2"}, OptBuildBroadcastAckSyncUp()).
 		BuildBroadcast()
 	assert.NoError(t, err)
 	assert.NotNil(t, msg)
-	msg.WithBroadcastID(1)
+	msg.OverwriteBroadcastHeader(1, NewSharedDBNameResourceKey("1"), NewExclusiveCollectionNameResourceKey("1", "2"))
 	msgs := msg.SplitIntoMutableMessage()
 	assert.NotNil(t, msgs)
 	assert.Len(t, msgs, 2)
@@ -91,6 +91,8 @@ func TestBroadcast(t *testing.T) {
 	assert.Equal(t, uint64(1), msgs[1].BroadcastHeader().BroadcastID)
 	assert.Len(t, msgs[0].BroadcastHeader().ResourceKeys, 2)
 	assert.ElementsMatch(t, []string{"v1", "v2"}, []string{msgs[0].VChannel(), msgs[1].VChannel()})
+	assert.True(t, msgs[0].BroadcastHeader().AckSyncUp)
+	assert.True(t, msgs[1].BroadcastHeader().AckSyncUp)
 
 	MustAsBroadcastCreateCollectionMessageV1(msg)
 }

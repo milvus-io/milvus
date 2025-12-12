@@ -220,16 +220,16 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 	msg, err := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&messagespb.DropCollectionMessageHeader{}).
 		WithBody(&msgpb.DropCollectionRequest{}).
-		WithBroadcast(vchannels, rks...).
+		WithBroadcast(vchannels).
 		BuildBroadcast()
 	if err != nil {
 		panic(err)
 	}
-	return msg
+	return msg.OverwriteBroadcastHeader(0, rks...)
 }
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
-	msg := createNewBroadcastMsg(vchannels, rks...).WithBroadcastID(broadcastID)
+	msg := createNewBroadcastMsg(vchannels).OverwriteBroadcastHeader(broadcastID, rks...)
 	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{

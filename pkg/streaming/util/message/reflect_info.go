@@ -178,6 +178,7 @@ type (
 	ImmutableTimeTickMessageV1       = SpecializedImmutableMessage[*TimeTickMessageHeader, *TimeTickMsg]
 	BroadcastTimeTickMessageV1       = SpecializedBroadcastMessage[*TimeTickMessageHeader, *TimeTickMsg]
 	BroadcastResultTimeTickMessageV1 = BroadcastResult[*TimeTickMessageHeader, *TimeTickMsg]
+	AckResultTimeTickMessageV1       = AckResult[*TimeTickMessageHeader, *TimeTickMsg]
 )
 
 // MessageTypeWithVersion for TimeTickMessageV1
@@ -219,6 +220,7 @@ type (
 	ImmutableInsertMessageV1       = SpecializedImmutableMessage[*InsertMessageHeader, *InsertRequest]
 	BroadcastInsertMessageV1       = SpecializedBroadcastMessage[*InsertMessageHeader, *InsertRequest]
 	BroadcastResultInsertMessageV1 = BroadcastResult[*InsertMessageHeader, *InsertRequest]
+	AckResultInsertMessageV1       = AckResult[*InsertMessageHeader, *InsertRequest]
 )
 
 // MessageTypeWithVersion for InsertMessageV1
@@ -260,6 +262,7 @@ type (
 	ImmutableDeleteMessageV1       = SpecializedImmutableMessage[*DeleteMessageHeader, *DeleteRequest]
 	BroadcastDeleteMessageV1       = SpecializedBroadcastMessage[*DeleteMessageHeader, *DeleteRequest]
 	BroadcastResultDeleteMessageV1 = BroadcastResult[*DeleteMessageHeader, *DeleteRequest]
+	AckResultDeleteMessageV1       = AckResult[*DeleteMessageHeader, *DeleteRequest]
 )
 
 // MessageTypeWithVersion for DeleteMessageV1
@@ -301,6 +304,7 @@ type (
 	ImmutableCreateCollectionMessageV1       = SpecializedImmutableMessage[*CreateCollectionMessageHeader, *CreateCollectionRequest]
 	BroadcastCreateCollectionMessageV1       = SpecializedBroadcastMessage[*CreateCollectionMessageHeader, *CreateCollectionRequest]
 	BroadcastResultCreateCollectionMessageV1 = BroadcastResult[*CreateCollectionMessageHeader, *CreateCollectionRequest]
+	AckResultCreateCollectionMessageV1       = AckResult[*CreateCollectionMessageHeader, *CreateCollectionRequest]
 )
 
 // MessageTypeWithVersion for CreateCollectionMessageV1
@@ -342,6 +346,7 @@ type (
 	ImmutableDropCollectionMessageV1       = SpecializedImmutableMessage[*DropCollectionMessageHeader, *DropCollectionRequest]
 	BroadcastDropCollectionMessageV1       = SpecializedBroadcastMessage[*DropCollectionMessageHeader, *DropCollectionRequest]
 	BroadcastResultDropCollectionMessageV1 = BroadcastResult[*DropCollectionMessageHeader, *DropCollectionRequest]
+	AckResultDropCollectionMessageV1       = AckResult[*DropCollectionMessageHeader, *DropCollectionRequest]
 )
 
 // MessageTypeWithVersion for DropCollectionMessageV1
@@ -383,6 +388,7 @@ type (
 	ImmutableTruncateCollectionMessageV2       = SpecializedImmutableMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
 	BroadcastTruncateCollectionMessageV2       = SpecializedBroadcastMessage[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
 	BroadcastResultTruncateCollectionMessageV2 = BroadcastResult[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
+	AckResultTruncateCollectionMessageV2       = AckResult[*TruncateCollectionMessageHeader, *TruncateCollectionMessageBody]
 )
 
 // MessageTypeWithVersion for TruncateCollectionMessageV2
@@ -424,6 +430,7 @@ type (
 	ImmutableCreatePartitionMessageV1       = SpecializedImmutableMessage[*CreatePartitionMessageHeader, *CreatePartitionRequest]
 	BroadcastCreatePartitionMessageV1       = SpecializedBroadcastMessage[*CreatePartitionMessageHeader, *CreatePartitionRequest]
 	BroadcastResultCreatePartitionMessageV1 = BroadcastResult[*CreatePartitionMessageHeader, *CreatePartitionRequest]
+	AckResultCreatePartitionMessageV1       = AckResult[*CreatePartitionMessageHeader, *CreatePartitionRequest]
 )
 
 // MessageTypeWithVersion for CreatePartitionMessageV1
@@ -465,6 +472,7 @@ type (
 	ImmutableDropPartitionMessageV1       = SpecializedImmutableMessage[*DropPartitionMessageHeader, *DropPartitionRequest]
 	BroadcastDropPartitionMessageV1       = SpecializedBroadcastMessage[*DropPartitionMessageHeader, *DropPartitionRequest]
 	BroadcastResultDropPartitionMessageV1 = BroadcastResult[*DropPartitionMessageHeader, *DropPartitionRequest]
+	AckResultDropPartitionMessageV1       = AckResult[*DropPartitionMessageHeader, *DropPartitionRequest]
 )
 
 // MessageTypeWithVersion for DropPartitionMessageV1
@@ -506,6 +514,7 @@ type (
 	ImmutableImportMessageV1       = SpecializedImmutableMessage[*ImportMessageHeader, *ImportMsg]
 	BroadcastImportMessageV1       = SpecializedBroadcastMessage[*ImportMessageHeader, *ImportMsg]
 	BroadcastResultImportMessageV1 = BroadcastResult[*ImportMessageHeader, *ImportMsg]
+	AckResultImportMessageV1       = AckResult[*ImportMessageHeader, *ImportMsg]
 )
 
 // MessageTypeWithVersion for ImportMessageV1
@@ -547,6 +556,7 @@ type (
 	ImmutableCreateSegmentMessageV2       = SpecializedImmutableMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 	BroadcastCreateSegmentMessageV2       = SpecializedBroadcastMessage[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 	BroadcastResultCreateSegmentMessageV2 = BroadcastResult[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
+	AckResultCreateSegmentMessageV2       = AckResult[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]
 )
 
 // MessageTypeWithVersion for CreateSegmentMessageV2
@@ -588,6 +598,7 @@ type (
 	ImmutableFlushMessageV2       = SpecializedImmutableMessage[*FlushMessageHeader, *FlushMessageBody]
 	BroadcastFlushMessageV2       = SpecializedBroadcastMessage[*FlushMessageHeader, *FlushMessageBody]
 	BroadcastResultFlushMessageV2 = BroadcastResult[*FlushMessageHeader, *FlushMessageBody]
+	AckResultFlushMessageV2       = AckResult[*FlushMessageHeader, *FlushMessageBody]
 )
 
 // MessageTypeWithVersion for FlushMessageV2
@@ -629,6 +640,7 @@ type (
 	ImmutableManualFlushMessageV2       = SpecializedImmutableMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 	BroadcastManualFlushMessageV2       = SpecializedBroadcastMessage[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 	BroadcastResultManualFlushMessageV2 = BroadcastResult[*ManualFlushMessageHeader, *ManualFlushMessageBody]
+	AckResultManualFlushMessageV2       = AckResult[*ManualFlushMessageHeader, *ManualFlushMessageBody]
 )
 
 // MessageTypeWithVersion for ManualFlushMessageV2
@@ -670,6 +682,7 @@ type (
 	ImmutableAlterReplicateConfigMessageV2       = SpecializedImmutableMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 	BroadcastAlterReplicateConfigMessageV2       = SpecializedBroadcastMessage[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 	BroadcastResultAlterReplicateConfigMessageV2 = BroadcastResult[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
+	AckResultAlterReplicateConfigMessageV2       = AckResult[*AlterReplicateConfigMessageHeader, *AlterReplicateConfigMessageBody]
 )
 
 // MessageTypeWithVersion for AlterReplicateConfigMessageV2
@@ -711,6 +724,7 @@ type (
 	ImmutableBeginTxnMessageV2       = SpecializedImmutableMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	BroadcastBeginTxnMessageV2       = SpecializedBroadcastMessage[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 	BroadcastResultBeginTxnMessageV2 = BroadcastResult[*BeginTxnMessageHeader, *BeginTxnMessageBody]
+	AckResultBeginTxnMessageV2       = AckResult[*BeginTxnMessageHeader, *BeginTxnMessageBody]
 )
 
 // MessageTypeWithVersion for BeginTxnMessageV2
@@ -752,6 +766,7 @@ type (
 	ImmutableCommitTxnMessageV2       = SpecializedImmutableMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	BroadcastCommitTxnMessageV2       = SpecializedBroadcastMessage[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 	BroadcastResultCommitTxnMessageV2 = BroadcastResult[*CommitTxnMessageHeader, *CommitTxnMessageBody]
+	AckResultCommitTxnMessageV2       = AckResult[*CommitTxnMessageHeader, *CommitTxnMessageBody]
 )
 
 // MessageTypeWithVersion for CommitTxnMessageV2
@@ -793,6 +808,7 @@ type (
 	ImmutableRollbackTxnMessageV2       = SpecializedImmutableMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 	BroadcastRollbackTxnMessageV2       = SpecializedBroadcastMessage[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 	BroadcastResultRollbackTxnMessageV2 = BroadcastResult[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
+	AckResultRollbackTxnMessageV2       = AckResult[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]
 )
 
 // MessageTypeWithVersion for RollbackTxnMessageV2
@@ -834,6 +850,7 @@ type (
 	ImmutableTxnMessageV2       = SpecializedImmutableMessage[*TxnMessageHeader, *TxnMessageBody]
 	BroadcastTxnMessageV2       = SpecializedBroadcastMessage[*TxnMessageHeader, *TxnMessageBody]
 	BroadcastResultTxnMessageV2 = BroadcastResult[*TxnMessageHeader, *TxnMessageBody]
+	AckResultTxnMessageV2       = AckResult[*TxnMessageHeader, *TxnMessageBody]
 )
 
 // MessageTypeWithVersion for TxnMessageV2
@@ -854,6 +871,7 @@ type (
 	ImmutableSchemaChangeMessageV2       = SpecializedImmutableMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 	BroadcastSchemaChangeMessageV2       = SpecializedBroadcastMessage[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 	BroadcastResultSchemaChangeMessageV2 = BroadcastResult[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
+	AckResultSchemaChangeMessageV2       = AckResult[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]
 )
 
 // MessageTypeWithVersion for SchemaChangeMessageV2
@@ -895,6 +913,7 @@ type (
 	ImmutableAlterCollectionMessageV2       = SpecializedImmutableMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 	BroadcastAlterCollectionMessageV2       = SpecializedBroadcastMessage[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 	BroadcastResultAlterCollectionMessageV2 = BroadcastResult[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
+	AckResultAlterCollectionMessageV2       = AckResult[*AlterCollectionMessageHeader, *AlterCollectionMessageBody]
 )
 
 // MessageTypeWithVersion for AlterCollectionMessageV2
@@ -936,6 +955,7 @@ type (
 	ImmutableAlterLoadConfigMessageV2       = SpecializedImmutableMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 	BroadcastAlterLoadConfigMessageV2       = SpecializedBroadcastMessage[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 	BroadcastResultAlterLoadConfigMessageV2 = BroadcastResult[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
+	AckResultAlterLoadConfigMessageV2       = AckResult[*AlterLoadConfigMessageHeader, *AlterLoadConfigMessageBody]
 )
 
 // MessageTypeWithVersion for AlterLoadConfigMessageV2
@@ -977,6 +997,7 @@ type (
 	ImmutableDropLoadConfigMessageV2       = SpecializedImmutableMessage[*DropLoadConfigMessageHeader, *DropLoadConfigMessageBody]
 	BroadcastDropLoadConfigMessageV2       = SpecializedBroadcastMessage[*DropLoadConfigMessageHeader, *DropLoadConfigMessageBody]
 	BroadcastResultDropLoadConfigMessageV2 = BroadcastResult[*DropLoadConfigMessageHeader, *DropLoadConfigMessageBody]
+	AckResultDropLoadConfigMessageV2       = AckResult[*DropLoadConfigMessageHeader, *DropLoadConfigMessageBody]
 )
 
 // MessageTypeWithVersion for DropLoadConfigMessageV2
@@ -1018,6 +1039,7 @@ type (
 	ImmutableCreateDatabaseMessageV2       = SpecializedImmutableMessage[*CreateDatabaseMessageHeader, *CreateDatabaseMessageBody]
 	BroadcastCreateDatabaseMessageV2       = SpecializedBroadcastMessage[*CreateDatabaseMessageHeader, *CreateDatabaseMessageBody]
 	BroadcastResultCreateDatabaseMessageV2 = BroadcastResult[*CreateDatabaseMessageHeader, *CreateDatabaseMessageBody]
+	AckResultCreateDatabaseMessageV2       = AckResult[*CreateDatabaseMessageHeader, *CreateDatabaseMessageBody]
 )
 
 // MessageTypeWithVersion for CreateDatabaseMessageV2
@@ -1059,6 +1081,7 @@ type (
 	ImmutableAlterDatabaseMessageV2       = SpecializedImmutableMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 	BroadcastAlterDatabaseMessageV2       = SpecializedBroadcastMessage[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 	BroadcastResultAlterDatabaseMessageV2 = BroadcastResult[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
+	AckResultAlterDatabaseMessageV2       = AckResult[*AlterDatabaseMessageHeader, *AlterDatabaseMessageBody]
 )
 
 // MessageTypeWithVersion for AlterDatabaseMessageV2
@@ -1100,6 +1123,7 @@ type (
 	ImmutableDropDatabaseMessageV2       = SpecializedImmutableMessage[*DropDatabaseMessageHeader, *DropDatabaseMessageBody]
 	BroadcastDropDatabaseMessageV2       = SpecializedBroadcastMessage[*DropDatabaseMessageHeader, *DropDatabaseMessageBody]
 	BroadcastResultDropDatabaseMessageV2 = BroadcastResult[*DropDatabaseMessageHeader, *DropDatabaseMessageBody]
+	AckResultDropDatabaseMessageV2       = AckResult[*DropDatabaseMessageHeader, *DropDatabaseMessageBody]
 )
 
 // MessageTypeWithVersion for DropDatabaseMessageV2
@@ -1141,6 +1165,7 @@ type (
 	ImmutableAlterAliasMessageV2       = SpecializedImmutableMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 	BroadcastAlterAliasMessageV2       = SpecializedBroadcastMessage[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 	BroadcastResultAlterAliasMessageV2 = BroadcastResult[*AlterAliasMessageHeader, *AlterAliasMessageBody]
+	AckResultAlterAliasMessageV2       = AckResult[*AlterAliasMessageHeader, *AlterAliasMessageBody]
 )
 
 // MessageTypeWithVersion for AlterAliasMessageV2
@@ -1182,6 +1207,7 @@ type (
 	ImmutableDropAliasMessageV2       = SpecializedImmutableMessage[*DropAliasMessageHeader, *DropAliasMessageBody]
 	BroadcastDropAliasMessageV2       = SpecializedBroadcastMessage[*DropAliasMessageHeader, *DropAliasMessageBody]
 	BroadcastResultDropAliasMessageV2 = BroadcastResult[*DropAliasMessageHeader, *DropAliasMessageBody]
+	AckResultDropAliasMessageV2       = AckResult[*DropAliasMessageHeader, *DropAliasMessageBody]
 )
 
 // MessageTypeWithVersion for DropAliasMessageV2
@@ -1223,6 +1249,7 @@ type (
 	ImmutableAlterUserMessageV2       = SpecializedImmutableMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 	BroadcastAlterUserMessageV2       = SpecializedBroadcastMessage[*AlterUserMessageHeader, *AlterUserMessageBody]
 	BroadcastResultAlterUserMessageV2 = BroadcastResult[*AlterUserMessageHeader, *AlterUserMessageBody]
+	AckResultAlterUserMessageV2       = AckResult[*AlterUserMessageHeader, *AlterUserMessageBody]
 )
 
 // MessageTypeWithVersion for AlterUserMessageV2
@@ -1264,6 +1291,7 @@ type (
 	ImmutableDropUserMessageV2       = SpecializedImmutableMessage[*DropUserMessageHeader, *DropUserMessageBody]
 	BroadcastDropUserMessageV2       = SpecializedBroadcastMessage[*DropUserMessageHeader, *DropUserMessageBody]
 	BroadcastResultDropUserMessageV2 = BroadcastResult[*DropUserMessageHeader, *DropUserMessageBody]
+	AckResultDropUserMessageV2       = AckResult[*DropUserMessageHeader, *DropUserMessageBody]
 )
 
 // MessageTypeWithVersion for DropUserMessageV2
@@ -1305,6 +1333,7 @@ type (
 	ImmutableAlterRoleMessageV2       = SpecializedImmutableMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 	BroadcastAlterRoleMessageV2       = SpecializedBroadcastMessage[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 	BroadcastResultAlterRoleMessageV2 = BroadcastResult[*AlterRoleMessageHeader, *AlterRoleMessageBody]
+	AckResultAlterRoleMessageV2       = AckResult[*AlterRoleMessageHeader, *AlterRoleMessageBody]
 )
 
 // MessageTypeWithVersion for AlterRoleMessageV2
@@ -1346,6 +1375,7 @@ type (
 	ImmutableDropRoleMessageV2       = SpecializedImmutableMessage[*DropRoleMessageHeader, *DropRoleMessageBody]
 	BroadcastDropRoleMessageV2       = SpecializedBroadcastMessage[*DropRoleMessageHeader, *DropRoleMessageBody]
 	BroadcastResultDropRoleMessageV2 = BroadcastResult[*DropRoleMessageHeader, *DropRoleMessageBody]
+	AckResultDropRoleMessageV2       = AckResult[*DropRoleMessageHeader, *DropRoleMessageBody]
 )
 
 // MessageTypeWithVersion for DropRoleMessageV2
@@ -1387,6 +1417,7 @@ type (
 	ImmutableAlterUserRoleMessageV2       = SpecializedImmutableMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 	BroadcastAlterUserRoleMessageV2       = SpecializedBroadcastMessage[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 	BroadcastResultAlterUserRoleMessageV2 = BroadcastResult[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
+	AckResultAlterUserRoleMessageV2       = AckResult[*AlterUserRoleMessageHeader, *AlterUserRoleMessageBody]
 )
 
 // MessageTypeWithVersion for AlterUserRoleMessageV2
@@ -1428,6 +1459,7 @@ type (
 	ImmutableDropUserRoleMessageV2       = SpecializedImmutableMessage[*DropUserRoleMessageHeader, *DropUserRoleMessageBody]
 	BroadcastDropUserRoleMessageV2       = SpecializedBroadcastMessage[*DropUserRoleMessageHeader, *DropUserRoleMessageBody]
 	BroadcastResultDropUserRoleMessageV2 = BroadcastResult[*DropUserRoleMessageHeader, *DropUserRoleMessageBody]
+	AckResultDropUserRoleMessageV2       = AckResult[*DropUserRoleMessageHeader, *DropUserRoleMessageBody]
 )
 
 // MessageTypeWithVersion for DropUserRoleMessageV2
@@ -1469,6 +1501,7 @@ type (
 	ImmutableAlterPrivilegeMessageV2       = SpecializedImmutableMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 	BroadcastAlterPrivilegeMessageV2       = SpecializedBroadcastMessage[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 	BroadcastResultAlterPrivilegeMessageV2 = BroadcastResult[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
+	AckResultAlterPrivilegeMessageV2       = AckResult[*AlterPrivilegeMessageHeader, *AlterPrivilegeMessageBody]
 )
 
 // MessageTypeWithVersion for AlterPrivilegeMessageV2
@@ -1510,6 +1543,7 @@ type (
 	ImmutableDropPrivilegeMessageV2       = SpecializedImmutableMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 	BroadcastDropPrivilegeMessageV2       = SpecializedBroadcastMessage[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 	BroadcastResultDropPrivilegeMessageV2 = BroadcastResult[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
+	AckResultDropPrivilegeMessageV2       = AckResult[*DropPrivilegeMessageHeader, *DropPrivilegeMessageBody]
 )
 
 // MessageTypeWithVersion for DropPrivilegeMessageV2
@@ -1551,6 +1585,7 @@ type (
 	ImmutableAlterPrivilegeGroupMessageV2       = SpecializedImmutableMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 	BroadcastAlterPrivilegeGroupMessageV2       = SpecializedBroadcastMessage[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 	BroadcastResultAlterPrivilegeGroupMessageV2 = BroadcastResult[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
+	AckResultAlterPrivilegeGroupMessageV2       = AckResult[*AlterPrivilegeGroupMessageHeader, *AlterPrivilegeGroupMessageBody]
 )
 
 // MessageTypeWithVersion for AlterPrivilegeGroupMessageV2
@@ -1592,6 +1627,7 @@ type (
 	ImmutableDropPrivilegeGroupMessageV2       = SpecializedImmutableMessage[*DropPrivilegeGroupMessageHeader, *DropPrivilegeGroupMessageBody]
 	BroadcastDropPrivilegeGroupMessageV2       = SpecializedBroadcastMessage[*DropPrivilegeGroupMessageHeader, *DropPrivilegeGroupMessageBody]
 	BroadcastResultDropPrivilegeGroupMessageV2 = BroadcastResult[*DropPrivilegeGroupMessageHeader, *DropPrivilegeGroupMessageBody]
+	AckResultDropPrivilegeGroupMessageV2       = AckResult[*DropPrivilegeGroupMessageHeader, *DropPrivilegeGroupMessageBody]
 )
 
 // MessageTypeWithVersion for DropPrivilegeGroupMessageV2
@@ -1633,6 +1669,7 @@ type (
 	ImmutableRestoreRBACMessageV2       = SpecializedImmutableMessage[*RestoreRBACMessageHeader, *RestoreRBACMessageBody]
 	BroadcastRestoreRBACMessageV2       = SpecializedBroadcastMessage[*RestoreRBACMessageHeader, *RestoreRBACMessageBody]
 	BroadcastResultRestoreRBACMessageV2 = BroadcastResult[*RestoreRBACMessageHeader, *RestoreRBACMessageBody]
+	AckResultRestoreRBACMessageV2       = AckResult[*RestoreRBACMessageHeader, *RestoreRBACMessageBody]
 )
 
 // MessageTypeWithVersion for RestoreRBACMessageV2
@@ -1674,6 +1711,7 @@ type (
 	ImmutableAlterResourceGroupMessageV2       = SpecializedImmutableMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 	BroadcastAlterResourceGroupMessageV2       = SpecializedBroadcastMessage[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 	BroadcastResultAlterResourceGroupMessageV2 = BroadcastResult[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
+	AckResultAlterResourceGroupMessageV2       = AckResult[*AlterResourceGroupMessageHeader, *AlterResourceGroupMessageBody]
 )
 
 // MessageTypeWithVersion for AlterResourceGroupMessageV2
@@ -1715,6 +1753,7 @@ type (
 	ImmutableDropResourceGroupMessageV2       = SpecializedImmutableMessage[*DropResourceGroupMessageHeader, *DropResourceGroupMessageBody]
 	BroadcastDropResourceGroupMessageV2       = SpecializedBroadcastMessage[*DropResourceGroupMessageHeader, *DropResourceGroupMessageBody]
 	BroadcastResultDropResourceGroupMessageV2 = BroadcastResult[*DropResourceGroupMessageHeader, *DropResourceGroupMessageBody]
+	AckResultDropResourceGroupMessageV2       = AckResult[*DropResourceGroupMessageHeader, *DropResourceGroupMessageBody]
 )
 
 // MessageTypeWithVersion for DropResourceGroupMessageV2
@@ -1756,6 +1795,7 @@ type (
 	ImmutableCreateIndexMessageV2       = SpecializedImmutableMessage[*CreateIndexMessageHeader, *CreateIndexMessageBody]
 	BroadcastCreateIndexMessageV2       = SpecializedBroadcastMessage[*CreateIndexMessageHeader, *CreateIndexMessageBody]
 	BroadcastResultCreateIndexMessageV2 = BroadcastResult[*CreateIndexMessageHeader, *CreateIndexMessageBody]
+	AckResultCreateIndexMessageV2       = AckResult[*CreateIndexMessageHeader, *CreateIndexMessageBody]
 )
 
 // MessageTypeWithVersion for CreateIndexMessageV2
@@ -1797,6 +1837,7 @@ type (
 	ImmutableAlterIndexMessageV2       = SpecializedImmutableMessage[*AlterIndexMessageHeader, *AlterIndexMessageBody]
 	BroadcastAlterIndexMessageV2       = SpecializedBroadcastMessage[*AlterIndexMessageHeader, *AlterIndexMessageBody]
 	BroadcastResultAlterIndexMessageV2 = BroadcastResult[*AlterIndexMessageHeader, *AlterIndexMessageBody]
+	AckResultAlterIndexMessageV2       = AckResult[*AlterIndexMessageHeader, *AlterIndexMessageBody]
 )
 
 // MessageTypeWithVersion for AlterIndexMessageV2
@@ -1838,6 +1879,7 @@ type (
 	ImmutableDropIndexMessageV2       = SpecializedImmutableMessage[*DropIndexMessageHeader, *DropIndexMessageBody]
 	BroadcastDropIndexMessageV2       = SpecializedBroadcastMessage[*DropIndexMessageHeader, *DropIndexMessageBody]
 	BroadcastResultDropIndexMessageV2 = BroadcastResult[*DropIndexMessageHeader, *DropIndexMessageBody]
+	AckResultDropIndexMessageV2       = AckResult[*DropIndexMessageHeader, *DropIndexMessageBody]
 )
 
 // MessageTypeWithVersion for DropIndexMessageV2

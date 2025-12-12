@@ -113,6 +113,12 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 
 	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
+	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
+	// It should only be used for temp properties, these properties make no sense out of the coordinator.
+	// It just be used to switch some coordinator behaviours, such as enable/disable some features.
+	SetTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string, value string) error
+	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
+	RemoveTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
 
@@ -971,6 +977,54 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
 	mt.collID2Meta[header.CollectionId] = newColl
 	log.Ctx(ctx).Info("alter collection finished", zap.Bool("dbChanged", dbChanged), zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", newColl.UpdateTimestamp))
+	return nil
+}
+
+func (mt *MetaTable) SetTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string, value string) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return errAlterCollectionNotFound
+	}
+
+	// Apply the properties to override the existing properties.
+	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	if _, ok := newProperties[key]; ok && newProperties[key] == value {
+		return nil
+	}
+	newProperties[key] = value
+	return mt.updateCollectionProperties(ctx, coll, newProperties)
+}
+
+func (mt *MetaTable) RemoveTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return errAlterCollectionNotFound
+	}
+
+	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	if _, ok := newProperties[key]; !ok {
+		return nil
+	}
+	delete(newProperties, key)
+	return mt.updateCollectionProperties(ctx, coll, newProperties)
+}
+
+func (mt *MetaTable) updateCollectionProperties(ctx context.Context, coll *model.Collection, newProperties map[string]string) error {
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+	newColl.Properties = common.NewKeyValuePairs(newProperties)
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[coll.CollectionID] = newColl
 	return nil
 }
 

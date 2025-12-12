@@ -214,7 +214,6 @@ func (it *importTask) Execute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("alloc job id failed", zap.Error(err))
 		return err
 	}
-	resourceKey := message.NewImportJobIDResourceKey(jobID)
 	msg, err := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).WithBody(
 		&msgpb.ImportMsg{
@@ -231,7 +230,7 @@ func (it *importTask) Execute(ctx context.Context) error {
 			Schema:         it.schema.CollectionSchema,
 			JobID:          jobID,
 		}).
-		WithBroadcast(it.vchannels, resourceKey).
+		WithBroadcast(it.vchannels).
 		BuildBroadcast()
 	if err != nil {
 		log.Ctx(ctx).Warn("create import message failed", zap.Error(err))
