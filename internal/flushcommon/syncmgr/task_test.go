@@ -381,7 +381,7 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(retry.Unrecoverable(errors.New("mocked")))
 		task := s.getSuiteSyncTask(new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})).
 			WithFailureCallback(handler).
-			WithWriteRetryOptions(retry.Attempts(1))
+			WithWriteRetryOptions(retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second))
 
 		err := task.Run(ctx)
 
