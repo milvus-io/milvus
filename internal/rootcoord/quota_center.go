@@ -406,7 +406,8 @@ func (q *QuotaCenter) collectMetrics() error {
 
 	ctx, cancel := context.WithTimeout(q.ctx, GetMetricsTimeout)
 	defer cancel()
-
+	metrics.RootCoordNumEntities.Reset()
+	metrics.RootCoordIndexedNumEntities.Reset()
 	group := &errgroup.Group{}
 
 	// get Query cluster metrics
