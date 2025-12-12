@@ -42,7 +42,7 @@ func Hash32Bytes(b []byte) (uint32, error) {
 	return h.Sum32() & 0x7fffffff, nil
 }
 
-// Hash32Uint64 hashing an uint64 nubmer to uint32
+// Hash32Uint64 hashing an uint64 number to uint32
 func Hash32Uint64(v uint64) (uint32, error) {
 	// need unsafe package to get element byte size
 	/* #nosec G103 */
@@ -140,15 +140,15 @@ func HashKey2Partitions(keys *schemapb.FieldData, partitionNames []string) ([]ui
 	return hashValues, nil
 }
 
-// this method returns a static sequence for partitions for partiton key mode
+// this method returns a static sequence for partitions for partition key mode
 func RearrangePartitionsForPartitionKey(partitions map[string]int64) ([]string, []int64, error) {
-	// Make sure the order of the partition names got every time is the same
+	// Make sure the order of the partition names is the same every time
 	partitionNames := make([]string, len(partitions))
 	partitionIDs := make([]int64, len(partitions))
 	for partitionName, partitionID := range partitions {
 		splits := strings.Split(partitionName, "_")
 		if len(splits) < 2 {
-			return nil, nil, fmt.Errorf("bad default partion name in partition key mode: %s", partitionName)
+			return nil, nil, fmt.Errorf("bad default partition name in partition key mode: %s", partitionName)
 		}
 		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
 		if err != nil {

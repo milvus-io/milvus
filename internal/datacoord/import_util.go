@@ -754,7 +754,7 @@ func ValidateBinlogImportRequest(ctx context.Context, cm storage.ChunkManager,
 }
 
 // ListBinlogImportRequestFiles lists the binlog files from the request.
-// TODO: dyh, remove listing binlog after backup-restore derectly passed the segments paths.
+// TODO: dyh, remove listing binlog after backup-restore directly passes the segment paths.
 func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	reqFiles []*internalpb.ImportFile, options []*commonpb.KeyValuePair,
 ) ([]*internalpb.ImportFile, error) {
