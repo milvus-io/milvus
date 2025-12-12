@@ -367,6 +367,21 @@ func GenerateInt8Vectors(numRows, dim int) []int8 {
 	return ret
 }
 
+func GenerateFloatVectorsWithInvalidData(numRows, dim int) []float32 {
+	total := numRows * dim
+	ret := make([]float32, 0, total)
+	for i := 0; i < total; i++ {
+		var f float32
+		if i%2 == 0 {
+			f = float32(math.NaN())
+		} else {
+			f = float32(math.Inf(1))
+		}
+		ret = append(ret, f)
+	}
+	return ret
+}
+
 func GenerateBFloat16VectorsWithInvalidData(numRows, dim int) []byte {
 	total := numRows * dim
 	ret16 := make([]uint16, 0, total)

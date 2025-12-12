@@ -141,7 +141,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 				return err
 			}
 		case schemapb.DataType_SparseFloatVector:
-			if err := v.checkSparseFloatFieldData(field, fieldSchema); err != nil {
+			if err := v.checkSparseFloatVectorFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_Int8Vector:
@@ -219,6 +219,13 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 		msg := fmt.Sprintf("the dim (%d) of field data(%s) is not equal to schema dim (%d)", dataDim, fieldName, schemaDim)
 		return merr.WrapErrParameterInvalid(schemaDim, dataDim, msg)
 	}
+	getExpectedVectorRows := func(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) uint64 {
+		validData := field.GetValidData()
+		if fieldSchema.GetNullable() && len(validData) > 0 {
+			return uint64(getValidNumber(validData))
+		}
+		return numRows
+	}
 	for _, field := range data {
 		switch field.GetType() {
 		case schemapb.DataType_FloatVector:
@@ -241,7 +248,8 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
-			if n != numRows {
+			expectedRows := getExpectedVectorRows(field, f)
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -265,7 +273,8 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			if n != numRows {
+			expectedRows := getExpectedVectorRows(field, f)
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -289,7 +298,8 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			if n != numRows {
+			expectedRows := getExpectedVectorRows(field, f)
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -313,13 +323,19 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return err
 			}
 
-			if n != numRows {
+			expectedRows := getExpectedVectorRows(field, f)
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
 		case schemapb.DataType_SparseFloatVector:
+			f, err := schema.GetFieldFromName(field.GetFieldName())
+			if err != nil {
+				return err
+			}
 			n := uint64(len(field.GetVectors().GetSparseFloatVector().Contents))
-			if n != numRows {
+			expectedRows := getExpectedVectorRows(field, f)
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -343,7 +359,8 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
-			if n != numRows {
+			expectedRows := getExpectedVectorRows(field, f)
+			if n != expectedRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
 
@@ -728,7 +745,7 @@ func getValidNumber(validData []bool) int {
 
 func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	floatArray := field.GetVectors().GetFloatVector().GetData()
-	if floatArray == nil {
+	if floatArray == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need float vector", "got nil", msg)
 	}
@@ -743,8 +760,11 @@ func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fiel
 func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	float16VecArray := field.GetVectors().GetFloat16Vector()
 	if float16VecArray == nil {
-		msg := fmt.Sprintf("float16 float field '%v' is illegal, nil Vector_Float16 type", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need vector_float16 array", "got nil", msg)
+		if !fieldSchema.GetNullable() {
+			msg := fmt.Sprintf("float16 vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need float16 vector", "got nil", msg)
+		}
+		return nil
 	}
 	if v.checkNAN {
 		return typeutil.VerifyFloats16(float16VecArray)
@@ -755,8 +775,11 @@ func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fi
 func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	bfloat16VecArray := field.GetVectors().GetBfloat16Vector()
 	if bfloat16VecArray == nil {
-		msg := fmt.Sprintf("bfloat16 float field '%v' is illegal, nil Vector_BFloat16 type", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need vector_bfloat16 array", "got nil", msg)
+		if !fieldSchema.GetNullable() {
+			msg := fmt.Sprintf("bfloat16 vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need bfloat16 vector", "got nil", msg)
+		}
+		return nil
 	}
 	if v.checkNAN {
 		return typeutil.VerifyBFloats16(bfloat16VecArray)
@@ -766,31 +789,33 @@ func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, f
 
 func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	bVecArray := field.GetVectors().GetBinaryVector()
-	if bVecArray == nil {
-		msg := fmt.Sprintf("binary float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need bytes array", "got nil", msg)
+	if bVecArray == nil && !fieldSchema.GetNullable() {
+		msg := fmt.Sprintf("binary vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need binary vector", "got nil", msg)
 	}
 	return nil
 }
 
-func (v *validateUtil) checkSparseFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+func (v *validateUtil) checkSparseFloatVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	if field.GetVectors() == nil || field.GetVectors().GetSparseFloatVector() == nil {
-		msg := fmt.Sprintf("sparse float field '%v' is illegal, nil SparseFloatVector", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
+		if !fieldSchema.GetNullable() {
+			msg := fmt.Sprintf("sparse float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need sparse float vector", "got nil", msg)
+		}
+		return nil
 	}
 	sparseRows := field.GetVectors().GetSparseFloatVector().GetContents()
-	if sparseRows == nil {
-		msg := fmt.Sprintf("sparse float field '%v' is illegal, array type mismatch", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
-	}
 	return typeutil.ValidateSparseFloatRows(sparseRows...)
 }
 
 func (v *validateUtil) checkInt8VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	int8VecArray := field.GetVectors().GetInt8Vector()
 	if int8VecArray == nil {
-		msg := fmt.Sprintf("int8 vector field '%v' is illegal, nil Vector_Int8 type", field.GetFieldName())
-		return merr.WrapErrParameterInvalid("need vector_int8 array", "got nil", msg)
+		if !fieldSchema.GetNullable() {
+			msg := fmt.Sprintf("int8 vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+			return merr.WrapErrParameterInvalid("need int8 vector", "got nil", msg)
+		}
+		return nil
 	}
 	return nil
 }

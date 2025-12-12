@@ -790,6 +790,10 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	}
 
 	cursors := make([]int64, len(validRetrieveResults))
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(validRetrieveResults))
+	for i, vr := range validRetrieveResults {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(vr.GetFieldsData())
+	}
 
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
 		// IReduceInOrderForBest will try to get as many results as possible
@@ -819,7 +823,8 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		if sel == -1 || (reduce.ShouldStopWhenDrained(queryParams.reduceType) && drainOneResult) {
 			break
 		}
-		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+		fieldIdxs := idxComputers[sel].Compute(cursors[sel])
+		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel], fieldIdxs...)
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {

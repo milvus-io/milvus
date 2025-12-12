@@ -238,36 +238,91 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 
 func (index *CgoIndex) buildFloatVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]float32)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildFloatVecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			(*C.float)(&vectors[0]),
+			(*C.bool)(&validData[0]),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build float vector index with valid data")
+	}
 	status := C.BuildFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build float vector index")
 }
 
 func (index *CgoIndex) buildFloat16VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildFloat16VecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			(*C.uint8_t)(&vectors[0]),
+			(*C.bool)(&validData[0]),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build float16 vector index with valid data")
+	}
 	status := C.BuildFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build float16 vector index")
 }
 
 func (index *CgoIndex) buildBFloat16VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildBFloat16VecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			(*C.uint8_t)(&vectors[0]),
+			(*C.bool)(&validData[0]),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build bfloat16 vector index with valid data")
+	}
 	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build bfloat16 vector index")
 }
 
 func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildSparseFloatVecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(validData)),
+			(C.int64_t)(0),
+			(*C.uint8_t)(&vectors[0]),
+			(*C.bool)(&validData[0]),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build sparse float vector index with valid data")
+	}
 	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), (*C.uint8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build sparse float vector index")
 }
 
 func (index *CgoIndex) buildBinaryVecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildBinaryVecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			(*C.uint8_t)(&vectors[0]),
+			(*C.bool)(&validData[0]),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build binary vector index with valid data")
+	}
 	status := C.BuildBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build binary vector index")
 }
 
 func (index *CgoIndex) buildInt8VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]int8)
+	if validData, ok := dataset.Data[keyValidArr].([]bool); ok && len(validData) > 0 {
+		status := C.BuildInt8VecIndexWithValidData(
+			index.indexPtr,
+			(C.int64_t)(len(vectors)),
+			(*C.int8_t)(&vectors[0]),
+			(*C.bool)(&validData[0]),
+			(C.int64_t)(len(validData)))
+		return HandleCStatus(&status, "failed to build int8 vector index with valid data")
+	}
 	status := C.BuildInt8VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.int8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build int8 vector index")
 }
