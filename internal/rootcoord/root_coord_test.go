@@ -252,6 +252,16 @@ func TestRootCoord_DropCollection(t *testing.T) {
 	})
 }
 
+func TestRootCoord_TruncateCollection(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
 func TestRootCoord_CreatePartition(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())

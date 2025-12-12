@@ -321,3 +321,7 @@ func (m *GrpcRootCoordClient) Close() error {
 func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
 }
+
+func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	return &milvuspb.TruncateCollectionResponse{}, m.Err
+}

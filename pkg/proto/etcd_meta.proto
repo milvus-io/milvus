@@ -70,6 +70,7 @@ message CollectionInfo {
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
   uint64 UpdateTimestamp = 16;
+  map<string, uint64> LastTruncateTimestamps = 17;
 }
 
 message PartitionInfo {

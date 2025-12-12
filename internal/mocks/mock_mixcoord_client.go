@@ -10224,6 +10224,80 @@ func (_c *MockMixCoordClient_TransferSegment_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// TruncateCollection provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TruncateCollection")
+	}
+
+	var r0 *milvuspb.TruncateCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) *milvuspb.TruncateCollectionResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.TruncateCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_TruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TruncateCollection'
+type MockMixCoordClient_TruncateCollection_Call struct {
+	*mock.Call
+}
+
+// TruncateCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *milvuspb.TruncateCollectionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) TruncateCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_TruncateCollection_Call {
+	return &MockMixCoordClient_TruncateCollection_Call{Call: _e.mock.On("TruncateCollection",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_TruncateCollection_Call) Run(run func(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption)) *MockMixCoordClient_TruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*milvuspb.TruncateCollectionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_TruncateCollection_Call) Return(_a0 *milvuspb.TruncateCollectionResponse, _a1 error) *MockMixCoordClient_TruncateCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest, ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)) *MockMixCoordClient_TruncateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateChannelCheckpoint provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) UpdateChannelCheckpoint(ctx context.Context, in *datapb.UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))

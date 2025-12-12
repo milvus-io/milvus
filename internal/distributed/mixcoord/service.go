@@ -961,3 +961,8 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
 }
+
+// TruncateCollection truncate a collection
+func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return s.mixCoord.TruncateCollection(ctx, in)
+}

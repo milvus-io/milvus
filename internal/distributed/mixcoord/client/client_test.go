@@ -2661,3 +2661,58 @@ func Test_FlushAll(t *testing.T) {
 	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
+
+func TestClient_TruncateCollection(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockRC := mocks.NewMockRootCoordClient(t)
+	mockmix := MixCoordClient{
+		RootCoordClient: mockRC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, nil)
+	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockRC.ExpectedCalls = nil
+	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockRC.ExpectedCalls = nil
+	mockRC.EXPECT().TruncateCollection(mock1.Anything, mock1.Anything).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

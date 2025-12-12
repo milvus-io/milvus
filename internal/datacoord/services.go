@@ -2106,3 +2106,30 @@ func (s *Server) SyncFileResources(ctx context.Context) error {
 	resources, version := s.meta.ListFileResource(ctx)
 	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
 }
+
+// DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
+func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("receive DropSegmentsByTime request",
+		zap.Int64("collectionID", collectionID))
+
+	for channelName, flushTs := range flushTsList {
+		// wait until the checkpoint reaches or exceeds the flush timestamp
+		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
+		if err != nil {
+			log.Ctx(ctx).Warn("WatchChannelCheckpoint failed", zap.Error(err))
+			return err
+		}
+		// drop segments that were updated before the flush timestamp
+		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
+		if err != nil {
+			log.Warn("TruncateChannelByTime failed", zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
+}

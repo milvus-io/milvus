@@ -1960,3 +1960,15 @@ func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 		return client.ValidateAnalyzer(ctx, req)
 	})
 }
+
+// TruncateCollection truncate collection
+func (c *Client) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.TruncateCollectionResponse, error) {
+		return client.TruncateCollection(ctx, in)
+	})
+}
