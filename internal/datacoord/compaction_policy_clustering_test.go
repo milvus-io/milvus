@@ -185,6 +185,14 @@ func (s *ClusteringCompactionPolicySuite) TestCalculateClusteringCompactionConfi
 	for _, test := range testCases {
 		s.Run(test.description, func() {
 			expectedSegmentSize := getExpectedSegmentSize(s.meta, test.coll.ID, test.coll.Schema)
+			if view, ok := test.view.(*ClusteringSegmentsView); ok {
+				for _, segment := range view.segments {
+					if segment == nil || segment.NumOfRows <= 0 || test.maxSegmentRows == 0 {
+						continue
+					}
+					segment.Size = float64(expectedSegmentSize) * float64(segment.NumOfRows) / float64(test.maxSegmentRows)
+				}
+			}
 			totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(test.coll, test.view, expectedSegmentSize)
 			s.Equal(test.totalRows, totalRows)
 			s.Equal(test.maxSegmentRows, maxSegmentRows)

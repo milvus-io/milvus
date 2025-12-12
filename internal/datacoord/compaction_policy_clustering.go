@@ -196,19 +196,55 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 }
 
 func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView, expectedSegmentSize int64) (totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
-	for _, s := range view.GetSegmentsView() {
+	segments := view.GetSegmentsView()
+	for _, s := range segments {
 		totalRows += s.NumOfRows
 	}
 	clusteringMaxSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat()
 	clusteringPreferSegmentSizeRatio := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
 
-	maxRows, err := calBySegmentSizePolicy(coll.Schema, expectedSegmentSize)
+	segmentRows, err := estimateRowsBySegmentSize(segments, expectedSegmentSize)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	maxSegmentRows = int64(float64(maxRows) * clusteringMaxSegmentSizeRatio)
-	preferSegmentRows = int64(float64(maxRows) * clusteringPreferSegmentSizeRatio)
+	maxSegmentRows = int64(float64(segmentRows) * clusteringMaxSegmentSizeRatio)
+	preferSegmentRows = int64(float64(segmentRows) * clusteringPreferSegmentSizeRatio)
 	return
+}
+
+func estimateRowsBySegmentSize(segments []*SegmentView, expectedSegmentSize int64) (int64, error) {
+	if expectedSegmentSize <= 0 {
+		return 0, fmt.Errorf("invalid expected segment size %d", expectedSegmentSize)
+	}
+
+	var totalSize float64
+	var totalRows int64
+	for _, segment := range segments {
+		if segment == nil {
+			continue
+		}
+		if segment.NumOfRows <= 0 || segment.Size <= 0 {
+			continue
+		}
+		totalSize += segment.Size
+		totalRows += segment.NumOfRows
+	}
+
+	if totalRows == 0 || totalSize == 0 {
+		return 0, fmt.Errorf("segment view does not contain size info to estimate row count")
+	}
+
+	rowSize := totalSize / float64(totalRows)
+	if rowSize <= 0 {
+		return 0, fmt.Errorf("invalid row size calculated from segment view")
+	}
+
+	rows := float64(expectedSegmentSize) / rowSize
+	if rows <= 0 {
+		return 0, fmt.Errorf("estimated max row count is not positive")
+	}
+
+	return int64(rows), nil
 }
 
 func triggerClusteringCompactionPolicy(ctx context.Context, meta *meta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
