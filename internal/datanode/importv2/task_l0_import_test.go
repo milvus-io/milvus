@@ -134,7 +134,7 @@ func (s *L0ImportSuite) TestL0Import() {
 	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, task syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 			alloc := allocator.NewMockAllocator(s.T())
-			alloc.EXPECT().Alloc(mock.Anything).Return(1, int64(s.delCnt)+1, nil)
+			alloc.EXPECT().AllocOne().Return(1, nil)
 			task.(*syncmgr.SyncTask).WithAllocator(alloc)
 
 			s.cm.(*mocks.ChunkManager).EXPECT().RootPath().Return("mock-rootpath")
