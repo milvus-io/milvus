@@ -15,10 +15,11 @@
 // limitations under the License.
 
 #include "GroupByNode.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 
 #include "exec/operator/groupby/SearchGroupByOperator.h"
 #include "monitor/Monitor.h"
-
 namespace milvus {
 namespace exec {
 
@@ -50,10 +51,15 @@ PhyGroupByNode::GetOutput() {
         return nullptr;
     }
 
+    tracer::AutoSpan span(
+        "PhyGroupByNode::Execute", tracer::GetRootSpan(), true);
+
     DeferLambda([&]() { is_finished_ = true; });
     if (input_ == nullptr) {
         return nullptr;
     }
+
+    tracer::AddEvent(fmt::format("group_size: {}", search_info_.group_size_));
 
     std::chrono::high_resolution_clock::time_point vector_start =
         std::chrono::high_resolution_clock::now();
@@ -83,6 +89,9 @@ PhyGroupByNode::GetOutput() {
                    search_result.group_by_values_.value().size(),
                    search_result.seg_offsets_.size());
     }
+    tracer::AddEvent(
+        fmt::format("grouped_results: {}", search_result.seg_offsets_.size()));
+
     query_context_->set_search_result(std::move(search_result));
     std::chrono::high_resolution_clock::time_point vector_end =
         std::chrono::high_resolution_clock::now();
