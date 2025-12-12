@@ -407,7 +407,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 				ResultSegments: []int64{},
 				TotalRows:      totalRows,
 				Schema:         coll.Schema,
-				MaxSize:        getExpandedSize(expectedSize),
+				MaxSize:        expectedSize,
 				PreAllocatedSegmentIDs: &datapb.IDRange{
 					Begin: startID + 1,
 					End:   endID,
@@ -425,6 +425,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			log.Info("time cost of generating compaction",
 				zap.Int64("planID", task.GetPlanID()),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
+				zap.Int64("target size", task.GetMaxSize()),
 				zap.Int64s("inputSegments", inputSegmentIDs))
 		}
 	}
@@ -809,6 +810,7 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 	return small
 }
 
+// deprecated
 func getExpandedSize(size int64) int64 {
 	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
 }

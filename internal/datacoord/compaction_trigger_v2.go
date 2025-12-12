@@ -26,6 +26,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -43,7 +46,23 @@ const (
 	TriggerTypeClustering
 	TriggerTypeSingle
 	TriggerTypeSort
+	TriggerTypeForceMerge
 )
+
+func (t CompactionTriggerType) GetCompactionType() datapb.CompactionType {
+	switch t {
+	case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
+		return datapb.CompactionType_Level0DeleteCompaction
+	case TriggerTypeSegmentSizeViewChange, TriggerTypeSingle, TriggerTypeForceMerge:
+		return datapb.CompactionType_MixCompaction
+	case TriggerTypeClustering:
+		return datapb.CompactionType_ClusteringCompaction
+	case TriggerTypeSort:
+		return datapb.CompactionType_SortCompaction
+	default:
+		return datapb.CompactionType_MixCompaction
+	}
+}
 
 func (t CompactionTriggerType) String() string {
 	switch t {
@@ -61,6 +80,8 @@ func (t CompactionTriggerType) String() string {
 		return "Single"
 	case TriggerTypeSort:
 		return "Sort"
+	case TriggerTypeForceMerge:
+		return "ForceMerge"
 	default:
 		return ""
 	}
@@ -70,9 +91,10 @@ type TriggerManager interface {
 	Start()
 	Stop()
 	OnCollectionUpdate(collectionID int64)
-	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool) (UniqueID, error)
+	ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool, targetSize int64) (UniqueID, error)
 	GetPauseCompactionChan(jobID, collectionID int64) <-chan struct{}
 	GetResumeCompactionChan(jobID, collectionID int64) <-chan struct{}
+	InitForceMergeMemoryQuerier(nodeManager session.NodeManager, mixCoord types.MixCoord, session sessionutil.SessionInterface)
 }
 
 var _ TriggerManager = (*CompactionTriggerManager)(nil)
@@ -80,13 +102,6 @@ var _ TriggerManager = (*CompactionTriggerManager)(nil)
 // CompactionTriggerManager registers Triggers to TriggerType
 // so that when the certain TriggerType happens, the corresponding triggers can
 // trigger the correct compaction plans.
-// Trigger types:
-// 1. Change of Views
-//   - LevelZeroViewTrigger
-//   - SegmentSizeViewTrigger
-//
-// 2. SystemIDLE & schedulerIDLE
-// 3. Manual Compaction
 type CompactionTriggerManager struct {
 	inspector CompactionInspector
 	handler   Handler
@@ -97,6 +112,7 @@ type CompactionTriggerManager struct {
 	l0Policy         *l0CompactionPolicy
 	clusteringPolicy *clusteringCompactionPolicy
 	singlePolicy     *singleCompactionPolicy
+	forceMergePolicy *forceMergeCompactionPolicy
 
 	cancel  context.CancelFunc
 	closeWg sync.WaitGroup
@@ -125,7 +141,16 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	m.l0Policy = newL0CompactionPolicy(meta, alloc)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
+	m.forceMergePolicy = newForceMergeCompactionPolicy(meta, m.allocator, m.handler)
 	return m
+}
+
+// InitForceMergeMemoryQuerier initializes the topology querier for force merge auto calculation
+func (m *CompactionTriggerManager) InitForceMergeMemoryQuerier(nodeManager session.NodeManager, mixCoord types.MixCoord, session sessionutil.SessionInterface) {
+	if m.forceMergePolicy != nil {
+		querier := newMetricsNodeMemoryQuerier(nodeManager, mixCoord, session)
+		m.forceMergePolicy.SetTopologyQuerier(querier)
+	}
 }
 
 // OnCollectionUpdate notifies L0Policy about latest collection's L0 segment changes
@@ -294,21 +319,27 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 	}
 }
 
-func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, clusteringCompaction bool, l0Compaction bool) (UniqueID, error) {
-	log.Ctx(ctx).Info("receive manual trigger", zap.Int64("collectionID", collectionID),
-		zap.Bool("clusteringCompaction", clusteringCompaction), zap.Bool("l0Compaction", l0Compaction))
+func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collectionID int64, isClustering bool, isL0 bool, targetSize int64) (UniqueID, error) {
+	log.Ctx(ctx).Info("receive manual trigger",
+		zap.Int64("collectionID", collectionID),
+		zap.Bool("is clustering", isClustering),
+		zap.Bool("is l0", isL0),
+		zap.Int64("targetSize", targetSize))
 
 	var triggerID UniqueID
 	var err error
 	var views []CompactionView
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
-	if l0Compaction {
+	if targetSize != 0 {
+		views, triggerID, err = m.forceMergePolicy.triggerOneCollection(ctx, collectionID, targetSize)
+		events[TriggerTypeForceMerge] = views
+	} else if isL0 {
 		m.setL0Triggering(true)
 		defer m.setL0Triggering(false)
 		views, triggerID, err = m.l0Policy.triggerOneCollection(ctx, collectionID)
 		events[TriggerTypeLevelZeroViewManual] = views
-	} else if clusteringCompaction {
+	} else if isClustering {
 		views, triggerID, err = m.clusteringPolicy.triggerOneCollection(ctx, collectionID, true)
 		events[TriggerTypeClustering] = views
 	}
@@ -326,14 +357,18 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, collection
 func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context, eventType CompactionTriggerType,
 	view CompactionView,
 ) ([]CompactionView, string) {
-	if eventType == TriggerTypeLevelZeroViewIDLE {
+	switch eventType {
+	case TriggerTypeLevelZeroViewIDLE:
 		view, reason := view.ForceTrigger()
 		return []CompactionView{view}, reason
-	} else if eventType == TriggerTypeLevelZeroViewManual {
+
+	case TriggerTypeLevelZeroViewManual, TriggerTypeForceMerge:
 		return view.ForceTriggerAll()
+
+	default:
+		outView, reason := view.Trigger()
+		return []CompactionView{outView}, reason
 	}
-	outView, reason := view.Trigger()
-	return []CompactionView{outView}, reason
 }
 
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
@@ -354,10 +389,10 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 					m.SubmitL0ViewToScheduler(ctx, outView)
 				case TriggerTypeClustering:
 					m.SubmitClusteringViewToScheduler(ctx, outView)
-				case TriggerTypeSingle:
-					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_MixCompaction)
-				case TriggerTypeSort:
-					m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_SortCompaction)
+				case TriggerTypeSingle, TriggerTypeSort:
+					m.SubmitSingleViewToScheduler(ctx, outView, eventType)
+				case TriggerTypeForceMerge:
+					m.SubmitForceMergeViewToScheduler(ctx, outView)
 				}
 			}
 		}
@@ -567,14 +602,15 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	)
 }
 
-func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, compactionType datapb.CompactionType) {
-	log := log.Ctx(ctx).With(zap.String("view", view.String()))
+func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, triggerType CompactionTriggerType) {
+	// single view is definitely one-one mapping
+	log := log.Ctx(ctx).With(zap.String("trigger type", triggerType.String()), zap.String("view", view.String()))
 	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
 	n := 11 * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	startID, endID, err := m.allocator.AllocN(n)
 	if err != nil {
-		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
 		return
 	}
 
@@ -595,7 +631,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
-		Type:               compactionType, // todo: use SingleCompaction
+		Type:               triggerType.GetCompactionType(),
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,
@@ -604,7 +640,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		ResultSegments:     []int64{},
 		TotalRows:          totalRows,
 		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            getExpandedSize(expectedSize),
+		MaxSize:            expectedSize,
 		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: startID + 1,
 			End:   endID,
@@ -617,11 +653,74 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 			zap.Int64("planID", task.GetPlanID()),
 			zap.Int64s("segmentIDs", task.GetInputSegments()),
 			zap.Error(err))
+		return
 	}
 	log.Info("Finish to submit a single compaction task",
 		zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.String("type", task.GetType().String()),
+		zap.Int64("targetSize", task.GetMaxSize()),
+	)
+}
+
+func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.Context, view CompactionView) {
+	log := log.Ctx(ctx).With(zap.String("view", view.String()))
+
+	taskID, err := m.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("Failed to allocate task ID", zap.Error(err))
+		return
+	}
+
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("Failed to get collection", zap.Error(err))
+		return
+	}
+
+	totalRows := lo.SumBy(view.GetSegmentsView(), func(v *SegmentView) int64 { return v.NumOfRows })
+
+	targetCount := view.(*ForceMergeSegmentView).targetCount
+	n := targetCount * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
+	startID, endID, err := m.allocator.AllocN(n)
+	if err != nil {
+		log.Warn("Failed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return
+	}
+
+	task := &datapb.CompactionTask{
+		PlanID:             taskID,
+		TriggerID:          view.GetTriggerID(),
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		CollectionTtl:      view.(*ForceMergeSegmentView).collectionTTL.Nanoseconds(),
+		Type:               datapb.CompactionType_MixCompaction,
+		CollectionID:       view.GetGroupLabel().CollectionID,
+		PartitionID:        view.GetGroupLabel().PartitionID,
+		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
+		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
+		ResultSegments:     []int64{},
+		TotalRows:          totalRows,
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSize),
+		PreAllocatedSegmentIDs: &datapb.IDRange{
+			Begin: startID + 1,
+			End:   endID,
+		},
+	}
+
+	err = m.inspector.enqueueCompaction(task)
+	if err != nil {
+		log.Warn("Failed to enqueue task", zap.Error(err))
+		return
+	}
+
+	log.Info("Finish to submit force merge task",
+		zap.Int64("planID", taskID),
+		zap.Int64("triggerID", task.GetTriggerID()),
+		zap.Int64("collectionID", task.GetCollectionID()),
+		zap.Int64("targetSize", task.GetMaxSize()),
 	)
 }
 
