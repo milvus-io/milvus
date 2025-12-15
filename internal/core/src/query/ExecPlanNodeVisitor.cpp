@@ -55,7 +55,12 @@ ExecPlanNodeVisitor::ExecuteTask(
     for (;;) {
         auto result = task->Next();
         if (!result) {
-            Assert(processed_num == query_context->get_active_count());
+            if (query_context->get_active_element_count() > 0) {
+                Assert(processed_num ==
+                       query_context->get_active_element_count());
+            } else {
+                Assert(processed_num == query_context->get_active_count());
+            }
             break;
         }
         auto childrens = result->childrens();

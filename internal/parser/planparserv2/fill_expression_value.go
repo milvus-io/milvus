@@ -40,6 +40,14 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
 	case *planpb.Expr_RandomSampleExpr:
 		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
+	case *planpb.Expr_ElementFilterExpr:
+		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
+			return err
+		}
+		if e.ElementFilterExpr.GetPredicate() != nil {
+			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
+		}
+		return nil
 	default:
 		return fmt.Errorf("this expression no need to fill placeholder with expr type: %T", e)
 	}
