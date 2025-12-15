@@ -18,6 +18,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -839,6 +840,61 @@ func TestTaskQuery_functions(t *testing.T) {
 				assert.Equal(t, 2, len(result.GetFieldsData()))
 				assert.Equal(t, []int64{11}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 			})
+		})
+
+		t.Run("test SelectMinPK with pk equals MaxInt64 and firstInt true", func(t *testing.T) {
+			// Test case to cover pk == minIntPK && firstInt condition in SelectMinPK
+			// When the first int64 PK equals math.MaxInt64 (which equals initial minIntPK),
+			// and firstInt is true, the condition firstInt || pk < minIntPK evaluates to true
+			// This ensures the branch is taken even when pk == minIntPK
+			const (
+				Dim                  = 8
+				Int64FieldName       = "Int64Field"
+				FloatVectorFieldName = "FloatVectorField"
+				Int64FieldID         = common.StartOfUserFieldID + 1
+				FloatVectorFieldID   = common.StartOfUserFieldID + 2
+			)
+			maxInt64PK := int64(math.MaxInt64)
+			FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+			fieldDataMaxPK := getFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, []int64{maxInt64PK}, 1)
+			vectorDataMaxPK := getFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:8], Dim)
+
+			// Create result with MaxInt64 as the first PK to trigger pk == minIntPK && firstInt condition
+			// Only the first result has data with pk = maxInt64PK
+			rMaxPK := &internalpb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{maxInt64PK},
+						},
+					},
+				},
+				FieldsData:    []*schemapb.FieldData{fieldDataMaxPK, vectorDataMaxPK},
+				HasMoreResult: false,
+			}
+
+			// Create a second result with no data (empty result)
+			rEmpty := &internalpb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{},
+						},
+					},
+				},
+				FieldsData:    []*schemapb.FieldData{},
+				HasMoreResult: false,
+			}
+
+			// Test with MaxInt64 first to ensure it's handled correctly when pk == minIntPK && firstInt
+			// The reduced result should include the maxInt64PK result
+			result, err := reduceRetrieveResults(context.Background(),
+				[]*internalpb.RetrieveResults{rMaxPK, rEmpty},
+				&queryParams{limit: typeutil.Unlimited})
+			assert.NoError(t, err)
+			assert.Equal(t, 2, len(result.GetFieldsData()))
+			// Should include the maxInt64PK result
+			assert.Equal(t, []int64{maxInt64PK}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 		})
 	})
 }

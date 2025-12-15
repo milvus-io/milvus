@@ -813,23 +813,23 @@ func (_c *MockCluster_UnsubDmChannel_Call) RunAndReturn(run func(context.Context
 }
 
 // ValidateAnalyzer provides a mock function with given fields: ctx, nodeID, req
-func (_m *MockCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (_m *MockCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	ret := _m.Called(ctx, nodeID, req)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateAnalyzer")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.ValidateAnalyzerResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)); ok {
 		return rf(ctx, nodeID, req)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *querypb.ValidateAnalyzerRequest) *querypb.ValidateAnalyzerResponse); ok {
 		r0 = rf(ctx, nodeID, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.ValidateAnalyzerResponse)
 		}
 	}
 
@@ -862,12 +862,12 @@ func (_c *MockCluster_ValidateAnalyzer_Call) Run(run func(ctx context.Context, n
 	return _c
 }
 
-func (_c *MockCluster_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockCluster_ValidateAnalyzer_Call {
+func (_c *MockCluster_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnalyzerResponse, _a1 error) *MockCluster_ValidateAnalyzer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCluster_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, int64, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MockCluster_ValidateAnalyzer_Call {
+func (_c *MockCluster_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, int64, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)) *MockCluster_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

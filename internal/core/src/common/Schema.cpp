@@ -171,4 +171,15 @@ Schema::MmapEnabled(const FieldId& field_id) const {
     return {true, it->second};
 }
 
+const FieldMeta&
+Schema::GetFirstArrayFieldInStruct(const std::string& struct_name) const {
+    auto cache_it = struct_array_field_cache_.find(struct_name);
+    if (cache_it != struct_array_field_cache_.end()) {
+        return fields_.at(cache_it->second);
+    }
+
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "No array field found in struct: {}",
+              struct_name);
+}
 }  // namespace milvus

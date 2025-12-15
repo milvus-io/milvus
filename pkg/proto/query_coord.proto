@@ -101,7 +101,7 @@ service QueryCoord {
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
-  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
 }
 
 service QueryNode {
@@ -177,7 +177,7 @@ service QueryNode {
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
     
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
@@ -1015,6 +1015,10 @@ message AnalyzerInfo{
 message ValidateAnalyzerRequest{
     common.MsgBase base = 1;
     repeated AnalyzerInfo analyzer_infos = 2;
+}
+
+message ValidateAnalyzerResponse{
+    common.Status status = 1;
 }
 
 message HighlightOptions{

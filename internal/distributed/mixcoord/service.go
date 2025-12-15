@@ -943,7 +943,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	return s.mixCoord.RunAnalyzer(ctx, req)
 }
 
-func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.mixCoord.ValidateAnalyzer(ctx, req)
 }
 
@@ -960,4 +960,9 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 // ListFileResources list file resources
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
+}
+
+// TruncateCollection truncate a collection
+func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return s.mixCoord.TruncateCollection(ctx, in)
 }

@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
@@ -69,7 +71,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -620,6 +621,78 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return dct.result, nil
+}
+
+// TruncateCollection truncate a collection.
+func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
+	defer sp.End()
+	method := "TruncateCollection"
+	tr := timerecord.NewTimeRecorder(method)
+
+	dct := &truncateCollectionTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		TruncateCollectionRequest: request,
+		mixCoord:                  node.mixCoord,
+		chMgr:                     node.chMgr,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+	)
+
+	log.Info("TruncateCollection received")
+
+	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+		log.Warn("TruncateCollection failed to enqueue",
+			zap.Error(err))
+
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug(
+		"TruncateCollection enqueued",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+
+	if err := dct.WaitToFinish(); err != nil {
+		log.Warn("TruncateCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTs", dct.BeginTs()),
+			zap.Uint64("EndTs", dct.EndTs()))
+
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info(
+		"TruncateCollection done",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+	DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
+
+	metrics.ProxyReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+	).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &milvuspb.TruncateCollectionResponse{
+		Status: dct.result.GetStatus(),
+	}, nil
 }
 
 // HasCollection check if the specific collection exists in Milvus.
@@ -2928,15 +3001,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
 
-	if request.SearchByPrimaryKeys {
-		placeholderGroupBytes, err := node.getVectorPlaceholderGroupForSearchByPks(ctx, request)
-		if err != nil {
-			return &milvuspb.SearchResults{
-				Status: merr.Status(err),
-			}, false, false, false, nil
-		}
-
-		request.PlaceholderGroup = placeholderGroupBytes
+	// Handle search by primary keys: transform IDs to vectors
+	if err := node.handleIfSearchByPK(ctx, request); err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, false, false, false, nil
 	}
 
 	qt := &searchTask{
@@ -2967,7 +3036,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		zap.String("collection", request.CollectionName),
 		zap.Strings("partitions", request.PartitionNames),
 		zap.String("dsl", request.Dsl),
-		zap.Int("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+		zap.Int("len(PlaceholderGroup)", len(request.GetPlaceholderGroup())),
 		zap.Strings("OutputFields", request.OutputFields),
 		zap.Any("search_params", request.SearchParams),
 		zap.String("ConsistencyLevel", request.GetConsistencyLevel().String()),
@@ -3324,59 +3393,197 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
 }
 
-func (node *Proxy) getVectorPlaceholderGroupForSearchByPks(ctx context.Context, request *milvuspb.SearchRequest) ([]byte, error) {
-	placeholderGroup := &commonpb.PlaceholderGroup{}
-	err := proto.Unmarshal(request.PlaceholderGroup, placeholderGroup)
+// validateIDsType validates that the IDs type matches the primary key field type
+func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
+	if ids == nil {
+		return nil
+	}
+
+	pkType := pkField.GetDataType()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		if ids.GetIntId() == nil {
+			return merr.WrapErrParameterInvalid("int64 IDs", "got other type",
+				"primary key is int64, but IDs type mismatch")
+		}
+	case schemapb.DataType_VarChar:
+		if ids.GetStrId() == nil {
+			return merr.WrapErrParameterInvalid("string IDs", "got other type",
+				"primary key is varchar, but IDs type mismatch")
+		}
+	default:
+		return merr.WrapErrParameterInvalid("int64 or varchar", pkType.String(),
+			fmt.Sprintf("unsupported primary key type: %s", pkType.String()))
+	}
+
+	return nil
+}
+
+// After this function, the request will have PlaceholderGroup set, ready for normal search pipeline.
+// If the request is not search-by-IDs, this function does nothing.
+//
+// Returns error if the transformation fails.
+func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) error {
+	// Check if this is a search by PK request
+	ids := request.GetIds()
+	if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
+		return nil // Not search by PK, do nothing
+	}
+
+	// Get collection schema for validation and plan building
+	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
+		request.GetDbName(), request.GetCollectionName(), 0)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if len(placeholderGroup.Placeholders) != 1 || len(placeholderGroup.Placeholders[0].Values) != 1 {
-		return nil, merr.WrapErrParameterInvalidMsg("please provide primary key")
+	// Validate that anns_field is provided
+	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
+	if err != nil || annsFieldName == "" {
+		return merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			"anns_field is required for search by IDs")
 	}
-	queryExpr := string(placeholderGroup.Placeholders[0].Values[0])
 
-	annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
+	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
+	if annField == nil {
+		return merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema")
+	}
+
+	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
+	}
+
+	if !typeutil.IsVectorType(annField.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+	}
+
+	// Get primary key field
+	pkField, err := collectionInfo.schema.GetPkField()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	queryRequest := &milvuspb.QueryRequest{
+	// Validate IDs type matches primary key type
+	if err := validateIDsType(pkField, ids); err != nil {
+		return err
+	}
+
+	// Create requery plan using IDs (no expr parsing overhead)
+	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+
+	// Build query request to fetch vectors by IDs
+	queryReq := &milvuspb.QueryRequest{
 		Base:                  request.Base,
 		DbName:                request.DbName,
 		CollectionName:        request.CollectionName,
-		Expr:                  queryExpr,
-		OutputFields:          []string{annsField},
+		OutputFields:          []string{pkField.GetName(), annsFieldName}, // Only need the vector field
 		PartitionNames:        request.PartitionNames,
 		TravelTimestamp:       request.TravelTimestamp,
 		GuaranteeTimestamp:    request.GuaranteeTimestamp,
-		QueryParams:           nil,
-		NotReturnAllMeta:      request.NotReturnAllMeta,
 		ConsistencyLevel:      request.ConsistencyLevel,
 		UseDefaultConsistency: request.UseDefaultConsistency,
 	}
 
-	queryResults, _ := node.Query(ctx, queryRequest)
-
-	err = merr.Error(queryResults.GetStatus())
-	if err != nil {
-		return nil, err
+	// Create queryTask to execute the retrieval
+	qt := &queryTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID:            paramtable.GetNodeID(),
+			ConsistencyLevel: request.ConsistencyLevel,
+		},
+		request:             queryReq,
+		plan:                plan,
+		mixCoord:            node.mixCoord,
+		lb:                  node.lbPolicy,
+		shardclientMgr:      node.shardMgr,
+		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
+		// reQuery defaults to false - we need full query processing:
+		// partition conversion, struct field reconstruction, timestamp handling etc
 	}
 
-	var vectorFieldsData *schemapb.FieldData
-	for _, fieldsData := range queryResults.GetFieldsData() {
-		if fieldsData.GetFieldName() == annsField {
-			vectorFieldsData = fieldsData
-			break
+	// Execute query
+	queryResult, _, err := node.query(ctx, qt, nil)
+	if err != nil {
+		return err
+	}
+
+	if !merr.Ok(queryResult.GetStatus()) {
+		return merr.Error(queryResult.GetStatus())
+	}
+
+	// Extract primary key field to check result count
+	pkFieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+		return f.GetFieldName() == pkField.GetName()
+	})
+
+	if pkFieldData == nil {
+		return merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
+	}
+
+	// Check if the returned pk count matches the input IDs count
+	inputIDsCount := typeutil.GetSizeOfIDs(ids)
+	returnedPKCount := typeutil.GetPKSize(pkFieldData)
+	if returnedPKCount != inputIDsCount {
+		// Find which IDs are missing
+		returnedPKSet := make(map[interface{}]struct{})
+		switch pkFieldData.GetType() {
+		case schemapb.DataType_Int64:
+			for _, pk := range pkFieldData.GetScalars().GetLongData().GetData() {
+				returnedPKSet[pk] = struct{}{}
+			}
+		case schemapb.DataType_VarChar:
+			for _, pk := range pkFieldData.GetScalars().GetStringData().GetData() {
+				returnedPKSet[pk] = struct{}{}
+			}
 		}
+
+		var missingIDs []interface{}
+		switch ids.GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			for _, id := range ids.GetIntId().GetData() {
+				if _, exists := returnedPKSet[id]; !exists {
+					missingIDs = append(missingIDs, id)
+				}
+			}
+		case *schemapb.IDs_StrId:
+			for _, id := range ids.GetStrId().GetData() {
+				if _, exists := returnedPKSet[id]; !exists {
+					missingIDs = append(missingIDs, id)
+				}
+			}
+		}
+
+		return merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
-	placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(vectorFieldsData)
+	// Extract vector field from query result
+	vectorFieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+		return f.GetFieldName() == annsFieldName || f.GetType() == schemapb.DataType_ArrayOfStruct
+	})
+
+	if vectorFieldData == nil {
+		return merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in query result")
+	}
+
+	// Convert to PlaceholderGroup
+	placeholderBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(vectorFieldData)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return placeholderGroupBytes, nil
+	// Transform request: replace IDs with PlaceholderGroup
+	// Now the request is ready for normal search pipeline
+	request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+		PlaceholderGroup: placeholderBytes,
+	}
+
+	return nil
 }
 
 // Flush notify data nodes to persist the data of collection.
@@ -3960,15 +4167,12 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		Condition:       NewTaskCondition(ctx),
 		FlushAllRequest: request,
 		mixCoord:        node.mixCoord,
-		chMgr:           node.chMgr,
 	}
 
 	method := "FlushAll"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName))
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
 
 	log.Debug(rpcReceived(method))
 
@@ -3993,11 +4197,8 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
-		zap.Uint64("FlushAllTs", ft.result.GetFlushAllTs()),
-		zap.Uint64("BeginTs", ft.BeginTs()),
-		zap.Uint64("EndTs", ft.EndTs()))
+	log.Debug(rpcDone(method),
+		zap.Any("FlushAllTss", ft.result.GetFlushAllTss()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil
@@ -4667,9 +4868,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushAllState")
 	defer sp.End()
-	log := log.Ctx(ctx).With(zap.Uint64("FlushAllTs", req.GetFlushAllTs()),
-		zap.Time("FlushAllTime", tsoutil.PhysicalTime(req.GetFlushAllTs())),
-		zap.String("db", req.GetDbName()))
+	log := log.Ctx(ctx).With(zap.Any("FlushAllTss", req.GetFlushAllTss()))
 	log.Debug("receive GetFlushAllState request")
 
 	var err error

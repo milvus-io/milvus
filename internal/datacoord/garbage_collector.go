@@ -1289,7 +1289,6 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 					log.Warn("some task failure in remove object pool", zap.Error(err))
 				}
 
-				log = log.With(zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 				if err != nil {
 					log.Warn("json stats files recycle failed when walk with prefix", zap.Error(err))
 					return
@@ -1327,7 +1326,6 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 					log.Warn("some task failure in remove object pool", zap.Error(err))
 				}
 
-				log = log.With(zap.Int("deleteJSONStatsLowerDataFormatNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 				if err != nil {
 					log.Warn("json stats lower data format files recycle failed when walk with prefix", zap.Error(err))
 					return
@@ -1335,7 +1333,9 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 			}
 		}
 	}
-	log.Info("json stats files recycle done")
+	log.Info("json stats files recycle done",
+		zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())),
+		zap.Int("walkFileNum", fileNum))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }
@@ -1396,7 +1396,6 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 					log.Warn("some task failure in remove object pool", zap.Error(err))
 				}
 
-				log = log.With(zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 				if err != nil {
 					log.Warn("json index files recycle failed when walk with prefix", zap.Error(err))
 					return
@@ -1404,7 +1403,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, sig
 			}
 		}
 	}
-	log.Info("json index files recycle done")
+	log.Info("json index files recycle done", zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }

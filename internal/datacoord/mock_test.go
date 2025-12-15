@@ -949,7 +949,19 @@ func (s *mockMixCoord) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	panic("implement me")
 }
 
-func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mockMixCoord) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	panic("implement me")
 }
 

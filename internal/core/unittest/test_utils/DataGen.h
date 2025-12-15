@@ -1151,7 +1151,10 @@ CreatePlaceholderGroup(int64_t num_queries,
 
 template <class TraitType = milvus::FloatVector>
 auto
-CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
+CreatePlaceholderGroup(int64_t num_queries,
+                       int dim,
+                       int64_t seed = 42,
+                       bool element_level = false) {
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         assert(dim % 8 == 0);
     }
@@ -1162,6 +1165,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
     value->set_type(TraitType::placeholder_type);
+    value->set_element_level(element_level);
     // TODO caiyd: need update for Int8Vector
     std::normal_distribution<double> dis(0, 1);
     std::default_random_engine e(seed);

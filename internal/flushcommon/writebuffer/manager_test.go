@@ -102,6 +102,19 @@ func (s *ManagerSuite) TestFlushSegments() {
 		err := manager.SealSegments(ctx, s.channelName, []int64{1})
 		s.NoError(err)
 	})
+
+	s.Run("seal all segments", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		wb := NewMockWriteBuffer(s.T())
+		s.manager.buffers.Insert(s.channelName, wb)
+
+		wb.EXPECT().SealAllSegments(mock.Anything).Return()
+
+		err := manager.SealAllSegments(ctx, s.channelName)
+		s.NoError(err)
+	})
 }
 
 func (s *ManagerSuite) TestCreateNewGrowingSegment() {

@@ -28,29 +28,30 @@ import (
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
 type Collection struct {
-	TenantID             string
-	DBID                 int64
-	CollectionID         int64
-	Partitions           []*Partition
-	Name                 string
-	DBName               string
-	Description          string
-	AutoID               bool
-	Fields               []*Field
-	StructArrayFields    []*StructArrayField
-	Functions            []*Function
-	VirtualChannelNames  []string
-	PhysicalChannelNames []string
-	ShardsNum            int32
-	StartPositions       []*commonpb.KeyDataPair
-	CreateTime           uint64
-	ConsistencyLevel     commonpb.ConsistencyLevel
-	Aliases              []string // TODO: deprecate this.
-	Properties           []*commonpb.KeyValuePair
-	State                pb.CollectionState
-	EnableDynamicField   bool
-	UpdateTimestamp      uint64
-	SchemaVersion        int32
+	TenantID               string
+	DBID                   int64
+	CollectionID           int64
+	Partitions             []*Partition
+	Name                   string
+	DBName                 string
+	Description            string
+	AutoID                 bool
+	Fields                 []*Field
+	StructArrayFields      []*StructArrayField
+	Functions              []*Function
+	VirtualChannelNames    []string
+	PhysicalChannelNames   []string
+	ShardsNum              int32
+	StartPositions         []*commonpb.KeyDataPair
+	CreateTime             uint64
+	ConsistencyLevel       commonpb.ConsistencyLevel
+	Aliases                []string // TODO: deprecate this.
+	Properties             []*commonpb.KeyValuePair
+	State                  pb.CollectionState
+	EnableDynamicField     bool
+	UpdateTimestamp        uint64
+	SchemaVersion          int32
+	LastTruncateTimestamps map[string]uint64
 }
 
 func (c *Collection) Available() bool {
@@ -59,57 +60,59 @@ func (c *Collection) Available() bool {
 
 func (c *Collection) ShallowClone() *Collection {
 	return &Collection{
-		TenantID:             c.TenantID,
-		DBID:                 c.DBID,
-		CollectionID:         c.CollectionID,
-		Name:                 c.Name,
-		DBName:               c.DBName,
-		Description:          c.Description,
-		AutoID:               c.AutoID,
-		Fields:               c.Fields,
-		StructArrayFields:    c.StructArrayFields,
-		Partitions:           c.Partitions,
-		VirtualChannelNames:  c.VirtualChannelNames,
-		PhysicalChannelNames: c.PhysicalChannelNames,
-		ShardsNum:            c.ShardsNum,
-		ConsistencyLevel:     c.ConsistencyLevel,
-		CreateTime:           c.CreateTime,
-		StartPositions:       c.StartPositions,
-		Aliases:              c.Aliases,
-		Properties:           c.Properties,
-		State:                c.State,
-		EnableDynamicField:   c.EnableDynamicField,
-		Functions:            c.Functions,
-		UpdateTimestamp:      c.UpdateTimestamp,
-		SchemaVersion:        c.SchemaVersion,
+		TenantID:               c.TenantID,
+		DBID:                   c.DBID,
+		CollectionID:           c.CollectionID,
+		Name:                   c.Name,
+		DBName:                 c.DBName,
+		Description:            c.Description,
+		AutoID:                 c.AutoID,
+		Fields:                 c.Fields,
+		StructArrayFields:      c.StructArrayFields,
+		Partitions:             c.Partitions,
+		VirtualChannelNames:    c.VirtualChannelNames,
+		PhysicalChannelNames:   c.PhysicalChannelNames,
+		ShardsNum:              c.ShardsNum,
+		ConsistencyLevel:       c.ConsistencyLevel,
+		CreateTime:             c.CreateTime,
+		StartPositions:         c.StartPositions,
+		Aliases:                c.Aliases,
+		Properties:             c.Properties,
+		State:                  c.State,
+		EnableDynamicField:     c.EnableDynamicField,
+		Functions:              c.Functions,
+		UpdateTimestamp:        c.UpdateTimestamp,
+		SchemaVersion:          c.SchemaVersion,
+		LastTruncateTimestamps: c.LastTruncateTimestamps,
 	}
 }
 
 func (c *Collection) Clone() *Collection {
 	return &Collection{
-		TenantID:             c.TenantID,
-		DBID:                 c.DBID,
-		CollectionID:         c.CollectionID,
-		Name:                 c.Name,
-		DBName:               c.DBName,
-		Description:          c.Description,
-		AutoID:               c.AutoID,
-		Fields:               CloneFields(c.Fields),
-		StructArrayFields:    CloneStructArrayFields(c.StructArrayFields),
-		Partitions:           ClonePartitions(c.Partitions),
-		VirtualChannelNames:  common.CloneStringList(c.VirtualChannelNames),
-		PhysicalChannelNames: common.CloneStringList(c.PhysicalChannelNames),
-		ShardsNum:            c.ShardsNum,
-		ConsistencyLevel:     c.ConsistencyLevel,
-		CreateTime:           c.CreateTime,
-		StartPositions:       common.CloneKeyDataPairs(c.StartPositions),
-		Aliases:              common.CloneStringList(c.Aliases),
-		Properties:           common.CloneKeyValuePairs(c.Properties),
-		State:                c.State,
-		EnableDynamicField:   c.EnableDynamicField,
-		Functions:            CloneFunctions(c.Functions),
-		UpdateTimestamp:      c.UpdateTimestamp,
-		SchemaVersion:        c.SchemaVersion,
+		TenantID:               c.TenantID,
+		DBID:                   c.DBID,
+		CollectionID:           c.CollectionID,
+		Name:                   c.Name,
+		DBName:                 c.DBName,
+		Description:            c.Description,
+		AutoID:                 c.AutoID,
+		Fields:                 CloneFields(c.Fields),
+		StructArrayFields:      CloneStructArrayFields(c.StructArrayFields),
+		Partitions:             ClonePartitions(c.Partitions),
+		VirtualChannelNames:    common.CloneStringList(c.VirtualChannelNames),
+		PhysicalChannelNames:   common.CloneStringList(c.PhysicalChannelNames),
+		ShardsNum:              c.ShardsNum,
+		ConsistencyLevel:       c.ConsistencyLevel,
+		CreateTime:             c.CreateTime,
+		StartPositions:         common.CloneKeyDataPairs(c.StartPositions),
+		Aliases:                common.CloneStringList(c.Aliases),
+		Properties:             common.CloneKeyValuePairs(c.Properties),
+		State:                  c.State,
+		EnableDynamicField:     c.EnableDynamicField,
+		Functions:              CloneFunctions(c.Functions),
+		UpdateTimestamp:        c.UpdateTimestamp,
+		SchemaVersion:          c.SchemaVersion,
+		LastTruncateTimestamps: common.CloneMap(c.LastTruncateTimestamps),
 	}
 }
 
@@ -178,26 +181,27 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 	}
 
 	return &Collection{
-		CollectionID:         coll.ID,
-		DBID:                 coll.DbId,
-		Name:                 coll.Schema.Name,
-		DBName:               coll.Schema.DbName,
-		Description:          coll.Schema.Description,
-		AutoID:               coll.Schema.AutoID,
-		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
-		StructArrayFields:    UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
-		Partitions:           partitions,
-		VirtualChannelNames:  coll.VirtualChannelNames,
-		PhysicalChannelNames: coll.PhysicalChannelNames,
-		ShardsNum:            coll.ShardsNum,
-		ConsistencyLevel:     coll.ConsistencyLevel,
-		CreateTime:           coll.CreateTime,
-		StartPositions:       coll.StartPositions,
-		State:                coll.State,
-		Properties:           coll.Properties,
-		EnableDynamicField:   coll.Schema.EnableDynamicField,
-		UpdateTimestamp:      coll.UpdateTimestamp,
-		SchemaVersion:        coll.Schema.Version,
+		CollectionID:           coll.ID,
+		DBID:                   coll.DbId,
+		Name:                   coll.Schema.Name,
+		DBName:                 coll.Schema.DbName,
+		Description:            coll.Schema.Description,
+		AutoID:                 coll.Schema.AutoID,
+		Fields:                 UnmarshalFieldModels(coll.GetSchema().GetFields()),
+		StructArrayFields:      UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
+		Partitions:             partitions,
+		VirtualChannelNames:    coll.VirtualChannelNames,
+		PhysicalChannelNames:   coll.PhysicalChannelNames,
+		ShardsNum:              coll.ShardsNum,
+		ConsistencyLevel:       coll.ConsistencyLevel,
+		CreateTime:             coll.CreateTime,
+		StartPositions:         coll.StartPositions,
+		State:                  coll.State,
+		Properties:             coll.Properties,
+		EnableDynamicField:     coll.Schema.EnableDynamicField,
+		UpdateTimestamp:        coll.UpdateTimestamp,
+		SchemaVersion:          coll.Schema.Version,
+		LastTruncateTimestamps: coll.LastTruncateTimestamps,
 	}
 }
 
@@ -262,18 +266,19 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 	}
 
 	collectionPb := &pb.CollectionInfo{
-		ID:                   coll.CollectionID,
-		DbId:                 coll.DBID,
-		Schema:               collSchema,
-		CreateTime:           coll.CreateTime,
-		VirtualChannelNames:  coll.VirtualChannelNames,
-		PhysicalChannelNames: coll.PhysicalChannelNames,
-		ShardsNum:            coll.ShardsNum,
-		ConsistencyLevel:     coll.ConsistencyLevel,
-		StartPositions:       coll.StartPositions,
-		State:                coll.State,
-		Properties:           coll.Properties,
-		UpdateTimestamp:      coll.UpdateTimestamp,
+		ID:                     coll.CollectionID,
+		DbId:                   coll.DBID,
+		Schema:                 collSchema,
+		CreateTime:             coll.CreateTime,
+		VirtualChannelNames:    coll.VirtualChannelNames,
+		PhysicalChannelNames:   coll.PhysicalChannelNames,
+		ShardsNum:              coll.ShardsNum,
+		ConsistencyLevel:       coll.ConsistencyLevel,
+		StartPositions:         coll.StartPositions,
+		State:                  coll.State,
+		Properties:             coll.Properties,
+		UpdateTimestamp:        coll.UpdateTimestamp,
+		LastTruncateTimestamps: coll.LastTruncateTimestamps,
 	}
 
 	if c.withPartitions {

@@ -878,13 +878,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 
-	tr.RecordSpan()
 	ret.Status = merr.Success()
 
-	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.
-		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
-		Observe(float64(reduceLatency.Milliseconds()))
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
@@ -1662,10 +1657,10 @@ func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	}, nil
 }
 
-func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		return merr.Status(err), nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
 	defer node.lifetime.Done()
 
@@ -1673,13 +1668,13 @@ func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 		err := analyzer.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			if info.GetName() != "" {
-				return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err)), nil
+				return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err))}, nil
 			}
-			return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err)), nil
+			return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err))}, nil
 		}
 	}
 
-	return merr.Status(nil), nil
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Status(nil)}, nil
 }
 
 type deleteRequestStringer struct {

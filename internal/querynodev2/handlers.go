@@ -435,6 +435,12 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 		reduce.NewReduceSearchResultInfo(req.GetReq().GetNq(),
 			req.GetReq().GetTopk()).WithMetricType(req.GetReq().GetMetricType()).WithGroupByField(req.GetReq().GetGroupByFieldId()).
 			WithGroupSize(req.GetReq().GetGroupSize()).WithAdvance(req.GetReq().GetIsAdvanced()))
+
+	reduceLatency := tr.RecordSpan()
+	metrics.QueryNodeReduceLatency.
+		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
+		Observe(float64(reduceLatency.Milliseconds()))
+
 	if err != nil {
 		return nil, err
 	}

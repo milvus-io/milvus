@@ -1193,21 +1193,51 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	return resp, nil
 }
 
-func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		return merr.Status(errors.Wrap(err, "failed to validate analyzer")), nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(errors.Wrap(err, "failed to validate analyzer"))}, nil
 	}
 
 	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
 
 	if len(nodeIDs) == 0 {
-		return merr.Status(errors.New("failed to validate analyzer, no delegator")), nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(errors.New("failed to validate analyzer, no delegator"))}, nil
 	}
 
 	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))
 	resp, err := s.cluster.ValidateAnalyzer(ctx, nodeIDs[idx], req)
 	if err != nil {
-		return merr.Status(err), nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
 	return resp, nil
+}
+
+// ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
+func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collectionID),
+	)
+
+	log.Info("manual update current target request received")
+
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to manual update current target", zap.Error(err))
+		return err
+	}
+
+	// Check if collection is loaded
+	percentage := s.meta.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
+	if percentage < 0 {
+		log.Info("collection not loaded, skip ManualUpdateCurrentTarget")
+		return nil
+	}
+
+	err := job.WaitCurrentTargetUpdated(ctx, s.targetObserver, collectionID)
+	if err != nil {
+		log.Warn("failed to wait current target updated", zap.Error(err))
+		return err
+	}
+
+	log.Info("manual update current target done")
+	return nil
 }

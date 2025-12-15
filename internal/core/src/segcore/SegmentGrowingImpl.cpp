@@ -56,6 +56,167 @@ namespace milvus::segcore {
 
 using namespace milvus::cachinglayer;
 
+namespace {
+
+void
+ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
+                                 const FieldMeta& field_meta,
+                                 int32_t* array_lengths) {
+    auto data_type = field_meta.get_data_type();
+    int64_t offset = 0;
+
+    for (const auto& data : field_data) {
+        auto num_rows = data->get_num_rows();
+
+        if (data_type == DataType::VECTOR_ARRAY) {
+            // Get raw pointer to VectorArray data
+            auto* raw_data = static_cast<const VectorArray*>(data->Data());
+            for (int64_t i = 0; i < num_rows; ++i) {
+                array_lengths[offset + i] = raw_data[i].length();
+            }
+        } else {
+            // For regular array types (INT32, FLOAT, etc.)
+            auto* raw_data = static_cast<const ArrayView*>(data->Data());
+            for (int64_t i = 0; i < num_rows; ++i) {
+                array_lengths[offset + i] = raw_data[i].length();
+            }
+        }
+        offset += num_rows;
+    }
+}
+
+void
+ExtractArrayLengths(const proto::schema::FieldData& field_data,
+                    const FieldMeta& field_meta,
+                    int64_t num_rows,
+                    int32_t* array_lengths) {
+    auto data_type = field_meta.get_data_type();
+    if (data_type == DataType::VECTOR_ARRAY) {
+        const auto& vector_array = field_data.vectors().vector_array();
+        int64_t dim = field_meta.get_dim();
+        auto element_type = field_meta.get_element_type();
+
+        for (int i = 0; i < num_rows; ++i) {
+            const auto& vec_field = vector_array.data(i);
+            int32_t array_len = 0;
+
+            switch (element_type) {
+                case DataType::VECTOR_FLOAT:
+                    array_len = vec_field.float_vector().data_size() / dim;
+                    break;
+                case DataType::VECTOR_FLOAT16:
+                    array_len = vec_field.float16_vector().size() / (dim * 2);
+                    break;
+                case DataType::VECTOR_BFLOAT16:
+                    array_len = vec_field.bfloat16_vector().size() / (dim * 2);
+                    break;
+                case DataType::VECTOR_BINARY:
+                    array_len = vec_field.binary_vector().size() / (dim / 8);
+                    break;
+                case DataType::VECTOR_INT8:
+                    array_len = vec_field.int8_vector().size() / dim;
+                    break;
+                default:
+                    ThrowInfo(ErrorCode::UnexpectedError,
+                              "Unexpected VECTOR_ARRAY element type: {}",
+                              element_type);
+            }
+
+            array_lengths[i] = array_len;
+        }
+    } else {
+        // ARRAY: extract from scalars().array_data().data(i)
+        const auto& array_data = field_data.scalars().array_data();
+        auto element_type = field_meta.get_element_type();
+
+        for (int i = 0; i < num_rows; ++i) {
+            int32_t array_len = 0;
+
+            switch (element_type) {
+                case DataType::BOOL:
+                    array_len = array_data.data(i).bool_data().data_size();
+                    break;
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                    array_len = array_data.data(i).int_data().data_size();
+                    break;
+                case DataType::INT64:
+                    array_len = array_data.data(i).long_data().data_size();
+                    break;
+                case DataType::FLOAT:
+                    array_len = array_data.data(i).float_data().data_size();
+                    break;
+                case DataType::DOUBLE:
+                    array_len = array_data.data(i).double_data().data_size();
+                    break;
+                case DataType::STRING:
+                case DataType::VARCHAR:
+                    array_len = array_data.data(i).string_data().data_size();
+                    break;
+                default:
+                    ThrowInfo(ErrorCode::UnexpectedError,
+                              "Unexpected array type: {}",
+                              element_type);
+            }
+
+            array_lengths[i] = array_len;
+        }
+    }
+
+    // Handle nullable fields
+    if (field_meta.is_nullable() && field_data.valid_data_size() > 0) {
+        const auto& valid_data = field_data.valid_data();
+        for (int i = 0; i < num_rows; ++i) {
+            if (!valid_data[i]) {
+                array_lengths[i] = 0;  // null → empty array
+            }
+        }
+    }
+}
+
+}  // anonymous namespace
+
+void
+SegmentGrowingImpl::InitializeArrayOffsets() {
+    // Group fields by struct_name
+    std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
+
+    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+        const auto& field_name = field_meta.get_name().get();
+
+        // Check if field belongs to a struct: format = "struct_name[field_name]"
+        size_t bracket_pos = field_name.find('[');
+        if (bracket_pos != std::string::npos && bracket_pos > 0) {
+            std::string struct_name = field_name.substr(0, bracket_pos);
+            struct_fields[struct_name].push_back(field_id);
+        }
+    }
+
+    // Create one ArrayOffsetsGrowing per struct, shared by all its fields
+    for (const auto& [struct_name, field_ids] : struct_fields) {
+        auto array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+
+        // Pick the first field as representative (any field works since array lengths are identical)
+        FieldId representative_field = field_ids[0];
+
+        // Map all field_ids from this struct to the same ArrayOffsetsGrowing
+        for (auto field_id : field_ids) {
+            array_offsets_map_[field_id] = array_offsets;
+        }
+
+        // Record representative field for Insert-time updates
+        struct_representative_fields_.insert(representative_field);
+
+        LOG_INFO(
+            "Created ArrayOffsetsGrowing for struct '{}' with {} fields, "
+            "representative field_id={}",
+            struct_name,
+            field_ids.size(),
+            representative_field.get());
+    }
+}
+
 int64_t
 SegmentGrowingImpl::PreInsert(int64_t size) {
     auto reserved_begin = insert_record_.reserved.fetch_add(size);
@@ -108,26 +269,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         auto field_id = FieldId(field.field_id());
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
-        // may be added field, add the null if has existed data
-        if (exist_rows > 0 && !insert_record_.is_data_exist(field_id)) {
-            LOG_WARN(
-                "heterogeneous insert data found for segment {}, field id {}, "
-                "data type {}",
-                id_,
-                field_id.get(),
-                field.type());
-            schema_->AddField(FieldName(field.field_name()),
-                              field_id,
-                              DataType(field.type()),
-                              true,
-                              std::nullopt);
-            auto field_meta = schema_->get_fields().at(field_id);
-            insert_record_.append_field_meta(
-                field_id, field_meta, size_per_chunk(), mmap_descriptor_);
-            auto data = bulk_subscript_not_exist_field(field_meta, exist_rows);
-            insert_record_.get_data_base(field_id)->set_data_raw(
-                0, exist_rows, data.get(), field_meta);
-        }
+        AssertInfo(exist_rows == 0 || insert_record_.is_data_exist(field_id),
+                   "unexpected new field in growing segment {}, field id {}",
+                   id_,
+                   field.field_id());
     }
 
     // segment have latest schema while insert used old one
@@ -188,6 +333,22 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 field_id,
                 &insert_record_proto->fields_data(data_offset),
                 insert_record_);
+        }
+
+        // update ArrayOffsetsGrowing for struct fields
+        if (struct_representative_fields_.count(field_id) > 0) {
+            const auto& field_data =
+                insert_record_proto->fields_data(data_offset);
+
+            std::vector<int32_t> array_lengths(num_rows);
+            ExtractArrayLengths(
+                field_data, field_meta, num_rows, array_lengths.data());
+
+            auto offsets_it = array_offsets_map_.find(field_id);
+            if (offsets_it != array_offsets_map_.end()) {
+                offsets_it->second->Insert(
+                    reserved_offset, array_lengths.data(), num_rows);
+            }
         }
 
         // index text.
@@ -395,6 +556,23 @@ SegmentGrowingImpl::load_field_data_common(
         index->Commit();
         // Reload reader so that the index can be read immediately
         index->Reload();
+    }
+
+    // update ArrayOffsetsGrowing for struct fields
+    if (struct_representative_fields_.count(field_id) > 0) {
+        std::vector<int32_t> array_lengths(num_rows);
+        ExtractArrayLengthsFromFieldData(
+            field_data, field_meta, array_lengths.data());
+
+        auto offsets_it = array_offsets_map_.find(field_id);
+        if (offsets_it != array_offsets_map_.end()) {
+            offsets_it->second->Insert(
+                reserved_offset, array_lengths.data(), num_rows);
+        }
+
+        LOG_INFO("Updated ArrayOffsetsGrowing for field {} with {} rows",
+                 field_id.get(),
+                 num_rows);
     }
 
     // update the mem size

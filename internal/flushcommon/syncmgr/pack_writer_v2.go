@@ -82,12 +82,6 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	size int64,
 	err error,
 ) {
-	err = bw.prefetchIDs(pack)
-	if err != nil {
-		log.Warn("failed allocate ids for sync task", zap.Error(err))
-		return
-	}
-
 	if inserts, manifest, err = bw.writeInserts(ctx, pack); err != nil {
 		log.Error("failed to write insert data", zap.Error(err))
 		return
@@ -132,14 +126,10 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		return make(map[int64]*datapb.FieldBinlog), "", nil
 	}
 
-	columnGroups := bw.columnGroups
-
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
 		return nil, "", err
 	}
-
-	logs := make(map[int64]*datapb.FieldBinlog)
 
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
 	rows := rec.Len()
@@ -154,9 +144,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			tsTo = ts
 		}
 	}
-
-	bucketName := bw.getBucketName()
-
 	var pluginContextPtr *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
@@ -172,9 +159,43 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 			}
 		}
 	}
+	var logs map[int64]*datapb.FieldBinlog
+	var manifestPath string
 
+	if err := retry.Do(ctx, func() error {
+		var err error
+		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo)
+		if err != nil {
+			log.Warn("failed to write inserts into storage",
+				zap.Int64("collectionID", pack.collectionID),
+				zap.Int64("segmentID", pack.segmentID),
+				zap.Error(err))
+			return err
+		}
+		return nil
+	}, bw.writeRetryOpts...); err != nil {
+		return nil, "", err
+	}
+	return logs, manifestPath, nil
+}
+
+func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
+	pluginContextPtr *indexcgopb.StoragePluginContext,
+	pack *SyncPack,
+	rec storage.Record,
+	tsFrom typeutil.Timestamp,
+	tsTo typeutil.Timestamp,
+) (map[int64]*datapb.FieldBinlog, string, error) {
+	logs := make(map[int64]*datapb.FieldBinlog)
+	columnGroups := bw.columnGroups
+	bucketName := bw.getBucketName()
+
+	var err error
 	doWrite := func(w storage.RecordWriter) error {
 		if err = w.Write(rec); err != nil {
+			if closeErr := w.Close(); closeErr != nil {
+				log.Error("failed to close writer after write failed", zap.Error(closeErr))
+			}
 			return err
 		}
 		// close first the get stats & output
@@ -213,7 +234,11 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	} else {
 		paths := make([]string, 0)
 		for _, columnGroup := range columnGroups {
-			path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
+			id, err := bw.allocator.AllocOne()
+			if err != nil {
+				return nil, "", err
+			}
+			path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, id)
 			paths = append(paths, path)
 		}
 		w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)

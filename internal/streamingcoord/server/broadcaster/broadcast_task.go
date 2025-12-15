@@ -28,7 +28,7 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		taskMetricsGuard:     m,
 		msg:                  msg,
 		task:                 proto,
-		dirty:                true, // the task is recovered from the recovery info, so it's persisted.
+		dirty:                false, // the task is recovered from the recovery info, so it's persisted.
 		ackCallbackScheduler: ackCallbackScheduler,
 		done:                 make(chan struct{}),
 		allAcked:             make(chan struct{}),
@@ -76,7 +76,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 			AckedVchannelBitmap: make([]byte, len(header.VChannels)),
 			AckedCheckpoints:    make([]*streamingpb.AckedCheckpoint, len(header.VChannels)),
 		},
-		dirty:                false,
+		dirty:                true,
 		ackCallbackScheduler: ackCallbackScheduler,
 		done:                 make(chan struct{}),
 		allAcked:             make(chan struct{}),
