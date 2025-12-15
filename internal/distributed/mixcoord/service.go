@@ -937,7 +937,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	return s.mixCoord.RunAnalyzer(ctx, req)
 }
 
-func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.mixCoord.ValidateAnalyzer(ctx, req)
 }
 
