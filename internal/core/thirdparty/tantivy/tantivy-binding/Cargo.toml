@@ -15,7 +15,8 @@ lindera-cc-cedict = ["lindera/cc-cedict"]
 
 [dependencies]
 tantivy = { git = "https://github.com/zilliztech/tantivy", tag = "0.21.2-fix3" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
-lindera = "0.40.1"
+lindera = "0.42.4"
+lindera-dictionary = "0.42.4"
 futures = "0.3.21"
 libc = "0.2"
 scopeguard = "1.2"
