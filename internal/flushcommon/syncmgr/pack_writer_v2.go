@@ -183,7 +183,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 }
 
 func (bw *BulkPackWriterV2) GetManifestInfo(pack *SyncPack) (basePath string, version int64, err error) {
-	// emtpy info, shall be first write,
+	// empty info, shall be first write,
 	// initialize manifestPath with -1 version
 	if bw.manifestPath == "" {
 		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID)
@@ -229,6 +229,9 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	var manifestPath string
 	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() || bw.manifestPath != "" {
 		basePath, version, err := bw.GetManifestInfo(pack)
+		if err != nil {
+			return nil, "", err
+		}
 		w, err := storage.NewPackedRecordManifestWriter(bucketName, basePath, version, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 		if err != nil {
 			return nil, "", err
