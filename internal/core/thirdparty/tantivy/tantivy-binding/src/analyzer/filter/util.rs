@@ -1,5 +1,7 @@
+use crate::analyzer::options::get_resource_path;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
+use std::io::BufRead;
 
 pub fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> {
     if !value.is_array() {
@@ -21,4 +23,26 @@ pub fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> 
         }
     }
     Ok(str_list)
+}
+
+pub(crate) fn read_line_file(
+    dict: &mut Vec<String>,
+    params: &json::Value,
+    key: &str,
+) -> Result<()> {
+    let path = get_resource_path(params, key)?;
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    for line in reader.lines() {
+        if let Ok(row_data) = line {
+            dict.push(row_data);
+        } else {
+            return Err(TantivyBindingError::InternalError(format!(
+                "read {} file failed, error: {}",
+                key,
+                line.unwrap_err().to_string()
+            )));
+        }
+    }
+    Ok(())
 }

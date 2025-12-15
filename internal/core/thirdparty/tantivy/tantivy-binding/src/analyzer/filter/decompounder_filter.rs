@@ -1,31 +1,11 @@
-use std::io::BufRead;
-
 use super::filter::FilterBuilder;
-use crate::analyzer::options::get_resource_path;
+use super::util::read_line_file;
 use crate::error::{Result, TantivyBindingError};
-use log::warn;
 use serde_json as json;
 use tantivy::tokenizer::SplitCompoundWords;
 
 const WORD_LIST_KEY: &str = "word_list";
 const WORD_LIST_FILE_KEY: &str = "word_list_file";
-
-fn read_word_list_file(dict: &mut Vec<String>, params: &json::Value) -> Result<()> {
-    let path = get_resource_path(params, "decompounder word list file")?;
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(row_data) = line {
-            dict.push(row_data);
-        } else {
-            return Err(TantivyBindingError::InternalError(format!(
-                "read decompounder word list file failed, error: {}",
-                line.unwrap_err().to_string()
-            )));
-        }
-    }
-    Ok(())
-}
 
 impl FilterBuilder for SplitCompoundWords {
     fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
@@ -49,7 +29,7 @@ impl FilterBuilder for SplitCompoundWords {
         }
 
         if let Some(file_params) = params.get(WORD_LIST_FILE_KEY) {
-            read_word_list_file(&mut dict, file_params)?;
+            read_line_file(&mut dict, file_params, "decompounder word list file")?;
         }
 
         if dict.is_empty() {

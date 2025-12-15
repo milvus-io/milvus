@@ -1,32 +1,12 @@
-use std::io::BufRead;
-
 use super::filter::FilterBuilder;
 use super::stop_words::fetch_language_stop_words;
-use super::util::get_string_list;
-use crate::analyzer::options::get_resource_path;
+use super::util::*;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use tantivy::tokenizer::StopWordFilter;
 
 const STOP_WORDS_LIST_KEY: &str = "stop_words";
 const STOP_WORDS_FILE_KEY: &str = "stop_words_file";
-
-fn read_stop_words_file(dict: &mut Vec<String>, params: &json::Value) -> Result<()> {
-    let path = get_resource_path(params, "stop words dict file")?;
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(row_data) = line {
-            dict.push(row_data);
-        } else {
-            return Err(TantivyBindingError::InternalError(format!(
-                "read stop words dict file failed, error: {}",
-                line.unwrap_err().to_string()
-            )));
-        }
-    }
-    Ok(())
-}
 
 pub(crate) fn get_stop_words_list(str_list: Vec<String>) -> Vec<String> {
     let mut stop_words = Vec::new();
@@ -55,7 +35,7 @@ impl FilterBuilder for StopWordFilter {
         }
 
         if let Some(file_params) = params.get(STOP_WORDS_FILE_KEY) {
-            read_stop_words_file(&mut dict, file_params)?;
+            read_line_file(&mut dict, file_params, "stop words dict file")?;
         }
 
         Ok(StopWordFilter::remove(dict))
