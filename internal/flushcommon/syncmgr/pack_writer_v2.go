@@ -130,6 +130,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err != nil {
 		return nil, err
 	}
+	defer rec.Release()
 
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
 	rows := rec.Len()
