@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"strconv"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -58,18 +61,30 @@ func NewSyncTask(ctx context.Context,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
 	storageVersion int64,
+	useLOONFFI bool,
 	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
-		metaCache.AddSegment(&datapb.SegmentInfo{
+		segment := &datapb.SegmentInfo{
 			ID:             segmentID,
 			State:          commonpb.SegmentState_Importing,
 			CollectionID:   collectionID,
 			PartitionID:    partitionID,
 			InsertChannel:  vchannel,
 			StorageVersion: storageVersion,
-		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
+		}
+		// init first manifest path
+		if useLOONFFI {
+			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+			if storageConfig.GetStorageType() != "local" {
+				basePath = path.Join(storageConfig.GetBucketName(), basePath)
+			}
+			// -1 for first write
+			segment.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+		}
+		metaCache.AddSegment(segment, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
 		}, metacache.NewBM25StatsFactory)
@@ -123,6 +138,7 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		Statslogs:    lo.Values(statsBinlog),
 		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
+		ManifestPath: segment.ManifestPath(),
 	}, nil
 }
 

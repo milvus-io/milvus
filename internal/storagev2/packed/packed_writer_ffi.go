@@ -177,8 +177,6 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 	defer C.free(unsafe.Pointer(cBasePath))
 	var transationHandle C.TransactionHandle
 
-	// TODO pass version
-	// use -1 as latest
 	result = C.transaction_begin(cBasePath, pw.cProperties, &transationHandle, C.int64_t(pw.baseVersion))
 	if err := HandleFFIResult(result); err != nil {
 		return "", err
