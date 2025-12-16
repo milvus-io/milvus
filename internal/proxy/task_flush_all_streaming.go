@@ -35,9 +35,9 @@ func (t *flushAllTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to call flush all to data coordinator: %s", err.Error())
 	}
 	t.result = &milvuspb.FlushAllResponse{
-		Status:      merr.Success(),
-		FlushAllTss: resp.GetFlushAllTss(),
-		ClusterInfo: resp.GetClusterInfo(),
+		Status:       merr.Success(),
+		FlushAllMsgs: resp.GetFlushAllMsgs(),
+		ClusterInfo:  resp.GetClusterInfo(),
 	}
 	return nil
 }

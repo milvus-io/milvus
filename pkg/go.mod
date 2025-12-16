@@ -22,7 +22,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
 	github.com/klauspost/compress v1.18.0
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.8-0.20251209035107-ab384ff6bcc6
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.8-0.20251216091711-874a110cdf03
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.20.5
