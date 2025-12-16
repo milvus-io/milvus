@@ -2137,6 +2137,7 @@ func TestServer_FlushAll(t *testing.T) {
 					LastConfirmedMessageID: rmq.NewRmqID(1),
 				}
 			}
+			msg.WithBroadcastID(1)
 			retry.Do(context.Background(), func() error {
 				log.Info("broadcast message", log.FieldMessage(msg))
 				return registry.CallMessageAckCallback(context.Background(), msg, results)

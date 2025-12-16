@@ -219,30 +219,34 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		return pchannel
 	})
 
-	res, err := broadcaster.Broadcast(ctx, message.NewFlushAllMessageBuilderV2().
+	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
 		WithBroadcast(broadcastPChannels).
-		MustBuildBroadcast(),
-	)
+		MustBuildBroadcast()
+	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
 		log.Ctx(ctx).Warn("broadcast FlushAllMessage fail", zap.Error(err))
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	flushAllTss := make(map[string]uint64, len(res.AppendResults))
-	for appendChannel, result := range res.AppendResults {
+
+	flushAllMsgs := make(map[string]*commonpb.ImmutableMessage, len(res.AppendResults))
+	msgs := broadcastFlushAllMsg.SplitIntoMutableMessage()
+	for _, msg := range msgs {
+		appendResult := res.GetAppendResult(msg.VChannel())
 		// if is control channel, convert it to physical channel.
-		// it's ok to call ToPhysicalChannel even if it's a physical channel,
-		// so no need to check if it's a control channel here.
-		channel := funcutil.ToPhysicalChannel(appendChannel)
-		flushAllTss[channel] = result.TimeTick
+		channel := funcutil.ToPhysicalChannel(msg.VChannel())
+		flushAllMsgs[channel] = msg.WithTimeTick(appendResult.TimeTick).
+			WithLastConfirmed(appendResult.LastConfirmedMessageID).
+			IntoImmutableMessage(appendResult.MessageID).
+			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllTss", flushAllTss))
+	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllMsgs", flushAllMsgs))
 	return &datapb.FlushAllResponse{
-		Status:      merr.Success(),
-		FlushAllTss: flushAllTss,
+		Status:       merr.Success(),
+		FlushAllMsgs: flushAllMsgs,
 		ClusterInfo: &milvuspb.ClusterInfo{
 			ClusterId: Params.CommonCfg.ClusterID.GetValue(),
 			Cchannel:  controlChannel,

@@ -74,7 +74,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 	return storageConfig
 }
 
-func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedWriter, error) {
+func NewFFIPackedWriter(basePath string, baseVersion int64, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*FFIPackedWriter, error) {
 	cBasePath := C.CString(basePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 
@@ -143,6 +143,7 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 
 	return &FFIPackedWriter{
 		basePath:      basePath,
+		baseVersion:   baseVersion,
 		cWriterHandle: writerHandle,
 		cProperties:   cProperties,
 	}, nil
@@ -178,7 +179,7 @@ func (pw *FFIPackedWriter) Close() (string, error) {
 
 	// TODO pass version
 	// use -1 as latest
-	result = C.transaction_begin(cBasePath, pw.cProperties, &transationHandle, C.int64_t(-1))
+	result = C.transaction_begin(cBasePath, pw.cProperties, &transationHandle, C.int64_t(pw.baseVersion))
 	if err := HandleFFIResult(result); err != nil {
 		return "", err
 	}
