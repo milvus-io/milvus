@@ -77,6 +77,9 @@ type ReadOption struct {
 
 	// Handler is the message handler used to handle message after recv from consumer.
 	MessageHandler message.Handler
+
+	// IgnoreStartupDelay is the flag to ignore the startup delay of the scanner.
+	IgnoreStartupDelay bool
 }
 
 // Scanner is the interface for reading records from the wal.

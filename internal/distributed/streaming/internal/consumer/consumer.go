@@ -23,6 +23,9 @@ type ConsumerOptions struct {
 
 	// Handler is the message handler used to handle message after recv from consumer.
 	MessageHandler message.Handler
+
+	// IgnoreStartupDelay is the flag to ignore the startup delay of the consumer.
+	IgnoreStartupDelay bool
 }
 
 // ResumableConsumer is the interface for consuming message to log service.

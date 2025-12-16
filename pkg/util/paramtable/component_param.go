@@ -6457,6 +6457,9 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// scanner
+	WALScannerStartupDelay ParamItem `refreshable:"true"`
+
 	// balancer
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
@@ -6512,6 +6515,17 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// scanner
+	p.WALScannerStartupDelay = ParamItem{
+		Key:     "streaming.scanner.startupDelay",
+		Version: "2.6.0",
+		Doc: `Delay WAL scanner startup for a specified duration after scanner startup, 0s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
+		DefaultValue: "0s",
+		Export:       true,
+	}
+	p.WALScannerStartupDelay.Init(base.mgr)
+
 	// balancer
 	p.WALBalancerTriggerInterval = ParamItem{
 		Key:     "streaming.walBalancer.triggerInterval",

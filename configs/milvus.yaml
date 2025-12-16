@@ -1289,6 +1289,10 @@ streamingNode:
 
 # Any configuration related to the streaming service.
 streaming:
+  scanner:
+    # Delay WAL scanner startup for a specified duration after scanner startup, 0s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    startupDelay: 0s
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
