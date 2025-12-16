@@ -2760,8 +2760,9 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::map<int, std::vector<FieldId>>& cg_field_ids_map) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<void>> load_group_futures;
-    for (const auto& [cg_index, field_ids] : cg_field_ids_map) {
-        // for (int64_t i = 0; i < column_groups->size(); ++i) {
+    for (const auto& kv : cg_field_ids_map) {
+        auto cg_index = kv.first;
+        const auto& field_ids = kv.second;
         auto future =
             pool.Submit([this, column_groups, properties, cg_index, field_ids] {
                 LoadColumnGroup(column_groups, properties, cg_index, field_ids);

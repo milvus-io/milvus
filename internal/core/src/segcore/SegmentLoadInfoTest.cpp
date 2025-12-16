@@ -230,8 +230,8 @@ TEST_F(SegmentLoadInfoTest, ColumnGroup) {
 
     auto child_fields = info.GetChildFieldIds(FieldId(200));
     EXPECT_EQ(child_fields.size(), 2);
-    EXPECT_EQ(child_fields[0].get(), 201);
-    EXPECT_EQ(child_fields[1].get(), 202);
+    EXPECT_EQ(child_fields[0], 201);
+    EXPECT_EQ(child_fields[1], 202);
 
     auto empty_children = info.GetChildFieldIds(FieldId(101));
     EXPECT_TRUE(empty_children.empty());
