@@ -662,6 +662,7 @@ func buildIndexParams(
 		JsonStatsMaxShreddingColumns:     options.JsonStatsMaxShreddingColumns,
 		JsonStatsShreddingRatioThreshold: options.JsonStatsShreddingRatio,
 		JsonStatsWriteBatchSize:          options.JsonStatsWriteBatchSize,
+		Manifest:                         req.GetManifestPath(),
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 {
