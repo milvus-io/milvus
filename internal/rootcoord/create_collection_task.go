@@ -211,6 +211,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		if err := merr.Error(resp.GetStatus()); err != nil {
 			return err
 		}
+		schema.FileResourceIds = resp.GetResourceIds()
 	}
 
 	return validateFieldDataType(schema.GetFields())
