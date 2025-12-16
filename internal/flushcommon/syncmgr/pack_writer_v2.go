@@ -149,7 +149,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		}
 	}
 	var pluginContextPtr *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 		if ez != nil {
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)

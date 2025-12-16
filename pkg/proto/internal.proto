@@ -448,3 +448,13 @@ message GetQuotaMetricsResponse {
   common.Status status = 1;
   string metrics_info = 2;
 }
+
+message BackupEzkRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+}
+
+message BackupEzkResponse {
+  common.Status status = 1;
+  string ezk = 2;
+}

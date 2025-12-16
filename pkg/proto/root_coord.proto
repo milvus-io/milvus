@@ -160,6 +160,7 @@ service RootCoord {
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+    rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
 }
 
 message AllocTimestampRequest {

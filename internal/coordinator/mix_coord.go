@@ -531,6 +531,10 @@ func (s *mixCoordImpl) DescribeCollectionInternal(ctx context.Context, in *milvu
 	return s.rootcoordServer.DescribeCollectionInternal(ctx, in)
 }
 
+func (s *mixCoordImpl) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.rootcoordServer.BackupEzk(ctx, in)
+}
+
 // DropAlias drop collection alias
 func (c *mixCoordImpl) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	return c.rootcoordServer.DropAlias(ctx, in)

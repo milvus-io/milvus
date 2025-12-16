@@ -1664,6 +1664,12 @@ func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.Va
 	return &querypb.ValidateAnalyzerResponse{Status: merr.Success()}, nil
 }
 
+func (coord *MixCoordMock) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
+	return &internalpb.BackupEzkResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
