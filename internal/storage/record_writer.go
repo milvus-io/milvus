@@ -65,6 +65,7 @@ func (pw *packedRecordWriter) Write(r Record) error {
 			arrays[i] = r.Column(field.FieldID)
 		}
 		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
+		defer rec.Release()
 	} else {
 		rec = sar.r
 	}
@@ -80,7 +81,6 @@ func (pw *packedRecordWriter) Write(r Record) error {
 			}
 		}
 	}
-	defer rec.Release()
 	return pw.writer.WriteRecordBatch(rec)
 }
 
@@ -227,6 +227,7 @@ func (pw *packedRecordManifestWriter) Write(r Record) error {
 			arrays[i] = r.Column(field.FieldID)
 		}
 		rec = array.NewRecord(pw.arrowSchema, arrays, int64(r.Len()))
+		defer rec.Release()
 	} else {
 		rec = sar.r
 	}
@@ -242,7 +243,6 @@ func (pw *packedRecordManifestWriter) Write(r Record) error {
 			}
 		}
 	}
-	defer rec.Release()
 	return pw.writer.WriteRecordBatch(rec)
 }
 
