@@ -23,7 +23,7 @@ func Init() {
 	// init and select wal name
 	util.InitAndSelectWALName()
 	// register cipher for cipher message
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		message.RegisterCipher(hookutil.GetCipher())
 	}
 	singleton = newWALAccesser(c)

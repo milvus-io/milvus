@@ -505,6 +505,10 @@ func (m *mockMixCoord) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBA
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 type mockCompactionTrigger struct {
 	methods map[string]interface{}
 }

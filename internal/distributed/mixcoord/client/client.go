@@ -1972,3 +1972,14 @@ func (c *Client) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCo
 		return client.TruncateCollection(ctx, in)
 	})
 }
+
+func (c *Client) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.BackupEzkResponse, error) {
+		return client.BackupEzk(ctx, req)
+	})
+}
