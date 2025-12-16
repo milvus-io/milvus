@@ -1359,6 +1359,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             }
             field_data_list.push_back(field_data);
         }
+        // access underlying feature to get exception if any
+        load_future.get();
     }
     return field_data_list;
 }

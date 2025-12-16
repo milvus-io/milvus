@@ -523,6 +523,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 }
             }
         }
+        // access underlying feature to get exception if any
+        load_future.get();
 
         for (auto& [field_id, field_data] : field_data_map) {
             load_field_data_common(field_id,
