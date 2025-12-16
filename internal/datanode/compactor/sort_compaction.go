@@ -446,6 +446,7 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			StorageConfig:             newStorageConfig,
 			CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
 			StorageVersion:            t.storageVersion,
+			Manifest:                  t.manifest,
 		}
 
 		if t.storageVersion == storage.StorageV2 {
