@@ -249,11 +249,12 @@ func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID in
 	return nil
 }
 
+// Non nill return
 func GetReadStoragePluginContext(importEzk string) []*commonpb.KeyValuePair {
 	readContext, err := ImportEZ(importEzk)
 	if err != nil {
 		log.Error("failed to import ezk", zap.Error(err))
-		return nil
+		return []*commonpb.KeyValuePair{}
 	}
 	return readContext
 }

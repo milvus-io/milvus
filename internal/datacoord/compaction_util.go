@@ -51,34 +51,10 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	return &datapb.IDRange{Begin: begin, End: end}, err
 }
 
-func WrapPluginContextWithImport(collectionID int64, dbProperties []*commonpb.KeyValuePair, options importutilv2.Options, msg proto.Message) {
-	pluginContext := make([]*commonpb.KeyValuePair, 0)
-
+// Return None nil slice
+func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
 	importEzk, _ := importutilv2.GetEZK(options)
-	readPluginContext := hookutil.GetReadStoragePluginContext(importEzk)
-	if readPluginContext != nil {
-		pluginContext = append(pluginContext, readPluginContext...)
-	}
-
-	writePluginContext := hookutil.GetStoragePluginContext(dbProperties, collectionID)
-	if writePluginContext != nil {
-		pluginContext = append(pluginContext, writePluginContext...)
-	}
-
-	if len(pluginContext) == 0 {
-		return
-	}
-
-	switch msg.(type) {
-	case *datapb.ImportRequest:
-		job := msg.(*datapb.ImportRequest)
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.PreImportRequest:
-		job := msg.(*datapb.PreImportRequest)
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	default:
-		return
-	}
+	return hookutil.GetReadStoragePluginContext(importEzk)
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
