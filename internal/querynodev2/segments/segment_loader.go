@@ -103,6 +103,11 @@ type Loader interface {
 	LoadJSONIndex(ctx context.Context,
 		segment Segment,
 		info *querypb.SegmentLoadInfo) error
+
+	// ReopenSegments update segment data according to new load info.
+	ReopenSegments(ctx context.Context,
+		loadInfos []*querypb.SegmentLoadInfo,
+	) error
 }
 
 type ResourceEstimate struct {
@@ -2244,6 +2249,40 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	}
 
 	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
+}
+
+func (loader *segmentLoader) ReopenSegments(ctx context.Context,
+	loadInfos []*querypb.SegmentLoadInfo,
+) error {
+	// Filter out LOADING segments only
+	// use None to avoid loaded check
+	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
+	defer loader.unregister(infos...)
+
+	// use full resource in case of whole segment reopen
+	// TODO use calculated resource from segcore after supported
+	requestResourceResult, err := loader.requestResource(ctx, infos...)
+	if err != nil {
+		log.Warn("reopen segment request resource failed", zap.Error(err))
+		return err
+	}
+	defer loader.freeRequestResource(requestResourceResult)
+
+	for _, info := range infos {
+		segment := loader.manager.Segment.GetSealed(info.GetSegmentID())
+		if segment == nil {
+			log.Warn("failed to reopen segment, segment not loaded", zap.Int64("segmentID", info.GetSegmentID()))
+			continue
+		}
+
+		err := segment.Reopen(ctx, info)
+		if err != nil {
+			log.Warn("failed to reopen segment", zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
