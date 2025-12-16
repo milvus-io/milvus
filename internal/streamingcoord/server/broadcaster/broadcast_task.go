@@ -250,7 +250,7 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.ack(ctx)
+	return b.ack(ctx, msgs)
 }
 
 // ack acknowledges the message at the specified vchannel.

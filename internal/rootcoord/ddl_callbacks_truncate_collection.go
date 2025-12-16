@@ -19,9 +19,10 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -78,16 +79,16 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 	// Drop segments that were updated before the flush timestamp
 	err := c.mixCoord.DropSegmentsByTime(ctx, header.CollectionId, flushTsList)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "when dropping segments by time")
 	}
 
 	// manually update current target to sync QueryCoord's view
 	err = c.mixCoord.ManualUpdateCurrentTarget(ctx, header.CollectionId)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "when manually updating current target")
 	}
 
-	return c.meta.RemoveTempCollectionProperty(ctx, header.CollectionId, common.CollectionOnTruncatingKey)
+	return c.meta.TruncateCollection(ctx, result)
 }
 
 // truncateCollectionV2AckOnceCallback is called when the truncate collection message is acknowledged once
@@ -100,10 +101,13 @@ func (c *DDLCallback) truncateCollectionV2AckOnceCallback(ctx context.Context, r
 	// the new compacted segment can not be dropped as whole, break the design of truncate collection operation.
 	// we need to forbid the compaction of current collection here.
 	collectionID := msg.Header().CollectionId
-	if err := c.meta.SetTempCollectionProperty(ctx, collectionID, common.CollectionOnTruncatingKey, "1"); err != nil {
-		return err
+	if err := c.meta.BeginTruncateCollection(ctx, collectionID); err != nil {
+		return errors.Wrap(err, "when beginning truncate collection")
 	}
 
 	// notify datacoord to update their meta cache
-	return c.broker.BroadcastAlteredCollection(ctx, collectionID)
+	if err := c.broker.BroadcastAlteredCollection(ctx, collectionID); err != nil {
+		return errors.Wrap(err, "when broadcasting altered collection")
+	}
+	return nil
 }

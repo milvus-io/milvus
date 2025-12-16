@@ -374,6 +374,53 @@ func (_c *IMetaTable_BackupRBAC_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
+// BeginTruncateCollection provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) BeginTruncateCollection(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BeginTruncateCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_BeginTruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BeginTruncateCollection'
+type IMetaTable_BeginTruncateCollection_Call struct {
+	*mock.Call
+}
+
+// BeginTruncateCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) BeginTruncateCollection(ctx interface{}, collectionID interface{}) *IMetaTable_BeginTruncateCollection_Call {
+	return &IMetaTable_BeginTruncateCollection_Call{Call: _e.mock.On("BeginTruncateCollection", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_BeginTruncateCollection_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_BeginTruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_BeginTruncateCollection_Call) Return(_a0 error) *IMetaTable_BeginTruncateCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_BeginTruncateCollection_Call) RunAndReturn(run func(context.Context, int64) error) *IMetaTable_BeginTruncateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CheckIfAddCredential provides a mock function with given fields: ctx, req
 func (_m *IMetaTable) CheckIfAddCredential(ctx context.Context, req *internalpb.CredentialInfo) error {
 	ret := _m.Called(ctx, req)
@@ -3334,54 +3381,6 @@ func (_c *IMetaTable_RemovePartition_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// RemoveTempCollectionProperty provides a mock function with given fields: ctx, collectionID, key
-func (_m *IMetaTable) RemoveTempCollectionProperty(ctx context.Context, collectionID int64, key string) error {
-	ret := _m.Called(ctx, collectionID, key)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RemoveTempCollectionProperty")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, string) error); ok {
-		r0 = rf(ctx, collectionID, key)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// IMetaTable_RemoveTempCollectionProperty_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveTempCollectionProperty'
-type IMetaTable_RemoveTempCollectionProperty_Call struct {
-	*mock.Call
-}
-
-// RemoveTempCollectionProperty is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - key string
-func (_e *IMetaTable_Expecter) RemoveTempCollectionProperty(ctx interface{}, collectionID interface{}, key interface{}) *IMetaTable_RemoveTempCollectionProperty_Call {
-	return &IMetaTable_RemoveTempCollectionProperty_Call{Call: _e.mock.On("RemoveTempCollectionProperty", ctx, collectionID, key)}
-}
-
-func (_c *IMetaTable_RemoveTempCollectionProperty_Call) Run(run func(ctx context.Context, collectionID int64, key string)) *IMetaTable_RemoveTempCollectionProperty_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(string))
-	})
-	return _c
-}
-
-func (_c *IMetaTable_RemoveTempCollectionProperty_Call) Return(_a0 error) *IMetaTable_RemoveTempCollectionProperty_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *IMetaTable_RemoveTempCollectionProperty_Call) RunAndReturn(run func(context.Context, int64, string) error) *IMetaTable_RemoveTempCollectionProperty_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // RestoreRBAC provides a mock function with given fields: ctx, tenant, meta
 func (_m *IMetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
 	ret := _m.Called(ctx, tenant, meta)
@@ -3612,17 +3611,17 @@ func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
-// SetTempCollectionProperty provides a mock function with given fields: ctx, collectionID, key, value
-func (_m *IMetaTable) SetTempCollectionProperty(ctx context.Context, collectionID int64, key string, value string) error {
-	ret := _m.Called(ctx, collectionID, key, value)
+// TruncateCollection provides a mock function with given fields: ctx, result
+func (_m *IMetaTable) TruncateCollection(ctx context.Context, result message.BroadcastResult[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]) error {
+	ret := _m.Called(ctx, result)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SetTempCollectionProperty")
+		panic("no return value specified for TruncateCollection")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, string, string) error); ok {
-		r0 = rf(ctx, collectionID, key, value)
+	if rf, ok := ret.Get(0).(func(context.Context, message.BroadcastResult[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]) error); ok {
+		r0 = rf(ctx, result)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -3630,33 +3629,31 @@ func (_m *IMetaTable) SetTempCollectionProperty(ctx context.Context, collectionI
 	return r0
 }
 
-// IMetaTable_SetTempCollectionProperty_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetTempCollectionProperty'
-type IMetaTable_SetTempCollectionProperty_Call struct {
+// IMetaTable_TruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TruncateCollection'
+type IMetaTable_TruncateCollection_Call struct {
 	*mock.Call
 }
 
-// SetTempCollectionProperty is a helper method to define mock.On call
+// TruncateCollection is a helper method to define mock.On call
 //   - ctx context.Context
-//   - collectionID int64
-//   - key string
-//   - value string
-func (_e *IMetaTable_Expecter) SetTempCollectionProperty(ctx interface{}, collectionID interface{}, key interface{}, value interface{}) *IMetaTable_SetTempCollectionProperty_Call {
-	return &IMetaTable_SetTempCollectionProperty_Call{Call: _e.mock.On("SetTempCollectionProperty", ctx, collectionID, key, value)}
+//   - result message.BroadcastResult[*messagespb.TruncateCollectionMessageHeader,*messagespb.TruncateCollectionMessageBody]
+func (_e *IMetaTable_Expecter) TruncateCollection(ctx interface{}, result interface{}) *IMetaTable_TruncateCollection_Call {
+	return &IMetaTable_TruncateCollection_Call{Call: _e.mock.On("TruncateCollection", ctx, result)}
 }
 
-func (_c *IMetaTable_SetTempCollectionProperty_Call) Run(run func(ctx context.Context, collectionID int64, key string, value string)) *IMetaTable_SetTempCollectionProperty_Call {
+func (_c *IMetaTable_TruncateCollection_Call) Run(run func(ctx context.Context, result message.BroadcastResult[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody])) *IMetaTable_TruncateCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(string), args[3].(string))
+		run(args[0].(context.Context), args[1].(message.BroadcastResult[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]))
 	})
 	return _c
 }
 
-func (_c *IMetaTable_SetTempCollectionProperty_Call) Return(_a0 error) *IMetaTable_SetTempCollectionProperty_Call {
+func (_c *IMetaTable_TruncateCollection_Call) Return(_a0 error) *IMetaTable_TruncateCollection_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *IMetaTable_SetTempCollectionProperty_Call) RunAndReturn(run func(context.Context, int64, string, string) error) *IMetaTable_SetTempCollectionProperty_Call {
+func (_c *IMetaTable_TruncateCollection_Call) RunAndReturn(run func(context.Context, message.BroadcastResult[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]) error) *IMetaTable_TruncateCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

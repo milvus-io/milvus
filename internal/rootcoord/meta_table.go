@@ -114,11 +114,10 @@ type IMetaTable interface {
 
 	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
-	// It should only be used for temp properties, these properties make no sense out of the coordinator.
-	// It just be used to switch some coordinator behaviours, such as enable/disable some features.
-	SetTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string, value string) error
-	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
-	RemoveTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string) error
+	// It will be used to forbid the compaction of current collection when truncate collection operation is in progress.
+	BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error
+	// TruncateCollection is called when the truncate collection message is acknowledged.
+	TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
 
@@ -980,7 +979,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	return nil
 }
 
-func (mt *MetaTable) SetTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string, value string) error {
+func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -991,35 +990,43 @@ func (mt *MetaTable) SetTempCollectionProperty(ctx context.Context, collectionID
 
 	// Apply the properties to override the existing properties.
 	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
-	if _, ok := newProperties[key]; ok && newProperties[key] == value {
+	key := common.CollectionOnTruncatingKey
+	if _, ok := newProperties[key]; ok && newProperties[key] == "1" {
 		return nil
 	}
-	newProperties[key] = value
-	return mt.updateCollectionProperties(ctx, coll, newProperties)
+	newProperties[key] = "1"
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+	newColl.Properties = common.NewKeyValuePairs(newProperties)
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[coll.CollectionID] = newColl
+	return nil
 }
 
-func (mt *MetaTable) RemoveTempCollectionProperty(ctx context.Context, collectionID UniqueID, key string) error {
+func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	collectionID := result.Message.Header().CollectionId
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
 		return errAlterCollectionNotFound
 	}
 
-	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
-	if _, ok := newProperties[key]; !ok {
-		return nil
-	}
-	delete(newProperties, key)
-	return mt.updateCollectionProperties(ctx, coll, newProperties)
-}
-
-func (mt *MetaTable) updateCollectionProperties(ctx context.Context, coll *model.Collection, newProperties map[string]string) error {
 	oldColl := coll.Clone()
-	newColl := coll.Clone()
-	newColl.Properties = common.NewKeyValuePairs(newProperties)
 
+	// remmove the truncating key from the properties and update the last truncate time tick of the shard infos
+	newColl := coll.Clone()
+	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	delete(newProperties, common.CollectionOnTruncatingKey)
+	newColl.Properties = common.NewKeyValuePairs(newProperties)
+	for vchannel := range newColl.ShardInfos {
+		newColl.ShardInfos[vchannel].LastTruncateTimeTick = result.Results[vchannel].TimeTick
+	}
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err

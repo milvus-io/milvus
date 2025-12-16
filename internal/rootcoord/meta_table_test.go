@@ -2290,7 +2290,7 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestMetaTable_TempCollectionProperty(t *testing.T) {
+func TestMetaTable_TruncateCollection(t *testing.T) {
 	channel.ResetStaticPChannelStatsManager()
 
 	kv, _ := kvfactory.GetEtcdAndPath()
@@ -2307,33 +2307,30 @@ func TestMetaTable_TempCollectionProperty(t *testing.T) {
 	require.NoError(t, err)
 
 	err = meta.AddCollection(context.Background(), &model.Collection{
-		CollectionID: 1,
-		State:        pb.CollectionState_CollectionCreated,
-		DBID:         util.DefaultDBID,
-		Properties:   common.NewKeyValuePairs(map[string]string{}),
+		CollectionID:         1,
+		PhysicalChannelNames: []string{"pchannel1"},
+		VirtualChannelNames:  []string{"vchannel1"},
+		State:                pb.CollectionState_CollectionCreated,
+		DBID:                 util.DefaultDBID,
+		Properties:           common.NewKeyValuePairs(map[string]string{}),
+		ShardInfos: map[string]*model.ShardInfo{
+			"vchannel1": {
+				VChannelName:         "vchannel1",
+				PChannelName:         "pchannel1",
+				LastTruncateTimeTick: 0,
+			},
+		},
 	})
 	require.NoError(t, err)
 
-	err = meta.SetTempCollectionProperty(context.Background(), 1, "key", "value")
+	// begin truncate collection
+	err = meta.BeginTruncateCollection(context.Background(), 1)
 	require.NoError(t, err)
 	coll, err := meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	m := common.CloneKeyValuePairs(coll.Properties).ToMap()
-	require.Equal(t, "value", m["key"])
-
-	err = meta.SetTempCollectionProperty(context.Background(), 1, "key", "value2")
-	require.NoError(t, err)
-	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
-	require.Equal(t, "value2", m["key"])
-
-	err = meta.SetTempCollectionProperty(context.Background(), 1, "key", "value2")
-	require.NoError(t, err)
-	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
-	require.Equal(t, "value2", m["key"])
+	require.Equal(t, "1", m[common.CollectionOnTruncatingKey])
+	require.Equal(t, uint64(0), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
 
 	// reload the meta
 	channel.ResetStaticPChannelStatsManager()
@@ -2342,16 +2339,34 @@ func TestMetaTable_TempCollectionProperty(t *testing.T) {
 	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
-	require.Equal(t, "value2", m["key"])
+	require.Equal(t, "1", m[common.CollectionOnTruncatingKey])
+	require.Equal(t, uint64(0), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
 
 	// remove the temp property
-	meta.RemoveTempCollectionProperty(context.Background(), 1, "key")
+	b := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast()
+
+	meta.TruncateCollection(context.Background(), message.BroadcastResultTruncateCollectionMessageV2{
+		Message: message.MustAsBroadcastTruncateCollectionMessageV2(b),
+		Results: map[string]*message.AppendResult{
+			"vchannel1": {
+				TimeTick: 1000,
+			},
+		},
+	})
+
 	require.NoError(t, err)
 	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
-	_, ok := m["key"]
+	_, ok := m[common.CollectionOnTruncatingKey]
 	require.False(t, ok)
+	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
 
 	// reload the meta again
 	channel.ResetStaticPChannelStatsManager()
@@ -2360,6 +2375,8 @@ func TestMetaTable_TempCollectionProperty(t *testing.T) {
 	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
-	_, ok = m["key"]
+	_, ok = m[common.CollectionOnTruncatingKey]
 	require.False(t, ok)
+	require.Equal(t, 1, len(coll.ShardInfos))
+	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
 }
