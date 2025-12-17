@@ -171,7 +171,15 @@ func (n *NodeInfo) IsInStandalone() bool {
 }
 
 func (n *NodeInfo) IsEmbeddedQueryNodeInStreamingNode() bool {
-	return n.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1"
+	// Since 2.6.8, we introduce a new label rule for session,
+	// the LegacyLabelStreamingNodeEmbeddedQueryNode is used before 2.6.8, so we need to check both key to keep compatibility.
+	return n.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1" ||
+		n.immutableInfo.Labels[sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode] == "1"
+}
+
+// ResourceGroupName returns the resource group name of the current node.
+func (n *NodeInfo) ResourceGroupName() string {
+	return n.immutableInfo.Labels[sessionutil.LabelResourceGroup]
 }
 
 func (n *NodeInfo) SegmentCnt() int {
