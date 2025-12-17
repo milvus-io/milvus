@@ -6517,12 +6517,21 @@ type streamingConfig struct {
 func (p *streamingConfig) init(base *BaseTable) {
 	// scanner
 	p.WALScannerStartupDelay = ParamItem{
-		Key:     "streaming.scanner.startupDelay",
-		Version: "2.6.0",
-		Doc: `Delay WAL scanner startup for a specified duration after scanner startup, 0s by default.
-It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
+		Key:     "streaming.walScanner.startupDelay",
+		Version: "2.6.8",
+		Doc: `Startup delay before the scanner begins consuming WAL messages, 0s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration.
+
+This parameter can be used as a temporary mitigation when a StreamingNode
+enters a crash loop and fails to execute UpdateReplicateConfigure(Primary-Secondary switchover) due to bugs.
+Delaying scanner consumption helps prevent the crash from being repeatedly triggered during startup.
+
+A value of "20m" is recommended in such scenarios. After UpdateReplicateConfigure
+completes successfully or the StreamingNode returns to a healthy state, this value should be reset to "0s".
+
+This configuration is applied dynamically and does not require restarting the cluster.`,
 		DefaultValue: "0s",
-		Export:       true,
+		Export:       false,
 	}
 	p.WALScannerStartupDelay.Init(base.mgr)
 
