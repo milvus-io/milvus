@@ -151,6 +151,10 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
 	require.NoError(t, err)
 	require.Equal(t, coll.Name, collectionName)
+	require.Equal(t, 1, len(coll.ShardInfos))
+	for _, shardInfo := range coll.ShardInfos {
+		require.Greater(t, shardInfo.LastTruncateTimeTick, uint64(0))
+	}
 
 	// Test DropCollection
 	// drop the collection should be ok.

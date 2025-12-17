@@ -197,6 +197,10 @@ func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
 // if not set, returns global auto compaction config.
 func getCollectionAutoCompactionEnabled(properties map[string]string) (bool, error) {
+	// when collection is on truncating, disable auto compaction.
+	if _, ok := properties[common.CollectionOnTruncatingKey]; ok {
+		return false, nil
+	}
 	v, ok := properties[common.CollectionAutoCompactionKey]
 	if ok {
 		enabled, err := strconv.ParseBool(v)
