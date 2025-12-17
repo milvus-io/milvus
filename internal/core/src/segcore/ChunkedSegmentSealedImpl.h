@@ -42,6 +42,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/common.pb.h"
 #include "milvus-storage/reader.h"
+#include "segcore/SegmentLoadInfo.h"
 
 namespace milvus::segcore {
 
@@ -89,7 +90,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
              FieldId field_id,
              bool include_ngram = false) const override {
         auto [scalar_indexings, ngram_fields] =
-            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+            lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
         if (!include_ngram) {
             if (ngram_fields->find(field_id) != ngram_fields->end()) {
                 return {};
@@ -169,6 +170,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          FieldId field_id,
                          const std::string& nested_path) const override;
 
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const override {
+        auto it = array_offsets_map_.find(field_id);
+        if (it != array_offsets_map_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
                     FieldId field_id,
@@ -181,6 +191,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Reopen(SchemaPtr sch) override;
+
+    void
+    Reopen(
+        const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
     LazyCheckSchema(SchemaPtr sch) override;
@@ -931,6 +945,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
+    void
+    LoadBatchIndexes(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>&
+            field_id_to_index_info);
+
+    void
+    LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
+                       std::vector<std::pair<std::vector<FieldId>,
+                                             proto::segcore::FieldBinlog>>&
+                           field_binlog_to_load);
+
     /**
      * @brief Load all column groups from a manifest file path
      *
@@ -940,7 +966,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @param manifest_path JSON string containing base_path and version fields
      */
     void
-    LoadColumnGroups(const std::string& manifest_path);
+    LoadManifest(const std::string& manifest_path);
+
+    void
+    LoadColumnGroups(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        std::map<int, std::vector<FieldId>>& cg_field_ids_map);
 
     /**
      * @brief Load a single column group at the specified index
@@ -956,7 +988,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index);
+        int64_t index,
+        const std::vector<FieldId>& milvus_field_ids);
 
     void
     load_field_data_common(
@@ -967,11 +1000,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column,
         std::optional<ParquetStatistics> statistics = {});
-
-    // Convert proto::segcore::FieldIndexInfo to LoadIndexInfo
-    LoadIndexInfo
-    ConvertFieldIndexInfoToLoadIndexInfo(
-        const milvus::proto::segcore::FieldIndexInfo* field_index_info) const;
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {
@@ -1026,7 +1054,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
-    milvus::proto::segcore::SegmentLoadInfo segment_load_info_;
+
+    SegmentLoadInfo segment_load_info_;
 
     SchemaPtr schema_;
     int64_t id_;
@@ -1049,6 +1078,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+
+    // ArrayOffsetsSealed for element-level filtering on array fields
+    // field_id -> ArrayOffsetsSealed mapping
+    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
+        array_offsets_map_;
+    // struct_name -> ArrayOffsetsSealed mapping (temporary during load)
+    std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
+        struct_to_array_offsets_;
 };
 
 inline SegmentSealedUPtr

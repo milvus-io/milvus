@@ -133,6 +133,10 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
 		_, schema := vchannelInfo.GetSchema(timetick)
 		if schema == nil {
+			r.Logger().DPanic("schema not found, fallback to latest schema", zap.String("vchannel", vchannel), zap.Uint64("timetick", timetick))
+			if _, schema = vchannelInfo.GetSchema(0); schema != nil {
+				return schema, nil
+			}
 			return nil, errors.Errorf("critical error: schema not found, vchannel: %s, timetick: %d", vchannel, timetick)
 		}
 		return schema, nil
@@ -334,6 +338,9 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeAlterCollection:
 		immutableMsg := message.MustAsImmutableAlterCollectionMessageV2(msg)
 		r.handleAlterCollection(immutableMsg)
+	case message.MessageTypeTruncateCollection:
+		immutableMsg := message.MustAsImmutableTruncateCollectionMessageV2(msg)
+		r.handleTruncateCollection(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
 	}
@@ -515,6 +522,16 @@ func (r *recoveryStorageImpl) handleAlterCollection(msg message.ImmutableAlterCo
 	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
 		vchannelInfo.ObserveAlterCollection(msg)
 	}
+}
+
+// handleTruncateCollection handles the truncate collection message.
+func (r *recoveryStorageImpl) handleTruncateCollection(msg message.ImmutableTruncateCollectionMessageV2) {
+	// when truncate collection happens, we need to flush all segments in the collection.
+	segments := make(map[int64]struct{}, len(msg.Header().SegmentIds))
+	for _, segmentID := range msg.Header().SegmentIds {
+		segments[segmentID] = struct{}{}
+	}
+	r.flushSegments(msg, segments)
 }
 
 // detectInconsistency detects the inconsistency in the recovery storage.

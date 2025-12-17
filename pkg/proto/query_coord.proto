@@ -101,7 +101,7 @@ service QueryCoord {
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
-  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
 }
 
 service QueryNode {
@@ -177,7 +177,7 @@ service QueryNode {
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
     
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
@@ -419,6 +419,7 @@ enum LoadScope {
     Delta = 1;
     Index = 2;
     Stats = 3;
+    Reopen = 4;
 }
 
 message LoadSegmentsRequest {
@@ -677,6 +678,7 @@ message SegmentVersionInfo {
     bool is_sorted = 9;
     repeated int64 field_json_index_stats = 10;
     map<int64, JsonStatsInfo> json_stats_info = 11; 
+    string manifest_path = 12;
 }
 
 message ChannelVersionInfo {
@@ -1015,6 +1017,10 @@ message AnalyzerInfo{
 message ValidateAnalyzerRequest{
     common.MsgBase base = 1;
     repeated AnalyzerInfo analyzer_infos = 2;
+}
+
+message ValidateAnalyzerResponse{
+    common.Status status = 1;
 }
 
 message HighlightOptions{

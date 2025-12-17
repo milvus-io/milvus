@@ -1661,12 +1661,24 @@ func (coord *MixCoordMock) RunAnalyzer(ctx context.Context, req *querypb.RunAnal
 	}, nil
 }
 
-func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
+func (coord *MixCoordMock) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Success()}, nil
 }
 
 func (coord *MixCoordMock) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest, opts ...grpc.CallOption) (*datapb.CreateExternalCollectionResponse, error) {
 	return &datapb.CreateExternalCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	return &milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
+	return &internalpb.BackupEzkResponse{
 		Status: merr.Success(),
 	}, nil
 }

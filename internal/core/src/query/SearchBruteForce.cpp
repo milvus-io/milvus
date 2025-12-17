@@ -140,7 +140,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     // not gurantee to return exactly `range_search_k` results, which may be more or less.
     // set it to -1 will return all results in the range.
     search_cfg[knowhere::meta::RANGE_SEARCH_K] = topk;
-    sub_result.mutable_seg_offsets().resize(nq * topk);
+    sub_result.mutable_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
 
     // For vector array (embedding list), element type is used to determine how to operate search.
@@ -196,8 +196,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
         auto result =
             ReGenRangeSearchResult(res.value(), topk, nq, query_ds.metric_type);
         milvus::tracer::AddEvent("ReGenRangeSearchResult");
-        std::copy_n(
-            GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
+        std::copy_n(GetDatasetIDs(result), nq * topk, sub_result.get_offsets());
         std::copy_n(
             GetDatasetDistance(result), nq * topk, sub_result.get_distances());
     } else {
@@ -206,7 +205,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             stat = knowhere::BruteForce::SearchWithBuf<float>(
                 base_dataset,
                 query_dataset,
-                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_offsets().data(),
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
@@ -215,7 +214,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             stat = knowhere::BruteForce::SearchWithBuf<float16>(
                 base_dataset,
                 query_dataset,
-                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_offsets().data(),
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
@@ -224,7 +223,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             stat = knowhere::BruteForce::SearchWithBuf<bfloat16>(
                 base_dataset,
                 query_dataset,
-                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_offsets().data(),
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
@@ -233,7 +232,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             stat = knowhere::BruteForce::SearchWithBuf<bin1>(
                 base_dataset,
                 query_dataset,
-                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_offsets().data(),
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
@@ -242,7 +241,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             stat = knowhere::BruteForce::SearchSparseWithBuf(
                 base_dataset,
                 query_dataset,
-                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_offsets().data(),
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
@@ -251,7 +250,7 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             stat = knowhere::BruteForce::SearchWithBuf<int8>(
                 base_dataset,
                 query_dataset,
-                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_offsets().data(),
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset,
@@ -296,6 +295,9 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
                 base_dataset, query_dataset, config, bitset);
         case DataType::VECTOR_INT8:
             return knowhere::BruteForce::AnnIterator<int8>(
+                base_dataset, query_dataset, config, bitset);
+        case DataType::VECTOR_BINARY:
+            return knowhere::BruteForce::AnnIterator<bin1>(
                 base_dataset, query_dataset, config, bitset);
         default:
             ThrowInfo(ErrorCode::Unsupported,

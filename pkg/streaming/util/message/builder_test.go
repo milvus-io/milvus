@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -106,7 +107,14 @@ func TestReplicateBuilder(t *testing.T) {
 	msgs := msg.WithBroadcastID(1).SplitIntoMutableMessage()
 
 	msgID := walimplstest.NewTestMessageID(1)
-	immutableMsg := msgs[0].WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+	var immutableMsg message.ImmutableMessage
+	for _, msg := range msgs {
+		if msg.VChannel() == "v1" {
+			immutableMsg = msg.WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
+			break
+		}
+	}
+	require.NotNil(t, immutableMsg)
 
 	replicateMsg := message.MustNewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
 	assert.NotNil(t, replicateMsg)

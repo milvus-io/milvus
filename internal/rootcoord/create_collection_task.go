@@ -208,7 +208,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 			return err
 		}
 
-		if err := merr.Error(resp); err != nil {
+		if err := merr.Error(resp.GetStatus()); err != nil {
 			return err
 		}
 	}
@@ -486,9 +486,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 
-	if ezProps := hookutil.GetEzPropByDBProperties(db.Properties); ezProps != nil {
-		t.Req.Properties = append(t.Req.Properties, ezProps)
-	}
+	t.Req.Properties = hookutil.TidyCollPropsByDBProps(t.Req.Properties, db.Properties)
 
 	t.header.DbId = db.ID
 	t.body.DbID = t.header.DbId

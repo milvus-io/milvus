@@ -872,6 +872,65 @@ func (_c *MixCoord_AssignSegmentID_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// BackupEzk provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) BackupEzk(_a0 context.Context, _a1 *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BackupEzk")
+	}
+
+	var r0 *internalpb.BackupEzkResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.BackupEzkRequest) *internalpb.BackupEzkResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.BackupEzkResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.BackupEzkRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_BackupEzk_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BackupEzk'
+type MixCoord_BackupEzk_Call struct {
+	*mock.Call
+}
+
+// BackupEzk is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.BackupEzkRequest
+func (_e *MixCoord_Expecter) BackupEzk(_a0 interface{}, _a1 interface{}) *MixCoord_BackupEzk_Call {
+	return &MixCoord_BackupEzk_Call{Call: _e.mock.On("BackupEzk", _a0, _a1)}
+}
+
+func (_c *MixCoord_BackupEzk_Call) Run(run func(_a0 context.Context, _a1 *internalpb.BackupEzkRequest)) *MixCoord_BackupEzk_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.BackupEzkRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_BackupEzk_Call) Return(_a0 *internalpb.BackupEzkResponse, _a1 error) *MixCoord_BackupEzk_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_BackupEzk_Call) RunAndReturn(run func(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)) *MixCoord_BackupEzk_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BackupRBAC provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) BackupRBAC(_a0 context.Context, _a1 *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2756,6 +2815,54 @@ func (_c *MixCoord_DropRole_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCo
 }
 
 func (_c *MixCoord_DropRole_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)) *MixCoord_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSegmentsByTime provides a mock function with given fields: ctx, collectionID, flushTsList
+func (_m *MixCoord) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	ret := _m.Called(ctx, collectionID, flushTsList)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSegmentsByTime")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, map[string]uint64) error); ok {
+		r0 = rf(ctx, collectionID, flushTsList)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_DropSegmentsByTime_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentsByTime'
+type MixCoord_DropSegmentsByTime_Call struct {
+	*mock.Call
+}
+
+// DropSegmentsByTime is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - flushTsList map[string]uint64
+func (_e *MixCoord_Expecter) DropSegmentsByTime(ctx interface{}, collectionID interface{}, flushTsList interface{}) *MixCoord_DropSegmentsByTime_Call {
+	return &MixCoord_DropSegmentsByTime_Call{Call: _e.mock.On("DropSegmentsByTime", ctx, collectionID, flushTsList)}
+}
+
+func (_c *MixCoord_DropSegmentsByTime_Call) Run(run func(ctx context.Context, collectionID int64, flushTsList map[string]uint64)) *MixCoord_DropSegmentsByTime_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(map[string]uint64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_DropSegmentsByTime_Call) Return(_a0 error) *MixCoord_DropSegmentsByTime_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_DropSegmentsByTime_Call) RunAndReturn(run func(context.Context, int64, map[string]uint64) error) *MixCoord_DropSegmentsByTime_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6377,6 +6484,53 @@ func (_c *MixCoord_ManualCompaction_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// ManualUpdateCurrentTarget provides a mock function with given fields: ctx, collectionID
+func (_m *MixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ManualUpdateCurrentTarget")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_ManualUpdateCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ManualUpdateCurrentTarget'
+type MixCoord_ManualUpdateCurrentTarget_Call struct {
+	*mock.Call
+}
+
+// ManualUpdateCurrentTarget is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *MixCoord_Expecter) ManualUpdateCurrentTarget(ctx interface{}, collectionID interface{}) *MixCoord_ManualUpdateCurrentTarget_Call {
+	return &MixCoord_ManualUpdateCurrentTarget_Call{Call: _e.mock.On("ManualUpdateCurrentTarget", ctx, collectionID)}
+}
+
+func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MixCoord_ManualUpdateCurrentTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Return(_a0 error) *MixCoord_ManualUpdateCurrentTarget_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_ManualUpdateCurrentTarget_Call) RunAndReturn(run func(context.Context, int64) error) *MixCoord_ManualUpdateCurrentTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MarkSegmentsDropped provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) MarkSegmentsDropped(_a0 context.Context, _a1 *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -8720,6 +8874,65 @@ func (_c *MixCoord_TransferSegment_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
+// TruncateCollection provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) TruncateCollection(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TruncateCollection")
+	}
+
+	var r0 *milvuspb.TruncateCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.TruncateCollectionRequest) *milvuspb.TruncateCollectionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.TruncateCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.TruncateCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_TruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TruncateCollection'
+type MixCoord_TruncateCollection_Call struct {
+	*mock.Call
+}
+
+// TruncateCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.TruncateCollectionRequest
+func (_e *MixCoord_Expecter) TruncateCollection(_a0 interface{}, _a1 interface{}) *MixCoord_TruncateCollection_Call {
+	return &MixCoord_TruncateCollection_Call{Call: _e.mock.On("TruncateCollection", _a0, _a1)}
+}
+
+func (_c *MixCoord_TruncateCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.TruncateCollectionRequest)) *MixCoord_TruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.TruncateCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_TruncateCollection_Call) Return(_a0 *milvuspb.TruncateCollectionResponse, _a1 error) *MixCoord_TruncateCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_TruncateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)) *MixCoord_TruncateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateChannelCheckpoint provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) UpdateChannelCheckpoint(_a0 context.Context, _a1 *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -9108,23 +9321,23 @@ func (_c *MixCoord_UpdateStateCode_Call) RunAndReturn(run func(commonpb.StateCod
 }
 
 // ValidateAnalyzer provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (_m *MixCoord) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateAnalyzer")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.ValidateAnalyzerResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *querypb.ValidateAnalyzerResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.ValidateAnalyzerResponse)
 		}
 	}
 
@@ -9156,12 +9369,12 @@ func (_c *MixCoord_ValidateAnalyzer_Call) Run(run func(_a0 context.Context, _a1 
 	return _c
 }
 
-func (_c *MixCoord_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_ValidateAnalyzer_Call {
+func (_c *MixCoord_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnalyzerResponse, _a1 error) *MixCoord_ValidateAnalyzer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MixCoord_ValidateAnalyzer_Call {
+func (_c *MixCoord_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)) *MixCoord_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

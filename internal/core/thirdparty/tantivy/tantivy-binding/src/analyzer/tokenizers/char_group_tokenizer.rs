@@ -85,7 +85,7 @@ impl CharGroupTokenizer {
                                         .to_string(),
                                 )),
                                 |v| {
-                                    if v.len() == 1 {
+                                    if v.chars().count() == 1 {
                                         delimiters.insert(v.chars().next().unwrap());
                                         return Ok(());
                                     }
@@ -204,7 +204,7 @@ mod tests {
     fn test_char_group_tokenizer() {
         let params = r#"{
             "type": "chargroup",
-            "delimiters": ["o", "punctuation","digit"]
+            "delimiters": ["o", "punctuation","digit", "，"]
         }"#;
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());

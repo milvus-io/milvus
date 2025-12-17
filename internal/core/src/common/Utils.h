@@ -28,6 +28,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "knowhere/dataset.h"

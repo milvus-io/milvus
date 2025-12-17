@@ -21,6 +21,8 @@
 #include <string>
 #include <type_traits>
 
+#include "common/Array.h"
+#include "common/ArrayOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -677,6 +679,173 @@ class SegmentExpr : public Expr {
             }
         }
         return input->size();
+    }
+
+    // Process element-level data by element IDs
+    // Handles the type mismatch between storage (ArrayView) and element type
+    // Currently only implemented for sealed chunked segments
+    template <typename ElementType, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessElementLevelByOffsets(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* element_ids,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        auto& skip_index = segment_->GetSkipIndex();
+        if (segment_->type() == SegmentType::Sealed) {
+            AssertInfo(
+                segment_->is_chunked(),
+                "Element-level filtering requires chunked segment for sealed");
+
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            if (!array_offsets) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "IArrayOffsets not found for field {}",
+                          field_id_.get());
+            }
+
+            // Batch process consecutive elements belonging to the same chunk
+            size_t processed_size = 0;
+            size_t i = 0;
+
+            // Reuse these vectors to avoid repeated heap allocations
+            FixedVector<int32_t> offsets;
+            FixedVector<int32_t> elem_indices;
+
+            while (i < element_ids->size()) {
+                // Start of a new chunk batch
+                int64_t element_id = (*element_ids)[i];
+                auto [doc_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+                auto [chunk_id, chunk_offset] =
+                    segment_->get_chunk_by_offset(field_id_, doc_id);
+
+                // Collect consecutive elements belonging to the same chunk
+                offsets.clear();
+                elem_indices.clear();
+                offsets.push_back(chunk_offset);
+                elem_indices.push_back(elem_idx);
+
+                size_t batch_start = i;
+                i++;
+
+                // Look ahead for more elements in the same chunk
+                while (i < element_ids->size()) {
+                    int64_t next_element_id = (*element_ids)[i];
+                    auto [next_doc_id, next_elem_idx] =
+                        array_offsets->ElementIDToRowID(next_element_id);
+                    auto [next_chunk_id, next_chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, next_doc_id);
+
+                    if (next_chunk_id != chunk_id) {
+                        break;  // Different chunk, process current batch
+                    }
+
+                    offsets.push_back(next_chunk_offset);
+                    elem_indices.push_back(next_elem_idx);
+                    i++;
+                }
+
+                // Batch fetch all ArrayViews for this chunk
+                auto pw = segment_->get_views_by_offsets<ArrayView>(
+                    op_ctx_, field_id_, chunk_id, offsets);
+
+                auto [array_vec, valid_data] = pw.get();
+
+                // Process each element in this batch
+                for (size_t j = 0; j < offsets.size(); j++) {
+                    size_t result_idx = batch_start + j;
+
+                    if ((!skip_func ||
+                         !skip_func(skip_index, field_id_, chunk_id)) &&
+                        (!namespace_skip_func_.has_value() ||
+                         !namespace_skip_func_.value()(chunk_id))) {
+                        // Extract element from ArrayView
+                        auto value =
+                            array_vec[j].template get_data<ElementType>(
+                                elem_indices[j]);
+                        bool is_valid = !valid_data.data() || valid_data[j];
+
+                        func.template operator()<FilterType::random>(
+                            &value,
+                            &is_valid,
+                            nullptr,
+                            1,
+                            res + result_idx,
+                            valid_res + result_idx,
+                            values...);
+                    } else {
+                        // Chunk is skipped - handle exactly like ProcessDataByOffsets
+                        if (valid_data.size() > j && !valid_data[j]) {
+                            res[result_idx] = valid_res[result_idx] = false;
+                        }
+                    }
+
+                    processed_size++;
+                }
+            }
+            return processed_size;
+        } else {
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            if (!array_offsets) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "IArrayOffsets not found for field {}",
+                          field_id_.get());
+            }
+
+            auto& skip_index = segment_->GetSkipIndex();
+            size_t processed_size = 0;
+
+            for (size_t i = 0; i < element_ids->size(); i++) {
+                int64_t element_id = (*element_ids)[i];
+
+                auto [doc_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+
+                // Calculate chunk_id and chunk_offset for this doc
+                auto chunk_id = doc_id / size_per_chunk_;
+                auto chunk_offset = doc_id % size_per_chunk_;
+
+                // Get the Array chunk (Growing segment stores Array, not ArrayView)
+                auto pw =
+                    segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+                auto chunk = pw.get();
+                const Array* array_ptr = chunk.data() + chunk_offset;
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += chunk_offset;
+                }
+
+                if ((!skip_func ||
+                     !skip_func(skip_index, field_id_, chunk_id)) &&
+                    (!namespace_skip_func_.has_value() ||
+                     !namespace_skip_func_.value()(chunk_id))) {
+                    // Extract element from Array
+                    auto value = array_ptr->get_data<ElementType>(elem_idx);
+                    bool is_valid = !valid_data || valid_data[0];
+
+                    func.template operator()<FilterType::random>(
+                        &value,
+                        &is_valid,
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
+                } else {
+                    // Chunk is skipped
+                    if (valid_data && !valid_data[0]) {
+                        res[processed_size] = valid_res[processed_size] = false;
+                    }
+                }
+
+                processed_size++;
+            }
+
+            return processed_size;
+        }
     }
 
     // Template parameter to control whether segment offsets are needed (for GIS functions)
@@ -1431,7 +1600,59 @@ class SegmentExpr : public Expr {
     CanUseIndex() const {
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
         // TODO: if multiple indexes are supported, this logic should be changed
-        return num_index_chunk_ != 0 && !CanUseNgramIndex();
+        if (num_index_chunk_ == 0 || CanUseNgramIndex()) {
+            return false;
+        }
+
+        // For JSON fields with JsonFlatIndex, check if prefix matching is valid.
+        // Tantivy JSON index can handle nested object paths (e.g., "a.b") but NOT
+        // numeric array indices (e.g., "a.0"). Per RFC 6901, JSON Pointer doesn't
+        // distinguish between array indices and object keys syntactically. Since
+        // Tantivy doesn't store array index information, we must fall back to
+        // brute-force search when the relative path contains numeric segments.
+        if (field_type_ != DataType::JSON || pinned_index_.empty()) {
+            return true;
+        }
+
+        auto json_flat_index =
+            dynamic_cast<const index::JsonFlatIndex*>(pinned_index_[0].get());
+        if (json_flat_index == nullptr) {
+            return true;
+        }
+
+        auto index_path = json_flat_index->GetNestedPath();
+        auto query_path = milvus::Json::pointer(nested_path_);
+
+        // Exact match - safe to use index
+        if (index_path == query_path) {
+            return true;
+        }
+
+        // PinJsonIndex guarantees index_path is a prefix of query_path
+
+        // Get relative path (e.g., if index_path="/a" and query_path="/a/0/b",
+        // relative_path="/0/b")
+        auto relative_path = query_path.substr(index_path.length());
+
+        // Check if any path segment is numeric (potential array index)
+        size_t pos = 0;
+        while (pos < relative_path.length()) {
+            if (relative_path[pos] == '/') {
+                pos++;
+                continue;
+            }
+            size_t end = relative_path.find('/', pos);
+            if (end == std::string::npos) {
+                end = relative_path.length();
+            }
+            auto segment = relative_path.substr(pos, end - pos);
+            if (!segment.empty() && milvus::IsInteger(segment)) {
+                return false;
+            }
+            pos = end;
+        }
+
+        return true;
     }
 
     template <typename T>

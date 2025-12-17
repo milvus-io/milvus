@@ -301,7 +301,7 @@ rootCoord:
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
-  port: 53100 # TCP port of rootCoord
+  port: 22125 # TCP port of rootCoord
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the rootCoord can send, unit: byte
     serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the rootCoord can receive, unit: byte
@@ -1003,6 +1003,10 @@ common:
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
+  estimate:
+    varCharLengthAvg: 256 # average length considered per VarChar/Text field when estimating record size
+    dynamicFieldLengthAvg: 512 # average length considered per JSON/Array/Geometry field when estimating record size
+    sparseFloatVectorSize: 1200 # fallback size (bytes) used when estimating sparse float vector fields
   locks:
     metrics:
       enable: false # whether gather statistics for metrics locks

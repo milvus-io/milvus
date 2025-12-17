@@ -82,7 +82,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
-    auto active_count =
+    auto active_row_count =
         std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
 
     // step 1.1: get meta
@@ -163,7 +163,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
-                                             active_count,
+                                             active_row_count,
                                              info,
                                              index_info,
                                              bitset,
@@ -173,21 +173,23 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
 
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-        auto max_chunk = upper_div(active_count, vec_size_per_chunk);
+        auto max_chunk = upper_div(active_row_count, vec_size_per_chunk);
 
-        LOG_INFO("debug=== optimized search on growing, max_chunk: {}",
-                 max_chunk);
-        auto now = std::chrono::high_resolution_clock::now();
+        // embedding search embedding on embedding list
+        bool embedding_search = false;
+        if (data_type == DataType::VECTOR_ARRAY &&
+            info.array_offsets_ != nullptr) {
+            embedding_search = true;
+        }
 
+        auto row_begin = 0;
+        auto element_begin = 0;
         for (int chunk_id = current_chunk_id; chunk_id < max_chunk;
              ++chunk_id) {
             auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
 
-            auto element_begin = chunk_id * vec_size_per_chunk;
-            auto element_end =
-                std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
-            auto size_per_chunk = element_end - element_begin;
-
+            auto row_count =
+                std::min(vec_size_per_chunk, active_row_count - row_begin);
             query::dataset::RawDataset sub_data;
             if (data_type == DataType::VECTOR_ARRAY) {
                 auto concurrent_vector_array =
@@ -195,25 +197,37 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                         vec_ptr);
                 AssertInfo(concurrent_vector_array != nullptr,
                            "ConcurrentVectorArray dynamic cast failed");
-                sub_data = query::dataset::RawDataset{
-                    element_begin,
-                    dim,
-                    size_per_chunk,
-                    chunk_data->data(),
-                    concurrent_vector_array->get_chunk_offsets(chunk_id)};
+
+                auto chunk_offsets =
+                    concurrent_vector_array->get_chunk_offsets(chunk_id);
+                if (embedding_search) {
+                    auto total_embeddings = chunk_offsets[row_count];
+                    sub_data = query::dataset::RawDataset{element_begin,
+                                                          dim,
+                                                          total_embeddings,
+                                                          chunk_data->data(),
+                                                          chunk_offsets};
+                    element_begin += total_embeddings;
+                } else {
+                    sub_data = query::dataset::RawDataset{row_begin,
+                                                          dim,
+                                                          row_count,
+                                                          chunk_data->data(),
+                                                          chunk_offsets};
+                }
             } else {
                 sub_data = query::dataset::RawDataset{
-                    element_begin, dim, size_per_chunk, chunk_data->data()};
+                    row_begin, dim, row_count, chunk_data->data()};
             }
+            row_begin += row_count;
 
-            if (data_type == DataType::VECTOR_ARRAY) {
-                AssertInfo(
-                    query_offsets != nullptr,
-                    "query_offsets is nullptr, but data_type is vector array");
+            auto vector_type = data_type;
+            if (embedding_search) {
+                vector_type = element_type;
             }
 
             if (milvus::exec::UseVectorIterator(info)) {
-                AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                AssertInfo(vector_type != DataType::VECTOR_ARRAY,
                            "vector array(embedding list) is not supported for "
                            "vector iterator");
 
@@ -223,7 +237,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                                info,
                                                                index_info,
                                                                bitset,
-                                                               data_type);
+                                                               vector_type);
                 final_qr.merge(sub_qr);
             } else {
                 auto sub_qr = BruteForceSearch(search_dataset,
@@ -231,19 +245,12 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                info,
                                                index_info,
                                                bitset,
-                                               data_type,
+                                               vector_type,
                                                element_type,
                                                op_context);
                 final_qr.merge(sub_qr);
             }
         }
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration =
-            std::chrono::duration_cast<std::chrono::milliseconds>(end - now)
-                .count();
-        LOG_INFO("debug=== optimized search on growing, duration: {} ms",
-                 duration);
 
         if (milvus::exec::UseVectorIterator(info)) {
             std::vector<int64_t> chunk_rows(max_chunk, 0);
@@ -253,9 +260,18 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             search_result.AssembleChunkVectorIterators(
                 num_queries, max_chunk, chunk_rows, final_qr.chunk_iterators());
         } else {
+            if (info.array_offsets_ != nullptr) {
+                auto [seg_offsets, elem_indicies] =
+                    final_qr.convert_to_element_offsets(
+                        info.array_offsets_.get());
+                search_result.seg_offsets_ = std::move(seg_offsets);
+                search_result.element_indices_ = std::move(elem_indicies);
+                search_result.element_level_ = true;
+            } else {
+                search_result.seg_offsets_ =
+                    std::move(final_qr.mutable_offsets());
+            }
             search_result.distances_ = std::move(final_qr.mutable_distances());
-            search_result.seg_offsets_ =
-                std::move(final_qr.mutable_seg_offsets());
         }
         search_result.unity_topK_ = topk;
         search_result.total_nq_ = num_queries;

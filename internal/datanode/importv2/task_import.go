@@ -299,7 +299,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
-				bm25Stats, t.req.GetStorageVersion(), t.req.GetStorageConfig())
+				bm25Stats, t.req.GetStorageVersion(), t.req.GetUseLoonFfi(), t.req.GetStorageConfig())
 			if err != nil {
 				return nil, nil, err
 			}

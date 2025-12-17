@@ -123,7 +123,8 @@ class TestMilvusClientTimestamptzValid(TestMilvusClientV2Base):
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} >= 0",
                             check_task=CheckTasks.check_query_results,
                             check_items={exp_res: new_rows,
-                                         "pk_name": default_primary_key_field_name})
+                                         "pk_name": default_primary_key_field_name,
+                                         "debug_mode": True})
         
         self.drop_collection(client, collection_name)
         self.drop_database(client, db_name)

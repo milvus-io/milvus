@@ -713,7 +713,7 @@ GenIndexPathPrefixByType(ChunkManagerPtr cm,
     boost::filesystem::path path = std::string(index_type);
     boost::filesystem::path path1 =
         GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
-    return (prefix / path / path1).string();
+    return NormalizePath(prefix / path / path1);
 }
 
 std::string
@@ -749,7 +749,7 @@ GenJsonStatsPathPrefix(ChunkManagerPtr cm,
     boost::filesystem::path path1 =
         GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
 
-    return (prefix / path / path1).string();
+    return NormalizePath(prefix / path / path1);
 }
 
 std::string
@@ -764,7 +764,7 @@ GenJsonStatsPathIdentifier(int64_t build_id,
         std::to_string(index_version) / std::to_string(collection_id) /
         std::to_string(partition_id) / std::to_string(segment_id) /
         std::to_string(field_id);
-    return p.string() + "/";
+    return NormalizePath(p);
 }
 
 std::string
@@ -784,7 +784,7 @@ GenRemoteJsonStatsPathPrefix(ChunkManagerPtr cm,
                                     partition_id,
                                     segment_id,
                                     field_id);
-    return p.string();
+    return NormalizePath(p);
 }
 
 std::string
@@ -811,7 +811,7 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
     boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
     boost::filesystem::path path1 =
         std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
-    return (prefix / path / path1).string();
+    return NormalizePath(prefix / path / path1);
 }
 
 std::string
@@ -819,7 +819,7 @@ GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
     boost::filesystem::path prefix = cm->GetRootPath();
     boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
     boost::filesystem::path path1 = std::to_string(segment_id);
-    return (prefix / path / path1).string();
+    return NormalizePath(prefix / path / path1);
 }
 
 std::pair<std::string, size_t>
@@ -1364,6 +1364,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             }
             field_data_list.push_back(field_data);
         }
+        // access underlying feature to get exception if any
+        load_future.get();
     }
     return field_data_list;
 }

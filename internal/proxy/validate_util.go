@@ -56,6 +56,9 @@ func withMaxCapCheck() validateOption {
 }
 
 func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
+	if *fieldData == nil || (*fieldData).GetScalars() == nil || (*fieldData).GetScalars().Data == nil {
+		return nil
+	}
 	// Check if the field data already contains GeometryWktData
 	_, ok := (*fieldData).GetScalars().Data.(*schemapb.ScalarField_GeometryWktData)
 	if ok {
@@ -1163,7 +1166,7 @@ func (v *validateUtil) checkTimestamptzFieldData(field *schemapb.FieldData, time
 		// Use the centralized parser (timestamptz.ParseTimeTz) for validation and parsing.
 		t, err := timestamptz.ParseTimeTz(isoStr, timezone)
 		if err != nil {
-			log.Warn("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.Error(err))
+			log.Info("cannot parse timestamptz string", zap.String("timestamp_string", isoStr), zap.String("timezone", timezone), zap.Error(err))
 			// Use the recommended refined error message structure
 			const invalidMsg = "invalid timezone name; must be a valid IANA Time Zone ID (e.g., 'Asia/Shanghai' or 'UTC')"
 			return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string '%s': %s", isoStr, invalidMsg)

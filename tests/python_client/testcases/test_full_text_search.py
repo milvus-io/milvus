@@ -527,7 +527,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         if text_lang == "hybrid":
             hybrid_data = []
             for i in range(data_size):
-                fake = random.choice([fake_en, fake_zh, Faker("de_DE")])
+                fake = random.choice([fake_en, fake_zh, fake_de])
                 tmp = {
                     "id": i,
                     "word": fake.word().lower(),
@@ -651,7 +651,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         if text_lang == "zh":
             fake = fake_zh
         elif text_lang == "de":
-            fake = Faker("de_DE")
+            fake = fake_de
         elif text_lang == "hybrid":
             fake = Faker()
 
@@ -688,7 +688,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         if text_lang == "hybrid":
             hybrid_data = []
             for i in range(data_size):
-                fake = random.choice([fake_en, fake_zh, Faker("de_DE")])
+                fake = random.choice([fake_en, fake_zh, fake_de])
                 tmp = {
                     "id": i,
                     "word": fake.word().lower(),
@@ -806,7 +806,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         if text_lang == "zh":
             fake = fake_zh
         elif text_lang == "de":
-            fake = Faker("de_DE")
+            fake = fake_de
         elif text_lang == "hybrid":
             fake = Faker()
 
@@ -841,7 +841,7 @@ class TestInsertWithFullTextSearch(TestcaseBase):
         if text_lang == "hybrid":
             hybrid_data = []
             for i in range(data_size):
-                fake = random.choice([fake_en, fake_zh, Faker("de_DE")])
+                fake = random.choice([fake_en, fake_zh, fake_de])
                 tmp = {
                     "id": i,
                     "word": fake.word().lower(),

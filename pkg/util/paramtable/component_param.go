@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -270,7 +271,10 @@ type commonConfig struct {
 	TopicNames             ParamItem `refreshable:"true"`
 	TimeTicker             ParamItem `refreshable:"true"`
 
-	JSONMaxLength ParamItem `refreshable:"false"`
+	JSONMaxLength         ParamItem `refreshable:"false"`
+	VarCharLengthAvg      ParamItem `refreshable:"true"`
+	DynamicFieldLengthAvg ParamItem `refreshable:"true"`
+	SparseFloatVectorSize ParamItem `refreshable:"true"`
 
 	MetricsPort ParamItem `refreshable:"false"`
 
@@ -887,6 +891,48 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: fmt.Sprint(64 << 10),
 	}
 	p.JSONMaxLength.Init(base.mgr)
+
+	p.VarCharLengthAvg = ParamItem{
+		Key:          "common.estimate.varCharLengthAvg",
+		Version:      "2.6.8",
+		DefaultValue: fmt.Sprint(typeutil.GetVarCharEstimateLength()),
+		Doc:          "average length considered per VarChar/Text field when estimating record size",
+		Export:       true,
+	}
+	p.VarCharLengthAvg.Init(base.mgr)
+	typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
+	p.VarCharLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
+		typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
+		return nil
+	})
+
+	p.DynamicFieldLengthAvg = ParamItem{
+		Key:          "common.estimate.dynamicFieldLengthAvg",
+		Version:      "2.6.8",
+		DefaultValue: fmt.Sprint(typeutil.GetDynamicFieldEstimateLength()),
+		Doc:          "average length considered per JSON/Array/Geometry field when estimating record size",
+		Export:       true,
+	}
+	p.DynamicFieldLengthAvg.Init(base.mgr)
+	typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
+	p.DynamicFieldLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
+		typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
+		return nil
+	})
+
+	p.SparseFloatVectorSize = ParamItem{
+		Key:          "common.estimate.sparseFloatVectorSize",
+		Version:      "2.6.8",
+		DefaultValue: fmt.Sprint(typeutil.GetSparseFloatVectorEstimateLength()),
+		Doc:          "fallback size (bytes) used when estimating sparse float vector fields",
+		Export:       true,
+	}
+	p.SparseFloatVectorSize.Init(base.mgr)
+	typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
+	p.SparseFloatVectorSize.RegisterCallback(func(_ context.Context, _, _, _ string) error {
+		typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
+		return nil
+	})
 
 	p.MetricsPort = ParamItem{
 		Key:          "common.MetricsPort",
@@ -6376,9 +6422,10 @@ type streamingConfig struct {
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// recovery configuration.
-	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
-	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
-	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
+	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
+	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
+	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
+	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6703,6 +6750,16 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALRecoverySchemaExpirationTolerance = ParamItem{
+		Key:     "streaming.walRecovery.schemaExpirationTolerance",
+		Version: "2.6.8",
+		Doc: `The tolerance of schema expiration for wal recovery, 24h by default.
+If the schema is older than (the channel checkpoint - tolerance), it will be removed forever.`,
+		DefaultValue: "24h",
+		Export:       false,
+	}
+	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

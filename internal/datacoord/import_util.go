@@ -301,7 +301,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
 	}
-	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	WrapPluginContextWithImport(task.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req)
 	return req
 }
 
@@ -379,8 +379,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
+		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
 	}
-	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	WrapPluginContextWithImport(task.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req)
 	return req, nil
 }
 

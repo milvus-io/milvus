@@ -20,10 +20,30 @@ type ParserVisitorArgs struct {
 	Timezone string
 }
 
+// int64OverflowError is a special error type used to handle the case where
+// 9223372036854775808 (which exceeds int64 max) is used with unary minus
+// to represent -9223372036854775808 (int64 minimum value).
+// This happens because ANTLR parses -9223372036854775808 as Unary(SUB, Integer(9223372036854775808)),
+// causing the integer literal to exceed int64 range before the unary minus is applied.
+type int64OverflowError struct {
+	literal string
+}
+
+func (e *int64OverflowError) Error() string {
+	return fmt.Sprintf("int64 overflow: %s", e.literal)
+}
+
+func isInt64OverflowError(err error) bool {
+	_, ok := err.(*int64OverflowError)
+	return ok
+}
+
 type ParserVisitor struct {
 	parser.BasePlanVisitor
 	schema *typeutil.SchemaHelper
 	args   *ParserVisitorArgs
+	// currentStructArrayField stores the struct array field name when processing ElementFilter
+	currentStructArrayField string
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
@@ -108,6 +128,15 @@ func (v *ParserVisitor) VisitInteger(ctx *parser.IntegerContext) interface{} {
 	literal := ctx.IntegerConstant().GetText()
 	i, err := strconv.ParseInt(literal, 0, 64)
 	if err != nil {
+		// Special case: 9223372036854775808 is out of int64 range,
+		// but -9223372036854775808 is valid (int64 minimum value).
+		// This happens because ANTLR parses -9223372036854775808 as:
+		//   Unary(SUB, Integer(9223372036854775808))
+		// The integer literal 9223372036854775808 exceeds int64 max (9223372036854775807)
+		// before the unary minus is applied. We handle this in VisitUnary.
+		if literal == "9223372036854775808" {
+			return &int64OverflowError{literal: literal}
+		}
 		return err
 	}
 	return &ExprWithType{
@@ -631,6 +660,10 @@ func isRandomSampleExpr(expr *ExprWithType) bool {
 	return expr.expr.GetRandomSampleExpr() != nil
 }
 
+func isElementFilterExpr(expr *ExprWithType) bool {
+	return expr.expr.GetElementFilterExpr() != nil
+}
+
 const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
@@ -746,13 +779,57 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	}
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func isValidStructSubField(tokenText string) bool {
+	return len(tokenText) >= 4 && tokenText[:2] == "$[" && tokenText[len(tokenText)-1] == ']'
+}
+
+func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*planpb.ColumnInfo, error) {
+	if !isValidStructSubField(tokenText) {
+		return nil, fmt.Errorf("invalid struct sub-field syntax: %s", tokenText)
+	}
+	// Remove "$[" prefix and "]" suffix
+	fieldName := tokenText[2 : len(tokenText)-1]
+
+	// Check if we're inside an ElementFilter context
+	if v.currentStructArrayField == "" {
+		return nil, fmt.Errorf("$[%s] syntax can only be used inside ElementFilter", fieldName)
+	}
+
+	// Construct full field name for struct array field
+	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
+	// Get the struct array field info
+	field, err := v.schema.GetFieldFromName(fullFieldName)
+	if err != nil {
+		return nil, fmt.Errorf("array field not found: %s, error: %s", fullFieldName, err)
+	}
+
+	// In element-level context, data_type should be the element type
+	elementType := field.GetElementType()
+
+	return &planpb.ColumnInfo{
+		FieldId:         field.FieldID,
+		DataType:        elementType, // Use element type, not storage type
+		IsPrimaryKey:    field.IsPrimaryKey,
+		IsAutoID:        field.AutoID,
+		IsPartitionKey:  field.IsPartitionKey,
+		IsClusteringKey: field.IsClusteringKey,
+		ElementType:     elementType,
+		Nullable:        field.GetNullable(),
+		IsElementLevel:  true, // Mark as element-level access
+	}, nil
+}
+
+func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
 			return nil, err
 		}
 		return toColumnInfo(childExpr), nil
+	}
+
+	if structSubField != nil {
+		return v.getColumnInfoFromStructSubField(structSubField.GetText())
 	}
 
 	return v.getColumnInfoFromJSONIdentifier(child.GetText())
@@ -785,7 +862,7 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructSubFieldIdentifier())
 	if err != nil {
 		return err
 	}
@@ -866,7 +943,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), ctx.StructSubFieldIdentifier())
 	if err != nil {
 		return err
 	}
@@ -950,6 +1027,23 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 	child := ctx.Expr().Accept(v)
 	if err := getError(child); err != nil {
+		// Special case: handle -9223372036854775808
+		// ANTLR parses -9223372036854775808 as Unary(SUB, Integer(9223372036854775808)).
+		// The integer literal 9223372036854775808 exceeds int64 max, but when combined
+		// with unary minus, it represents the valid int64 minimum value.
+		if isInt64OverflowError(err) && ctx.GetOp().GetTokenType() == parser.PlanParserSUB {
+			return &ExprWithType{
+				dataType: schemapb.DataType_Int64,
+				expr: &planpb.Expr{
+					Expr: &planpb.Expr_ValueExpr{
+						ValueExpr: &planpb.ValueExpr{
+							Value: NewInt(math.MinInt64),
+						},
+					},
+				},
+				nodeDependent: true,
+			}
+		}
 		return err
 	}
 
@@ -1037,6 +1131,10 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return errors.New("random sample expression cannot be used in logical and expression")
 	}
 
+	if isElementFilterExpr(leftExpr) {
+		return errors.New("element filter expression can only be the last expression in the logical or expression")
+	}
+
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return errors.New("'or' can only be used between boolean expressions")
 	}
@@ -1089,6 +1187,10 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return errors.New("random sample expression can only be the last expression in the logical and expression")
 	}
 
+	if isElementFilterExpr(leftExpr) {
+		return errors.New("element filter expression can only be the last expression in the logical and expression")
+	}
+
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
 		return errors.New("'and' can only be used between boolean expressions")
 	}
@@ -1100,6 +1202,15 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		expr = &planpb.Expr{
 			Expr: &planpb.Expr_RandomSampleExpr{
 				RandomSampleExpr: randomSampleExpr,
+			},
+		}
+	} else if isElementFilterExpr(rightExpr) {
+		// Similar to RandomSampleExpr, extract doc-level predicate
+		elementFilterExpr := rightExpr.expr.GetElementFilterExpr()
+		elementFilterExpr.Predicate = leftExpr.expr
+		expr = &planpb.Expr{
+			Expr: &planpb.Expr_ElementFilterExpr{
+				ElementFilterExpr: elementFilterExpr,
 			},
 		}
 	} else {
@@ -1366,7 +1477,7 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
 	if err != nil {
 		return err
 	}
@@ -1406,7 +1517,7 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
 	if err != nil {
 		return err
 	}
@@ -1609,7 +1720,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 }
 
 func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interface{} {
-	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	columnInfo, err := v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil)
 	if err != nil {
 		return err
 	}
@@ -2137,4 +2248,91 @@ func validateAndExtractMinShouldMatch(minShouldMatchExpr interface{}) ([]*planpb
 		return []*planpb.GenericValue{NewInt(minShouldMatch)}, nil
 	}
 	return nil, nil
+}
+
+// VisitElementFilter handles ElementFilter(structArrayField, elementExpr) syntax.
+func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) interface{} {
+	// Check for nested ElementFilter - not allowed
+	if v.currentStructArrayField != "" {
+		return fmt.Errorf("nested ElementFilter is not supported, already inside ElementFilter for field: %s", v.currentStructArrayField)
+	}
+
+	// Get struct array field name (first parameter)
+	arrayFieldName := ctx.Identifier().GetText()
+
+	// Set current context for element expression parsing
+	v.currentStructArrayField = arrayFieldName
+	defer func() { v.currentStructArrayField = "" }()
+
+	elementExpr := ctx.Expr().Accept(v)
+	if err := getError(elementExpr); err != nil {
+		return fmt.Errorf("cannot parse element expression: %s, error: %s", ctx.Expr().GetText(), err)
+	}
+
+	exprWithType := getExpr(elementExpr)
+	if exprWithType == nil {
+		return fmt.Errorf("invalid element expression: %s", ctx.Expr().GetText())
+	}
+
+	// Build ElementFilterExpr proto
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ElementFilterExpr{
+				ElementFilterExpr: &planpb.ElementFilterExpr{
+					ElementExpr: exprWithType.expr,
+					StructName:  arrayFieldName,
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// VisitStructSubField handles $[fieldName] syntax within ElementFilter.
+func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) interface{} {
+	// Extract the field name from $[fieldName]
+	tokenText := ctx.StructSubFieldIdentifier().GetText()
+	if !isValidStructSubField(tokenText) {
+		return fmt.Errorf("invalid struct sub-field syntax: %s", tokenText)
+	}
+	// Remove "$[" prefix and "]" suffix
+	fieldName := tokenText[2 : len(tokenText)-1]
+
+	// Check if we're inside an ElementFilter context
+	if v.currentStructArrayField == "" {
+		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter", fieldName)
+	}
+
+	// Construct full field name for struct array field
+	fullFieldName := v.currentStructArrayField + "[" + fieldName + "]"
+	// Get the struct array field info
+	field, err := v.schema.GetFieldFromName(fullFieldName)
+	if err != nil {
+		return fmt.Errorf("array field not found: %s, error: %s", fullFieldName, err)
+	}
+
+	// In element-level context, data_type should be the element type
+	elementType := field.GetElementType()
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:         field.FieldID,
+						DataType:        elementType, // Use element type, not storage type
+						IsPrimaryKey:    field.IsPrimaryKey,
+						IsAutoID:        field.AutoID,
+						IsPartitionKey:  field.IsPartitionKey,
+						IsClusteringKey: field.IsClusteringKey,
+						ElementType:     elementType,
+						Nullable:        field.GetNullable(),
+						IsElementLevel:  true, // Mark as element-level access
+					},
+				},
+			},
+		},
+		dataType:      elementType, // Expression evaluates to element type
+		nodeDependent: true,
+	}
 }

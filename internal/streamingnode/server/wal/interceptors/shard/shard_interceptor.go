@@ -32,17 +32,19 @@ type shardInterceptor struct {
 // initOpTable initializes the operation table for the segment interceptor.
 func (impl *shardInterceptor) initOpTable() {
 	impl.ops = map[message.MessageType]interceptors.AppendInterceptorCall{
-		message.MessageTypeCreateCollection: impl.handleCreateCollection,
-		message.MessageTypeDropCollection:   impl.handleDropCollection,
-		message.MessageTypeCreatePartition:  impl.handleCreatePartition,
-		message.MessageTypeDropPartition:    impl.handleDropPartition,
-		message.MessageTypeInsert:           impl.handleInsertMessage,
-		message.MessageTypeDelete:           impl.handleDeleteMessage,
-		message.MessageTypeManualFlush:      impl.handleManualFlushMessage,
-		message.MessageTypeSchemaChange:     impl.handleSchemaChange,
-		message.MessageTypeAlterCollection:  impl.handleAlterCollection,
-		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
-		message.MessageTypeFlush:            impl.handleFlushSegment,
+		message.MessageTypeCreateCollection:   impl.handleCreateCollection,
+		message.MessageTypeDropCollection:     impl.handleDropCollection,
+		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
+		message.MessageTypeDropPartition:      impl.handleDropPartition,
+		message.MessageTypeInsert:             impl.handleInsertMessage,
+		message.MessageTypeDelete:             impl.handleDeleteMessage,
+		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
+		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
+		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
+		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
+		message.MessageTypeFlush:              impl.handleFlushSegment,
+		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
+		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
 	}
 }
 
@@ -295,6 +297,30 @@ func (impl *shardInterceptor) handleFlushSegment(ctx context.Context, msg messag
 	}
 	impl.shardManager.FlushSegment(message.MustAsImmutableFlushMessageV2(msg.IntoImmutableMessage(msgID)))
 	return msgID, nil
+}
+
+// handleFlushAllMessage handles the flush all message.
+func (impl *shardInterceptor) handleFlushAllMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	_, err := impl.shardManager.FlushAllAndFenceSegmentAllocUntil(msg.TimeTick())
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+	return appendOp(ctx, msg)
+}
+
+// handleTruncateCollectionMessage handles the truncate collection message.
+func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	truncateCollectionMsg := message.MustAsMutableTruncateCollectionMessageV2(msg)
+	header := truncateCollectionMsg.Header()
+	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+
+	header.SegmentIds = segmentIDs
+	truncateCollectionMsg.OverwriteHeader(header)
+
+	return appendOp(ctx, msg)
 }
 
 // Close closes the segment interceptor.

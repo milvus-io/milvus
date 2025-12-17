@@ -3,6 +3,7 @@ package writebuffer
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -18,12 +19,15 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -47,6 +51,8 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// SealSegments is the method to perform `Sync` operation with provided options.
 	SealSegments(ctx context.Context, segmentIDs []int64) error
+	// SealAllSegments seal all segments in the write buffer.
+	SealAllSegments(ctx context.Context)
 	// DropPartitions mark segments as Dropped of the partition
 	DropPartitions(partitionIDs []int64)
 	// GetCheckpoint returns current channel checkpoint.
@@ -184,6 +190,15 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 	defer wb.mut.RUnlock()
 
 	return wb.sealSegments(ctx, segmentIDs)
+}
+
+func (wb *writeBufferBase) SealAllSegments(ctx context.Context) {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	// mark all segments sealed if they were growing
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
+		metacache.WithSegmentState(commonpb.SegmentState_Growing))
 }
 
 func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
@@ -511,6 +526,16 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 			StartPosition:  startPos,
 			State:          commonpb.SegmentState_Growing,
 			StorageVersion: storageVersion,
+		}
+		// set manifest path when creating segment
+		if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
+			k := metautil.JoinIDPath(wb.collectionID, partitionID, segmentID)
+			basePath := path.Join(paramtable.Get().ServiceParam.MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+			if paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
+				basePath = path.Join(paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue(), basePath)
+			}
+			// -1 for first write
+			segmentInfo.ManifestPath = packed.MarshalManifestPath(basePath, -1)
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())

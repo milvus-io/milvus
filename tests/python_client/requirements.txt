@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.7.0rc83
-pymilvus[bulk_writer]==2.7.0rc83
+pymilvus==2.7.0rc84
+pymilvus[bulk_writer]==2.7.0rc84
 # for protobuf
 protobuf>=5.29.5
 
@@ -84,3 +84,6 @@ python-dotenv<=2.0.0
 
 # for geometry
 shapely==2.1.1
+
+# for time zone
+tzdata>=2024.1

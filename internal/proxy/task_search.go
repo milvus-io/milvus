@@ -606,10 +606,8 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		if err != nil {
 			return err
 		}
-
-		return h.initHighlightQueries(t)
 	}
-	return nil
+	return h.initHighlightQueries(t)
 }
 
 func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
@@ -705,9 +703,9 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
-		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
+		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
-	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
+	t.SearchRequest.PlaceholderGroup = t.request.GetPlaceholderGroup()
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)

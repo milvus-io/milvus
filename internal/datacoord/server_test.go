@@ -1931,199 +1931,6 @@ func TestPostFlush(t *testing.T) {
 	})
 }
 
-func TestGetFlushAllState(t *testing.T) {
-	tests := []struct {
-		testName                 string
-		ChannelCPs               []Timestamp
-		FlushAllTs               Timestamp
-		ServerIsHealthy          bool
-		ListDatabaseFailed       bool
-		ShowCollectionFailed     bool
-		DescribeCollectionFailed bool
-		ExpectedSuccess          bool
-		ExpectedFlushed          bool
-	}{
-		{
-			"test FlushAll flushed",
-			[]Timestamp{100, 200},
-			99,
-			true, false, false, false, true, true,
-		},
-		{
-			"test FlushAll not flushed",
-			[]Timestamp{100, 200},
-			150,
-			true, false, false, false, true, false,
-		},
-		{
-			"test Sever is not healthy", nil, 0,
-			false, false, false, false, false, false,
-		},
-		{
-			"test ListDatabase failed", nil, 0,
-			true, true, false, false, false, false,
-		},
-		{
-			"test ShowCollections failed", nil, 0,
-			true, false, true, false, false, false,
-		},
-		{
-			"test DescribeCollection failed", nil, 0,
-			true, false, false, true, false, false,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.testName, func(t *testing.T) {
-			collection := UniqueID(0)
-			vchannels := []string{"mock-vchannel-0", "mock-vchannel-1"}
-
-			svr := &Server{}
-			if test.ServerIsHealthy {
-				svr.stateCode.Store(commonpb.StateCode_Healthy)
-			}
-			var err error
-			svr.meta = &meta{}
-			svr.mixCoord = mocks.NewMixCoord(t)
-			svr.broker = broker.NewCoordinatorBroker(svr.mixCoord)
-			if test.ListDatabaseFailed {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, atr *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
-					return &milvuspb.ListDatabasesResponse{
-						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
-					}, nil
-				}).Once()
-			} else {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-					Return(&milvuspb.ListDatabasesResponse{
-						DbNames: []string{"db1"},
-						Status:  merr.Success(),
-					}, nil).Maybe()
-			}
-
-			if test.ShowCollectionFailed {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-					Return(&milvuspb.ShowCollectionsResponse{
-						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
-					}, nil).Maybe()
-			} else {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-					Return(&milvuspb.ShowCollectionsResponse{
-						Status:        merr.Success(),
-						CollectionIds: []int64{collection},
-					}, nil).Maybe()
-			}
-
-			if test.DescribeCollectionFailed {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-					Return(&milvuspb.DescribeCollectionResponse{
-						Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
-					}, nil).Maybe()
-			} else {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-					Return(&milvuspb.DescribeCollectionResponse{
-						Status:              merr.Success(),
-						VirtualChannelNames: vchannels,
-					}, nil).Maybe()
-			}
-
-			svr.meta.channelCPs = newChannelCps()
-			for i, ts := range test.ChannelCPs {
-				channel := vchannels[i]
-				svr.meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
-					ChannelName: channel,
-					Timestamp:   ts,
-				}
-			}
-
-			resp, err := svr.GetFlushAllState(context.TODO(), &milvuspb.GetFlushAllStateRequest{FlushAllTs: test.FlushAllTs})
-			assert.NoError(t, err)
-			if test.ExpectedSuccess {
-				assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-			} else if test.ServerIsHealthy {
-				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			} else {
-				assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-			}
-			assert.Equal(t, test.ExpectedFlushed, resp.GetFlushed())
-		})
-	}
-}
-
-func TestGetFlushAllStateWithDB(t *testing.T) {
-	tests := []struct {
-		testName        string
-		FlushAllTs      Timestamp
-		DbExist         bool
-		ExpectedSuccess bool
-		ExpectedFlushed bool
-	}{
-		{"test FlushAllWithDB, db exist", 99, true, true, true},
-		{"test FlushAllWithDB, db not exist", 99, false, false, false},
-	}
-	for _, test := range tests {
-		t.Run(test.testName, func(t *testing.T) {
-			collectionID := UniqueID(0)
-			dbName := "db"
-			collectionName := "collection"
-			vchannels := []string{"mock-vchannel-0", "mock-vchannel-1"}
-
-			svr := &Server{}
-			svr.stateCode.Store(commonpb.StateCode_Healthy)
-			var err error
-			svr.meta = &meta{}
-			svr.mixCoord = mocks.NewMixCoord(t)
-			svr.broker = broker.NewCoordinatorBroker(svr.mixCoord)
-
-			if test.DbExist {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-					Return(&milvuspb.ListDatabasesResponse{
-						DbNames: []string{dbName},
-						Status:  merr.Success(),
-					}, nil).Maybe()
-			} else {
-				svr.mixCoord.(*mocks.MixCoord).EXPECT().ListDatabases(mock.Anything, mock.Anything).
-					Return(&milvuspb.ListDatabasesResponse{
-						DbNames: []string{},
-						Status:  merr.Success(),
-					}, nil).Maybe()
-			}
-
-			svr.mixCoord.(*mocks.MixCoord).EXPECT().ShowCollections(mock.Anything, mock.Anything).
-				Return(&milvuspb.ShowCollectionsResponse{
-					Status:        merr.Success(),
-					CollectionIds: []int64{collectionID},
-				}, nil).Maybe()
-
-			svr.mixCoord.(*mocks.MixCoord).EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-				Return(&milvuspb.DescribeCollectionResponse{
-					Status:              merr.Success(),
-					VirtualChannelNames: vchannels,
-					CollectionID:        collectionID,
-					CollectionName:      collectionName,
-				}, nil).Maybe()
-
-			svr.meta.channelCPs = newChannelCps()
-			channelCPs := []Timestamp{100, 200}
-			for i, ts := range channelCPs {
-				channel := vchannels[i]
-				svr.meta.channelCPs.checkpoints[channel] = &msgpb.MsgPosition{
-					ChannelName: channel,
-					Timestamp:   ts,
-				}
-			}
-
-			var resp *milvuspb.GetFlushAllStateResponse
-			resp, err = svr.GetFlushAllState(context.TODO(), &milvuspb.GetFlushAllStateRequest{FlushAllTs: test.FlushAllTs, DbName: dbName})
-			assert.NoError(t, err)
-			if test.ExpectedSuccess {
-				assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-			} else {
-				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			}
-			assert.Equal(t, test.ExpectedFlushed, resp.GetFlushed())
-		})
-	}
-}
-
 func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
@@ -2775,7 +2582,6 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	server.initMessageCallback()
 
 	// Test Import message check callback
-	resourceKey := message.NewImportJobIDResourceKey(1)
 	msg, err := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{
@@ -2784,7 +2590,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 			},
 			Schema: &schemapb.CollectionSchema{},
 		}).
-		WithBroadcast([]string{"ch-0"}, resourceKey).
+		WithBroadcast([]string{"ch-0"}).
 		BuildBroadcast()
 	err = registry.CallMessageCheckCallback(ctx, msg)
 	assert.NoError(t, err)
@@ -2798,7 +2604,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 			},
 			Schema: &schemapb.CollectionSchema{},
 		}).
-		WithBroadcast([]string{"test_channel"}, resourceKey).
+		WithBroadcast([]string{"test_channel"}).
 		MustBuildBroadcast()
 	err = registry.CallMessageAckCallback(ctx, importMsg, map[string]*message.AppendResult{
 		"test_channel": {

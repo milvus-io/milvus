@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -28,7 +29,7 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 		taskMetricsGuard:     m,
 		msg:                  msg,
 		task:                 proto,
-		dirty:                true, // the task is recovered from the recovery info, so it's persisted.
+		dirty:                false, // the task is recovered from the recovery info, so it's persisted.
 		ackCallbackScheduler: ackCallbackScheduler,
 		done:                 make(chan struct{}),
 		allAcked:             make(chan struct{}),
@@ -76,7 +77,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 			AckedVchannelBitmap: make([]byte, len(header.VChannels)),
 			AckedCheckpoints:    make([]*streamingpb.AckedCheckpoint, len(header.VChannels)),
 		},
-		dirty:                false,
+		dirty:                true,
 		ackCallbackScheduler: ackCallbackScheduler,
 		done:                 make(chan struct{}),
 		allAcked:             make(chan struct{}),
@@ -245,11 +246,11 @@ func (b *broadcastTask) getImmutableMessageFromVChannel(vchannel string, result 
 
 // Ack acknowledges the message at the specified vchannel.
 // return true if all the vchannels are acked at first time, false if not.
-func (b *broadcastTask) Ack(ctx context.Context, msgs ...message.ImmutableMessage) (err error) {
+func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) (err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.ack(ctx, msgs...)
+	return b.ack(ctx, msgs)
 }
 
 // ack acknowledges the message at the specified vchannel.
@@ -258,10 +259,14 @@ func (b *broadcastTask) ack(ctx context.Context, msgs ...message.ImmutableMessag
 	if !b.dirty {
 		return nil
 	}
+	// because the incoming ack operation is always with one vchannel at a time or with all the vchannels at once,
+	// so we don't need to filter the vchannel that has been acked.
+	if err := registry.CallMessageAckOnceCallbacks(ctx, msgs...); err != nil {
+		return err
+	}
 	if err := b.saveTaskIfDirty(ctx, b.Logger()); err != nil {
 		return err
 	}
-
 	allDone := isAllDone(b.task)
 	if (isControlChannelAcked || allDone) && !b.joinAckCallbackScheduled {
 		// after 2.6.5, the control channel is always broadcasted, it's used to determine the order of the ack callback operations.
@@ -375,6 +380,13 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	defer b.mu.Unlock()
 
 	b.ObserveBroadcastDone()
+
+	if b.Header().AckSyncUp {
+		// Because the ack sync up is enabled, the ack operation want to be synced up at comsuming side of streaming node,
+		// so we can not make a fast ack operation here to speed up the ack operation.
+		return nil
+	}
+
 	// because we need to wait for the streamingnode to ack the message,
 	// however, if the message is already write into wal, the message is determined,
 	// so we can make a fast ack operation here to speed up the ack operation.

@@ -44,6 +44,22 @@ type HardwareMetrics struct {
 	DiskUsage float64 `json:"disk_usage"`
 
 	IOWaitPercentage float64 `json:"io_wait_percentage"` // IO Wait in %
+
+	// Jemalloc memory statistics (all sizes in bytes)
+	// Core metrics from jemalloc
+	JemallocAllocated uint64 `json:"jemalloc_allocated,omitempty"` // Total bytes allocated by the application
+	JemallocActive    uint64 `json:"jemalloc_active,omitempty"`    // Total bytes in active pages (includes fragmentation)
+	JemallocMetadata  uint64 `json:"jemalloc_metadata,omitempty"`  // Total bytes dedicated to jemalloc metadata
+	JemallocResident  uint64 `json:"jemalloc_resident,omitempty"`  // Total bytes in physically resident data pages (RSS)
+	JemallocMapped    uint64 `json:"jemalloc_mapped,omitempty"`    // Total bytes in virtual memory mappings
+	JemallocRetained  uint64 `json:"jemalloc_retained,omitempty"`  // Total bytes in retained virtual memory (could be returned to OS)
+
+	// Derived metrics (calculated)
+	JemallocFragmentation uint64 `json:"jemalloc_fragmentation,omitempty"` // Internal fragmentation (active - allocated)
+	JemallocOverhead      uint64 `json:"jemalloc_overhead,omitempty"`      // Memory overhead (resident - active)
+
+	// Status
+	JemallocSuccess bool `json:"jemalloc_success,omitempty"` // Whether jemalloc stats were successfully retrieved
 }
 
 type TaskQueueMetrics struct {
