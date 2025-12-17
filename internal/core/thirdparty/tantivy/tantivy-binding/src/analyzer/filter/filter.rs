@@ -146,37 +146,3 @@ pub fn create_filter(
         )),
     }
 }
-
-// impl TryFrom<&json::Map<String, json::Value>> for SystemFilter {
-//     type Error = TantivyBindingError;
-
-//     fn try_from(params: &json::Map<String, json::Value>) -> Result<Self> {
-//         match params.get(&"type".to_string()) {
-//             Some(value) => {
-//                 if !value.is_string() {
-//                     return Err(TantivyBindingError::InternalError(
-//                         "filter type should be string".to_string(),
-//                     ));
-//                 };
-
-//                 match value.as_str().unwrap() {
-//                     "length" => get_length_filter(params),
-//                     "stop" => StopWordFilter::from_json(params).map(|f| SystemFilter::Stop(f)),
-//                     "decompounder" => {
-//                         SplitCompoundWords::from_json(params).map(|f| SystemFilter::Decompounder(f))
-//                     }
-//                     "stemmer" => Stemmer::from_json(params).map(|f| SystemFilter::Stemmer(f)),
-//                     "regex" => RegexFilter::from_json(params).map(|f| SystemFilter::Regex(f)),
-//                     "synonym" => SynonymFilter::from_json(params).map(|f| SystemFilter::Synonym(f)),
-//                     other => Err(TantivyBindingError::InternalError(format!(
-//                         "unsupport filter type: {}",
-//                         other
-//                     ))),
-//                 }
-//             }
-//             None => Err(TantivyBindingError::InternalError(
-//                 "no type field in filter params".to_string(),
-//             )),
-//         }
-//     }
-// }

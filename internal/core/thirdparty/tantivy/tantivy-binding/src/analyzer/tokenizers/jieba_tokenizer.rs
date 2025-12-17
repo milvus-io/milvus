@@ -4,6 +4,7 @@ use lazy_static::lazy_static;
 use serde_json as json;
 use std::fs;
 use std::io::BufReader;
+use log::warn;
 use std::{borrow::Cow, path::PathBuf};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
@@ -103,6 +104,7 @@ fn get_jieba_dict(
     match params.get("extra_dict_file") {
         Some(v) => {
             let path = get_resource_path(helper, v, "jieba extra dict file")?;
+            warn!("test-- get_jieba_dict: path: {:?}", path);
             user_dict = Some(path)
         }
         _ => {}

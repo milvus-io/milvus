@@ -237,6 +237,7 @@ func (mt *MetaTable) reload() error {
 			if collection.DBName == "" {
 				collection.DBName = dbName
 			}
+			log.Info("test-- collection", zap.Int64("collectionID", collection.CollectionID), zap.Any("resources", collection.FileResourceIds))
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)

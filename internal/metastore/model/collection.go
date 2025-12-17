@@ -52,7 +52,7 @@ type Collection struct {
 	UpdateTimestamp        uint64
 	SchemaVersion          int32
 	LastTruncateTimestamps map[string]uint64
-	fileResourceIds        []int64
+	FileResourceIds        []int64
 }
 
 func (c *Collection) Available() bool {
@@ -85,7 +85,7 @@ func (c *Collection) ShallowClone() *Collection {
 		UpdateTimestamp:        c.UpdateTimestamp,
 		SchemaVersion:          c.SchemaVersion,
 		LastTruncateTimestamps: c.LastTruncateTimestamps,
-		fileResourceIds:        c.fileResourceIds,
+		FileResourceIds:        c.FileResourceIds,
 	}
 }
 
@@ -115,7 +115,7 @@ func (c *Collection) Clone() *Collection {
 		UpdateTimestamp:        c.UpdateTimestamp,
 		SchemaVersion:          c.SchemaVersion,
 		LastTruncateTimestamps: common.CloneMap(c.LastTruncateTimestamps),
-		fileResourceIds:        append([]int64{}, c.fileResourceIds...),
+		FileResourceIds:        append([]int64{}, c.FileResourceIds...),
 	}
 }
 
@@ -205,7 +205,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		UpdateTimestamp:        coll.UpdateTimestamp,
 		SchemaVersion:          coll.Schema.Version,
 		LastTruncateTimestamps: coll.LastTruncateTimestamps,
-		fileResourceIds:        coll.Schema.GetFileResourceIds(),
+		FileResourceIds:        coll.Schema.GetFileResourceIds(),
 	}
 }
 
@@ -257,7 +257,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		EnableDynamicField: coll.EnableDynamicField,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
-		FileResourceIds:    coll.fileResourceIds,
+		FileResourceIds:    coll.FileResourceIds,
 	}
 
 	if c.withFields {

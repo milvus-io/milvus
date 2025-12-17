@@ -79,6 +79,7 @@ type CompactionMeta interface {
 	GetAnalyzeMeta() *analyzeMeta
 	GetPartitionStatsMeta() *partitionStatsMeta
 	GetCompactionTaskMeta() *compactionTaskMeta
+	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -104,6 +105,7 @@ type meta struct {
 
 	// File Resource Meta
 	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
+	resourceIDMap   map[int64]*internalpb.FileResourceInfo  // id -> info
 	resourceVersion uint64
 	resourceLock    lock.RWMutex
 }
@@ -210,7 +212,8 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta: make(map[string]*internalpb.FileResourceInfo),
+		resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+		resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -367,6 +370,7 @@ func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
 	log.Info("meta update: add collection", zap.Int64("collectionID", collection.ID))
+	log.Info("test-- collection info", zap.String("collectionName", collection.Schema.Name), zap.Any("resources", collection.Schema.GetFileResourceIds()))
 	m.collections.Insert(collection.ID, collection)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
 	log.Info("meta update: add collection - complete", zap.Int64("collectionID", collection.ID))
@@ -2444,6 +2448,7 @@ func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
 	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
 		m.resourceMeta[resource.Name] = resource
+		m.resourceIDMap[resource.Id] = resource
 	}
 	m.resourceVersion = version
 	return nil
@@ -2464,6 +2469,7 @@ func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileRes
 	}
 
 	m.resourceMeta[resource.Name] = resource
+	m.resourceIDMap[resource.Id] = resource
 	m.resourceVersion += 1
 	return nil
 }
@@ -2480,10 +2486,26 @@ func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
 		}
 
 		delete(m.resourceMeta, name)
+		delete(m.resourceIDMap, resource.Id)
 		m.resourceVersion += 1
 	}
 
 	return nil
+}
+
+func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	m.resourceLock.RLock()
+	defer m.resourceLock.RUnlock()
+
+	resources := make([]*internalpb.FileResourceInfo, 0)
+	for _, resourceID := range resourceIDs {
+		if resource, ok := m.resourceIDMap[resourceID]; ok {
+			resources = append(resources, resource)
+		} else {
+			return nil, errors.Errorf("file resource %d not found", resourceID)
+		}
+	}
+	return resources, nil
 }
 
 // ListFileResource list file resources from meta

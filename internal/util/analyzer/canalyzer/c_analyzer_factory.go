@@ -17,7 +17,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -25,6 +27,7 @@ const (
 	LinderaDictURLKey = "lindera_download_urls"
 	ResourceMapKey    = "resource_map"
 	ResourcePathKey   = "resource_path"
+	StorageNameKey    = "storage_name"
 )
 
 var initOnce sync.Once
@@ -39,7 +42,7 @@ func UpdateParams() {
 	cfg := paramtable.Get()
 	params := map[string]any{}
 	params[LinderaDictURLKey] = cfg.FunctionCfg.LinderaDownloadUrls.GetValue()
-	params[ResourcePathKey] = cfg.FunctionCfg.LocalResourcePath.GetValue()
+	params[ResourcePathKey] = pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
 
 	bytes, err := json.Marshal(params)
 	if err != nil {
@@ -53,6 +56,22 @@ func UpdateParams() {
 	if err := HandleCStatus(&status, "failed to init segcore analyzer option"); err != nil {
 		log.Panic("init analyzer option failed", zap.Error(err))
 	}
+}
+
+func BuildExtraResourceInfo(storage string, resources []*internalpb.FileResourceInfo) (string, error) {
+	result := map[string]any{}
+	result[StorageNameKey] = storage
+
+	resultMap := map[string]int64{}
+	for _, resource := range resources {
+		resultMap[resource.GetName()] = resource.GetId()
+	}
+	result[ResourceMapKey] = resultMap
+	bytes, err := json.Marshal(result)
+	if err != nil {
+		return "", errors.Wrap(err, "marshal extra resource info failed")
+	}
+	return string(bytes), nil
 }
 
 func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {

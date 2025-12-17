@@ -62,6 +62,7 @@ impl FileResourcePathBuilder for RuntimeOption {
         file_name: &str,
     ) -> Result<(i64, PathBuf)> {
         let r = self.inner.read().unwrap();
+        warn!("test-- get_resource_file_path: resource_name: {}, file_name: {}, infos: {}", resource_name, file_name, r.resource_info.debug());
         return r
             .resource_info
             .get_resource_file_path(resource_name, file_name);
@@ -99,6 +100,7 @@ impl RuntimeOptionInner {
     }
 
     fn set(&mut self, key: String, value: json::Value) -> Result<()> {
+        warn!("test-- set option: key: {}, value: {:?}", key, value);
         // cache linera download map
         if key == LINDERA_DOWNLOAD_KEY {
             self.lindera_download_urls = HashMap::new();

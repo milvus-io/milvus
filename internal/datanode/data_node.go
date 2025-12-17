@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -216,6 +217,8 @@ func (node *DataNode) Init() error {
 		if err != nil {
 			initError = err
 		}
+
+		analyzer.InitOptions()
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError

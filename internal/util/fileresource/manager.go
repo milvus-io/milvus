@@ -46,6 +46,7 @@ var (
 
 func InitManager(storage storage.ChunkManager, mode Mode) {
 	once.Do(func() {
+		log.Info("test-- InitManager", zap.Int("mode", int(mode)), zap.Any("nodeID", paramtable.GetNodeID()))
 		m := NewManager(storage, mode)
 		GlobalFileManager = m
 	})
@@ -65,7 +66,7 @@ type Manager interface {
 	// sync resource to local
 	Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error
 
-	Download(downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error
+	Download(ctx context.Context, downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error
 	Release(resources ...*internalpb.FileResourceInfo)
 	Mode() Mode
 }
@@ -89,7 +90,7 @@ type BaseManager struct {
 func (m *BaseManager) Sync(version uint64, resourceList []*internalpb.FileResourceInfo) error {
 	return nil
 }
-func (m *BaseManager) Download(downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error {
+func (m *BaseManager) Download(ctx context.Context, downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error {
 	return nil
 }
 func (m *BaseManager) Release(resources ...*internalpb.FileResourceInfo) {}
@@ -190,7 +191,7 @@ type RefManager struct {
 	sf       *conc.Singleflight[interface{}]
 }
 
-func (m *RefManager) Download(downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error {
+func (m *RefManager) Download(ctx context.Context, downloader storage.ChunkManager, resources ...*internalpb.FileResourceInfo) error {
 	m.Lock()
 	// inc ref count and set storage name with storage root path
 	for _, resource := range resources {
@@ -200,7 +201,6 @@ func (m *RefManager) Download(downloader storage.ChunkManager, resources ...*int
 	}
 	m.Unlock()
 
-	ctx := context.Background()
 	for _, r := range resources {
 		resource := r
 		key := fmt.Sprintf("%s/%d", downloader.RootPath(), resource.GetId())

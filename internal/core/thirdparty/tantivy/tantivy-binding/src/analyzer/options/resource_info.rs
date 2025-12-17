@@ -37,6 +37,7 @@ impl ResourceInfo {
             let url = value.as_i64().ok_or(TantivyBindingError::InternalError(
                 "file resource id shoud be integer".to_string(),
             ))?;
+            warn!("test-- from_global_json: key: {}, value: {}", key, url);
             resource_map.insert(key.to_string(), url);
         }
         Ok(Self {

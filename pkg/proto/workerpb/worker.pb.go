@@ -12,6 +12,7 @@ import (
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	datapb "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	indexpb "github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1096,15 +1097,16 @@ type CreateStatsRequest struct {
 	JsonKeyStatsTantivyMemory int64  `protobuf:"varint,21,opt,name=json_key_stats_tantivy_memory,json=jsonKeyStatsTantivyMemory,proto3" json:"json_key_stats_tantivy_memory,omitempty"`
 	JsonKeyStatsDataFormat    int64  `protobuf:"varint,22,opt,name=json_key_stats_data_format,json=jsonKeyStatsDataFormat,proto3" json:"json_key_stats_data_format,omitempty"`
 	// deprecated, the sort logic has been moved into the compaction process.
-	EnableJsonKeyStatsInSort         bool                     `protobuf:"varint,23,opt,name=enable_json_key_stats_in_sort,json=enableJsonKeyStatsInSort,proto3" json:"enable_json_key_stats_in_sort,omitempty"`
-	TaskSlot                         int64                    `protobuf:"varint,24,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
-	StorageVersion                   int64                    `protobuf:"varint,25,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
-	CurrentScalarIndexVersion        int32                    `protobuf:"varint,26,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`
-	PluginContext                    []*commonpb.KeyValuePair `protobuf:"bytes,27,rep,name=plugin_context,json=pluginContext,proto3" json:"plugin_context,omitempty"`
-	JsonStatsMaxShreddingColumns     int64                    `protobuf:"varint,28,opt,name=json_stats_max_shredding_columns,json=jsonStatsMaxShreddingColumns,proto3" json:"json_stats_max_shredding_columns,omitempty"`
-	JsonStatsShreddingRatioThreshold float64                  `protobuf:"fixed64,29,opt,name=json_stats_shredding_ratio_threshold,json=jsonStatsShreddingRatioThreshold,proto3" json:"json_stats_shredding_ratio_threshold,omitempty"`
-	JsonStatsWriteBatchSize          int64                    `protobuf:"varint,30,opt,name=json_stats_write_batch_size,json=jsonStatsWriteBatchSize,proto3" json:"json_stats_write_batch_size,omitempty"`
-	ManifestPath                     string                   `protobuf:"bytes,31,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
+	EnableJsonKeyStatsInSort         bool                           `protobuf:"varint,23,opt,name=enable_json_key_stats_in_sort,json=enableJsonKeyStatsInSort,proto3" json:"enable_json_key_stats_in_sort,omitempty"`
+	TaskSlot                         int64                          `protobuf:"varint,24,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
+	StorageVersion                   int64                          `protobuf:"varint,25,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
+	CurrentScalarIndexVersion        int32                          `protobuf:"varint,26,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`
+	PluginContext                    []*commonpb.KeyValuePair       `protobuf:"bytes,27,rep,name=plugin_context,json=pluginContext,proto3" json:"plugin_context,omitempty"`
+	JsonStatsMaxShreddingColumns     int64                          `protobuf:"varint,28,opt,name=json_stats_max_shredding_columns,json=jsonStatsMaxShreddingColumns,proto3" json:"json_stats_max_shredding_columns,omitempty"`
+	JsonStatsShreddingRatioThreshold float64                        `protobuf:"fixed64,29,opt,name=json_stats_shredding_ratio_threshold,json=jsonStatsShreddingRatioThreshold,proto3" json:"json_stats_shredding_ratio_threshold,omitempty"`
+	JsonStatsWriteBatchSize          int64                          `protobuf:"varint,30,opt,name=json_stats_write_batch_size,json=jsonStatsWriteBatchSize,proto3" json:"json_stats_write_batch_size,omitempty"`
+	ManifestPath                     string                         `protobuf:"bytes,31,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
+	FileResources                    []*internalpb.FileResourceInfo `protobuf:"bytes,32,rep,name=file_resources,json=fileResources,proto3" json:"file_resources,omitempty"`
 }
 
 func (x *CreateStatsRequest) Reset() {
@@ -1354,6 +1356,13 @@ func (x *CreateStatsRequest) GetManifestPath() string {
 		return x.ManifestPath
 	}
 	return ""
+}
+
+func (x *CreateStatsRequest) GetFileResources() []*internalpb.FileResourceInfo {
+	if x != nil {
+		return x.FileResources
+	}
+	return nil
 }
 
 type CreateJobV2Request struct {
@@ -2188,6 +2197,7 @@ var file_worker_proto_rawDesc = []byte{
 	0x64, 0x61, 0x74, 0x61, 0x5f, 0x63, 0x6f, 0x6f, 0x72, 0x64, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f,
 	0x1a, 0x11, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x5f, 0x63, 0x6f, 0x6f, 0x72, 0x64, 0x2e, 0x70, 0x72,
 	0x6f, 0x74, 0x6f, 0x1a, 0x0c, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
+	0x6f, 0x1a, 0x0e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x22, 0xc3, 0x01, 0x0a, 0x11, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x54, 0x61, 0x73, 0x6b,
 	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x70, 0x61, 0x79, 0x6c, 0x6f,
 	0x61, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x07, 0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61,
@@ -2433,7 +2443,7 @@ var file_worker_proto_rawDesc = []byte{
 	0x28, 0x0b, 0x32, 0x20, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74,
 	0x6f, 0x2e, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x2e, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x53,
 	0x74, 0x61, 0x74, 0x73, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22,
-	0xed, 0x0b, 0x0a, 0x12, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x52,
+	0xbd, 0x0c, 0x0a, 0x12, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x53, 0x74, 0x61, 0x74, 0x73, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1c, 0x0a, 0x09, 0x63, 0x6c, 0x75, 0x73, 0x74, 0x65,
 	0x72, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x63, 0x6c, 0x75, 0x73, 0x74,
 	0x65, 0x72, 0x49, 0x44, 0x12, 0x16, 0x0a, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x44, 0x18, 0x02,
@@ -2527,7 +2537,12 @@ var file_worker_proto_rawDesc = []byte{
 	0x03, 0x52, 0x17, 0x6a, 0x73, 0x6f, 0x6e, 0x53, 0x74, 0x61, 0x74, 0x73, 0x57, 0x72, 0x69, 0x74,
 	0x65, 0x42, 0x61, 0x74, 0x63, 0x68, 0x53, 0x69, 0x7a, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x6d, 0x61,
 	0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x1f, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x0c, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x50, 0x61, 0x74, 0x68, 0x22,
+	0x09, 0x52, 0x0c, 0x6d, 0x61, 0x6e, 0x69, 0x66, 0x65, 0x73, 0x74, 0x50, 0x61, 0x74, 0x68, 0x12,
+	0x4e, 0x0a, 0x0e, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65,
+	0x73, 0x18, 0x20, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e,
+	0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x49, 0x6e, 0x66, 0x6f,
+	0x52, 0x0d, 0x66, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x73, 0x22,
 	0xf8, 0x02, 0x0a, 0x12, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x4a, 0x6f, 0x62, 0x56, 0x32, 0x52,
 	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1c, 0x0a, 0x09, 0x63, 0x6c, 0x75, 0x73, 0x74, 0x65,
 	0x72, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x63, 0x6c, 0x75, 0x73, 0x74,
@@ -2817,14 +2832,15 @@ var file_worker_proto_goTypes = []interface{}{
 	(*indexpb.JobInfo)(nil),             // 36: milvus.proto.index.JobInfo
 	(*schemapb.CollectionSchema)(nil),   // 37: milvus.proto.schema.CollectionSchema
 	(indexpb.StatsSubJob)(0),            // 38: milvus.proto.index.StatsSubJob
-	(indexpb.JobType)(0),                // 39: milvus.proto.index.JobType
-	(commonpb.IndexState)(0),            // 40: milvus.proto.common.IndexState
-	(indexpb.JobState)(0),               // 41: milvus.proto.index.JobState
-	(*indexpb.SegmentStats)(nil),        // 42: milvus.proto.index.SegmentStats
-	(*datapb.TextIndexStats)(nil),       // 43: milvus.proto.data.TextIndexStats
-	(*datapb.JsonKeyStats)(nil),         // 44: milvus.proto.data.JsonKeyStats
-	(*milvuspb.GetMetricsRequest)(nil),  // 45: milvus.proto.milvus.GetMetricsRequest
-	(*milvuspb.GetMetricsResponse)(nil), // 46: milvus.proto.milvus.GetMetricsResponse
+	(*internalpb.FileResourceInfo)(nil), // 39: milvus.proto.internal.FileResourceInfo
+	(indexpb.JobType)(0),                // 40: milvus.proto.index.JobType
+	(commonpb.IndexState)(0),            // 41: milvus.proto.common.IndexState
+	(indexpb.JobState)(0),               // 42: milvus.proto.index.JobState
+	(*indexpb.SegmentStats)(nil),        // 43: milvus.proto.index.SegmentStats
+	(*datapb.TextIndexStats)(nil),       // 44: milvus.proto.data.TextIndexStats
+	(*datapb.JsonKeyStats)(nil),         // 45: milvus.proto.data.JsonKeyStats
+	(*milvuspb.GetMetricsRequest)(nil),  // 46: milvus.proto.milvus.GetMetricsRequest
+	(*milvuspb.GetMetricsResponse)(nil), // 47: milvus.proto.milvus.GetMetricsResponse
 }
 var file_worker_proto_depIdxs = []int32{
 	22, // 0: milvus.proto.index.CreateTaskRequest.properties:type_name -> milvus.proto.index.CreateTaskRequest.PropertiesEntry
@@ -2855,57 +2871,58 @@ var file_worker_proto_depIdxs = []int32{
 	37, // 25: milvus.proto.index.CreateStatsRequest.schema:type_name -> milvus.proto.schema.CollectionSchema
 	38, // 26: milvus.proto.index.CreateStatsRequest.subJobType:type_name -> milvus.proto.index.StatsSubJob
 	31, // 27: milvus.proto.index.CreateStatsRequest.plugin_context:type_name -> milvus.proto.common.KeyValuePair
-	39, // 28: milvus.proto.index.CreateJobV2Request.job_type:type_name -> milvus.proto.index.JobType
-	10, // 29: milvus.proto.index.CreateJobV2Request.analyze_request:type_name -> milvus.proto.index.AnalyzeRequest
-	4,  // 30: milvus.proto.index.CreateJobV2Request.index_request:type_name -> milvus.proto.index.CreateJobRequest
-	11, // 31: milvus.proto.index.CreateJobV2Request.stats_request:type_name -> milvus.proto.index.CreateStatsRequest
-	39, // 32: milvus.proto.index.QueryJobsV2Request.job_type:type_name -> milvus.proto.index.JobType
-	40, // 33: milvus.proto.index.IndexTaskInfo.state:type_name -> milvus.proto.common.IndexState
-	14, // 34: milvus.proto.index.IndexJobResults.results:type_name -> milvus.proto.index.IndexTaskInfo
-	41, // 35: milvus.proto.index.AnalyzeResult.state:type_name -> milvus.proto.index.JobState
-	16, // 36: milvus.proto.index.AnalyzeResults.results:type_name -> milvus.proto.index.AnalyzeResult
-	41, // 37: milvus.proto.index.StatsResult.state:type_name -> milvus.proto.index.JobState
-	35, // 38: milvus.proto.index.StatsResult.insert_logs:type_name -> milvus.proto.data.FieldBinlog
-	35, // 39: milvus.proto.index.StatsResult.stats_logs:type_name -> milvus.proto.data.FieldBinlog
-	27, // 40: milvus.proto.index.StatsResult.text_stats_logs:type_name -> milvus.proto.index.StatsResult.TextStatsLogsEntry
-	35, // 41: milvus.proto.index.StatsResult.bm25_logs:type_name -> milvus.proto.data.FieldBinlog
-	28, // 42: milvus.proto.index.StatsResult.json_key_stats_logs:type_name -> milvus.proto.index.StatsResult.JsonKeyStatsLogsEntry
-	18, // 43: milvus.proto.index.StatsResults.results:type_name -> milvus.proto.index.StatsResult
-	29, // 44: milvus.proto.index.QueryJobsV2Response.status:type_name -> milvus.proto.common.Status
-	15, // 45: milvus.proto.index.QueryJobsV2Response.index_job_results:type_name -> milvus.proto.index.IndexJobResults
-	17, // 46: milvus.proto.index.QueryJobsV2Response.analyze_job_results:type_name -> milvus.proto.index.AnalyzeResults
-	19, // 47: milvus.proto.index.QueryJobsV2Response.stats_job_results:type_name -> milvus.proto.index.StatsResults
-	39, // 48: milvus.proto.index.DropJobsV2Request.job_type:type_name -> milvus.proto.index.JobType
-	42, // 49: milvus.proto.index.AnalyzeRequest.SegmentStatsEntry.value:type_name -> milvus.proto.index.SegmentStats
-	43, // 50: milvus.proto.index.StatsResult.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
-	44, // 51: milvus.proto.index.StatsResult.JsonKeyStatsLogsEntry.value:type_name -> milvus.proto.data.JsonKeyStats
-	4,  // 52: milvus.proto.index.IndexNode.CreateJob:input_type -> milvus.proto.index.CreateJobRequest
-	5,  // 53: milvus.proto.index.IndexNode.QueryJobs:input_type -> milvus.proto.index.QueryJobsRequest
-	7,  // 54: milvus.proto.index.IndexNode.DropJobs:input_type -> milvus.proto.index.DropJobsRequest
-	8,  // 55: milvus.proto.index.IndexNode.GetJobStats:input_type -> milvus.proto.index.GetJobStatsRequest
-	12, // 56: milvus.proto.index.IndexNode.CreateJobV2:input_type -> milvus.proto.index.CreateJobV2Request
-	13, // 57: milvus.proto.index.IndexNode.QueryJobsV2:input_type -> milvus.proto.index.QueryJobsV2Request
-	21, // 58: milvus.proto.index.IndexNode.DropJobsV2:input_type -> milvus.proto.index.DropJobsV2Request
-	45, // 59: milvus.proto.index.IndexNode.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	0,  // 60: milvus.proto.index.IndexNode.CreateTask:input_type -> milvus.proto.index.CreateTaskRequest
-	1,  // 61: milvus.proto.index.IndexNode.QueryTask:input_type -> milvus.proto.index.QueryTaskRequest
-	3,  // 62: milvus.proto.index.IndexNode.DropTask:input_type -> milvus.proto.index.DropTaskRequest
-	29, // 63: milvus.proto.index.IndexNode.CreateJob:output_type -> milvus.proto.common.Status
-	6,  // 64: milvus.proto.index.IndexNode.QueryJobs:output_type -> milvus.proto.index.QueryJobsResponse
-	29, // 65: milvus.proto.index.IndexNode.DropJobs:output_type -> milvus.proto.common.Status
-	9,  // 66: milvus.proto.index.IndexNode.GetJobStats:output_type -> milvus.proto.index.GetJobStatsResponse
-	29, // 67: milvus.proto.index.IndexNode.CreateJobV2:output_type -> milvus.proto.common.Status
-	20, // 68: milvus.proto.index.IndexNode.QueryJobsV2:output_type -> milvus.proto.index.QueryJobsV2Response
-	29, // 69: milvus.proto.index.IndexNode.DropJobsV2:output_type -> milvus.proto.common.Status
-	46, // 70: milvus.proto.index.IndexNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	29, // 71: milvus.proto.index.IndexNode.CreateTask:output_type -> milvus.proto.common.Status
-	2,  // 72: milvus.proto.index.IndexNode.QueryTask:output_type -> milvus.proto.index.QueryTaskResponse
-	29, // 73: milvus.proto.index.IndexNode.DropTask:output_type -> milvus.proto.common.Status
-	63, // [63:74] is the sub-list for method output_type
-	52, // [52:63] is the sub-list for method input_type
-	52, // [52:52] is the sub-list for extension type_name
-	52, // [52:52] is the sub-list for extension extendee
-	0,  // [0:52] is the sub-list for field type_name
+	39, // 28: milvus.proto.index.CreateStatsRequest.file_resources:type_name -> milvus.proto.internal.FileResourceInfo
+	40, // 29: milvus.proto.index.CreateJobV2Request.job_type:type_name -> milvus.proto.index.JobType
+	10, // 30: milvus.proto.index.CreateJobV2Request.analyze_request:type_name -> milvus.proto.index.AnalyzeRequest
+	4,  // 31: milvus.proto.index.CreateJobV2Request.index_request:type_name -> milvus.proto.index.CreateJobRequest
+	11, // 32: milvus.proto.index.CreateJobV2Request.stats_request:type_name -> milvus.proto.index.CreateStatsRequest
+	40, // 33: milvus.proto.index.QueryJobsV2Request.job_type:type_name -> milvus.proto.index.JobType
+	41, // 34: milvus.proto.index.IndexTaskInfo.state:type_name -> milvus.proto.common.IndexState
+	14, // 35: milvus.proto.index.IndexJobResults.results:type_name -> milvus.proto.index.IndexTaskInfo
+	42, // 36: milvus.proto.index.AnalyzeResult.state:type_name -> milvus.proto.index.JobState
+	16, // 37: milvus.proto.index.AnalyzeResults.results:type_name -> milvus.proto.index.AnalyzeResult
+	42, // 38: milvus.proto.index.StatsResult.state:type_name -> milvus.proto.index.JobState
+	35, // 39: milvus.proto.index.StatsResult.insert_logs:type_name -> milvus.proto.data.FieldBinlog
+	35, // 40: milvus.proto.index.StatsResult.stats_logs:type_name -> milvus.proto.data.FieldBinlog
+	27, // 41: milvus.proto.index.StatsResult.text_stats_logs:type_name -> milvus.proto.index.StatsResult.TextStatsLogsEntry
+	35, // 42: milvus.proto.index.StatsResult.bm25_logs:type_name -> milvus.proto.data.FieldBinlog
+	28, // 43: milvus.proto.index.StatsResult.json_key_stats_logs:type_name -> milvus.proto.index.StatsResult.JsonKeyStatsLogsEntry
+	18, // 44: milvus.proto.index.StatsResults.results:type_name -> milvus.proto.index.StatsResult
+	29, // 45: milvus.proto.index.QueryJobsV2Response.status:type_name -> milvus.proto.common.Status
+	15, // 46: milvus.proto.index.QueryJobsV2Response.index_job_results:type_name -> milvus.proto.index.IndexJobResults
+	17, // 47: milvus.proto.index.QueryJobsV2Response.analyze_job_results:type_name -> milvus.proto.index.AnalyzeResults
+	19, // 48: milvus.proto.index.QueryJobsV2Response.stats_job_results:type_name -> milvus.proto.index.StatsResults
+	40, // 49: milvus.proto.index.DropJobsV2Request.job_type:type_name -> milvus.proto.index.JobType
+	43, // 50: milvus.proto.index.AnalyzeRequest.SegmentStatsEntry.value:type_name -> milvus.proto.index.SegmentStats
+	44, // 51: milvus.proto.index.StatsResult.TextStatsLogsEntry.value:type_name -> milvus.proto.data.TextIndexStats
+	45, // 52: milvus.proto.index.StatsResult.JsonKeyStatsLogsEntry.value:type_name -> milvus.proto.data.JsonKeyStats
+	4,  // 53: milvus.proto.index.IndexNode.CreateJob:input_type -> milvus.proto.index.CreateJobRequest
+	5,  // 54: milvus.proto.index.IndexNode.QueryJobs:input_type -> milvus.proto.index.QueryJobsRequest
+	7,  // 55: milvus.proto.index.IndexNode.DropJobs:input_type -> milvus.proto.index.DropJobsRequest
+	8,  // 56: milvus.proto.index.IndexNode.GetJobStats:input_type -> milvus.proto.index.GetJobStatsRequest
+	12, // 57: milvus.proto.index.IndexNode.CreateJobV2:input_type -> milvus.proto.index.CreateJobV2Request
+	13, // 58: milvus.proto.index.IndexNode.QueryJobsV2:input_type -> milvus.proto.index.QueryJobsV2Request
+	21, // 59: milvus.proto.index.IndexNode.DropJobsV2:input_type -> milvus.proto.index.DropJobsV2Request
+	46, // 60: milvus.proto.index.IndexNode.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	0,  // 61: milvus.proto.index.IndexNode.CreateTask:input_type -> milvus.proto.index.CreateTaskRequest
+	1,  // 62: milvus.proto.index.IndexNode.QueryTask:input_type -> milvus.proto.index.QueryTaskRequest
+	3,  // 63: milvus.proto.index.IndexNode.DropTask:input_type -> milvus.proto.index.DropTaskRequest
+	29, // 64: milvus.proto.index.IndexNode.CreateJob:output_type -> milvus.proto.common.Status
+	6,  // 65: milvus.proto.index.IndexNode.QueryJobs:output_type -> milvus.proto.index.QueryJobsResponse
+	29, // 66: milvus.proto.index.IndexNode.DropJobs:output_type -> milvus.proto.common.Status
+	9,  // 67: milvus.proto.index.IndexNode.GetJobStats:output_type -> milvus.proto.index.GetJobStatsResponse
+	29, // 68: milvus.proto.index.IndexNode.CreateJobV2:output_type -> milvus.proto.common.Status
+	20, // 69: milvus.proto.index.IndexNode.QueryJobsV2:output_type -> milvus.proto.index.QueryJobsV2Response
+	29, // 70: milvus.proto.index.IndexNode.DropJobsV2:output_type -> milvus.proto.common.Status
+	47, // 71: milvus.proto.index.IndexNode.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	29, // 72: milvus.proto.index.IndexNode.CreateTask:output_type -> milvus.proto.common.Status
+	2,  // 73: milvus.proto.index.IndexNode.QueryTask:output_type -> milvus.proto.index.QueryTaskResponse
+	29, // 74: milvus.proto.index.IndexNode.DropTask:output_type -> milvus.proto.common.Status
+	64, // [64:75] is the sub-list for method output_type
+	53, // [53:64] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_worker_proto_init() }

@@ -3,6 +3,9 @@ package analyzer
 import (
 	"github.com/milvus-io/milvus/internal/util/analyzer/canalyzer"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
+	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"go.uber.org/zap"
 )
 
 type (
@@ -19,7 +22,12 @@ func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
 }
 
 func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {
+	log.Info("test-- sync file to rust", zap.Any("resourceNameMap", resourceMap))
 	return canalyzer.UpdateGlobalResourceInfo(resourceMap)
+}
+
+func BuildExtraResourceInfo(storage string, resources []*internalpb.FileResourceInfo) (string, error) {
+	return canalyzer.BuildExtraResourceInfo(storage, resources)
 }
 
 func InitOptions() {

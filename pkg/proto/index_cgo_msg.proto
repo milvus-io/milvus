@@ -102,6 +102,7 @@ message BuildIndexInfo {
   double json_stats_shredding_ratio_threshold = 28;
   int64 json_stats_write_batch_size = 29;
   string manifest = 30;
+  string analyzer_extra_info = 31;
 }
 
 message StoragePluginContext {

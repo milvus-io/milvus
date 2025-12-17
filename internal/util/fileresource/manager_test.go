@@ -79,7 +79,7 @@ func (suite *BaseManagerSuite) TestDownload() {
 		{Id: 1, Name: "test.file", Path: "/test/test.file"},
 	}
 
-	err := suite.manager.Download(mockStorage, resources...)
+	err := suite.manager.Download(context.Background(), mockStorage, resources...)
 	suite.NoError(err)
 }
 
@@ -221,7 +221,7 @@ func (suite *RefManagerSuite) TestNormal() {
 	suite.mockStorage.EXPECT().RootPath().Return("/test/storage")
 	suite.mockStorage.EXPECT().Reader(context.Background(), "/storage/test.file").Return(newMockReader("test content"), nil)
 
-	err := suite.manager.Download(suite.mockStorage, resources...)
+	err := suite.manager.Download(context.Background(), suite.mockStorage, resources...)
 	suite.Require().NoError(err)
 
 	// Verify ref count

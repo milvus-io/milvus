@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -109,6 +111,7 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 			}
 		}
 	}
+	log.Info("test-- create collection", zap.Int64s("resources", body.CollectionSchema.GetFileResourceIds()))
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
 		return errors.Wrap(err, "failed to add collection to meta table")
@@ -197,6 +200,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		Properties:           properties,
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		UpdateTimestamp:      ts,
+		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
 	}
 }
 

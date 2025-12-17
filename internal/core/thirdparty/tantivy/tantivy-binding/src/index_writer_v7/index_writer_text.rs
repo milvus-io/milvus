@@ -28,6 +28,7 @@ impl IndexWriterWrapperImpl {
         path: &str,
         tokenizer_name: &str,
         tokenizer_params: &str,
+        extra_info: &str,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
@@ -37,7 +38,7 @@ impl IndexWriterWrapperImpl {
             field_name
         );
 
-        let tokenizer = create_analyzer(tokenizer_params, "")?;
+        let tokenizer = create_analyzer(tokenizer_params, extra_info)?;
 
         let (schema, field) = build_text_schema(field_name, tokenizer_name);
         let index = if in_ram {

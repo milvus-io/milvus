@@ -1,5 +1,6 @@
 use std::ffi::c_char;
 use std::ffi::CStr;
+use log::warn;
 
 use crate::array::RustResult;
 use crate::cstr_to_str;
@@ -13,8 +14,9 @@ pub extern "C" fn tantivy_create_text_writer(
     field_name: *const c_char,
     path: *const c_char,
     tantivy_index_version: u32,
-    tokenizer_name: *const c_char,
+    analyzer_name: *const c_char,
     analyzer_params: *const c_char,
+    analyzer_extra_info: *const c_char,
     num_threads: usize,
     overall_memory_budget_in_bytes: usize,
     in_ram: bool,
@@ -22,19 +24,23 @@ pub extern "C" fn tantivy_create_text_writer(
     init_log();
     let field_name_str = cstr_to_str!(field_name);
     let path_str = cstr_to_str!(path);
-    let tokenizer_name_str = cstr_to_str!(tokenizer_name);
-    let params = cstr_to_str!(analyzer_params);
+    let analyzer_name_str = cstr_to_str!(analyzer_name);
+    let analyzer_params_str = cstr_to_str!(analyzer_params);
+    let analyzer_extra_info_str = cstr_to_str!(analyzer_extra_info);
+
 
     let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
         Ok(v) => v,
         Err(e) => return RustResult::from_error(e.to_string()),
     };
 
+    warn!("test-- create text writer with analyzer_extra_info: {}", analyzer_extra_info_str);
     match IndexWriterWrapper::create_text_writer(
         field_name_str,
         path_str,
-        tokenizer_name_str,
-        params,
+        analyzer_name_str,
+        analyzer_params_str,
+        analyzer_extra_info_str,
         num_threads,
         overall_memory_budget_in_bytes,
         in_ram,
@@ -44,7 +50,7 @@ pub extern "C" fn tantivy_create_text_writer(
         Err(err) => RustResult::from_error(format!(
             "create tokenizer failed with error: {} param: {}",
             err.to_string(),
-            params,
+            analyzer_params_str,
         )),
     }
 }

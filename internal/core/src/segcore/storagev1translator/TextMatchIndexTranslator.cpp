@@ -99,7 +99,7 @@ TextMatchIndexTranslator::get_cells(
             },
             milvus::ScopedTimer::LogLevel::Info);
         index->Load(config_);
-        index->RegisterTokenizer("milvus_tokenizer",
+        index->RegisterAnalyzer("milvus_tokenizer",
                                  load_info_.analyzer_params.c_str());
     }
 

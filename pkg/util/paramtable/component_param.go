@@ -2558,7 +2558,8 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 
 	p.FileResourceMode = ParamItem{
 		Key:          "queryCoord.fileResource.mode",
-		Version:      "2.6.3",
+		Version:      "2.6.8",
+		Export:       true,
 		DefaultValue: "sync",
 	}
 	p.FileResourceMode.Init(base.mgr)
@@ -4701,8 +4702,9 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.FileResourceMode = ParamItem{
 		Key:          "dataCoord.fileResource.mode",
-		Version:      "2.6.3",
+		Version:      "2.6.8",
 		DefaultValue: "sync",
+		Export:       true,
 	}
 	p.FileResourceMode.Init(base.mgr)
 

@@ -1,5 +1,6 @@
 use serde_json as json;
 use std::collections::HashMap;
+use log::warn;
 use tantivy::tokenizer::*;
 
 use super::options::{get_global_file_resource_helper, FileResourcePathHelper};
@@ -184,6 +185,7 @@ pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
         )
     };
 
+    warn!("test-- create analyzer: extra_info: {}", extra_info);
     let mut helper = if json_extra_info.is_some() {
         FileResourcePathHelper::from_json(json_extra_info.unwrap())?
     } else {

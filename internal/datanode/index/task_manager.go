@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -355,6 +356,7 @@ type StatsTaskInfo struct {
 	TextStatsLogs    map[int64]*datapb.TextIndexStats
 	Bm25Logs         []*datapb.FieldBinlog
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
+	FileResources    []*internalpb.FileResourceInfo
 }
 
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
@@ -372,6 +374,7 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 		TextStatsLogs:    s.CloneTextStatsLogs(),
 		Bm25Logs:         s.CloneBm25Logs(),
 		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
+		FileResources:    s.CloneFileResources(),
 	}
 }
 
@@ -391,6 +394,14 @@ func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 		NumRows:          s.NumRows,
 		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
 	}
+}
+
+func (s *StatsTaskInfo) CloneFileResources() []*internalpb.FileResourceInfo {
+	clone := make([]*internalpb.FileResourceInfo, len(s.FileResources))
+	for i, resource := range s.FileResources {
+		clone[i] = typeutil.Clone(resource)
+	}
+	return clone
 }
 
 func (s *StatsTaskInfo) CloneInsertLogs() []*datapb.FieldBinlog {

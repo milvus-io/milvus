@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/milvus-io/milvus-proto/go-api/v2/tokenizerpb"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -100,7 +101,7 @@ func TestAnalyzer(t *testing.T) {
 	{
 		lis, _ := net.Listen("tcp", "127.0.0.1:0")
 		s := grpc.NewServer()
-		pb.RegisterTokenizerServer(s, &mockServer{})
+		pb.RegisterAnalyzerServer(s, &mockServer{})
 		go func() {
 			if err := s.Serve(lis); err != nil {
 				t.Errorf("Server exited with error: %v", err)
@@ -113,7 +114,7 @@ func TestAnalyzer(t *testing.T) {
 			}
 
 			s := grpc.NewServer()
-			pb.RegisterTokenizerServer(s, &mockServer{})
+			pb.RegisterAnalyzerServer(s, &mockServer{})
 
 			go func() {
 				_ = s.Serve(lis)
@@ -182,7 +183,8 @@ func TestValidateAnalyzer(t *testing.T) {
 
 	// with user resource
 	{
-		paramtable.Get().Save(paramtable.Get().FunctionCfg.LocalResourcePath.Key, tempDir)
+		resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
+		defer os.RemoveAll(resourcePath)
 		UpdateParams()
 		resourceID := int64(100)
 
@@ -207,7 +209,8 @@ func TestValidateAnalyzer(t *testing.T) {
 
 	// with user resource and update global resource info
 	{
-		paramtable.Get().Save(paramtable.Get().FunctionCfg.LocalResourcePath.Key, tempDir)
+		resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
+		defer os.RemoveAll(resourcePath)
 		UpdateParams()
 		resourceID := int64(100)
 

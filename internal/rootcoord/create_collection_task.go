@@ -200,6 +200,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	}
 
 	// validate analyzer params at any streaming node
+	// and set file resource ids to schema
 	if len(analyzerInfos) > 0 {
 		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
 			AnalyzerInfos: analyzerInfos,
@@ -212,6 +213,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 			return err
 		}
 		schema.FileResourceIds = resp.GetResourceIds()
+		log.Info("test-- validate analyzer", zap.Any("resourceIds", schema.FileResourceIds))
 	}
 
 	return validateFieldDataType(schema.GetFields())

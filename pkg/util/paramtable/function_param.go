@@ -24,7 +24,6 @@ type functionConfig struct {
 	BatchFactor            ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders ParamGroup `refreshable:"true"`
 	RerankModelProviders   ParamGroup `refreshable:"true"`
-	LocalResourcePath      ParamItem  `refreshable:"true"`
 	LinderaDownloadUrls    ParamGroup `refreshable:"true"`
 	ZillizProviders        ParamGroup `refreshable:"true"`
 }
@@ -140,14 +139,6 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.RerankModelProviders.Init(base.mgr)
-
-	p.LocalResourcePath = ParamItem{
-		Key:          "function.analyzer.local_resource_path",
-		Version:      "2.5.16",
-		Export:       true,
-		DefaultValue: "/var/lib/milvus/analyzer",
-	}
-	p.LocalResourcePath.Init(base.mgr)
 
 	p.LinderaDownloadUrls = ParamGroup{
 		KeyPrefix: "function.analyzer.lindera.download_urls.",

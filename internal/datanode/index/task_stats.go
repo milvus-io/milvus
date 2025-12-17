@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -67,6 +69,7 @@ type statsTask struct {
 	queueDur time.Duration
 	manager  *TaskManager
 	binlogIO io.BinlogIO
+	cm       storage.ChunkManager
 
 	deltaLogs   []string
 	logIDOffset int64
@@ -84,7 +87,7 @@ func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
-	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 ) *statsTask {
 	return &statsTask{
 		ident:       fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -92,7 +95,8 @@ func NewStatsTask(ctx context.Context,
 		cancel:      cancel,
 		req:         req,
 		manager:     manager,
-		binlogIO:    binlogIO,
+		binlogIO:    io.NewBinlogIO(cm),
+		cm:          cm,
 		tr:          timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		currentTime: tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset: 0,
@@ -469,6 +473,21 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	}
 
 	textIndexLogs := make(map[int64]*datapb.TextIndexStats)
+	var analyzerExtraInfo string
+	log.Info("test-- create text index")
+	if len(st.req.GetFileResources()) > 0 {
+		err := fileresource.GlobalFileManager.Download(ctx, st.cm, st.req.GetFileResources()...)
+		if err != nil {
+			return err
+		}
+		defer fileresource.GlobalFileManager.Release(st.req.GetFileResources()...)
+		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(st.req.GetStorageConfig().GetRootPath(), st.req.GetFileResources())
+		if err != nil {
+			return err
+		}
+		log.Info("test-- analyzer extra info", zap.String("analyzer extra info", analyzerExtraInfo))
+	}
+
 	for _, field := range st.req.GetSchema().GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableMatch() {
@@ -484,6 +503,10 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
 		req.InsertLogs = insertBinlogs
 		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+		// set analyzer extra info
+		if len(analyzerExtraInfo) > 0 {
+			buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
+		}
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {

@@ -387,6 +387,18 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.GetCurrentScalarIndexEngineVersion(),
 	}
+
+	log.Info("test-- build compaction request", zap.Any("file resources", taskProto.GetSchema().GetFileResourceIds()), zap.String("type", taskProto.GetType().String()))
+	// set analyzer resource for text match index
+	if taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskProto.GetSchema().GetFileResourceIds()) > 0 {
+		resources, err := t.meta.GetFileResources(context.Background(), taskProto.GetSchema().GetFileResourceIds()...)
+		if err != nil {
+			log.Warn("get file resources for collection failed", zap.Int64("collectionID", taskProto.GetCollectionID()), zap.Error(err))
+			return nil, errors.Errorf("get file resources for sort compaction failed: %v", err)
+		}
+		plan.FileResources = resources
+	}
+
 	segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 	segments := make([]*SegmentInfo, 0, len(taskProto.GetInputSegments()))
 	for _, segID := range taskProto.GetInputSegments() {

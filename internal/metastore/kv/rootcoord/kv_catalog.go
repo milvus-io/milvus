@@ -182,6 +182,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		return fmt.Errorf("failed to marshal collection info: %s", err.Error())
 	}
 
+	log.Info("test-- collection info", zap.String("collectionName", coll.Name), zap.Any("resources", coll.FileResourceIds))
 	// Due to the limit of etcd txn number, we must split these kvs into several batches.
 	// Save collection key first, and the state of collection is creating.
 	// If we save collection key with error, then no garbage will be generated and error will be raised.
@@ -920,6 +921,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 				log.Ctx(ctx).Warn("unmarshal collection info failed", zap.Error(err))
 				return nil, err
 			}
+			log.Info("test-- collection", zap.String("name", collMeta.Schema.Name), zap.Any("resources", collMeta.GetSchema().GetFileResourceIds()))
 			kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
 			collection, err := kc.appendPartitionAndFieldsInfo(ctx, collMeta, ts)
 			if err != nil {
