@@ -116,12 +116,17 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
                 real_topks[i]++;
                 offsets[valid_index] = offsets[index];
                 distances[valid_index] = distances[index];
+                if (search_result->element_level_)
+                    search_result->element_indices_[valid_index] =
+                        search_result->element_indices_[index];
                 valid_index++;
             }
         }
     }
     offsets.resize(valid_index);
     distances.resize(valid_index);
+    if (search_result->element_level_)
+        search_result->element_indices_.resize(valid_index);
     search_result->topk_per_nq_prefix_sum_.resize(nq + 1);
     std::partial_sum(real_topks.begin(),
                      real_topks.end(),
@@ -207,6 +212,10 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                 PkType temp_pk =
                     std::move(search_result->primary_keys_[start + i]);
                 int64_t temp_offset = search_result->seg_offsets_[start + i];
+                int32_t temp_elem_idx =
+                    search_result->element_level_
+                        ? search_result->element_indices_[start + i]
+                        : -1;
 
                 size_t curr = i;
                 while (indices[curr] != i) {
@@ -215,12 +224,20 @@ ReduceHelper::SortEqualScoresOneNQ(size_t nq_begin,
                         std::move(search_result->primary_keys_[start + next]);
                     search_result->seg_offsets_[start + curr] =
                         search_result->seg_offsets_[start + next];
+                    if (search_result->element_level_) {
+                        search_result->element_indices_[start + curr] =
+                            search_result->element_indices_[start + next];
+                    }
                     indices[curr] = curr;  // Mark as processed
                     curr = next;
                 }
 
                 search_result->primary_keys_[start + curr] = std::move(temp_pk);
                 search_result->seg_offsets_[start + curr] = temp_offset;
+                if (search_result->element_level_) {
+                    search_result->element_indices_[start + curr] =
+                        temp_elem_idx;
+                }
                 indices[curr] = curr;
             }
         }
@@ -258,6 +275,10 @@ ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
                 search_result->distances_[offset];
             search_result->seg_offsets_[index] =
                 search_result->seg_offsets_[offset];
+            if (search_result->element_level_) {
+                search_result->element_indices_[index] =
+                    search_result->element_indices_[offset];
+            }
             index++;
             real_topks[j]++;
         }
@@ -265,6 +286,9 @@ ReduceHelper::RefreshSingleSearchResult(SearchResult* search_result,
     search_result->primary_keys_.resize(index);
     search_result->distances_.resize(index);
     search_result->seg_offsets_.resize(index);
+    if (search_result->element_level_) {
+        search_result->element_indices_.resize(index);
+    }
 }
 
 void
@@ -451,6 +475,15 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
     // reserve space for distances
     search_result_data->mutable_scores()->Resize(result_count, 0);
 
+    for (auto search_result : search_results_) {
+        if (search_result->element_level_) {
+            search_result_data->mutable_element_indices()
+                ->mutable_data()
+                ->Resize(result_count, -1);
+            break;
+        }
+    }
+
     // fill pks and distances
     for (auto qi = nq_begin; qi < nq_end; qi++) {
         int64_t topk_count = 0;
@@ -499,6 +532,13 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
 
                 search_result_data->mutable_scores()->Set(
                     loc, search_result->distances_[ki]);
+
+                if (search_result->element_level_) {
+                    search_result_data->mutable_element_indices()
+                        ->mutable_data()
+                        ->Set(loc, search_result->element_indices_[ki]);
+                }
+
                 // set result offset to fill output fields data
                 result_pairs[loc] = {&search_result->output_fields_data_, ki};
             }

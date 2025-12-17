@@ -64,7 +64,7 @@ func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 			return &commonpb.Status{}, nil
 		})
 
-		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60", nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60&collection_id=100", nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 			return &commonpb.Status{}, errors.New("mock")
 		})
 
-		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60", nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60&collection_id=100", nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -118,7 +118,7 @@ func (s *ProxyManagementSuite) TestResumeDatacoordGC() {
 			return &commonpb.Status{}, nil
 		})
 
-		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume, nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume+"?collection_id=100", nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -381,7 +382,16 @@ func wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Context, req any, ch
 		username = ""
 	}
 
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, handler)
+	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
+		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
+		if token, ok := ginCtx.Get(ContextToken); ok {
+			interceptor = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token.(string)))
+		}
+		return interceptor(reqCtx, req, &grpc.UnaryServerInfo{FullMethod: fullMethod}, func(ctx context.Context, req any) (interface{}, error) {
+			return handler(ctx, req)
+		})
+	}
+	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx.Keys), req, username.(string), fullMethod, forwardHandler)
 	if err == nil {
 		status, ok := requestutil.GetStatusFromResponse(response)
 		if ok {
@@ -1379,7 +1389,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req.SearchParams = searchParams
-	req.PlaceholderGroup = placeholderGroup
+	req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+		PlaceholderGroup: placeholderGroup,
+	}
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
@@ -1497,14 +1509,16 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchReq := &milvuspb.SearchRequest{
-			DbName:           dbName,
-			CollectionName:   httpReq.CollectionName,
-			Dsl:              subReq.Filter,
-			PlaceholderGroup: placeholderGroup,
-			DslType:          commonpb.DslType_BoolExprV1,
-			OutputFields:     httpReq.OutputFields,
-			PartitionNames:   httpReq.PartitionNames,
-			SearchParams:     searchParams,
+			DbName:         dbName,
+			CollectionName: httpReq.CollectionName,
+			Dsl:            subReq.Filter,
+			SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+				PlaceholderGroup: placeholderGroup,
+			},
+			DslType:        commonpb.DslType_BoolExprV1,
+			OutputFields:   httpReq.OutputFields,
+			PartitionNames: httpReq.PartitionNames,
+			SearchParams:   searchParams,
 		}
 		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
 		req.Requests = append(req.Requests, searchReq)

@@ -23,7 +23,7 @@ func Init() {
 	// init and select wal name
 	util.InitAndSelectWALName()
 	// register cipher for cipher message
-	if hookutil.IsClusterEncyptionEnabled() {
+	if hookutil.IsClusterEncryptionEnabled() {
 		message.RegisterCipher(hookutil.GetCipher())
 	}
 	singleton = newWALAccesser(c)
@@ -134,6 +134,9 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// ForwardService returns the forward service of the wal.
+	ForwardService() ForwardService
+
 	// Replicate returns the replicate service of the wal.
 	Replicate() ReplicateService
 

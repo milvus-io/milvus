@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -270,7 +271,10 @@ type commonConfig struct {
 	TopicNames             ParamItem `refreshable:"true"`
 	TimeTicker             ParamItem `refreshable:"true"`
 
-	JSONMaxLength ParamItem `refreshable:"false"`
+	JSONMaxLength         ParamItem `refreshable:"false"`
+	VarCharLengthAvg      ParamItem `refreshable:"true"`
+	DynamicFieldLengthAvg ParamItem `refreshable:"true"`
+	SparseFloatVectorSize ParamItem `refreshable:"true"`
 
 	MetricsPort ParamItem `refreshable:"false"`
 
@@ -887,6 +891,48 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: fmt.Sprint(64 << 10),
 	}
 	p.JSONMaxLength.Init(base.mgr)
+
+	p.VarCharLengthAvg = ParamItem{
+		Key:          "common.estimate.varCharLengthAvg",
+		Version:      "2.6.8",
+		DefaultValue: fmt.Sprint(typeutil.GetVarCharEstimateLength()),
+		Doc:          "average length considered per VarChar/Text field when estimating record size",
+		Export:       true,
+	}
+	p.VarCharLengthAvg.Init(base.mgr)
+	typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
+	p.VarCharLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
+		typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
+		return nil
+	})
+
+	p.DynamicFieldLengthAvg = ParamItem{
+		Key:          "common.estimate.dynamicFieldLengthAvg",
+		Version:      "2.6.8",
+		DefaultValue: fmt.Sprint(typeutil.GetDynamicFieldEstimateLength()),
+		Doc:          "average length considered per JSON/Array/Geometry field when estimating record size",
+		Export:       true,
+	}
+	p.DynamicFieldLengthAvg.Init(base.mgr)
+	typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
+	p.DynamicFieldLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
+		typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
+		return nil
+	})
+
+	p.SparseFloatVectorSize = ParamItem{
+		Key:          "common.estimate.sparseFloatVectorSize",
+		Version:      "2.6.8",
+		DefaultValue: fmt.Sprint(typeutil.GetSparseFloatVectorEstimateLength()),
+		Doc:          "fallback size (bytes) used when estimating sparse float vector fields",
+		Export:       true,
+	}
+	p.SparseFloatVectorSize.Init(base.mgr)
+	typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
+	p.SparseFloatVectorSize.RegisterCallback(func(_ context.Context, _, _, _ string) error {
+		typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
+		return nil
+	})
 
 	p.MetricsPort = ParamItem{
 		Key:          "common.MetricsPort",
@@ -1675,11 +1721,14 @@ The larger the pending length, the more memory is used, the less logging writes 
 
 	l.AsyncWriteBufferSize = ParamItem{
 		Key:          "log.asyncWrite.bufferSize",
-		DefaultValue: "1m",
+		DefaultValue: "4k",
 		Version:      "2.6.7",
 		Doc: `The buffer size of the underlying bufio writer. 
 The larger the buffer size, the more memory is used, 
-but the less the number of writes to the underlying file system.`,
+but the less the number of writes to the underlying file system.
+Because the cpp will print the log message into stdout, 
+when the logging is woring with pipe like tty/docker log driver/k8s,
+PIPE_BUF=4096 may interleave the go log and cpp log together, so 4kb is set as default value to avoid this.`,
 		Export: false,
 	}
 	l.AsyncWriteBufferSize.Init(base.mgr)
@@ -2494,6 +2543,8 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	FileResourceMode ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2504,6 +2555,13 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		DefaultValue: "5",
 	}
 	p.RetryNum.Init(base.mgr)
+
+	p.FileResourceMode = ParamItem{
+		Key:          "queryCoord.fileResource.mode",
+		Version:      "2.6.3",
+		DefaultValue: "sync",
+	}
+	p.FileResourceMode.Init(base.mgr)
 
 	p.RetryInterval = ParamItem{
 		Key:          "queryCoord.task.retryinterval",
@@ -4614,6 +4672,7 @@ type dataCoordConfig struct {
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
 	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
+	ScalarIndexTaskSlotUsage      ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
@@ -4627,6 +4686,7 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
+	FileResourceMode      ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4638,6 +4698,13 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
+
+	p.FileResourceMode = ParamItem{
+		Key:          "dataCoord.fileResource.mode",
+		Version:      "2.6.3",
+		DefaultValue: "sync",
+	}
+	p.FileResourceMode.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
@@ -5631,6 +5698,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.IndexTaskSlotUsage.Init(base.mgr)
 
+	p.ScalarIndexTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.scalarIndexTaskSlotUsage",
+		Version:      "2.6.8",
+		Doc:          "slot usage of scalar index task per 512mb",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ScalarIndexTaskSlotUsage.Init(base.mgr)
+
 	p.StatsTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.statsTaskSlotUsage",
 		Version:      "2.5.8",
@@ -6345,9 +6422,10 @@ type streamingConfig struct {
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// recovery configuration.
-	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
-	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
-	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
+	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
+	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
+	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
+	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6672,6 +6750,16 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
+
+	p.WALRecoverySchemaExpirationTolerance = ParamItem{
+		Key:     "streaming.walRecovery.schemaExpirationTolerance",
+		Version: "2.6.8",
+		Doc: `The tolerance of schema expiration for wal recovery, 24h by default.
+If the schema is older than (the channel checkpoint - tolerance), it will be removed forever.`,
+		DefaultValue: "24h",
+		Export:       false,
+	}
+	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

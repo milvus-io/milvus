@@ -31,7 +31,12 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    switch (expr_->column_.data_type_) {
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>(context);
             break;
@@ -331,6 +336,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             TargetBitmapView valid_res,
             HighPrecisionType val1,
             HighPrecisionType val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,
@@ -408,14 +419,28 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 skip_index_func,
-                                                 input,
-                                                 res,
-                                                 valid_res,
-                                                 val1,
-                                                 val2);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering
+            processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             val1,
+                                                             val2);
+        } else {
+            // For doc-level filtering
+            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
+                                                     skip_index_func,
+                                                     input,
+                                                     res,
+                                                     valid_res,
+                                                     val1,
+                                                     val2);
+        }
     } else {
+        AssertInfo(!expr_->column_.element_level_,
+                   "Element-level filtering is not supported without offsets");
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
     }
@@ -479,6 +504,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val1,
             ValueType val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true, filter_type>
                 func;
@@ -782,6 +813,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             ValueType val1,
             ValueType val2,
             int index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
                 func;

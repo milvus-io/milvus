@@ -331,7 +331,7 @@ func (mt *MetaTable) createDefaultDb() error {
 	}
 
 	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
-	if hookutil.IsClusterEncyptionEnabled() && len(defaultRootKey) > 0 {
+	if hookutil.IsClusterEncryptionEnabled() && len(defaultRootKey) > 0 {
 		// Set unique ID as ezID because the default dbID for each cluster
 		// is the same
 		ezID, err := mt.tsoAllocator.GenerateTSO(1)

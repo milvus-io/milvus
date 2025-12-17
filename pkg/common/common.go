@@ -606,6 +606,31 @@ func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 	return false, false
 }
 
+func GetInt64Value(kvs []*commonpb.KeyValuePair, key string) (result int64, parseErr error, exist bool) {
+	kv := lo.FindOrElse(kvs, nil, func(kv *commonpb.KeyValuePair) bool {
+		return kv.GetKey() == key
+	})
+	if kv == nil {
+		return 0, nil, false
+	}
+
+	result, err := strconv.ParseInt(kv.GetValue(), 10, 64)
+	if err != nil {
+		return 0, err, true
+	}
+	return result, nil, true
+}
+
+func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, exist bool) {
+	kv := lo.FindOrElse(kvs, nil, func(kv *commonpb.KeyValuePair) bool {
+		return kv.GetKey() == key
+	})
+	if kv == nil {
+		return "", false
+	}
+	return kv.GetValue(), true
+}
+
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
 	enabled, _, err := ParseNamespaceProp(schema.Properties...)
 	if err != nil {

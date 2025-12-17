@@ -1,5 +1,7 @@
 use crate::error::Result;
+use crate::log::init_log;
 use core::slice;
+use log::error;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_void};
@@ -13,9 +15,27 @@ pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
 
 pub fn index_exist(path: &str) -> bool {
     let Ok(dir) = MmapDirectory::open(path) else {
+        init_log();
+        error!("tantivy index_exist: failed to open directory: {}", path);
         return false;
     };
-    Index::exists(&dir).unwrap()
+    let exists = Index::exists(&dir).unwrap();
+    if !exists {
+        init_log();
+        let files: Vec<_> = std::fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        error!(
+            "tantivy index_exist: meta.json not found at {}, files: {:?}",
+            path, files
+        );
+    }
+    exists
 }
 
 pub fn make_bounds<T>(bound: T, inclusive: bool) -> Bound<T> {
@@ -45,5 +65,36 @@ pub extern "C" fn set_bitset(bitset: *mut c_void, doc_id: *const u32, len: usize
     let docs = unsafe { crate::convert_to_rust_slice!(doc_id, len) };
     for doc in docs {
         bitset.insert(*doc);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_index_exist_directory_not_exist() {
+        let result = index_exist("/nonexistent/path/to/index");
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_index_exist_empty_directory() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let result = index_exist(path);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_index_exist_directory_without_meta_json() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+        // Create some dummy files but no meta.json
+        fs::write(path.join("dummy.txt"), "test").unwrap();
+        let result = index_exist(path.to_str().unwrap());
+        assert!(!result);
     }
 }

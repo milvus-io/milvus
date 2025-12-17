@@ -212,14 +212,16 @@ func constructSearchRequest(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     outputFields,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: outputFields,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
@@ -271,14 +273,16 @@ func ConstructSearchRequestWithConsistencyLevel(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     outputFields,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: outputFields,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,

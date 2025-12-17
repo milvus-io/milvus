@@ -291,11 +291,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
 	// set field id for user passed field data, prepare for merge logic
-	upsertFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
-	if len(upsertFieldData) == 0 {
+	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("upsert field data is empty")
 	}
-	for _, fieldData := range upsertFieldData {
+	for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
 		fieldName := fieldData.GetFieldName()
 		if fieldData.GetIsDynamic() {
 			fieldName = "$meta"
@@ -316,6 +315,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+
+	// Validate field data alignment before processing to prevent index out of range panic
+	if err := newValidateUtil().checkAligned(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, uint64(upsertIDSize)); err != nil {
+		log.Warn("check field data aligned failed", zap.Error(err))
+		return err
 	}
 
 	// Two nullable data formats are supported:
@@ -395,7 +400,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
 			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
-			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(baseIdx), int64(idx))
+			err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx))
 			baseIdx += 1
 			if err != nil {
 				log.Info("update field data failed", zap.Error(err))
@@ -1078,18 +1083,13 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		log.Warn("fail to get primary field schema", zap.Error(err))
 		return err
 	}
-	deduplicatedFieldsData, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, it.req.GetFieldsData(), schema)
+	duplicate, err := CheckDuplicatePkExist(primaryFieldSchema, it.req.GetFieldsData())
 	if err != nil {
-		log.Warn("fail to deduplicate upsert data", zap.Error(err))
+		log.Warn("fail to check duplicate primary keys", zap.Error(err))
+		return err
 	}
-
-	// dedup won't decrease numOfRows to 0
-	if newNumRows > 0 && newNumRows != it.req.NumRows {
-		log.Info("upsert data deduplicated",
-			zap.Uint32("original_num_rows", it.req.NumRows),
-			zap.Uint32("deduplicated_num_rows", newNumRows))
-		it.req.FieldsData = deduplicatedFieldsData
-		it.req.NumRows = newNumRows
+	if duplicate {
+		return merr.WrapErrParameterInvalidMsg("duplicate primary keys are not allowed in the same batch")
 	}
 
 	it.upsertMsg = &msgstream.UpsertMsg{

@@ -561,14 +561,16 @@ func constructSearchRequest(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     nil,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
@@ -2593,7 +2595,11 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		hash := testutils.GenerateHashKeys(nb)
+		// upsert require pk unique in same batch
+		hash := make([]uint32, nb)
+		for i := 0; i < nb; i++ {
+			hash[i] = uint32(i)
+		}
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
@@ -3065,6 +3071,61 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 func Test_dropCollectionTask_PostExecute(t *testing.T) {
 	dct := &dropCollectionTask{}
 	assert.NoError(t, dct.PostExecute(context.Background()))
+}
+
+func Test_truncateCollectionTask_PreExecute(t *testing.T) {
+	tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+		Base:           &commonpb.MsgBase{},
+		CollectionName: "valid",
+	}}
+	ctx := context.Background()
+	err := tct.PreExecute(ctx)
+	assert.NoError(t, err)
+
+	// Test invalid collection name
+	tct.CollectionName = "#0xc0de"
+	err = tct.PreExecute(ctx)
+	assert.Error(t, err)
+}
+
+func Test_truncateCollectionTask_Execute(t *testing.T) {
+	mockRC := mocks.NewMockMixCoordClient(t)
+	mockRC.On("TruncateCollection",
+		mock.Anything, // context.Context
+		mock.Anything, // *milvuspb.TruncateCollectionRequest
+		mock.Anything,
+	).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, func(ctx context.Context, request *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) error {
+		switch request.GetCollectionName() {
+		case "c1":
+			return errors.New("error mock TruncateCollection")
+		case "c2":
+			return merr.WrapErrCollectionNotFound("mock")
+		default:
+			return nil
+		}
+	})
+
+	ctx := context.Background()
+
+	tct := &truncateCollectionTask{mixCoord: mockRC, TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{CollectionName: "normal"}}
+	err := tct.Execute(ctx)
+	assert.NoError(t, err)
+
+	tct.TruncateCollectionRequest.CollectionName = "c1"
+	err = tct.Execute(ctx)
+	assert.Error(t, err)
+
+	tct.TruncateCollectionRequest.CollectionName = "c2"
+	err = tct.Execute(ctx)
+	assert.Error(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, tct.result.GetStatus().GetErrorCode())
+}
+
+func Test_truncateCollectionTask_PostExecute(t *testing.T) {
+	tct := &truncateCollectionTask{}
+	assert.NoError(t, tct.PostExecute(context.Background()))
 }
 
 func Test_loadCollectionTask_Execute(t *testing.T) {

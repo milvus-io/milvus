@@ -133,12 +133,16 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewFlushMessageBody(msg)
 	case message.MessageTypeManualFlush:
 		tsMsg, err = NewManualFlushMessageBody(msg)
+	case message.MessageTypeFlushAll:
+		tsMsg, err = NewFlushAllMessageBody(msg)
 	case message.MessageTypeCreateSegment:
 		tsMsg, err = NewCreateSegmentMessageBody(msg)
 	case message.MessageTypeSchemaChange:
 		tsMsg, err = NewSchemaChangeMessageBody(msg)
 	case message.MessageTypeAlterCollection:
 		tsMsg, err = NewAlterCollectionMessageBody(msg)
+	case message.MessageTypeTruncateCollection:
+		tsMsg, err = NewTruncateCollectionMessageBody(msg)
 	default:
 		panic("unsupported message type")
 	}

@@ -163,7 +163,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "error", Params.AsyncWriteNonDroppableLevel.GetValue())
 		assert.Equal(t, 1*time.Second, Params.AsyncWriteStopTimeout.GetAsDurationByParse())
 		assert.Equal(t, 1024, Params.AsyncWritePendingLength.GetAsInt())
-		assert.Equal(t, int64(1024*1024), Params.AsyncWriteBufferSize.GetAsSize())
+		assert.Equal(t, int64(4*1024), Params.AsyncWriteBufferSize.GetAsSize())
 		assert.Equal(t, int64(1024*1024), Params.AsyncWriteMaxBytesPerLog.GetAsSize())
 	})
 
@@ -691,6 +691,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 128, params.StreamingCfg.WALReadAheadBufferLength.GetAsInt())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.LoggingAppendSlowThreshold.GetAsDurationByParse())
 		assert.Equal(t, 3*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
+		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())

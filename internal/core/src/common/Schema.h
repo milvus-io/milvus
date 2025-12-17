@@ -367,12 +367,51 @@ class Schema {
         name_ids_.emplace(field_name, field_id);
         id_names_.emplace(field_id, field_name);
 
-        fields_.emplace(field_id, field_meta);
+        // Build struct_array_field_cache_ for ARRAY/VECTOR_ARRAY fields
+        // Field name format: "struct_name[0].field_name"
+        auto data_type = field_meta.get_data_type();
+        if (data_type == DataType::ARRAY ||
+            data_type == DataType::VECTOR_ARRAY) {
+            const std::string& name_str = field_name.get();
+            auto bracket_pos = name_str.find('[');
+            if (bracket_pos != std::string::npos && bracket_pos > 0) {
+                std::string struct_name = name_str.substr(0, bracket_pos);
+                // Only cache the first array field for each struct
+                if (struct_array_field_cache_.find(struct_name) ==
+                    struct_array_field_cache_.end()) {
+                    struct_array_field_cache_[struct_name] = field_id;
+                }
+            }
+        }
+
+        fields_.emplace(field_id, std::move(field_meta));
         field_ids_.emplace_back(field_id);
     }
 
     std::unique_ptr<std::vector<FieldMeta>>
     AbsentFields(Schema& old_schema) const;
+
+    /**
+     * @brief Determines whether the specified field should use mmap for data loading.
+     *
+     * This function checks mmap settings at the field level first. If no field-level
+     * setting is found, it falls back to the collection-level mmap configuration.
+     *
+     * @param field The field ID to check mmap settings for.
+     *
+     * @return A pair of booleans:
+     *         - first:  Whether an mmap setting exists (at field or collection level).
+     *         - second: Whether mmap is enabled (only meaningful when first is true).
+     *
+     * @note If no mmap setting exists at any level, first will be false and second
+     *       should be ignored.
+     */
+    std::pair<bool, bool>
+    MmapEnabled(const FieldId& field) const;
+
+    // Find the first array field belonging to a struct (cached)
+    const FieldMeta&
+    GetFirstArrayFieldInStruct(const std::string& struct_name) const;
 
  private:
     int64_t debug_id = START_USER_FIELDID;
@@ -395,6 +434,14 @@ class Schema {
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
+
+    // mmap settings
+    bool has_mmap_setting_ = false;
+    bool mmap_enabled_ = false;
+    std::unordered_map<FieldId, bool> mmap_fields_;
+
+    // Cache for struct_name -> first array field mapping (built during AddField)
+    std::unordered_map<std::string, FieldId> struct_array_field_cache_;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

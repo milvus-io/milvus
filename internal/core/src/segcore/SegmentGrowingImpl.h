@@ -34,6 +34,7 @@
 #include "common/Types.h"
 #include "query/PlanNode.h"
 #include "common/GeometryCache.h"
+#include "common/ArrayOffsets.h"
 
 namespace milvus::segcore {
 
@@ -99,6 +100,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     Reopen(SchemaPtr sch) override;
+
+    void
+    Reopen(
+        const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
     LazyCheckSchema(SchemaPtr sch) override;
@@ -330,6 +335,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         this->CreateTextIndexes();
+        this->InitializeArrayOffsets();
     }
 
     ~SegmentGrowingImpl() {
@@ -490,6 +496,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   "RemoveJsonStats not implemented for SegmentGrowingImpl");
     }
 
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const override {
+        auto it = array_offsets_map_.find(field_id);
+        if (it != array_offsets_map_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
  protected:
     int64_t
     num_chunk(FieldId field_id) const override;
@@ -586,6 +601,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index);
 
+    void
+    InitializeArrayOffsets();
+
  private:
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
     SegcoreConfig segcore_config_;
@@ -609,6 +627,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+
+    // field_id -> ArrayOffsetsGrowing (for fast lookup via GetArrayOffsets)
+    // Multiple field_ids from the same struct point to the same ArrayOffsetsGrowing
+    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsGrowing>>
+        array_offsets_map_;
+
+    // Representative field_id for each struct (used to extract array lengths during Insert)
+    // One field_id per struct, since all fields in the same struct have identical array lengths
+    std::unordered_set<FieldId> struct_representative_fields_;
 };
 
 inline SegmentGrowingPtr

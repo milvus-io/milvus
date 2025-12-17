@@ -211,6 +211,10 @@ func (s *mixCoordImpl) initInternal() error {
 		log.Error("queryCoord start failed", zap.Error(err))
 		return err
 	}
+
+	if err := s.datacoordServer.SyncFileResources(s.ctx); err != nil {
+		log.Error("init file resources failed", zap.Error(err))
+	}
 	return nil
 }
 
@@ -530,6 +534,10 @@ func (s *mixCoordImpl) CreateAlias(ctx context.Context, in *milvuspb.CreateAlias
 
 func (s *mixCoordImpl) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.rootcoordServer.DescribeCollectionInternal(ctx, in)
+}
+
+func (s *mixCoordImpl) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.rootcoordServer.BackupEzk(ctx, in)
 }
 
 // DropAlias drop collection alias
@@ -883,6 +891,10 @@ func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 	return s.queryCoordServer.GetMetrics(ctx, in)
 }
 
+func (s *mixCoordImpl) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	return s.queryCoordServer.SyncFileResource(ctx, resources, version)
+}
+
 // QueryCoordServer
 func (s *mixCoordImpl) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ActivateChecker(ctx, req)
@@ -1210,7 +1222,7 @@ func (s *mixCoordImpl) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	return s.queryCoordServer.RunAnalyzer(ctx, req)
 }
 
-func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
 }
 
@@ -1236,4 +1248,19 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 // CreateExternalCollection creates an external collection
 func (s *mixCoordImpl) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return s.datacoordServer.CreateExternalCollection(ctx, req)
+}
+
+// TruncateCollection truncate collection
+func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return s.rootcoordServer.TruncateCollection(ctx, req)
+}
+
+// DropSegmentsByTime drop segments by time for TruncateCollection
+func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	return s.datacoordServer.DropSegmentsByTime(ctx, collectionID, flushTsList)
+}
+
+// ManualUpdateCurrentTarget manually update current target for TruncateCollection
+func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
 }

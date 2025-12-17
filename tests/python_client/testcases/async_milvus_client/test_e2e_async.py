@@ -272,7 +272,7 @@ class TestAsyncMilvusClient(TestMilvusClientV2Base):
         assert _index["indexed_rows"] == async_default_nb
         assert _index["state"] == "Finished"
         _load, _ = await self.async_milvus_client_wrap.get_load_state(c_name)
-        assert _load == LoadState.Loaded
+        assert _load['state'] == LoadState.Loaded
 
         # dql tasks
         tasks = []

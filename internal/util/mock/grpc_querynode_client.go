@@ -142,8 +142,8 @@ func (m *GrpcQueryNodeClient) RunAnalyzer(ctx context.Context, in *querypb.RunAn
 	return &milvuspb.RunAnalyzerResponse{}, m.Err
 }
 
-func (m *GrpcQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (m *GrpcQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
+	return &querypb.ValidateAnalyzerResponse{}, m.Err
 }
 
 func (m *GrpcQueryNodeClient) GetHighlight(ctx context.Context, in *querypb.GetHighlightRequest, opts ...grpc.CallOption) (*querypb.GetHighlightResponse, error) {
@@ -155,5 +155,9 @@ func (m *GrpcQueryNodeClient) Close() error {
 }
 
 func (m *GrpcQueryNodeClient) DropIndex(ctx context.Context, in *querypb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

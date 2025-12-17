@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -129,7 +130,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 
-		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*model.FileResource{}, nil)
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{}, 0, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -175,7 +176,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 
-		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*model.FileResource{}, nil)
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{}, 0, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -703,6 +704,7 @@ func TestMeta_Basic(t *testing.T) {
 		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
@@ -714,6 +716,7 @@ func TestMeta_Basic(t *testing.T) {
 
 		metakv2 := mockkv.NewMetaKv(t)
 		metakv2.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+		metakv2.EXPECT().Has(mock.Anything, datacoord.FileResourceVersionKey).Return(false, nil).Maybe()
 		metakv2.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv2.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
 		metakv2.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("failed")).Maybe()
@@ -1173,6 +1176,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(errors.New("mocked fail")).Maybe()
 		metakv.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
+		metakv.EXPECT().Has(mock.Anything, mock.Anything).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
@@ -1521,6 +1525,102 @@ func TestChannelCP(t *testing.T) {
 		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 		err = meta.DropChannelCheckpoint(mockVChannel)
+		assert.NoError(t, err)
+	})
+
+	t.Run("WatchChannelCheckpoint", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
+		assert.NoError(t, err)
+		err = meta.WatchChannelCheckpoint(context.TODO(), mockVChannel, pos.Timestamp-1)
+		assert.NoError(t, err)
+	})
+
+	t.Run("TruncateChannelByTime", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		flushTs := uint64(2000)
+		channelName := mockVChannel
+
+		// Test case 1: No segments to drop
+		err = meta.TruncateChannelByTime(context.TODO(), channelName, flushTs)
+		assert.NoError(t, err)
+
+		// Test case 2: Add segments that should be dropped (timestamp <= flushTs)
+		seg1 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channelName,
+					Timestamp:   flushTs - 100, // less than flushTs
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg1)
+		assert.NoError(t, err)
+
+		// Test case 3: Add segment that should NOT be dropped (timestamp > flushTs)
+		seg2 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Flushed,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channelName,
+					Timestamp:   flushTs + 100, // greater than flushTs
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg2)
+		assert.NoError(t, err)
+
+		// Test case 4: Add segment that is already dropped (should be skipped)
+		seg3 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: channelName,
+				State:         commonpb.SegmentState_Dropped,
+				DmlPosition: &msgpb.MsgPosition{
+					ChannelName: channelName,
+					Timestamp:   flushTs - 100, // less than flushTs but already dropped
+				},
+			},
+		}
+		err = meta.AddSegment(context.TODO(), seg3)
+		assert.NoError(t, err)
+
+		// Test case 5: TruncateChannelByTime should drop seg1 but not seg2 or seg3
+		err = meta.TruncateChannelByTime(context.TODO(), channelName, flushTs)
+		assert.NoError(t, err)
+
+		// Verify seg1 is dropped
+		seg1After := meta.GetSegment(context.TODO(), seg1.ID)
+		assert.NotNil(t, seg1After)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg1After.GetState())
+
+		// Verify seg2 is not dropped
+		seg2After := meta.GetSegment(context.TODO(), seg2.ID)
+		assert.NotNil(t, seg2After)
+		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
+
+		// Verify seg3 remains dropped
+		seg3After := meta.GetSegment(context.TODO(), seg3.ID)
+		assert.NotNil(t, seg3After)
+		assert.Equal(t, commonpb.SegmentState_Dropped, seg3After.GetState())
+
+		// Test case 6: Call again with same flushTs, should return nil (no segments to drop)
+		err = meta.TruncateChannelByTime(context.TODO(), channelName, flushTs)
 		assert.NoError(t, err)
 	})
 }

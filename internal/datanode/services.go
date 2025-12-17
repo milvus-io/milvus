@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -568,7 +569,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.PreImport(ctx, req)
@@ -577,7 +578,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
@@ -586,7 +587,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.CompactionV2(ctx, req)
@@ -595,13 +596,16 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
 		return node.createIndexTask(ctx, req)
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createStatsTask(ctx, req)
@@ -610,7 +614,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)
@@ -772,4 +776,20 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		log.Ctx(ctx).Warn("DropTask failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
+}
+
+func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Uint64("version", req.GetVersion()))
+	log.Info("sync file resource", zap.Any("resources", req.Resources))
+
+	if !node.isHealthy() {
+		log.Warn("failed to sync file resource, DataNode is not healthy")
+		return merr.Status(merr.ErrServiceNotReady), nil
+	}
+
+	err := fileresource.Sync(req.GetResources())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
 }

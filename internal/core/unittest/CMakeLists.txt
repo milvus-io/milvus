@@ -43,12 +43,14 @@ set(MILVUS_TEST_FILES
         test_index_wrapper.cpp
         test_integer_overflow.cpp
         test_query.cpp
+        test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
         test_string_expr.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
+        test_element_filter.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )

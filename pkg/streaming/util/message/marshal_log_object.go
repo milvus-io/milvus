@@ -118,6 +118,8 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *DropCollectionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
+	case *TruncateCollectionMessageHeader:
+		enc.AddInt64("collectionID", header.GetCollectionId())
 	case *CreatePartitionMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		enc.AddInt64("partitionID", header.GetPartitionId())

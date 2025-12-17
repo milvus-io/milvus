@@ -215,6 +215,10 @@ woodpecker:
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
     retentionPolicy:
       ttl: 72h # Time to live for truncated segments in seconds, default is 72h
+    fencePolicy:
+      # Enable conditional write for embedded mode, default is auto, which will automatically detect whether the storage supports conditional write.
+      # Valid values: [auto, enable, disable]
+      conditionWrite: auto
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
@@ -297,7 +301,7 @@ rootCoord:
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
-  port: 53100 # TCP port of rootCoord
+  port: 22125 # TCP port of rootCoord
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the rootCoord can send, unit: byte
     serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the rootCoord can receive, unit: byte
@@ -735,6 +739,7 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
@@ -998,6 +1003,10 @@ common:
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
+  estimate:
+    varCharLengthAvg: 256 # average length considered per VarChar/Text field when estimating record size
+    dynamicFieldLengthAvg: 512 # average length considered per JSON/Array/Geometry field when estimating record size
+    sparseFloatVectorSize: 1200 # fallback size (bytes) used when estimating sparse float vector fields
   locks:
     metrics:
       enable: false # whether gather statistics for metrics locks

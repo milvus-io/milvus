@@ -303,11 +303,11 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("ValidateAnalyzer", func(t *testing.T) {
-		mockQN.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+		mockQN.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 		req := &querypb.ValidateAnalyzerRequest{}
 		resp, err := server.ValidateAnalyzer(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	err = server.Stop()

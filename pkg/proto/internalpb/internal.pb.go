@@ -4030,6 +4030,242 @@ func (x *GetQuotaMetricsResponse) GetMetricsInfo() string {
 	return ""
 }
 
+type FileResourceInfo struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Name        string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path        string `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Id          int64  `protobuf:"varint,3,opt,name=id,proto3" json:"id,omitempty"`
+	StorageName string `protobuf:"bytes,5,opt,name=storage_name,json=storageName,proto3" json:"storage_name,omitempty"`
+}
+
+func (x *FileResourceInfo) Reset() {
+	*x = FileResourceInfo{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_internal_proto_msgTypes[46]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *FileResourceInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileResourceInfo) ProtoMessage() {}
+
+func (x *FileResourceInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_msgTypes[46]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileResourceInfo.ProtoReflect.Descriptor instead.
+func (*FileResourceInfo) Descriptor() ([]byte, []int) {
+	return file_internal_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *FileResourceInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *FileResourceInfo) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *FileResourceInfo) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *FileResourceInfo) GetStorageName() string {
+	if x != nil {
+		return x.StorageName
+	}
+	return ""
+}
+
+type SyncFileResourceRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Resources []*FileResourceInfo `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
+	Version   uint64              `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
+}
+
+func (x *SyncFileResourceRequest) Reset() {
+	*x = SyncFileResourceRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_internal_proto_msgTypes[47]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SyncFileResourceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncFileResourceRequest) ProtoMessage() {}
+
+func (x *SyncFileResourceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_msgTypes[47]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncFileResourceRequest.ProtoReflect.Descriptor instead.
+func (*SyncFileResourceRequest) Descriptor() ([]byte, []int) {
+	return file_internal_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *SyncFileResourceRequest) GetResources() []*FileResourceInfo {
+	if x != nil {
+		return x.Resources
+	}
+	return nil
+}
+
+func (x *SyncFileResourceRequest) GetVersion() uint64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type BackupEzkRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Base   *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	DbName string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+}
+
+func (x *BackupEzkRequest) Reset() {
+	*x = BackupEzkRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_internal_proto_msgTypes[48]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *BackupEzkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupEzkRequest) ProtoMessage() {}
+
+func (x *BackupEzkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_msgTypes[48]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupEzkRequest.ProtoReflect.Descriptor instead.
+func (*BackupEzkRequest) Descriptor() ([]byte, []int) {
+	return file_internal_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *BackupEzkRequest) GetBase() *commonpb.MsgBase {
+	if x != nil {
+		return x.Base
+	}
+	return nil
+}
+
+func (x *BackupEzkRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+type BackupEzkResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Status *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Ezk    string           `protobuf:"bytes,2,opt,name=ezk,proto3" json:"ezk,omitempty"`
+}
+
+func (x *BackupEzkResponse) Reset() {
+	*x = BackupEzkResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_internal_proto_msgTypes[49]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *BackupEzkResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupEzkResponse) ProtoMessage() {}
+
+func (x *BackupEzkResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_msgTypes[49]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupEzkResponse.ProtoReflect.Descriptor instead.
+func (*BackupEzkResponse) Descriptor() ([]byte, []int) {
+	return file_internal_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *BackupEzkResponse) GetStatus() *commonpb.Status {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+func (x *BackupEzkResponse) GetEzk() string {
+	if x != nil {
+		return x.Ezk
+	}
+	return ""
+}
+
 var File_internal_proto protoreflect.FileDescriptor
 
 var file_internal_proto_rawDesc = []byte{
@@ -4737,36 +4973,62 @@ var file_internal_proto_rawDesc = []byte{
 	0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x21,
 	0x0a, 0x0c, 0x6d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x73, 0x5f, 0x69, 0x6e, 0x66, 0x6f, 0x18, 0x02,
 	0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x6d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x73, 0x49, 0x6e, 0x66,
-	0x6f, 0x2a, 0x45, 0x0a, 0x09, 0x52, 0x61, 0x74, 0x65, 0x53, 0x63, 0x6f, 0x70, 0x65, 0x12, 0x0b,
-	0x0a, 0x07, 0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x10, 0x00, 0x12, 0x0c, 0x0a, 0x08, 0x44,
-	0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x01, 0x12, 0x0e, 0x0a, 0x0a, 0x43, 0x6f, 0x6c,
-	0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x02, 0x12, 0x0d, 0x0a, 0x09, 0x50, 0x61, 0x72,
-	0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x03, 0x2a, 0xc4, 0x01, 0x0a, 0x08, 0x52, 0x61, 0x74,
-	0x65, 0x54, 0x79, 0x70, 0x65, 0x12, 0x11, 0x0a, 0x0d, 0x44, 0x44, 0x4c, 0x43, 0x6f, 0x6c, 0x6c,
-	0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x00, 0x12, 0x10, 0x0a, 0x0c, 0x44, 0x44, 0x4c, 0x50,
-	0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x01, 0x12, 0x0c, 0x0a, 0x08, 0x44, 0x44,
-	0x4c, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x10, 0x02, 0x12, 0x0c, 0x0a, 0x08, 0x44, 0x44, 0x4c, 0x46,
-	0x6c, 0x75, 0x73, 0x68, 0x10, 0x03, 0x12, 0x11, 0x0a, 0x0d, 0x44, 0x44, 0x4c, 0x43, 0x6f, 0x6d,
-	0x70, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x04, 0x12, 0x0d, 0x0a, 0x09, 0x44, 0x4d, 0x4c,
-	0x49, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x10, 0x05, 0x12, 0x0d, 0x0a, 0x09, 0x44, 0x4d, 0x4c, 0x44,
-	0x65, 0x6c, 0x65, 0x74, 0x65, 0x10, 0x06, 0x12, 0x0f, 0x0a, 0x0b, 0x44, 0x4d, 0x4c, 0x42, 0x75,
-	0x6c, 0x6b, 0x4c, 0x6f, 0x61, 0x64, 0x10, 0x07, 0x12, 0x0d, 0x0a, 0x09, 0x44, 0x51, 0x4c, 0x53,
-	0x65, 0x61, 0x72, 0x63, 0x68, 0x10, 0x08, 0x12, 0x0c, 0x0a, 0x08, 0x44, 0x51, 0x4c, 0x51, 0x75,
-	0x65, 0x72, 0x79, 0x10, 0x09, 0x12, 0x0d, 0x0a, 0x09, 0x44, 0x4d, 0x4c, 0x55, 0x70, 0x73, 0x65,
-	0x72, 0x74, 0x10, 0x0a, 0x12, 0x09, 0x0a, 0x05, 0x44, 0x44, 0x4c, 0x44, 0x42, 0x10, 0x0b, 0x2a,
-	0x83, 0x01, 0x0a, 0x0e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x4a, 0x6f, 0x62, 0x53, 0x74, 0x61,
-	0x74, 0x65, 0x12, 0x08, 0x0a, 0x04, 0x4e, 0x6f, 0x6e, 0x65, 0x10, 0x00, 0x12, 0x0b, 0x0a, 0x07,
-	0x50, 0x65, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x10, 0x01, 0x12, 0x10, 0x0a, 0x0c, 0x50, 0x72, 0x65,
-	0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x10, 0x02, 0x12, 0x0d, 0x0a, 0x09, 0x49,
-	0x6d, 0x70, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x10, 0x03, 0x12, 0x0a, 0x0a, 0x06, 0x46, 0x61,
-	0x69, 0x6c, 0x65, 0x64, 0x10, 0x04, 0x12, 0x0d, 0x0a, 0x09, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65,
-	0x74, 0x65, 0x64, 0x10, 0x05, 0x12, 0x11, 0x0a, 0x0d, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x42, 0x75,
-	0x69, 0x6c, 0x64, 0x69, 0x6e, 0x67, 0x10, 0x06, 0x12, 0x0b, 0x0a, 0x07, 0x53, 0x6f, 0x72, 0x74,
-	0x69, 0x6e, 0x67, 0x10, 0x07, 0x42, 0x35, 0x5a, 0x33, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e,
-	0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69,
-	0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x33,
+	0x6f, 0x22, 0x6d, 0x0a, 0x10, 0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63,
+	0x65, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x12, 0x0a, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x70, 0x61, 0x74,
+	0x68, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x70, 0x61, 0x74, 0x68, 0x12, 0x0e, 0x0a,
+	0x02, 0x69, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x02, 0x69, 0x64, 0x12, 0x21, 0x0a,
+	0x0c, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x05, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x0b, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x4e, 0x61, 0x6d, 0x65,
+	0x22, 0x7a, 0x0a, 0x17, 0x53, 0x79, 0x6e, 0x63, 0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f,
+	0x75, 0x72, 0x63, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x45, 0x0a, 0x09, 0x72,
+	0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x27,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e,
+	0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73, 0x6f, 0x75,
+	0x72, 0x63, 0x65, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x09, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63,
+	0x65, 0x73, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x04, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x5d, 0x0a, 0x10,
+	0x42, 0x61, 0x63, 0x6b, 0x75, 0x70, 0x45, 0x7a, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x12, 0x30, 0x0a, 0x04, 0x62, 0x61, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1c,
+	0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f,
+	0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x4d, 0x73, 0x67, 0x42, 0x61, 0x73, 0x65, 0x52, 0x04, 0x62, 0x61,
+	0x73, 0x65, 0x12, 0x17, 0x0a, 0x07, 0x64, 0x62, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x06, 0x64, 0x62, 0x4e, 0x61, 0x6d, 0x65, 0x22, 0x5a, 0x0a, 0x11, 0x42,
+	0x61, 0x63, 0x6b, 0x75, 0x70, 0x45, 0x7a, 0x6b, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x12, 0x33, 0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x1b, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x63, 0x6f, 0x6d, 0x6d, 0x6f, 0x6e, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x06, 0x73,
+	0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x10, 0x0a, 0x03, 0x65, 0x7a, 0x6b, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x03, 0x65, 0x7a, 0x6b, 0x2a, 0x45, 0x0a, 0x09, 0x52, 0x61, 0x74, 0x65, 0x53,
+	0x63, 0x6f, 0x70, 0x65, 0x12, 0x0b, 0x0a, 0x07, 0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x10,
+	0x00, 0x12, 0x0c, 0x0a, 0x08, 0x44, 0x61, 0x74, 0x61, 0x62, 0x61, 0x73, 0x65, 0x10, 0x01, 0x12,
+	0x0e, 0x0a, 0x0a, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x02, 0x12,
+	0x0d, 0x0a, 0x09, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x03, 0x2a, 0xc4,
+	0x01, 0x0a, 0x08, 0x52, 0x61, 0x74, 0x65, 0x54, 0x79, 0x70, 0x65, 0x12, 0x11, 0x0a, 0x0d, 0x44,
+	0x44, 0x4c, 0x43, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x00, 0x12, 0x10,
+	0x0a, 0x0c, 0x44, 0x44, 0x4c, 0x50, 0x61, 0x72, 0x74, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x01,
+	0x12, 0x0c, 0x0a, 0x08, 0x44, 0x44, 0x4c, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x10, 0x02, 0x12, 0x0c,
+	0x0a, 0x08, 0x44, 0x44, 0x4c, 0x46, 0x6c, 0x75, 0x73, 0x68, 0x10, 0x03, 0x12, 0x11, 0x0a, 0x0d,
+	0x44, 0x44, 0x4c, 0x43, 0x6f, 0x6d, 0x70, 0x61, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x10, 0x04, 0x12,
+	0x0d, 0x0a, 0x09, 0x44, 0x4d, 0x4c, 0x49, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x10, 0x05, 0x12, 0x0d,
+	0x0a, 0x09, 0x44, 0x4d, 0x4c, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x10, 0x06, 0x12, 0x0f, 0x0a,
+	0x0b, 0x44, 0x4d, 0x4c, 0x42, 0x75, 0x6c, 0x6b, 0x4c, 0x6f, 0x61, 0x64, 0x10, 0x07, 0x12, 0x0d,
+	0x0a, 0x09, 0x44, 0x51, 0x4c, 0x53, 0x65, 0x61, 0x72, 0x63, 0x68, 0x10, 0x08, 0x12, 0x0c, 0x0a,
+	0x08, 0x44, 0x51, 0x4c, 0x51, 0x75, 0x65, 0x72, 0x79, 0x10, 0x09, 0x12, 0x0d, 0x0a, 0x09, 0x44,
+	0x4d, 0x4c, 0x55, 0x70, 0x73, 0x65, 0x72, 0x74, 0x10, 0x0a, 0x12, 0x09, 0x0a, 0x05, 0x44, 0x44,
+	0x4c, 0x44, 0x42, 0x10, 0x0b, 0x2a, 0x83, 0x01, 0x0a, 0x0e, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74,
+	0x4a, 0x6f, 0x62, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x08, 0x0a, 0x04, 0x4e, 0x6f, 0x6e, 0x65,
+	0x10, 0x00, 0x12, 0x0b, 0x0a, 0x07, 0x50, 0x65, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x10, 0x01, 0x12,
+	0x10, 0x0a, 0x0c, 0x50, 0x72, 0x65, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x10,
+	0x02, 0x12, 0x0d, 0x0a, 0x09, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x10, 0x03,
+	0x12, 0x0a, 0x0a, 0x06, 0x46, 0x61, 0x69, 0x6c, 0x65, 0x64, 0x10, 0x04, 0x12, 0x0d, 0x0a, 0x09,
+	0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x64, 0x10, 0x05, 0x12, 0x11, 0x0a, 0x0d, 0x49,
+	0x6e, 0x64, 0x65, 0x78, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x69, 0x6e, 0x67, 0x10, 0x06, 0x12, 0x0b,
+	0x0a, 0x07, 0x53, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x10, 0x07, 0x42, 0x35, 0x5a, 0x33, 0x67,
+	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76,
+	0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c,
+	0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -4782,7 +5044,7 @@ func file_internal_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_internal_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_internal_proto_goTypes = []interface{}{
 	(RateScope)(0),                      // 0: milvus.proto.internal.RateScope
 	(RateType)(0),                       // 1: milvus.proto.internal.RateType
@@ -4833,87 +5095,94 @@ var file_internal_proto_goTypes = []interface{}{
 	(*GetSegmentsInfoResponse)(nil),     // 46: milvus.proto.internal.GetSegmentsInfoResponse
 	(*GetQuotaMetricsRequest)(nil),      // 47: milvus.proto.internal.GetQuotaMetricsRequest
 	(*GetQuotaMetricsResponse)(nil),     // 48: milvus.proto.internal.GetQuotaMetricsResponse
-	nil,                                 // 49: milvus.proto.internal.SearchResults.ChannelsMvccEntry
-	(*commonpb.Address)(nil),            // 50: milvus.proto.common.Address
-	(*commonpb.KeyValuePair)(nil),       // 51: milvus.proto.common.KeyValuePair
-	(*commonpb.Status)(nil),             // 52: milvus.proto.common.Status
-	(*commonpb.MsgBase)(nil),            // 53: milvus.proto.common.MsgBase
-	(commonpb.DslType)(0),               // 54: milvus.proto.common.DslType
-	(commonpb.ConsistencyLevel)(0),      // 55: milvus.proto.common.ConsistencyLevel
-	(*schemapb.IDs)(nil),                // 56: milvus.proto.schema.IDs
-	(*schemapb.FieldData)(nil),          // 57: milvus.proto.schema.FieldData
-	(*milvuspb.PrivilegeGroupInfo)(nil), // 58: milvus.proto.milvus.PrivilegeGroupInfo
-	(*schemapb.CollectionSchema)(nil),   // 59: milvus.proto.schema.CollectionSchema
-	(commonpb.SegmentState)(0),          // 60: milvus.proto.common.SegmentState
-	(commonpb.SegmentLevel)(0),          // 61: milvus.proto.common.SegmentLevel
+	(*FileResourceInfo)(nil),            // 49: milvus.proto.internal.FileResourceInfo
+	(*SyncFileResourceRequest)(nil),     // 50: milvus.proto.internal.SyncFileResourceRequest
+	(*BackupEzkRequest)(nil),            // 51: milvus.proto.internal.BackupEzkRequest
+	(*BackupEzkResponse)(nil),           // 52: milvus.proto.internal.BackupEzkResponse
+	nil,                                 // 53: milvus.proto.internal.SearchResults.ChannelsMvccEntry
+	(*commonpb.Address)(nil),            // 54: milvus.proto.common.Address
+	(*commonpb.KeyValuePair)(nil),       // 55: milvus.proto.common.KeyValuePair
+	(*commonpb.Status)(nil),             // 56: milvus.proto.common.Status
+	(*commonpb.MsgBase)(nil),            // 57: milvus.proto.common.MsgBase
+	(commonpb.DslType)(0),               // 58: milvus.proto.common.DslType
+	(commonpb.ConsistencyLevel)(0),      // 59: milvus.proto.common.ConsistencyLevel
+	(*schemapb.IDs)(nil),                // 60: milvus.proto.schema.IDs
+	(*schemapb.FieldData)(nil),          // 61: milvus.proto.schema.FieldData
+	(*milvuspb.PrivilegeGroupInfo)(nil), // 62: milvus.proto.milvus.PrivilegeGroupInfo
+	(*schemapb.CollectionSchema)(nil),   // 63: milvus.proto.schema.CollectionSchema
+	(commonpb.SegmentState)(0),          // 64: milvus.proto.common.SegmentState
+	(commonpb.SegmentLevel)(0),          // 65: milvus.proto.common.SegmentLevel
 }
 var file_internal_proto_depIdxs = []int32{
-	50, // 0: milvus.proto.internal.NodeInfo.address:type_name -> milvus.proto.common.Address
-	51, // 1: milvus.proto.internal.InitParams.start_params:type_name -> milvus.proto.common.KeyValuePair
-	52, // 2: milvus.proto.internal.StringList.status:type_name -> milvus.proto.common.Status
-	53, // 3: milvus.proto.internal.GetStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
-	53, // 4: milvus.proto.internal.GetStatisticsResponse.base:type_name -> milvus.proto.common.MsgBase
-	52, // 5: milvus.proto.internal.GetStatisticsResponse.status:type_name -> milvus.proto.common.Status
-	51, // 6: milvus.proto.internal.GetStatisticsResponse.stats:type_name -> milvus.proto.common.KeyValuePair
-	53, // 7: milvus.proto.internal.CreateAliasRequest.base:type_name -> milvus.proto.common.MsgBase
-	53, // 8: milvus.proto.internal.DropAliasRequest.base:type_name -> milvus.proto.common.MsgBase
-	53, // 9: milvus.proto.internal.AlterAliasRequest.base:type_name -> milvus.proto.common.MsgBase
-	53, // 10: milvus.proto.internal.CreateIndexRequest.base:type_name -> milvus.proto.common.MsgBase
-	51, // 11: milvus.proto.internal.CreateIndexRequest.extra_params:type_name -> milvus.proto.common.KeyValuePair
-	54, // 12: milvus.proto.internal.SubSearchRequest.dsl_type:type_name -> milvus.proto.common.DslType
-	53, // 13: milvus.proto.internal.SearchRequest.base:type_name -> milvus.proto.common.MsgBase
-	54, // 14: milvus.proto.internal.SearchRequest.dsl_type:type_name -> milvus.proto.common.DslType
+	54, // 0: milvus.proto.internal.NodeInfo.address:type_name -> milvus.proto.common.Address
+	55, // 1: milvus.proto.internal.InitParams.start_params:type_name -> milvus.proto.common.KeyValuePair
+	56, // 2: milvus.proto.internal.StringList.status:type_name -> milvus.proto.common.Status
+	57, // 3: milvus.proto.internal.GetStatisticsRequest.base:type_name -> milvus.proto.common.MsgBase
+	57, // 4: milvus.proto.internal.GetStatisticsResponse.base:type_name -> milvus.proto.common.MsgBase
+	56, // 5: milvus.proto.internal.GetStatisticsResponse.status:type_name -> milvus.proto.common.Status
+	55, // 6: milvus.proto.internal.GetStatisticsResponse.stats:type_name -> milvus.proto.common.KeyValuePair
+	57, // 7: milvus.proto.internal.CreateAliasRequest.base:type_name -> milvus.proto.common.MsgBase
+	57, // 8: milvus.proto.internal.DropAliasRequest.base:type_name -> milvus.proto.common.MsgBase
+	57, // 9: milvus.proto.internal.AlterAliasRequest.base:type_name -> milvus.proto.common.MsgBase
+	57, // 10: milvus.proto.internal.CreateIndexRequest.base:type_name -> milvus.proto.common.MsgBase
+	55, // 11: milvus.proto.internal.CreateIndexRequest.extra_params:type_name -> milvus.proto.common.KeyValuePair
+	58, // 12: milvus.proto.internal.SubSearchRequest.dsl_type:type_name -> milvus.proto.common.DslType
+	57, // 13: milvus.proto.internal.SearchRequest.base:type_name -> milvus.proto.common.MsgBase
+	58, // 14: milvus.proto.internal.SearchRequest.dsl_type:type_name -> milvus.proto.common.DslType
 	15, // 15: milvus.proto.internal.SearchRequest.sub_reqs:type_name -> milvus.proto.internal.SubSearchRequest
-	55, // 16: milvus.proto.internal.SearchRequest.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
-	53, // 17: milvus.proto.internal.SearchResults.base:type_name -> milvus.proto.common.MsgBase
-	52, // 18: milvus.proto.internal.SearchResults.status:type_name -> milvus.proto.common.Status
+	59, // 16: milvus.proto.internal.SearchRequest.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
+	57, // 17: milvus.proto.internal.SearchResults.base:type_name -> milvus.proto.common.MsgBase
+	56, // 18: milvus.proto.internal.SearchResults.status:type_name -> milvus.proto.common.Status
 	19, // 19: milvus.proto.internal.SearchResults.costAggregation:type_name -> milvus.proto.internal.CostAggregation
-	49, // 20: milvus.proto.internal.SearchResults.channels_mvcc:type_name -> milvus.proto.internal.SearchResults.ChannelsMvccEntry
+	53, // 20: milvus.proto.internal.SearchResults.channels_mvcc:type_name -> milvus.proto.internal.SearchResults.ChannelsMvccEntry
 	17, // 21: milvus.proto.internal.SearchResults.sub_results:type_name -> milvus.proto.internal.SubSearchResults
-	53, // 22: milvus.proto.internal.RetrieveRequest.base:type_name -> milvus.proto.common.MsgBase
-	55, // 23: milvus.proto.internal.RetrieveRequest.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
-	53, // 24: milvus.proto.internal.RetrieveResults.base:type_name -> milvus.proto.common.MsgBase
-	52, // 25: milvus.proto.internal.RetrieveResults.status:type_name -> milvus.proto.common.Status
-	56, // 26: milvus.proto.internal.RetrieveResults.ids:type_name -> milvus.proto.schema.IDs
-	57, // 27: milvus.proto.internal.RetrieveResults.fields_data:type_name -> milvus.proto.schema.FieldData
+	57, // 22: milvus.proto.internal.RetrieveRequest.base:type_name -> milvus.proto.common.MsgBase
+	59, // 23: milvus.proto.internal.RetrieveRequest.consistency_level:type_name -> milvus.proto.common.ConsistencyLevel
+	57, // 24: milvus.proto.internal.RetrieveResults.base:type_name -> milvus.proto.common.MsgBase
+	56, // 25: milvus.proto.internal.RetrieveResults.status:type_name -> milvus.proto.common.Status
+	60, // 26: milvus.proto.internal.RetrieveResults.ids:type_name -> milvus.proto.schema.IDs
+	61, // 27: milvus.proto.internal.RetrieveResults.fields_data:type_name -> milvus.proto.schema.FieldData
 	19, // 28: milvus.proto.internal.RetrieveResults.costAggregation:type_name -> milvus.proto.internal.CostAggregation
-	53, // 29: milvus.proto.internal.LoadIndex.base:type_name -> milvus.proto.common.MsgBase
-	51, // 30: milvus.proto.internal.LoadIndex.index_params:type_name -> milvus.proto.common.KeyValuePair
-	51, // 31: milvus.proto.internal.IndexStats.index_params:type_name -> milvus.proto.common.KeyValuePair
+	57, // 29: milvus.proto.internal.LoadIndex.base:type_name -> milvus.proto.common.MsgBase
+	55, // 30: milvus.proto.internal.LoadIndex.index_params:type_name -> milvus.proto.common.KeyValuePair
+	55, // 31: milvus.proto.internal.IndexStats.index_params:type_name -> milvus.proto.common.KeyValuePair
 	23, // 32: milvus.proto.internal.FieldStats.index_stats:type_name -> milvus.proto.internal.IndexStats
-	53, // 33: milvus.proto.internal.ChannelTimeTickMsg.base:type_name -> milvus.proto.common.MsgBase
-	53, // 34: milvus.proto.internal.ListPolicyRequest.base:type_name -> milvus.proto.common.MsgBase
-	52, // 35: milvus.proto.internal.ListPolicyResponse.status:type_name -> milvus.proto.common.Status
-	58, // 36: milvus.proto.internal.ListPolicyResponse.privilege_groups:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
-	53, // 37: milvus.proto.internal.ShowConfigurationsRequest.base:type_name -> milvus.proto.common.MsgBase
-	52, // 38: milvus.proto.internal.ShowConfigurationsResponse.status:type_name -> milvus.proto.common.Status
-	51, // 39: milvus.proto.internal.ShowConfigurationsResponse.configuations:type_name -> milvus.proto.common.KeyValuePair
+	57, // 33: milvus.proto.internal.ChannelTimeTickMsg.base:type_name -> milvus.proto.common.MsgBase
+	57, // 34: milvus.proto.internal.ListPolicyRequest.base:type_name -> milvus.proto.common.MsgBase
+	56, // 35: milvus.proto.internal.ListPolicyResponse.status:type_name -> milvus.proto.common.Status
+	62, // 36: milvus.proto.internal.ListPolicyResponse.privilege_groups:type_name -> milvus.proto.milvus.PrivilegeGroupInfo
+	57, // 37: milvus.proto.internal.ShowConfigurationsRequest.base:type_name -> milvus.proto.common.MsgBase
+	56, // 38: milvus.proto.internal.ShowConfigurationsResponse.status:type_name -> milvus.proto.common.Status
+	55, // 39: milvus.proto.internal.ShowConfigurationsResponse.configuations:type_name -> milvus.proto.common.KeyValuePair
 	1,  // 40: milvus.proto.internal.Rate.rt:type_name -> milvus.proto.internal.RateType
-	59, // 41: milvus.proto.internal.ImportRequestInternal.schema:type_name -> milvus.proto.schema.CollectionSchema
+	63, // 41: milvus.proto.internal.ImportRequestInternal.schema:type_name -> milvus.proto.schema.CollectionSchema
 	33, // 42: milvus.proto.internal.ImportRequestInternal.files:type_name -> milvus.proto.internal.ImportFile
-	51, // 43: milvus.proto.internal.ImportRequestInternal.options:type_name -> milvus.proto.common.KeyValuePair
+	55, // 43: milvus.proto.internal.ImportRequestInternal.options:type_name -> milvus.proto.common.KeyValuePair
 	33, // 44: milvus.proto.internal.ImportRequest.files:type_name -> milvus.proto.internal.ImportFile
-	51, // 45: milvus.proto.internal.ImportRequest.options:type_name -> milvus.proto.common.KeyValuePair
-	52, // 46: milvus.proto.internal.ImportResponse.status:type_name -> milvus.proto.common.Status
-	52, // 47: milvus.proto.internal.GetImportProgressResponse.status:type_name -> milvus.proto.common.Status
+	55, // 45: milvus.proto.internal.ImportRequest.options:type_name -> milvus.proto.common.KeyValuePair
+	56, // 46: milvus.proto.internal.ImportResponse.status:type_name -> milvus.proto.common.Status
+	56, // 47: milvus.proto.internal.GetImportProgressResponse.status:type_name -> milvus.proto.common.Status
 	2,  // 48: milvus.proto.internal.GetImportProgressResponse.state:type_name -> milvus.proto.internal.ImportJobState
 	38, // 49: milvus.proto.internal.GetImportProgressResponse.task_progresses:type_name -> milvus.proto.internal.ImportTaskProgress
-	52, // 50: milvus.proto.internal.ListImportsResponse.status:type_name -> milvus.proto.common.Status
+	56, // 50: milvus.proto.internal.ListImportsResponse.status:type_name -> milvus.proto.common.Status
 	2,  // 51: milvus.proto.internal.ListImportsResponse.states:type_name -> milvus.proto.internal.ImportJobState
-	60, // 52: milvus.proto.internal.SegmentInfo.state:type_name -> milvus.proto.common.SegmentState
-	61, // 53: milvus.proto.internal.SegmentInfo.level:type_name -> milvus.proto.common.SegmentLevel
+	64, // 52: milvus.proto.internal.SegmentInfo.state:type_name -> milvus.proto.common.SegmentState
+	65, // 53: milvus.proto.internal.SegmentInfo.level:type_name -> milvus.proto.common.SegmentLevel
 	44, // 54: milvus.proto.internal.SegmentInfo.insert_logs:type_name -> milvus.proto.internal.FieldBinlog
 	44, // 55: milvus.proto.internal.SegmentInfo.delta_logs:type_name -> milvus.proto.internal.FieldBinlog
 	44, // 56: milvus.proto.internal.SegmentInfo.stats_logs:type_name -> milvus.proto.internal.FieldBinlog
-	52, // 57: milvus.proto.internal.GetSegmentsInfoResponse.status:type_name -> milvus.proto.common.Status
+	56, // 57: milvus.proto.internal.GetSegmentsInfoResponse.status:type_name -> milvus.proto.common.Status
 	45, // 58: milvus.proto.internal.GetSegmentsInfoResponse.segmentInfos:type_name -> milvus.proto.internal.SegmentInfo
-	53, // 59: milvus.proto.internal.GetQuotaMetricsRequest.base:type_name -> milvus.proto.common.MsgBase
-	52, // 60: milvus.proto.internal.GetQuotaMetricsResponse.status:type_name -> milvus.proto.common.Status
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	57, // 59: milvus.proto.internal.GetQuotaMetricsRequest.base:type_name -> milvus.proto.common.MsgBase
+	56, // 60: milvus.proto.internal.GetQuotaMetricsResponse.status:type_name -> milvus.proto.common.Status
+	49, // 61: milvus.proto.internal.SyncFileResourceRequest.resources:type_name -> milvus.proto.internal.FileResourceInfo
+	57, // 62: milvus.proto.internal.BackupEzkRequest.base:type_name -> milvus.proto.common.MsgBase
+	56, // 63: milvus.proto.internal.BackupEzkResponse.status:type_name -> milvus.proto.common.Status
+	64, // [64:64] is the sub-list for method output_type
+	64, // [64:64] is the sub-list for method input_type
+	64, // [64:64] is the sub-list for extension type_name
+	64, // [64:64] is the sub-list for extension extendee
+	0,  // [0:64] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_init() }
@@ -5474,6 +5743,54 @@ func file_internal_proto_init() {
 				return nil
 			}
 		}
+		file_internal_proto_msgTypes[46].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*FileResourceInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_internal_proto_msgTypes[47].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SyncFileResourceRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_internal_proto_msgTypes[48].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*BackupEzkRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_internal_proto_msgTypes[49].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*BackupEzkResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -5481,7 +5798,7 @@ func file_internal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_internal_proto_rawDesc,
 			NumEnums:      3,
-			NumMessages:   47,
+			NumMessages:   51,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

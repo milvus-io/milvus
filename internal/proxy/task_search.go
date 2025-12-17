@@ -602,9 +602,12 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		if err != nil {
 			return err
 		}
-		return h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		err = h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		if err != nil {
+			return err
+		}
 	}
-	return nil
+	return h.initHighlightQueries(t)
 }
 
 func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricType string, annsField int64, placeholder []byte, analyzerName string) error {
@@ -642,9 +645,23 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
+	analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
+	if err == nil {
+		t.SearchRequest.AnalyzerName = analyzer
+	}
+
 	t.isIterator = isIterator
 	t.SearchRequest.Offset = offset
 	t.SearchRequest.FieldId = queryInfo.GetQueryFieldId()
+
+	if err := t.addHighlightTask(t.request.GetHighlighter(), queryInfo.GetMetricType(), queryInfo.GetQueryFieldId(), t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
+		return err
+	}
+
+	// add highlight field ids to output fields id
+	if t.highlighter != nil {
+		t.SearchRequest.OutputFieldsId = append(t.SearchRequest.OutputFieldsId, t.highlighter.FieldIDs()...)
+	}
 
 	if t.partitionKeyMode {
 		// isolation has tighter constraint, check first
@@ -686,25 +703,15 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		return err
 	}
 	if typeutil.IsFieldSparseFloatVector(t.schema.CollectionSchema, t.SearchRequest.FieldId) {
-		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.PlaceholderGroup, int(t.request.GetNq()))))
+		metrics.ProxySearchSparseNumNonZeros.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.collectionName, metrics.SearchLabel, strconv.FormatInt(t.SearchRequest.FieldId, 10)).Observe(float64(typeutil.EstimateSparseVectorNNZFromPlaceholderGroup(t.request.GetPlaceholderGroup(), int(t.request.GetNq()))))
 	}
-	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
+	t.SearchRequest.PlaceholderGroup = t.request.GetPlaceholderGroup()
 	t.SearchRequest.Topk = queryInfo.GetTopk()
 	t.SearchRequest.MetricType = queryInfo.GetMetricType()
 	t.queryInfos = append(t.queryInfos, queryInfo)
 	t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 	t.SearchRequest.GroupByFieldId = queryInfo.GroupByFieldId
 	t.SearchRequest.GroupSize = queryInfo.GroupSize
-
-	if t.SearchRequest.MetricType == metric.BM25 {
-		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV(AnalyzerKey, t.request.GetSearchParams())
-		if err == nil {
-			t.SearchRequest.AnalyzerName = analyzer
-		}
-	}
-	if err := t.addHighlightTask(t.request.GetHighlighter(), t.SearchRequest.MetricType, t.SearchRequest.FieldId, t.request.GetPlaceholderGroup(), t.SearchRequest.GetAnalyzerName()); err != nil {
-		return err
-	}
 
 	if embedding.HasNonBM25Functions(t.schema.CollectionSchema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")

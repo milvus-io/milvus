@@ -48,11 +48,27 @@ func newTestSchema(EnableDynamicField bool) *schemapb.CollectionSchema {
 		ElementType: schemapb.DataType_VarChar,
 	})
 
+	structArrayField := &schemapb.StructArrayFieldSchema{
+		FieldID: 132, Name: "struct_array", Fields: []*schemapb.FieldSchema{
+			{
+				FieldID: 133, Name: "struct_array[sub_str]", IsPrimaryKey: false, Description: "sub struct array field for string",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+			},
+			{
+				FieldID: 134, Name: "struct_array[sub_int]", IsPrimaryKey: false, Description: "sub struct array field for int",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+		},
+	}
+
 	return &schemapb.CollectionSchema{
 		Name:               "test",
 		Description:        "schema for test used",
 		AutoID:             true,
 		Fields:             fields,
+		StructArrayFields:  []*schemapb.StructArrayFieldSchema{structArrayField},
 		EnableDynamicField: EnableDynamicField,
 	}
 }
@@ -912,6 +928,9 @@ func TestCreateRetrievePlan(t *testing.T) {
 	schema := newTestSchemaHelper(t)
 	_, err := CreateRetrievePlan(schema, "Int64Field > 0", nil)
 	assert.NoError(t, err)
+
+	_, err = CreateRetrievePlan(schema, "id > -9223372036854775808", nil)
+	assert.NoError(t, err)
 }
 
 func TestCreateSearchPlan(t *testing.T) {
@@ -1007,7 +1026,7 @@ func TestExpr_Invalid(t *testing.T) {
 		`"str" != false`,
 		`VarCharField != FloatField`,
 		`FloatField == VarCharField`,
-		`A == -9223372036854775808`,
+		`A == -9223372036854775809`,
 		// ---------------------- relational --------------------
 		//`not_in_schema < 1`, // maybe in json
 		//`1 <= not_in_schema`, // maybe in json
@@ -2482,5 +2501,59 @@ func TestExpr_GISFunctionsInvalidParameterTypes(t *testing.T) {
 
 	for _, expr := range invalidTypeExprs {
 		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+func TestExpr_ElementFilter(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid expressions
+	validExprs := []string{
+		`element_filter(struct_array, 2 > $[sub_int] > 1)`,
+		`element_filter(struct_array, $[sub_int] > 1)`,
+		`element_filter(struct_array, $[sub_int] == 100)`,
+		`element_filter(struct_array, $[sub_int] >= 0)`,
+		`element_filter(struct_array, $[sub_int] <= 1000)`,
+		`element_filter(struct_array, $[sub_int] != 0)`,
+
+		`element_filter(struct_array, $[sub_str] == "1")`,
+		`element_filter(struct_array, $[sub_str] != "")`,
+
+		`element_filter(struct_array, $[sub_str] == "1" || $[sub_int] > 1)`,
+		`element_filter(struct_array, $[sub_str] == "1" && $[sub_int] > 1)`,
+		`element_filter(struct_array, $[sub_int] > 0 && $[sub_int] < 100)`,
+
+		`element_filter(struct_array, ($[sub_int] > 0 && $[sub_int] < 100) || $[sub_str] == "default")`,
+		`element_filter(struct_array, !($[sub_int] < 0))`,
+
+		`Int64Field > 0 && element_filter(struct_array, $[sub_int] > 1)`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+
+	// Invalid expressions
+	invalidExprs := []string{
+		`element_filter(struct_array, element_filter(struct_array, $[sub_int] > 1))`,
+		`element_filter(struct_array, $[sub_int] > 1 && element_filter(struct_array, $[sub_str] == "1"))`,
+
+		`$[sub_int] > 1`,
+		`Int64Field > 0 && $[sub_int] > 1`,
+
+		`element_filter(struct_array, $[non_existent_field] > 1)`,
+		`element_filter(non_existent_array, $[sub_int] > 1)`,
+
+		`element_filter(struct_array)`, // missing element expression
+		`element_filter()`,             // missing all parameters
+
+		`element_filter(struct_array, $[sub_int] > 1) || element_filter(struct_array, $[sub_str] == "test")`,
+		`element_filter(struct_array, $[sub_int] > 1) && Int64Field > 0`,
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
 	}
 }

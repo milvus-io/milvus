@@ -10,6 +10,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 // newVChannelRecoveryInfoFromCreateCollectionMessage creates a new vchannel recovery info from a create collection message.
@@ -103,9 +105,13 @@ func (info *vchannelRecoveryInfo) GetSchema(timetick uint64) (int, *schemapb.Col
 
 // UpdateFlushCheckpoint updates the flush checkpoint of the vchannel recovery info.
 func (info *vchannelRecoveryInfo) UpdateFlushCheckpoint(checkpoint *WALCheckpoint) error {
+	// Because current L0 may be consuming the data before the flush checkpoint,
+	// so we introduce a tolerance duration to delay the drop operation of the schema that is not used anymore.
+	tolerance := paramtable.Get().StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse()
 	if info.flusherCheckpoint == nil || info.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
 		info.flusherCheckpoint = checkpoint
-		idx, _ := info.GetSchema(info.flusherCheckpoint.TimeTick)
+		timetick := tsoutil.AddPhysicalDurationOnTs(info.flusherCheckpoint.TimeTick, -tolerance)
+		idx, _ := info.GetSchema(timetick)
 		for i := 0; i < idx; i++ {
 			// drop the schema that is not used anymore.
 			// the future GetSchema operation will use the timetick greater than the flusher checkpoint.

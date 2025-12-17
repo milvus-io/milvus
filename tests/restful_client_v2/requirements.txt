@@ -6,10 +6,10 @@ pyyaml==6.0
 numpy==1.24.3
 allure-pytest>=2.8.18
 Faker==19.2.0
-pymilvus==2.5.0rc108
+pymilvus
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
-minio==7.1.14
+minio==7.2.0
 tenacity==8.1.0
 # for bf16 datatype
 ml-dtypes==0.2.0
@@ -17,3 +17,5 @@ loguru==0.7.3
 bm25s==0.2.13
 jieba==0.42.1
 pyarrow==21.0.0
+# for geometry data type
+shapely>=2.0.0

@@ -254,6 +254,12 @@ impl IndexWriterWrapperImpl {
         // self.manual_merge();
         block_on(self.index_writer.garbage_collect_files())?;
         self.index_writer.wait_merging_threads()?;
+
+        // TODO: remove this log when #45590 is solved
+        let metas = self.index.searchable_segment_metas()?;
+        let segment_ids: Vec<_> = metas.iter().map(|m| m.id().uuid_string()).collect();
+        info!("tantivy index_writer finish, segments: {:?}", segment_ids);
+
         Ok(())
     }
 

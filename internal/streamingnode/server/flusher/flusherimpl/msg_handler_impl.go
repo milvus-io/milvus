@@ -108,10 +108,32 @@ func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFl
 	return nil
 }
 
+func (impl *msgHandlerImpl) HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error {
+	if err := impl.wbMgr.SealAllSegments(context.Background(), vchannel); err != nil {
+		return errors.Wrap(err, "failed to seal all segments")
+	}
+	// Use FlushAllMsg's ts as flush ts.
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushAllMsg.TimeTick()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	} // may be redundant.
+	return nil
+}
+
 func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.ImmutableSchemaChangeMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
 }
 
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), putCollectionMsg.VChannel(), putCollectionMsg.Header().FlushedSegmentIds)
+}
+
+func (impl *msgHandlerImpl) HandleTruncateCollection(flushMsg message.ImmutableTruncateCollectionMessageV2) error {
+	vchannel := flushMsg.VChannel()
+	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, flushMsg.Header().SegmentIds); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
+	}
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.TimeTick()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	return nil
 }

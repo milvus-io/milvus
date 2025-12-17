@@ -69,19 +69,114 @@ type garbageCollector struct {
 	meta    *meta
 	handler Handler
 
-	startOnce  sync.Once
-	stopOnce   sync.Once
-	wg         sync.WaitGroup
-	cmdCh      chan gcCmd
-	pauseUntil atomic.Time
+	startOnce        sync.Once
+	stopOnce         sync.Once
+	wg               sync.WaitGroup
+	cmdCh            chan gcCmd
+	pauseUntil       *gcPauseRecords
+	pausedCollection *typeutil.ConcurrentMap[int64, *gcPauseRecords]
+	controlChannels  map[string]chan gcCmd
 
 	systemMetricsListener *hardware.SystemMetricsListener
 }
 
 type gcCmd struct {
-	cmdType  datapb.GcCommand
-	duration time.Duration
-	done     chan struct{}
+	cmdType      datapb.GcCommand
+	duration     time.Duration
+	collectionID int64
+	ticket       string
+	done         chan error
+	timeout      <-chan struct{}
+}
+
+type gcPauseRecord struct {
+	ticket     string
+	pauseUntil time.Time
+}
+
+type gcPauseRecords struct {
+	mut     sync.RWMutex
+	maxLen  int
+	records typeutil.Heap[gcPauseRecord]
+}
+
+func (gc *gcPauseRecords) PauseUntil() time.Time {
+	// nil protection
+	if gc == nil {
+		return time.Time{}
+	}
+	gc.mut.RLock()
+	defer gc.mut.RUnlock()
+	// no pause records, return zero value
+	if gc.records.Len() == 0 {
+		return time.Time{}
+	}
+
+	return gc.records.Peek().pauseUntil
+}
+
+func (gc *gcPauseRecords) Insert(ticket string, pauseUntil time.Time) error {
+	gc.mut.Lock()
+	defer gc.mut.Unlock()
+
+	// heap small enough, short path
+	if gc.records.Len() < gc.maxLen {
+		gc.records.Push(gcPauseRecord{
+			ticket:     ticket,
+			pauseUntil: pauseUntil,
+		})
+		return nil
+	}
+
+	records := make([]gcPauseRecord, 0, gc.records.Len())
+	now := time.Now()
+	for gc.records.Len() > 0 {
+		record := gc.records.Pop()
+		if record.pauseUntil.After(now) {
+			records = append(records, record)
+		}
+	}
+
+	if gc.records.Len() < gc.maxLen {
+		gc.records.Push(gcPauseRecord{
+			ticket:     ticket,
+			pauseUntil: pauseUntil,
+		})
+	}
+
+	// too many pause records, refresh heap
+	return merr.WrapErrTooManyRequests(64, "too many pause records")
+}
+
+func (gc *gcPauseRecords) Delete(ticket string) {
+	gc.mut.Lock()
+	defer gc.mut.Unlock()
+	now := time.Now()
+	records := make([]gcPauseRecord, 0, gc.records.Len())
+	for gc.records.Len() > 0 {
+		record := gc.records.Pop()
+		if now.Before(record.pauseUntil) && record.ticket != ticket {
+			records = append(records, record)
+		}
+	}
+	gc.records = typeutil.NewObjectArrayBasedMaximumHeap(records, func(r gcPauseRecord) int64 {
+		return r.pauseUntil.UnixNano()
+	})
+}
+
+func (gc *gcPauseRecords) Len() int {
+	gc.mut.RLock()
+	defer gc.mut.RUnlock()
+	return gc.records.Len()
+}
+
+func NewGCPauseRecords() *gcPauseRecords {
+	return &gcPauseRecords{
+		records: typeutil.NewObjectArrayBasedMaximumHeap[gcPauseRecord, int64]([]gcPauseRecord{}, func(r gcPauseRecord) int64 {
+			return r.pauseUntil.UnixNano()
+		}),
+		maxLen: 64,
+	}
 }
 
 // newSystemMetricsListener creates a system metrics listener for garbage collector.
@@ -120,6 +215,13 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		zap.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	ctx, cancel := context.WithCancel(context.Background())
+	metaSignal := make(chan gcCmd)
+	orphanSignal := make(chan gcCmd)
+	// control signal channels
+	controlChannels := map[string]chan gcCmd{
+		"meta":   metaSignal,
+		"orphan": orphanSignal,
+	}
 	return &garbageCollector{
 		ctx:                   ctx,
 		cancel:                cancel,
@@ -128,6 +230,9 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		option:                opt,
 		cmdCh:                 make(chan gcCmd),
 		systemMetricsListener: newSystemMetricsListener(&opt),
+		pauseUntil:            NewGCPauseRecords(),
+		pausedCollection:      typeutil.NewConcurrentMap[int64, *gcPauseRecords](),
+		controlChannels:       controlChannels,
 	}
 }
 
@@ -152,7 +257,7 @@ type GcStatus struct {
 
 // GetStatus returns the current status of the garbage collector.
 func (gc *garbageCollector) GetStatus() GcStatus {
-	pauseUntil := gc.pauseUntil.Load()
+	pauseUntil := gc.pauseUntil.PauseUntil()
 	now := time.Now()
 
 	if now.Before(pauseUntil) {
@@ -168,35 +273,40 @@ func (gc *garbageCollector) GetStatus() GcStatus {
 	}
 }
 
-func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
+func (gc *garbageCollector) Pause(ctx context.Context, collectionID int64, ticket string, pauseDuration time.Duration) error {
 	if !gc.option.enabled {
 		log.Info("garbage collection not enabled")
 		return nil
 	}
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	select {
 	case gc.cmdCh <- gcCmd{
-		cmdType:  datapb.GcCommand_Pause,
-		duration: pauseDuration,
-		done:     done,
+		cmdType:      datapb.GcCommand_Pause,
+		duration:     pauseDuration,
+		collectionID: collectionID,
+		ticket:       ticket,
+		done:         done,
+		timeout:      ctx.Done(),
 	}:
-		<-done
-		return nil
+		return <-done
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (gc *garbageCollector) Resume(ctx context.Context) error {
+func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, ticket string) error {
 	if !gc.option.enabled {
 		log.Warn("garbage collection not enabled, cannot resume")
 		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
 	}
-	done := make(chan struct{})
+	done := make(chan error)
 	select {
 	case gc.cmdCh <- gcCmd{
-		cmdType: datapb.GcCommand_Resume,
-		done:    done,
+		cmdType:      datapb.GcCommand_Resume,
+		done:         done,
+		collectionID: collectionID,
+		ticket:       ticket,
+		timeout:      ctx.Done(),
 	}:
 		<-done
 		return nil
@@ -212,20 +322,21 @@ func (gc *garbageCollector) work(ctx context.Context) {
 	gc.wg.Add(3)
 	go func() {
 		defer gc.wg.Done()
-		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context) {
-			gc.recycleDroppedSegments(ctx)
-			gc.recycleChannelCPMeta(ctx)
-			gc.recycleUnusedIndexes(ctx)
-			gc.recycleUnusedSegIndexes(ctx)
-			gc.recycleUnusedAnalyzeFiles(ctx)
-			gc.recycleUnusedTextIndexFiles(ctx)
-			gc.recycleUnusedJSONIndexFiles(ctx)
-			gc.recycleUnusedJSONStatsFiles(ctx)
+		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			gc.recycleDroppedSegments(ctx, signal)
+			gc.recycleChannelCPMeta(ctx, signal)
+			gc.recycleUnusedIndexes(ctx, signal)
+			gc.recycleUnusedSegIndexes(ctx, signal)
+			gc.recycleUnusedAnalyzeFiles(ctx, signal)
+			gc.recycleUnusedTextIndexFiles(ctx, signal)
+			gc.recycleUnusedJSONIndexFiles(ctx, signal)
+			gc.recycleUnusedJSONStatsFiles(ctx, signal)
 		})
 	}()
 	go func() {
 		defer gc.wg.Done()
-		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context) {
+		gc.runRecycleTaskWithPauser(ctx, "orphan", gc.option.scanInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			// orphan file not controlled by collection level pause for now
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFiles(ctx)
 		})
@@ -234,6 +345,16 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		defer gc.wg.Done()
 		gc.startControlLoop(ctx)
 	}()
+}
+
+func (gc *garbageCollector) ackSignal(signal <-chan gcCmd) {
+	select {
+	case cmd := <-signal:
+		if cmd.done != nil {
+			close(cmd.done)
+		}
+	default:
+	}
 }
 
 // startControlLoop start a control loop for garbageCollector.
@@ -246,17 +367,10 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 		case cmd := <-gc.cmdCh:
 			switch cmd.cmdType {
 			case datapb.GcCommand_Pause:
-				pauseUntil := time.Now().Add(cmd.duration)
-				if pauseUntil.After(gc.pauseUntil.Load()) {
-					log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
-					gc.pauseUntil.Store(pauseUntil)
-				} else {
-					log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
-				}
+				err := gc.pause(cmd)
+				cmd.done <- err
 			case datapb.GcCommand_Resume:
-				// reset to zero value
-				gc.pauseUntil.Store(time.Time{})
-				log.Info("garbage collection resumed")
+				gc.resume(cmd)
 			}
 			close(cmd.done)
 		case <-gc.ctx.Done():
@@ -266,27 +380,100 @@ func (gc *garbageCollector) startControlLoop(_ context.Context) {
 	}
 }
 
+func (gc *garbageCollector) pause(cmd gcCmd) error {
+	log := log.With(
+		zap.Int64("collectionID", cmd.collectionID),
+		zap.String("ticket", cmd.ticket),
+	)
+	reqPauseUntil := time.Now().Add(cmd.duration)
+	log = log.With(
+		zap.Time("pauseUntil", reqPauseUntil),
+		zap.Duration("duration", cmd.duration),
+	)
+	var err error
+	if cmd.collectionID <= 0 { // legacy pause all
+		err = gc.pauseUntil.Insert(cmd.ticket, reqPauseUntil)
+		log.Info("global pause ticket recorded")
+	} else {
+		curr, has := gc.pausedCollection.Get(cmd.collectionID)
+		if !has {
+			curr = NewGCPauseRecords()
+			gc.pausedCollection.Insert(cmd.collectionID, curr)
+		}
+		err = curr.Insert(cmd.ticket, reqPauseUntil)
+		log.Info("collection new pause ticket recorded")
+	}
+	if err != nil {
+		return err
+	}
+	signalCh := gc.controlChannels["meta"]
+	// send signal to worker
+	// make sure worker ack the pause command before returning
+	signal := gcCmd{
+		done:    make(chan error),
+		timeout: cmd.timeout,
+	}
+	select {
+	case signalCh <- signal:
+		<-signal.done
+	case <-cmd.timeout:
+		// timeout, resume the pause
+		gc.resume(cmd)
+	}
+	return nil
+}
+
+func (gc *garbageCollector) resume(cmd gcCmd) {
+	// reset to zero value
+	var afterResume time.Time
+	if cmd.collectionID <= 0 {
+		gc.pauseUntil.Delete(cmd.ticket)
+		afterResume = gc.pauseUntil.PauseUntil()
+	} else {
+		curr, has := gc.pausedCollection.Get(cmd.collectionID)
+		if has {
+			curr.Delete(cmd.ticket)
+			afterResume = curr.PauseUntil()
+			if curr.Len() == 0 || time.Now().After(afterResume) {
+				gc.pausedCollection.Remove(cmd.collectionID)
+			}
+		}
+	}
+	stillPaused := time.Now().Before(afterResume)
+	log.Info("garbage collection resumed", zap.Bool("stillPaused", stillPaused))
+}
+
 // runRecycleTaskWithPauser is a helper function to create a task with pauser
-func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name string, interval time.Duration, task func(ctx context.Context)) {
+func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name string, interval time.Duration, task func(ctx context.Context, signal <-chan gcCmd)) {
 	logger := log.With(zap.String("gcType", name)).With(zap.Duration("interval", interval))
 	timer := time.NewTicker(interval)
 	defer timer.Stop()
-
+	// get signal channel, ok if nil, means no control
+	signal := gc.controlChannels[name]
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case cmd := <-signal:
+			// notify signal received
+			close(cmd.done)
 		case <-timer.C:
-			if time.Now().Before(gc.pauseUntil.Load()) {
-				logger.Info("garbage collector paused", zap.Time("until", gc.pauseUntil.Load()))
+			globalPauseUntil := gc.pauseUntil.PauseUntil()
+			if time.Now().Before(globalPauseUntil) {
+				logger.Info("garbage collector paused", zap.Time("until", globalPauseUntil))
 				continue
 			}
 			logger.Info("garbage collector recycle task start...")
 			start := time.Now()
-			task(ctx)
+			task(ctx, signal)
 			logger.Info("garbage collector recycle task done", zap.Duration("timeCost", time.Since(start)))
 		}
 	}
+}
+
+func (gc *garbageCollector) collectionGCPaused(collectionID int64) bool {
+	collPauseUntil, has := gc.pausedCollection.Get(collectionID)
+	return has && time.Now().Before(collPauseUntil.PauseUntil())
 }
 
 // close stop the garbage collector.
@@ -474,7 +661,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 }
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
-func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
+func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.With(zap.String("gcName", "recycleDroppedSegments"), zap.Time("startAt", start))
 	log.Info("start clear dropped segments...")
@@ -535,6 +722,13 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 			return
 		}
 
+		gc.ackSignal(signal)
+
+		if gc.collectionGCPaused(segment.GetCollectionID()) {
+			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", segmentID), zap.Int64("collectionID", segment.GetCollectionID()))
+			continue
+		}
+
 		log := log.With(zap.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
 		if loadedSegments.Contain(segmentID) {
@@ -579,7 +773,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 	}
 }
 
-func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
+func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {
 	log := log.Ctx(ctx)
 	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
 	if err != nil {
@@ -593,6 +787,11 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 	log.Info("start to GC channel cp", zap.Int("vchannelCPCnt", len(channelCPs)))
 	for vChannel := range channelCPs {
 		collectionID := funcutil.GetCollectionIDFromVChannel(vChannel)
+		if gc.collectionGCPaused(collectionID) {
+			continue
+		}
+
+		gc.ackSignal(signal)
 
 		// !!! Skip to GC if vChannel format is illegal, it will lead meta leak in this case
 		if collectionID == -1 {
@@ -718,7 +917,7 @@ func (gc *garbageCollector) removeObjectFiles(ctx context.Context, filePaths map
 }
 
 // recycleUnusedIndexes is used to delete those indexes that is deleted by collection.
-func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context) {
+func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedIndexes"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedIndexes...")
@@ -730,6 +929,10 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context) {
 			// process canceled.
 			return
 		}
+		if gc.collectionGCPaused(index.CollectionID) {
+			continue
+		}
+		gc.ackSignal(signal)
 
 		log := log.With(zap.Int64("collectionID", index.CollectionID), zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID))
 		if err := gc.meta.indexMeta.RemoveIndex(ctx, index.CollectionID, index.IndexID); err != nil {
@@ -741,7 +944,7 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context) {
 }
 
 // recycleUnusedSegIndexes remove the index of segment if index is deleted or segment itself is deleted.
-func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
+func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedSegIndexes"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedSegIndexes...")
@@ -753,6 +956,10 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 			// process canceled.
 			return
 		}
+		if gc.collectionGCPaused(segIdx.CollectionID) {
+			continue
+		}
+		gc.ackSignal(signal)
 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
@@ -883,7 +1090,7 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 }
 
 // recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.
-func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
+func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signal <-chan gcCmd) {
 	log := log.Ctx(ctx)
 	log.Info("start recycleUnusedAnalyzeFiles")
 	startTs := time.Now()
@@ -904,6 +1111,8 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
 			// process canceled
 			return
 		}
+		// collection gc pause not affect analyze file for now
+		gc.ackSignal(signal)
 
 		log.Debug("analyze keys", zap.String("key", key))
 		taskID, err := parseBuildIDFromFilePath(key)
@@ -955,7 +1164,7 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context) {
 
 // recycleUnusedTextIndexFiles load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
-func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
+func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedTextIndexFiles"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedTextIndexFiles...")
@@ -968,6 +1177,15 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 	deletedFilesNum := atomic.NewInt32(0)
 
 	for _, seg := range hasTextIndexSegments {
+		if ctx.Err() != nil {
+			// process canceled, stop.
+			return
+		}
+		if gc.collectionGCPaused(seg.GetCollectionID()) {
+			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
+			continue
+		}
+		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetTextStatsLogs() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
@@ -1016,7 +1234,7 @@ func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
 
 // recycleUnusedJSONStatsFiles load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
-func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context) {
+func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedJSONStatsFiles"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedJSONStatsFiles...")
@@ -1029,6 +1247,15 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context) {
 	deletedFilesNum := atomic.NewInt32(0)
 
 	for _, seg := range hasJSONStatsSegments {
+		if ctx.Err() != nil {
+			// process canceled, stop.
+			return
+		}
+		if gc.collectionGCPaused(seg.GetCollectionID()) {
+			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
+			continue
+		}
+		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
@@ -1062,7 +1289,6 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context) {
 					log.Warn("some task failure in remove object pool", zap.Error(err))
 				}
 
-				log = log.With(zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 				if err != nil {
 					log.Warn("json stats files recycle failed when walk with prefix", zap.Error(err))
 					return
@@ -1100,7 +1326,6 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context) {
 					log.Warn("some task failure in remove object pool", zap.Error(err))
 				}
 
-				log = log.With(zap.Int("deleteJSONStatsLowerDataFormatNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 				if err != nil {
 					log.Warn("json stats lower data format files recycle failed when walk with prefix", zap.Error(err))
 					return
@@ -1108,13 +1333,15 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context) {
 			}
 		}
 	}
-	log.Info("json stats files recycle done")
+	log.Info("json stats files recycle done",
+		zap.Int("deleteJSONStatsNum", int(deletedFilesNum.Load())),
+		zap.Int("walkFileNum", fileNum))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }
 
 // recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
-func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
+func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.String("gcName", "recycleUnusedJSONIndexFiles"), zap.Time("startAt", start))
 	log.Info("start recycleUnusedJSONIndexFiles...")
@@ -1127,6 +1354,15 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 	deletedFilesNum := atomic.NewInt32(0)
 
 	for _, seg := range hasJSONIndexSegments {
+		if ctx.Err() != nil {
+			// process canceled, stop.
+			return
+		}
+		if gc.collectionGCPaused(seg.GetCollectionID()) {
+			log.Info("skip GC segment since collection is paused", zap.Int64("segmentID", seg.GetID()), zap.Int64("collectionID", seg.GetCollectionID()))
+			continue
+		}
+		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := log.With(zap.Int64("segmentID", seg.GetID()), zap.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
@@ -1160,7 +1396,6 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 					log.Warn("some task failure in remove object pool", zap.Error(err))
 				}
 
-				log = log.With(zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 				if err != nil {
 					log.Warn("json index files recycle failed when walk with prefix", zap.Error(err))
 					return
@@ -1168,7 +1403,7 @@ func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
 			}
 		}
 	}
-	log.Info("json index files recycle done")
+	log.Info("json index files recycle done", zap.Int("deleteJSONKeyIndexNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }

@@ -46,6 +46,10 @@ var (
 	ErrCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
+type BackupInterface interface {
+	Backup(ezID int64) (string, error)
+}
+
 // GetCipher returns singleton hook.Cipher instance.
 // If Milvus is not built with cipher plugin, it will return nil
 // If Milvus is built with cipher plugin, it will return hook.Cipher
@@ -54,7 +58,7 @@ func GetCipher() hook.Cipher {
 	return Cipher.Load().(cipherContainer).cipher
 }
 
-func IsClusterEncyptionEnabled() bool {
+func IsClusterEncryptionEnabled() bool {
 	return GetCipher() != nil
 }
 
@@ -63,13 +67,6 @@ const (
 	EncryptionEnabledKey = "cipher.enabled"
 	EncryptionRootKeyKey = "cipher.key"
 	EncryptionEzIDKey    = "cipher.ezID"
-
-	// Used in Plugins
-	CipherConfigCreateEZ       = "cipher.ez.create"
-	CipherConfigRemoveEZ       = "cipher.ez.remove"
-	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
-	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
-	CipherConfigUnsafeEZK      = "cipher.ezk"
 )
 
 type EZ struct {
@@ -118,30 +115,6 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 	return nil
 }
 
-// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode
-func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
-	if GetCipher() == nil {
-		return nil
-	}
-
-	if ez := GetEzByCollProperties(properties, collectionID); ez != nil {
-		key := GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-		pluginContext := []*commonpb.KeyValuePair{
-			{
-				Key:   CipherConfigCreateEZ,
-				Value: strconv.FormatInt(ez.EzID, 10),
-			},
-			{
-				Key:   CipherConfigUnsafeEZK,
-				Value: base64.StdEncoding.EncodeToString(key),
-			},
-		}
-		return pluginContext
-	}
-
-	return nil
-}
-
 func GetDBCipherProperties(ezID uint64, kmsKey string) []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
 		{
@@ -159,78 +132,27 @@ func GetDBCipherProperties(ezID uint64, kmsKey string) []*commonpb.KeyValuePair 
 	}
 }
 
-func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
-	if GetCipher() == nil {
-		return nil
-	}
-
-	ezIdStr := ""
-	for _, property := range dbProperties {
-		if property.Key == EncryptionEzIDKey {
-			ezIdStr = property.Value
-		}
-	}
-	if len(ezIdStr) == 0 {
-		return nil
-	}
-
-	dropConfig := map[string]string{CipherConfigRemoveEZ: ezIdStr}
-	if err := GetCipher().Init(dropConfig); err != nil {
-		return err
-	}
-	return nil
-}
-
-func CreateLocalEZByPluginContext(context []*commonpb.KeyValuePair) (*indexcgopb.StoragePluginContext, error) {
-	if GetCipher() == nil {
-		return nil, nil
-	}
-	config := make(map[string]string)
-	ctx := &indexcgopb.StoragePluginContext{}
-	for _, value := range context {
-		if value.GetKey() == CipherConfigCreateEZ {
-			ezID, err := strconv.ParseInt(value.GetValue(), 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			config[CipherConfigCreateEZ] = value.GetValue()
-			ctx.EncryptionZoneId = ezID
-		}
-		if value.GetKey() == CipherConfigUnsafeEZK {
-			config[CipherConfigUnsafeEZK] = value.GetValue()
-			ctx.EncryptionKey = value.GetValue()
-		}
-	}
-	if len(config) == 2 {
-		return ctx, GetCipher().Init(config)
-	}
-	return nil, nil
-}
-
 func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
-	if GetCipher() == nil {
+	ezID, hasEzID := ParseEzIDFromProperties(dbProperties)
+	if !hasEzID {
 		return nil
 	}
 
-	config := make(map[string]string)
 	for _, property := range dbProperties {
-		if property.GetKey() == EncryptionEzIDKey {
-			config[CipherConfigCreateEZ] = property.Value
-		}
 		if property.GetKey() == EncryptionRootKeyKey {
-			config[CipherConfigKeyKmsKeyArn] = property.GetValue()
+			return CreateEZ(ezID, property.GetValue())
 		}
-	}
-
-	if len(config) == 2 {
-		return GetCipher().Init(config)
 	}
 
 	return nil
 }
 
+// When creating a new database with encryption eabled, set the ezID to the dbProperties,
+// and try to use the the config rootKey if rootKey not provided
+// An encrypted DB's properties will contain three properties:
+// cipher.enabled, cipher.ezID, cipher.key
 func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
-	dbEncryptionEnabled := IsDBEncryptionEnabled(dbProperties)
+	dbEncryptionEnabled := IsDBEncrypted(dbProperties)
 	if GetCipher() == nil {
 		if dbEncryptionEnabled {
 			return nil, ErrCipherPluginMissing
@@ -267,7 +189,24 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 	return dbProperties, nil
 }
 
-func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.KeyValuePair {
+func TidyCollPropsByDBProps(collProps, dbProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+	newCollProps := []*commonpb.KeyValuePair{}
+	for _, property := range collProps {
+		// Ignore already have ez property, likely from backup collection's schema
+		if property.Key == EncryptionEzIDKey {
+			continue
+		}
+		newCollProps = append(newCollProps, property)
+	}
+
+	// Set the new database's encryption properties
+	if ezProps := getCollEzPropsByDBProps(dbProps); ezProps != nil {
+		newCollProps = append(newCollProps, ezProps)
+	}
+	return newCollProps
+}
+
+func getCollEzPropsByDBProps(dbProperties []*commonpb.KeyValuePair) *commonpb.KeyValuePair {
 	for _, property := range dbProperties {
 		if property.Key == EncryptionEzIDKey {
 			return &commonpb.KeyValuePair{
@@ -279,13 +218,118 @@ func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.Ke
 	return nil
 }
 
-func IsDBEncryptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
+func IsDBEncrypted(dbProperties []*commonpb.KeyValuePair) bool {
 	for _, property := range dbProperties {
 		if property.Key == EncryptionEnabledKey && strings.ToLower(property.Value) == "true" {
 			return true
 		}
 	}
 	return false
+}
+
+func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
+	ezID, has := ParseEzIDFromProperties(dbProperties)
+	if !has {
+		return nil
+	}
+
+	return RemoveEZ(ezID)
+}
+
+// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode
+func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
+	if ez := GetEzByCollProperties(collProps, collectionID); ez != nil {
+		pluginContext, err := GetPluginContext(ez.EzID, ez.CollectionID)
+		if err != nil {
+			log.Error("failed to get plugin context", zap.Error(err))
+			return nil
+		}
+		return pluginContext
+	}
+	return nil
+}
+
+func GetReadStoragePluginContext(importEzk string) []*commonpb.KeyValuePair {
+	readContext, err := ImportEZ(importEzk)
+	if err != nil {
+		log.Error("failed to import ezk", zap.Error(err))
+		return nil
+	}
+	return readContext
+}
+
+// RegisterEZsFromPluginContext registers all EZ contexts from plugin context.
+// This processes ALL CipherConfigUnsafeEZK entries (for both read and write contexts).
+func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
+	if !IsClusterEncryptionEnabled() {
+		return nil
+	}
+
+	for _, value := range context {
+		if value.GetKey() == CipherConfigUnsafeEZK {
+			ezID, encryptionKey, err := decodeEZContext(value.GetValue())
+			if err != nil {
+				return err
+			}
+			if err := CreateLocalEZ(ezID, encryptionKey); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// GetCPluginContext gets C++ plugin context from the first CipherConfigUnsafeEZK entry.
+// Used for creating indexcgopb.StoragePluginContext for C++ segcore.
+func GetCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	if !IsClusterEncryptionEnabled() {
+		return nil, nil
+	}
+
+	for _, value := range context {
+		if value.GetKey() == CipherConfigUnsafeEZK {
+			ezID, encryptionKey, err := decodeEZContext(value.GetValue())
+			if err != nil {
+				return nil, err
+			}
+
+			return &indexcgopb.StoragePluginContext{
+				CollectionId:     collectionID,
+				EncryptionZoneId: ezID,
+				EncryptionKey:    encryptionKey,
+			}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func GetCPluginContextByEzID(ezID int64) (*indexcgopb.StoragePluginContext, error) {
+	if !IsClusterEncryptionEnabled() {
+		return nil, nil
+	}
+	key := GetCipher().GetUnsafeKey(ezID, 0)
+	if len(key) == 0 {
+		return nil, errors.Newf("cannot get ez key for ezID=%d", ezID)
+	}
+	return &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: ezID,
+		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
+		CollectionId:     0,
+	}, nil
+}
+
+func BackupEZKFromDBProperties(dbProperties []*commonpb.KeyValuePair) (string, error) {
+	if !IsDBEncrypted(dbProperties) {
+		return "", fmt.Errorf("not an encryption zone")
+	}
+
+	ezID, hasEzID := ParseEzIDFromProperties(dbProperties)
+	if !hasEzID {
+		return "", fmt.Errorf("encryption enabled but no ezID found")
+	}
+
+	return BackupEZ(ezID)
 }
 
 // For test only
