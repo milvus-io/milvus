@@ -20,8 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 type NodeManagerSuite struct {
