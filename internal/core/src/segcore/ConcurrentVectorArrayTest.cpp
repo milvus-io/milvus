@@ -60,7 +60,6 @@ TEST_F(ConcurrentVectorArrayTest, SingleChunkWrite) {
     auto chunk_data = static_cast<const float*>(accessor->data());
     EXPECT_EQ(chunk_data[0], 0.0f);
     EXPECT_EQ(chunk_data[12], 100.0f);
-    EXPECT_EQ(cva.get_chunk_vector_offset(0), 0);
 }
 
 TEST_F(ConcurrentVectorArrayTest, MultipleChunksWrite) {
@@ -77,8 +76,6 @@ TEST_F(ConcurrentVectorArrayTest, MultipleChunksWrite) {
     cva.set_data_raw(0, data.data(), 5);
 
     EXPECT_EQ(cva.num_chunk(), 2);
-    EXPECT_EQ(cva.get_chunk_vector_offset(0), 0);
-    EXPECT_EQ(cva.get_chunk_vector_offset(1), 6);
 
     // Verify chunk 0: rows 0,1,2 → 6 vectors × 4 floats = 24 floats
     // row 0: start=0, row 1: start=100, row 2: start=200
@@ -145,21 +142,6 @@ TEST_F(ConcurrentVectorArrayTest, Clear) {
 
     cva.set_data_raw(0, data.data(), 1);
     EXPECT_EQ(cva.num_chunk(), 1);
-}
-
-TEST_F(ConcurrentVectorArrayTest, ChunkVectorOffsetLazyComputation) {
-    ConcurrentVectorArray cva(kDim, kElementType, kSizePerChunk);
-
-    std::vector<milvus::VectorArray> data;
-    for (int i = 0; i < 6; ++i) {
-        data.push_back(CreateFloatVectorArray(i + 1, kDim));
-    }
-    cva.set_data_raw(0, data.data(), 6);
-
-    // Chunk 0: rows 0,1,2 with 1,2,3 vectors = 6 vectors
-    // Chunk 1: rows 3,4,5 with 4,5,6 vectors = 15 vectors
-    EXPECT_EQ(cva.get_chunk_vector_offset(0), 0);
-    EXPECT_EQ(cva.get_chunk_vector_offset(1), 6);
 }
 
 TEST_F(ConcurrentVectorArrayTest, DataIntegrity) {

@@ -1322,7 +1322,7 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec_ptr->view_vector_array(offset).output_data();
+            dst->at(i) = vec_ptr->vector_field_data_at(offset);
         }
     }
 }

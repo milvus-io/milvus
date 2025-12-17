@@ -51,6 +51,11 @@ class ConcurrentVectorArray : public VectorBase {
     ConcurrentVectorArray&
     operator=(const ConcurrentVectorArray&) = delete;
 
+    // Disable move
+    ConcurrentVectorArray(ConcurrentVectorArray&&) = delete;
+    ConcurrentVectorArray&
+    operator=(ConcurrentVectorArray&&) = delete;
+
     void
     set_data_raw(ssize_t element_offset,
                  ssize_t element_count,
@@ -81,11 +86,8 @@ class ConcurrentVectorArray : public VectorBase {
     int64_t
     get_element_offset(ssize_t chunk_index) const override;
 
-    int64_t
-    get_chunk_vector_offset(ssize_t chunk_index) const;
-
-    VectorArrayView
-    view_vector_array(ssize_t element_offset) const;
+    VectorFieldProto
+    vector_field_data_at(ssize_t element_offset) const;
 
     const size_t*
     get_chunk_offsets(ssize_t chunk_index) const;
@@ -126,6 +128,7 @@ class ConcurrentVectorArray : public VectorBase {
         explicit Chunk(ssize_t size_per_chunk)
             : data_(std::make_shared<std::vector<char>>()),
               size_per_chunk_(size_per_chunk) {
+            offsets_.reserve(size_per_chunk + 1);
             offsets_.push_back(0);
         }
 
@@ -170,8 +173,8 @@ class ConcurrentVectorArray : public VectorBase {
             // If capacity is sufficient, resize won't realloc, safe for readers.
             // Otherwise, copy-on-write to protect existing readers.
             if (data_->capacity() < new_size) {
-                auto new_data = std::make_shared<std::vector<char>>(*data_);
-                new_data->resize(new_size);
+                auto new_data = std::make_shared<std::vector<char>>(new_size);
+                std::memcpy(new_data->data(), data_->data(), old_size);
                 data_ = std::move(new_data);
             } else {
                 data_->resize(new_size);
@@ -186,8 +189,9 @@ class ConcurrentVectorArray : public VectorBase {
                 offsets_.push_back(offsets_.back() + va.length());
             }
 
-            // Shrink when chunk is full
-            if (chunk_offset + element_count == size_per_chunk_) {
+            // Shrink when chunk is full and capacity is more than 1.2 times of size
+            if (chunk_offset + element_count == size_per_chunk_ &&
+                data_->capacity() * 5 > data_->size() * 6) {
                 auto new_data = std::make_shared<std::vector<char>>(
                     data_->begin(), data_->end());
                 data_ = std::move(new_data);
@@ -204,21 +208,27 @@ class ConcurrentVectorArray : public VectorBase {
             return offsets_.back();
         }
 
-        VectorArrayView
-        view_vector_array(ssize_t chunk_offset,
-                          int64_t dim,
-                          DataType element_type) const {
+        VectorFieldProto
+        vector_field_data_at(ssize_t chunk_offset,
+                             int64_t dim,
+                             DataType element_type) const {
+            AssertInfo(chunk_offset < offsets_.size() - 1,
+                       fmt::format("chunk_offset out of offsets num, "
+                                   "chunk_offset={}, offsets_num={}",
+                                   chunk_offset,
+                                   offsets_.size() - 1));
             auto num_vectors =
                 offsets_[chunk_offset + 1] - offsets_[chunk_offset];
             auto bytes_per_vector = vector_bytes_per_element(element_type, dim);
             auto byte_offset = offsets_[chunk_offset] * bytes_per_vector;
             auto byte_size = num_vectors * bytes_per_vector;
-            return VectorArrayView(
-                const_cast<char*>(data_->data() + byte_offset),
-                dim,
-                num_vectors,
-                byte_size,
-                element_type);
+
+            return VectorArrayView(data_->data() + byte_offset,
+                                   dim,
+                                   num_vectors,
+                                   byte_size,
+                                   element_type)
+                .output_data();
         }
 
         const size_t*
@@ -239,7 +249,6 @@ class ConcurrentVectorArray : public VectorBase {
     mutable std::shared_mutex mutex_;
     std::deque<Chunk> chunks_;
 
-    mutable std::vector<int64_t> offsets_{0};
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };
 

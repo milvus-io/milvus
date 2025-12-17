@@ -261,7 +261,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             index_->BuildWithDataset(dataset, conf);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index build error: {}", error.what());
-            recreate_index(get_data_type(), get_element_type(), field_raw_data);
+            recreate_index(get_data_type(), field_raw_data);
             return;
         }
         index_cur_.fetch_add(vec_num);

@@ -138,6 +138,11 @@ ConcurrentVectorArray::get_span_base(int64_t chunk_id) const {
 std::unique_ptr<VectorBase::ChunkDataAccessor>
 ConcurrentVectorArray::get_chunk_data(ssize_t chunk_index) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
+    AssertInfo(chunk_index < chunks_.size(),
+               fmt::format(
+                   "chunk_index out of chunk num, chunk_index={}, chunk_num={}",
+                   chunk_index,
+                   chunks_.size()));
     return std::make_unique<SharedPtrChunkDataAccessor>(
         chunks_[chunk_index].get_data_ptr());
 }
@@ -157,28 +162,28 @@ ConcurrentVectorArray::get_element_offset(ssize_t chunk_index) const {
     return chunk_index * size_per_chunk_;
 }
 
-int64_t
-ConcurrentVectorArray::get_chunk_vector_offset(ssize_t chunk_index) const {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    while (offsets_.size() <= static_cast<size_t>(chunk_index)) {
-        auto idx = offsets_.size() - 1;
-        offsets_.push_back(offsets_.back() + chunks_[idx].total_vectors());
-    }
-    return offsets_[chunk_index];
-}
-
-VectorArrayView
-ConcurrentVectorArray::view_vector_array(ssize_t element_offset) const {
+VectorFieldProto
+ConcurrentVectorArray::vector_field_data_at(ssize_t element_offset) const {
     auto chunk_id = element_offset / size_per_chunk_;
     auto chunk_offset = element_offset % size_per_chunk_;
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    return chunks_[chunk_id].view_vector_array(
+    AssertInfo(
+        chunk_id < chunks_.size(),
+        fmt::format("chunk_id out of chunk num, chunk_id={}, chunk_num={}",
+                    chunk_id,
+                    chunks_.size()));
+    return chunks_[chunk_id].vector_field_data_at(
         chunk_offset, dim_, element_type_);
 }
 
 const size_t*
 ConcurrentVectorArray::get_chunk_offsets(ssize_t chunk_index) const {
     std::shared_lock<std::shared_mutex> lock(mutex_);
+    AssertInfo(chunk_index < chunks_.size(),
+               fmt::format(
+                   "chunk_index out of chunk num, chunk_index={}, chunk_num={}",
+                   chunk_index,
+                   chunks_.size()));
     return chunks_[chunk_index].get_offsets();
 }
 
@@ -198,7 +203,6 @@ void
 ConcurrentVectorArray::clear() {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     chunks_.clear();
-    offsets_ = {0};
 }
 
 }  // namespace milvus::segcore
