@@ -79,6 +79,33 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 	return nil
 }
 
+func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
+	log := log.Ctx(ctx).
+		WithRateGroup(fmt.Sprintf("util.CheckSegmentDataReady-%d", collectionID), 1, 60).
+		With(zap.Int64("collectionID", collectionID))
+
+	// Check whether segments are fully loaded
+	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
+	for segmentID, segmentInfo := range segmentDist {
+		segments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithSegmentID(segmentID))
+		if len(segments) == 0 {
+			log.RatedInfo(10, "segment is not available", zap.Int64("segmentID", segmentID))
+			return merr.WrapErrSegmentLack(segmentID)
+		}
+
+		for _, segment := range segments {
+			// Compare manifest path for now
+			// alternative is to compare version, but it's not recommended to add extra info in segmentinfo
+			// we may use data view version in the future
+			if segment.ManifestPath != segmentInfo.GetManifestPath() {
+				log.RatedInfo(10, "segment is not updated", zap.Int64("segmentID", segmentID))
+				return merr.WrapErrSegmentNotLoaded(segmentID)
+			}
+		}
+	}
+	return nil
+}
+
 func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) error {
 	percentage := m.CollectionManager.CalculateLoadPercentage(ctx, collectionID)
 	if percentage < 0 {
