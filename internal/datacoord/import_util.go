@@ -379,6 +379,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
+		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
 	}
 	WrapPluginContextWithImport(task.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req)
 	return req, nil
