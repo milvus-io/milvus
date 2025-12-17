@@ -30,6 +30,7 @@ import (
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -87,6 +88,10 @@ func RegisterMgrRoute(proxy *Proxy) {
 		management.Register(&management.Handler{
 			Path:        management.RouteQueryCoordBalanceStatus,
 			HandlerFunc: proxy.CheckQueryCoordBalanceStatus,
+		})
+		management.Register(&management.Handler{
+			Path:        management.RouteBackupEZ,
+			HandlerFunc: proxy.BackupEZ,
 		})
 	})
 }
@@ -584,4 +589,32 @@ func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.R
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
+	dbName := req.URL.Query().Get("db_name")
+	if dbName == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"msg": "db_name parameter is required"}`))
+		return
+	}
+
+	resp, err := node.mixCoord.BackupEzk(req.Context(), &internalpb.BackupEzkRequest{
+		Base:   commonpbutil.NewMsgBase(),
+		DbName: dbName,
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to backup EZK, %s"}`, err.Error())))
+		return
+	}
+
+	if !merr.Ok(resp.GetStatus()) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to backup EZK, %s"}`, resp.GetStatus().GetReason())))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf(`{"msg": "OK", "ezk": "%s"}`, resp.Ezk)))
 }

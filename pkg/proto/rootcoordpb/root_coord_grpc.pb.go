@@ -84,6 +84,7 @@ const (
 	RootCoord_DescribeDatabase_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/DescribeDatabase"
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
+	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -207,6 +208,7 @@ type RootCoordClient interface {
 	DescribeDatabase(ctx context.Context, in *DescribeDatabaseRequest, opts ...grpc.CallOption) (*DescribeDatabaseResponse, error)
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
+	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
 }
 
 type rootCoordClient struct {
@@ -766,6 +768,15 @@ func (c *rootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.Ge
 	return out, nil
 }
 
+func (c *rootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
+	out := new(internalpb.BackupEzkResponse)
+	err := c.cc.Invoke(ctx, RootCoord_BackupEzk_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -887,6 +898,7 @@ type RootCoordServer interface {
 	DescribeDatabase(context.Context, *DescribeDatabaseRequest) (*DescribeDatabaseResponse, error)
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
+	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1075,6 +1087,9 @@ func (UnimplementedRootCoordServer) AlterDatabase(context.Context, *AlterDatabas
 }
 func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQuotaMetrics not implemented")
+}
+func (UnimplementedRootCoordServer) BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BackupEzk not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2186,6 +2201,24 @@ func _RootCoord_GetQuotaMetrics_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_BackupEzk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.BackupEzkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).BackupEzk(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_BackupEzk_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).BackupEzk(ctx, req.(*internalpb.BackupEzkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2436,6 +2469,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQuotaMetrics",
 			Handler:    _RootCoord_GetQuotaMetrics_Handler,
+		},
+		{
+			MethodName: "BackupEzk",
+			Handler:    _RootCoord_BackupEzk_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
