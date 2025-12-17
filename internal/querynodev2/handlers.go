@@ -216,6 +216,21 @@ func (node *QueryNode) loadStats(ctx context.Context, req *querypb.LoadSegmentsR
 	return status
 }
 
+func (node *QueryNode) reopenSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) *commonpb.Status {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segmentIDs", lo.Map(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })),
+	)
+
+	log.Info("start to reopen segments")
+	err := node.loader.ReopenSegments(ctx, req.GetInfos())
+	if err != nil {
+		log.Warn("failed to reopen segments", zap.Error(err))
+		return merr.Status(err)
+	}
+	return merr.Success()
+}
+
 func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryRequest, channel string) (*internalpb.RetrieveResults, error) {
 	msgID := req.Req.Base.GetMsgID()
 	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
