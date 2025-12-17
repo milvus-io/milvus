@@ -1065,6 +1065,10 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  # factorChangeThreshold defines the minimum relative change in factor to trigger an update.
+  # If the factor change is less than this threshold (e.g., 5%), the update is skipped
+  # to reduce unnecessary proxy updates. Range: (0, 1]
+  factorChangeThreshold: 0.05 # 5%
   forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed

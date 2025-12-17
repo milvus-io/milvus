@@ -47,7 +47,6 @@ func initLimitConfigMaps() {
 				internalpb.RateType_DDLFlush:      &quotaConfig.MaxFlushRate,
 				internalpb.RateType_DDLCompaction: &quotaConfig.MaxCompactionRate,
 				internalpb.RateType_DMLInsert:     &quotaConfig.DMLMaxInsertRate,
-				internalpb.RateType_DMLUpsert:     &quotaConfig.DMLMaxUpsertRate,
 				internalpb.RateType_DMLDelete:     &quotaConfig.DMLMaxDeleteRate,
 				internalpb.RateType_DMLBulkLoad:   &quotaConfig.DMLMaxBulkLoadRate,
 				internalpb.RateType_DQLSearch:     &quotaConfig.DQLMaxSearchRate,
@@ -61,7 +60,6 @@ func initLimitConfigMaps() {
 				internalpb.RateType_DDLFlush:      &quotaConfig.MaxFlushRatePerDB,
 				internalpb.RateType_DDLCompaction: &quotaConfig.MaxCompactionRatePerDB,
 				internalpb.RateType_DMLInsert:     &quotaConfig.DMLMaxInsertRatePerDB,
-				internalpb.RateType_DMLUpsert:     &quotaConfig.DMLMaxUpsertRatePerDB,
 				internalpb.RateType_DMLDelete:     &quotaConfig.DMLMaxDeleteRatePerDB,
 				internalpb.RateType_DMLBulkLoad:   &quotaConfig.DMLMaxBulkLoadRatePerDB,
 				internalpb.RateType_DQLSearch:     &quotaConfig.DQLMaxSearchRatePerDB,
@@ -69,7 +67,6 @@ func initLimitConfigMaps() {
 			},
 			internalpb.RateScope_Collection: {
 				internalpb.RateType_DMLInsert:   &quotaConfig.DMLMaxInsertRatePerCollection,
-				internalpb.RateType_DMLUpsert:   &quotaConfig.DMLMaxUpsertRatePerCollection,
 				internalpb.RateType_DMLDelete:   &quotaConfig.DMLMaxDeleteRatePerCollection,
 				internalpb.RateType_DMLBulkLoad: &quotaConfig.DMLMaxBulkLoadRatePerCollection,
 				internalpb.RateType_DQLSearch:   &quotaConfig.DQLMaxSearchRatePerCollection,
@@ -78,7 +75,6 @@ func initLimitConfigMaps() {
 			},
 			internalpb.RateScope_Partition: {
 				internalpb.RateType_DMLInsert:   &quotaConfig.DMLMaxInsertRatePerPartition,
-				internalpb.RateType_DMLUpsert:   &quotaConfig.DMLMaxUpsertRatePerPartition,
 				internalpb.RateType_DMLDelete:   &quotaConfig.DMLMaxDeleteRatePerPartition,
 				internalpb.RateType_DMLBulkLoad: &quotaConfig.DMLMaxBulkLoadRatePerPartition,
 				internalpb.RateType_DQLSearch:   &quotaConfig.DQLMaxSearchRatePerPartition,
