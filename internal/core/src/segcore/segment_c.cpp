@@ -140,6 +140,29 @@ NewSegmentWithLoadInfo(CCollection collection,
 }
 
 CStatus
+ReopenSegment(CTraceContext c_trace,
+              CSegmentInterface c_segment,
+              const uint8_t* load_info_blob,
+              const int64_t load_info_length) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        AssertInfo(load_info_blob, "load info is null");
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        auto suc = load_info.ParseFromArray(load_info_blob, load_info_length);
+        AssertInfo(suc, "unmarshal load info failed");
+
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+
+        segment->Reopen(load_info);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
     SCOPE_CGO_CALL_METRIC();
 

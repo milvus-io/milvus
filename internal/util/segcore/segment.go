@@ -319,6 +319,21 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 	return ConsumeCStatusIntoError(&status)
 }
 
+func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
+	traceCtx := ParseCTraceContext(ctx)
+	defer runtime.KeepAlive(traceCtx)
+	defer runtime.KeepAlive(req)
+
+	segLoadInfo := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	loadInfoBlob, err := proto.Marshal(segLoadInfo)
+	if err != nil {
+		return err
+	}
+
+	status := C.ReopenSegment(traceCtx.ctx, s.ptr, (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
+	return ConsumeCStatusIntoError(&status)
+}
+
 func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
 	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
 	if err := ConsumeCStatusIntoError(&status); err != nil {

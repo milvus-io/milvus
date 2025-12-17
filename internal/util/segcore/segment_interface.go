@@ -42,6 +42,8 @@ type SealedSegment interface {
 	DropIndex(ctx context.Context, fieldID int64) error
 
 	DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error
+
+	Reopen(ctx context.Context, request *ReopenRequest) error
 }
 
 // basicSegmentMethodSet is the basic method set of a segment.

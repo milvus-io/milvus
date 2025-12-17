@@ -1610,6 +1610,53 @@ func (_c *MockSegment_RemoveUnusedFieldFiles_Call) RunAndReturn(run func() error
 	return _c
 }
 
+// Reopen provides a mock function with given fields: ctx, newLoadInfo
+func (_m *MockSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, newLoadInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Reopen")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, newLoadInfo)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_Reopen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Reopen'
+type MockSegment_Reopen_Call struct {
+	*mock.Call
+}
+
+// Reopen is a helper method to define mock.On call
+//   - ctx context.Context
+//   - newLoadInfo *querypb.SegmentLoadInfo
+func (_e *MockSegment_Expecter) Reopen(ctx interface{}, newLoadInfo interface{}) *MockSegment_Reopen_Call {
+	return &MockSegment_Reopen_Call{Call: _e.mock.On("Reopen", ctx, newLoadInfo)}
+}
+
+func (_c *MockSegment_Reopen_Call) Run(run func(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo)) *MockSegment_Reopen_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Reopen_Call) Return(_a0 error) *MockSegment_Reopen_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Reopen_Call) RunAndReturn(run func(context.Context, *querypb.SegmentLoadInfo) error) *MockSegment_Reopen_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ResetIndexesLazyLoad provides a mock function with given fields: lazyState
 func (_m *MockSegment) ResetIndexesLazyLoad(lazyState bool) {
 	_m.Called(lazyState)
