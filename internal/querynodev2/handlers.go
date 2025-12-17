@@ -96,6 +96,7 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 					InsertChannel:  segmentInfo.InsertChannel,
 					StartPosition:  segmentInfo.GetStartPosition(),
 					StorageVersion: segmentInfo.GetStorageVersion(),
+					ManifestPath:   segmentInfo.GetManifestPath(),
 				})
 			} else {
 				log.Info("skip segment which binlog is empty", zap.Int64("segmentID", segmentInfo.ID))
