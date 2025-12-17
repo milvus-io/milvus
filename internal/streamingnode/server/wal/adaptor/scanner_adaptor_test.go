@@ -3,6 +3,7 @@ package adaptor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -14,11 +15,17 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/mock_walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestScannerAdaptorReadError(t *testing.T) {
@@ -63,4 +70,47 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	<-s.Chan()
 	<-s.Done()
 	assert.NoError(t, s.Error())
+}
+
+func TestWaitUntilStartup(t *testing.T) {
+	configKey := paramtable.Get().StreamingCfg.WALScannerStartupDelay.Key
+	paramtable.Get().Save(configKey, "10s")
+	defer paramtable.Get().Reset(configKey)
+
+	scanner := &scannerAdaptorImpl{
+		logger: log.With(),
+		readOption: wal.ReadOption{
+			IgnoreStartupDelay: false,
+		},
+		filterFunc:    func(message.ImmutableMessage) bool { return true },
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		cleanup:       func() {},
+		ScannerHelper: helper.NewScannerHelper("test"),
+	}
+
+	done := make(chan struct{})
+	start := time.Now()
+
+	go func() {
+		scanner.waitUntilStartup()
+		close(done)
+	}()
+
+	// Wait a bit then reset the param to a shorter delay
+	time.Sleep(50 * time.Millisecond)
+	paramtable.Get().Save(configKey, "10ms")
+	// Manually trigger event dispatch since Save() doesn't dispatch events
+	paramtable.GetBaseTable().Manager().OnEvent(&config.Event{
+		Key:         configKey,
+		Value:       "10ms",
+		EventType:   config.UpdateType,
+		EventSource: "test",
+	})
+
+	<-done
+	elapsed := time.Since(start)
+
+	// Should return after new delay, not the original 10s
+	assert.Less(t, elapsed, 500*time.Millisecond)
 }

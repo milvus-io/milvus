@@ -484,6 +484,7 @@ message CreateVChannelConsumerRequest {
     string vchannel = 1;
     DeliverPolicy deliver_policy           = 2;  // deliver policy.
     repeated DeliverFilter deliver_filters = 3;  // deliver filter.
+    bool ignore_startup_delay              = 4;
 }
 
 // ConsumeMessageRequest is the request of the Consume RPC.

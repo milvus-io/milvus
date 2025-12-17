@@ -2,28 +2,21 @@ package consumer
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
-var (
-	consumerCounter     atomic.Int64
-	errGracefulShutdown = errors.New("graceful shutdown")
-)
+var errGracefulShutdown = errors.New("graceful shutdown")
 
 // NewResumableConsumer creates a new resumable consumer.
 func NewResumableConsumer(factory factory, opts *ConsumerOptions) ResumableConsumer {
@@ -91,7 +84,6 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 		},
 	}
 
-	rc.waitUntilStartup()
 	for {
 		rc.metrics.IntoUnavailable()
 		// Get last checkpoint sent.
@@ -121,11 +113,12 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 			deliverFilters = newDeliverFilters
 		}
 		opts := &handler.ConsumerOptions{
-			PChannel:       rc.opts.PChannel,
-			VChannel:       rc.opts.VChannel,
-			DeliverPolicy:  deliverPolicy,
-			DeliverFilters: deliverFilters,
-			MessageHandler: nopCloseMH,
+			PChannel:           rc.opts.PChannel,
+			VChannel:           rc.opts.VChannel,
+			DeliverPolicy:      deliverPolicy,
+			DeliverFilters:     deliverFilters,
+			MessageHandler:     nopCloseMH,
+			IgnoreStartupDelay: rc.opts.IgnoreStartupDelay,
 		}
 
 		// Create a new consumer.
@@ -171,34 +164,6 @@ func (rc *resumableConsumerImpl) createNewConsumer(opts *handler.ConsumerOptions
 
 		logger.Info("resume on new consumer at new start message id")
 		return newConsumerWithMetrics(rc.opts.PChannel, consumer), nil
-	}
-}
-
-// waitUntilStartup is used to wait until the startup delay is over.
-func (rc *resumableConsumerImpl) waitUntilStartup() {
-	startupDelay := paramtable.Get().StreamingCfg.WALScannerStartupDelay.GetAsDurationByParse()
-	if !rc.opts.IgnoreStartupDelay && startupDelay > 0 {
-		delayTimer := time.NewTimer(startupDelay)
-		defer delayTimer.Stop()
-
-		watchKey := paramtable.Get().StreamingCfg.WALScannerStartupDelay.Key
-		handler := config.NewHandler(fmt.Sprintf("%s-%d", watchKey, consumerCounter.Inc()), func(event *config.Event) {
-			if event.HasUpdated {
-				newStartupDelay := paramtable.Get().StreamingCfg.WALScannerStartupDelay.GetAsDurationByParse()
-				delayTimer.Reset(newStartupDelay)
-				rc.logger.Info("reset startup delay", zap.Duration("newDelay", newStartupDelay))
-			}
-		})
-		paramtable.Get().Watch(watchKey, handler)
-		defer paramtable.Get().Unwatch(watchKey, handler)
-
-		rc.logger.Info("wait util startup...", zap.Duration("delay", startupDelay))
-		select {
-		case <-delayTimer.C:
-			rc.logger.Info("finished to wait until startup")
-		case <-rc.ctx.Done():
-			rc.logger.Info("wait until startup is canceled")
-		}
 	}
 }
 

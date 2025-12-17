@@ -13,13 +13,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
-	"github.com/milvus-io/milvus/pkg/v2/config"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/walimplstest"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestResumableConsumer(t *testing.T) {
@@ -80,48 +77,6 @@ func TestResumableConsumer(t *testing.T) {
 
 	rc.Close()
 	<-rc.Done()
-}
-
-func TestWaitUntilStartup(t *testing.T) {
-	configKey := paramtable.Get().StreamingCfg.WALScannerStartupDelay.Key
-	paramtable.Get().Save(configKey, "10s")
-	defer paramtable.Get().Reset(configKey)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	rc := &resumableConsumerImpl{
-		ctx:    ctx,
-		logger: log.With(),
-		opts: &ConsumerOptions{
-			IgnoreStartupDelay: false,
-		},
-	}
-
-	done := make(chan struct{})
-	start := time.Now()
-
-	go func() {
-		rc.waitUntilStartup()
-		close(done)
-	}()
-
-	// Wait a bit then reset the param to a shorter delay
-	time.Sleep(50 * time.Millisecond)
-	paramtable.Get().Save(configKey, "10ms")
-	// Manually trigger event dispatch since Save() doesn't dispatch events
-	paramtable.GetBaseTable().Manager().OnEvent(&config.Event{
-		Key:         configKey,
-		Value:       "10ms",
-		EventType:   config.UpdateType,
-		EventSource: "test",
-	})
-
-	<-done
-	elapsed := time.Since(start)
-
-	// Should return after new delay, not the original 10s
-	assert.Less(t, elapsed, 500*time.Millisecond)
 }
 
 func TestHandler(t *testing.T) {
