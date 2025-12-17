@@ -43,7 +43,6 @@ class FieldIndexing {
     explicit FieldIndexing(const FieldMeta& field_meta,
                            const SegcoreConfig& segcore_config)
         : data_type_(field_meta.get_data_type()),
-          element_type_(field_meta.get_element_type()),
           dim_(IsVectorDataType(field_meta.get_data_type()) &&
                        !IsSparseFloatVectorDataType(field_meta.get_data_type())
                    ? field_meta.get_dim()
@@ -105,11 +104,6 @@ class FieldIndexing {
         return data_type_;
     }
 
-    DataType
-    get_element_type() const {
-        return element_type_;
-    }
-
     int64_t
     get_dim() const {
         return dim_;
@@ -129,7 +123,6 @@ class FieldIndexing {
  protected:
     // additional info
     const DataType data_type_;
-    const DataType element_type_;
     const int64_t dim_;
     const SegcoreConfig& segcore_config_;
 };
@@ -345,9 +338,7 @@ class VectorFieldIndexing : public FieldIndexing {
 
  private:
     void
-    recreate_index(DataType data_type,
-                   DataType element_type,
-                   const VectorBase* field_raw_data);
+    recreate_index(DataType data_type, const VectorBase* field_raw_data);
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
@@ -405,7 +396,8 @@ class IndexingRecord {
                     auto vec_field_meta =
                         index_meta_->GetFieldIndexMeta(field_id);
                     //Disable growing index for flat and embedding list
-                    if (!vec_field_meta.IsFlatIndex()) {
+                    if (!vec_field_meta.IsFlatIndex() &&
+                        field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
                         auto field_raw_data =
                             insert_record->get_data_base(field_id);
                         field_indexings_.try_emplace(
