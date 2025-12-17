@@ -61,7 +61,7 @@ func NewSyncTask(ctx context.Context,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
 	storageVersion int64,
-	useLOONFFI bool,
+	useLoonFFI bool,
 	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
@@ -75,7 +75,7 @@ func NewSyncTask(ctx context.Context,
 			StorageVersion: storageVersion,
 		}
 		// init first manifest path
-		if useLOONFFI {
+		if useLoonFFI {
 			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
 			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
 			if storageConfig.GetStorageType() != "local" {
