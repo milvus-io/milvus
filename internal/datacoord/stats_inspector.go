@@ -105,6 +105,17 @@ func (si *statsInspector) reloadFromMeta() {
 			st.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
+		if si.isExternalCollection(st.GetCollectionID()) {
+			log.Info("skip reloading stats task for external collection",
+				zap.Int64("taskID", st.GetTaskID()),
+				zap.Int64("collectionID", st.GetCollectionID()))
+			if err := si.mt.statsTaskMeta.MarkTaskCanRecycle(st.GetTaskID()); err != nil {
+				log.Warn("mark stats task can recycle failed",
+					zap.Int64("taskID", st.GetTaskID()),
+					zap.Error(err))
+			}
+			continue
+		}
 		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())
 		taskSlot := int64(0)
 		if segment != nil {
@@ -194,6 +205,9 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 func (si *statsInspector) triggerTextStatsTask() {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
+		if collection == nil || collection.IsExternal() {
+			continue
+		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			// TODO @longjiquan: please replace it to fieldSchemaHelper.EnableMath
@@ -230,6 +244,9 @@ func (si *statsInspector) triggerTextStatsTask() {
 func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger int64, maxJSONStatsTaskCount int) (int64, int) {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
+		if collection == nil || collection.IsExternal() {
+			continue
+		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			h := typeutil.CreateFieldSchemaHelper(field)
@@ -262,6 +279,9 @@ func (si *statsInspector) triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger 
 func (si *statsInspector) triggerBM25StatsTask() {
 	collections := si.mt.GetCollections()
 	for _, collection := range collections {
+		if collection == nil || collection.IsExternal() {
+			continue
+		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
 			// TODO: docking bm25 stats task
@@ -319,6 +339,13 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	originSegment := si.mt.GetHealthySegment(si.ctx, originSegmentID)
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
+	}
+	if si.isExternalCollection(originSegment.GetCollectionID()) {
+		log.Ctx(si.ctx).Info("skip submit stats task for external collection",
+			zap.Int64("collectionID", originSegment.GetCollectionID()),
+			zap.Int64("segmentID", originSegmentID),
+			zap.String("subJobType", subJobType.String()))
+		return nil
 	}
 	taskID, err := si.allocator.AllocID(context.Background())
 	if err != nil {
@@ -384,4 +411,12 @@ func (si *statsInspector) DropStatsTask(originSegmentID int64, subJobType indexp
 	log.Info("statsJobManager drop stats task success", zap.Int64("segmentID", originSegmentID),
 		zap.Int64("taskID", task.GetTaskID()), zap.String("subJobType", subJobType.String()))
 	return nil
+}
+
+func (si *statsInspector) isExternalCollection(collectionID int64) bool {
+	if si.mt == nil {
+		return false
+	}
+	coll := si.mt.GetCollection(collectionID)
+	return coll != nil && coll.IsExternal()
 }

@@ -602,6 +602,12 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if t.oldSchema == nil {
 		return merr.WrapErrParameterInvalidMsg("empty old schema in add field task")
 	}
+
+	// Check for external collection - add field is not supported
+	if typeutil.IsExternalCollection(t.oldSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"add field operation is not supported for external collection %s", t.CollectionName)
+	}
 	t.fieldSchema = &schemapb.FieldSchema{}
 	err := proto.Unmarshal(t.GetSchema(), t.fieldSchema)
 	if err != nil {
@@ -1614,6 +1620,12 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Check for external collection - alter field is not supported
+	if typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"alter field operation is not supported for external collection %s", t.CollectionName)
+	}
+
 	isCollectionLoadedFn := func() (bool, error) {
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 		if err != nil {
@@ -1782,6 +1794,16 @@ func (t *createPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// Check for external collection - create partition is not supported
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
+	if err != nil {
+		return err
+	}
+	if typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"create partition operation is not supported for external collection %s", collName)
+	}
+
 	partitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), collName)
 	if err != nil {
 		return err
@@ -1879,6 +1901,16 @@ func (t *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 	if err := validateCollectionName(collName); err != nil {
 		return err
+	}
+
+	// Check for external collection - drop partition is not supported
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
+	if err != nil {
+		return err
+	}
+	if typeutil.IsExternalCollection(collSchema.CollectionSchema) {
+		return merr.WrapErrParameterInvalidMsg(
+			"drop partition operation is not supported for external collection %s", collName)
 	}
 
 	partitionKeyMode, err := isPartitionKeyMode(ctx, t.GetDbName(), collName)
