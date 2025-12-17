@@ -196,6 +196,49 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		return len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 0
 	}, 3*time.Second, 1*time.Second)
 
+	// Verify all expected broker calls were made
+	suite.broker.AssertExpectations(suite.T())
+}
+
+// TestIncrementalUpdate_WithNewSegment verifies that when CurrentTarget is not empty,
+// the observer can automatically detect and update to include new segments.
+// This simulates a real-world scenario where data is continuously ingested.
+func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
+	ctx := suite.ctx
+
+	// Wait for initial load: 2 segments in NextTarget
+	suite.Eventually(func() bool {
+		return len(suite.targetMgr.GetSealedSegmentsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2 &&
+			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
+	}, 5*time.Second, 1*time.Second)
+
+	// Add initial segment distribution for CheckSegmentDataReady
+	suite.distMgr.SegmentDistManager.Update(2,
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            11,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionID,
+				InsertChannel: "channel-1",
+			},
+			Node: 2,
+		},
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            12,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionID,
+				InsertChannel: "channel-2",
+			},
+			Node: 2,
+		},
+	)
+
+	// Manually set CurrentTarget to non-empty (simulating previous successful load)
+	// This is the precondition for incremental updates to work
+	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, suite.collectionID)
+
+	// Clear previous mock expectations and prepare for new segment
 	suite.broker.AssertExpectations(suite.T())
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
 	suite.nextTargetSegments = append(suite.nextTargetSegments, &datapb.SegmentInfo{
@@ -249,6 +292,36 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			},
 		},
 	})
+	// Add segments to SegmentDistManager for CheckSegmentDataReady
+	suite.distMgr.SegmentDistManager.Update(2,
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            11,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionID,
+				InsertChannel: "channel-1",
+			},
+			Node: 2,
+		},
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            12,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionID,
+				InsertChannel: "channel-2",
+			},
+			Node: 2,
+		},
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            13,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionID,
+				InsertChannel: "channel-1",
+			},
+			Node: 2,
+		},
+	)
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -389,6 +462,7 @@ func TestShouldUpdateCurrentTarget_EmptyNextTarget(t *testing.T) {
 
 	// Return empty channels to simulate empty next target
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[string]*meta.DmChannel{}).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 
 	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
 	assert.False(t, result)
@@ -447,6 +521,7 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
@@ -574,6 +649,8 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, mock.Anything).Return([]int64{}, nil).Maybe()
+	// Return segments for CheckSegmentDataReady
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
 
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -603,6 +680,15 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 			},
 			Status: &querypb.LeaderViewStatus{Serviceable: true},
 		},
+	})
+	// Add segment to SegmentDistManager for CheckSegmentDataReady
+	distMgr.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            segmentID,
+			CollectionID:  collectionID,
+			InsertChannel: "channel-1",
+		},
+		Node: 1,
 	})
 
 	// Node 2: NOT READY delegator
@@ -698,6 +784,12 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 		segmentID2: {ID: segmentID2, CollectionID: collectionID, InsertChannel: "channel-2"},
 	}
 
+	// All segments for CheckSegmentDataReady
+	allSegments := map[int64]*datapb.SegmentInfo{
+		segmentID1: {ID: segmentID1, CollectionID: collectionID, InsertChannel: "channel-1"},
+		segmentID2: {ID: segmentID2, CollectionID: collectionID, InsertChannel: "channel-2"},
+	}
+
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
@@ -706,6 +798,8 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, mock.Anything).Return([]int64{}, nil).Maybe()
+	// Return segments for CheckSegmentDataReady
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(allSegments).Maybe()
 
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -742,6 +836,25 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 			Status: &querypb.LeaderViewStatus{Serviceable: true},
 		},
 	})
+	// Add segments to SegmentDistManager for CheckSegmentDataReady
+	distMgr.SegmentDistManager.Update(1,
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID1,
+				CollectionID:  collectionID,
+				InsertChannel: "channel-1",
+			},
+			Node: 1,
+		},
+		&meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID2,
+				CollectionID:  collectionID,
+				InsertChannel: "channel-2",
+			},
+			Node: 1,
+		},
+	)
 
 	// Execute the function under test
 	result := observer.shouldUpdateCurrentTarget(ctx, collectionID)
@@ -810,6 +923,12 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 		segmentID2: {ID: segmentID2, CollectionID: collectionID, InsertChannel: "channel-2"},
 	}
 
+	// All segments for CheckSegmentDataReady
+	allSegments := map[int64]*datapb.SegmentInfo{
+		segmentID1: {ID: segmentID1, CollectionID: collectionID, InsertChannel: "channel-1"},
+		segmentID2: {ID: segmentID2, CollectionID: collectionID, InsertChannel: "channel-2"},
+	}
+
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
@@ -818,6 +937,8 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, mock.Anything).Return([]int64{}, nil).Maybe()
+	// Return segments for CheckSegmentDataReady - this will fail since segment distribution is incomplete
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(allSegments).Maybe()
 
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -924,6 +1045,8 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetPartitions(mock.Anything, collectionID, mock.Anything).Return([]int64{}, nil).Maybe()
+	// Return segments for CheckSegmentDataReady - this will fail since no segment in distribution
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(targetSegments).Maybe()
 
 	broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
