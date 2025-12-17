@@ -921,6 +921,7 @@ message ImportRequest {
   int64 task_slot = 14;
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
+  bool use_loon_ffi = 17;
 }
 
 message QueryPreImportRequest {
@@ -965,6 +966,7 @@ message ImportSegmentInfo {
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
   repeated FieldBinlog bm25logs = 6;
+  string manifest_path = 7;
 }
 
 message QueryImportResponse {
