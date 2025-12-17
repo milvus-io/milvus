@@ -23,7 +23,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type flushTask struct {
@@ -79,6 +81,17 @@ func (t *flushTask) OnEnqueue() error {
 }
 
 func (t *flushTask) PreExecute(ctx context.Context) error {
+	// Check for external collections - flush is not supported
+	for _, collName := range t.GetCollectionNames() {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, t.GetDbName(), collName)
+		if err != nil {
+			return err
+		}
+		if typeutil.IsExternalCollection(schema.CollectionSchema) {
+			return merr.WrapErrParameterInvalidMsg(
+				"flush operation is not supported for external collection %s", collName)
+		}
+	}
 	return nil
 }
 

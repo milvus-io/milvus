@@ -2086,3 +2086,38 @@ func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
 		assert.False(t, found)
 	})
 }
+
+func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
+	// Save and restore globalMetaCache
+	cache := globalMetaCache
+	defer func() { globalMetaCache = cache }()
+	globalMetaCache = &MetaCache{}
+
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
+	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		schema: newSchemaInfo(externalSchema),
+	}, nil).Build()
+	defer m1.UnPatch()
+	defer m2.UnPatch()
+
+	proxy := &Proxy{}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	req := &milvuspb.ManualCompactionRequest{
+		DbName:         "default",
+		CollectionName: "external_col",
+	}
+
+	resp, err := proxy.ManualCompaction(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp.GetStatus()))
+}

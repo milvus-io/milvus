@@ -4825,7 +4825,23 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 		}
 	}
 
-	resp, err := node.mixCoord.ManualCompaction(ctx, req)
+	// Check for external collection - manual compaction is not supported
+	// Only check if we have collection identifier (collectionID > 0 or collectionName not empty)
+	if req.GetCollectionID() > 0 || req.GetCollectionName() != "" {
+		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		if typeutil.IsExternalCollection(collInfo.schema.CollectionSchema) {
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(
+				"manual compaction is not supported for external collection"))
+			return resp, nil
+		}
+	}
+
+	var err error
+	resp, err = node.mixCoord.ManualCompaction(ctx, req)
 	log.Info("received ManualCompaction response",
 		zap.Any("resp", resp),
 		zap.Error(err))

@@ -501,6 +501,12 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
+			schema: newSchemaInfo(&schemapb.CollectionSchema{
+				Name: "col-0",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			}),
 		}, nil)
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
@@ -931,11 +937,13 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 
+		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          schema,
 		}, nil).Build()
 
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 
@@ -983,11 +991,13 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
 		globalMetaCache = &MetaCache{}
 
+		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          schema,
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 
 		mockey.Mock(isPartitionKeyMode).Return(true, nil).Build()
 
@@ -1005,11 +1015,13 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
 		globalMetaCache = &MetaCache{}
 
+		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          schema,
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
 			name: "_default",
@@ -1030,11 +1042,13 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_QueryPreExecuteError", t, func() {
 		globalMetaCache = &MetaCache{}
 
+		schema := createTestSchema()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
+			schema:          schema,
 		}, nil).Build()
-		mockey.Mock((*MetaCache).GetCollectionSchema).Return(createTestSchema(), nil).Build()
+		mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{
 			name: "_default",
@@ -1638,7 +1652,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, schema: schema}, nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
@@ -1756,7 +1770,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test non-nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
+			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345, schema: schema}, nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(isPartitionKeyMode).Return(false, nil).Build()
 			mockey.Mock((*MetaCache).GetPartitionInfo).Return(&partitionInfo{name: "_default"}, nil).Build()
@@ -1810,4 +1824,39 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
+}
+
+func TestUpsertTask_ExternalCollection(t *testing.T) {
+	// Initialize globalMetaCache to avoid nil pointer dereference
+	globalMetaCache = &MetaCache{}
+
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(&databaseInfo{dbID: 0}, nil).Build()
+	m2 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
+	m3 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		schema: newSchemaInfo(externalSchema),
+	}, nil).Build()
+	defer m1.UnPatch()
+	defer m2.UnPatch()
+	defer m3.UnPatch()
+
+	ut := upsertTask{
+		ctx: context.Background(),
+		req: &milvuspb.UpsertRequest{
+			DbName:         "default",
+			CollectionName: "external_col",
+		},
+	}
+
+	err := ut.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "upsert operation is not supported for external collection")
 }
