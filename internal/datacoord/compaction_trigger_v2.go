@@ -423,7 +423,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		Channel:       view.GetGroupLabel().Channel,
 		CollectionID:  view.GetGroupLabel().CollectionID,
 		PartitionID:   view.GetGroupLabel().PartitionID,
-		Pos:           view.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
+		Pos:           view.(*LevelZeroCompactionView).latestDeletePos,
 		Schema:        collection.Schema,
 	}
 

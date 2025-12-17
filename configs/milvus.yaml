@@ -666,7 +666,7 @@ dataCoord:
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
-    taskPrioritizer: default
+    taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
