@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"math"
-	"path"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -183,27 +182,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, manifestPath, nil
 }
 
-func (bw *BulkPackWriterV2) GetManifestInfo(pack *SyncPack) (basePath string, version int64, err error) {
-	// empty info, shall be first write,
-	// initialize manifestPath with -1 version
-	if bw.manifestPath == "" {
-		k := metautil.JoinIDPath(pack.collectionID, pack.partitionID, pack.segmentID)
-		logicalPath := path.Join(bw.getRootPath(), common.SegmentInsertLogPath, k)
-		bucketName := bw.getBucketName()
-		// if storage config is not passed, use common config
-		storageType := paramtable.Get().CommonCfg.StorageType.GetValue()
-		if bw.storageConfig != nil {
-			storageType = bw.storageConfig.GetStorageType()
-		}
-		if storageType != "local" {
-			basePath = path.Join(bucketName, logicalPath)
-		}
-		return basePath, -1, nil
-	}
-
-	return packed.UnmarshalManfestPath(bw.manifestPath)
-}
-
 func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	pluginContextPtr *indexcgopb.StoragePluginContext,
 	pack *SyncPack,
@@ -228,8 +206,8 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	}
 
 	var manifestPath string
-	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() || bw.manifestPath != "" {
-		basePath, version, err := bw.GetManifestInfo(pack)
+	if bw.manifestPath != "" {
+		basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
 		if err != nil {
 			return nil, "", err
 		}
