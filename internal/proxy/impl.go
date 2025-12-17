@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -69,7 +70,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -3960,30 +3960,27 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		Condition:       NewTaskCondition(ctx),
 		FlushAllRequest: request,
 		mixCoord:        node.mixCoord,
-		chMgr:           node.chMgr,
 	}
 
 	method := "FlushAll"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName))
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
 
-	log.Debug(rpcReceived(method))
+	logger.Debug(rpcReceived(method))
 
 	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		logger.Warn(rpcFailedToEnqueue(method), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Debug(rpcEnqueued(method),
+	logger.Debug(rpcEnqueued(method),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
 	if err := ft.WaitToFinish(); err != nil {
-		log.Warn(
+		logger.Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", ft.BeginTs()),
@@ -3993,11 +3990,10 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	log.Debug(
-		rpcDone(method),
-		zap.Uint64("FlushAllTs", ft.result.GetFlushAllTs()),
-		zap.Uint64("BeginTs", ft.BeginTs()),
-		zap.Uint64("EndTs", ft.EndTs()))
+	logger.Debug(rpcDone(method))
+	for channel, msg := range ft.result.GetFlushAllMsgs() {
+		logger.Debug("flushall message", zap.String("channel", channel), log.FieldMessage(message.MilvusMessageToImmutableMessage(msg)))
+	}
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil
@@ -4667,9 +4663,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushAllState")
 	defer sp.End()
-	log := log.Ctx(ctx).With(zap.Uint64("FlushAllTs", req.GetFlushAllTs()),
-		zap.Time("FlushAllTime", tsoutil.PhysicalTime(req.GetFlushAllTs())),
-		zap.String("db", req.GetDbName()))
+	log := log.Ctx(ctx).With(zap.Any("FlushAllTss", req.GetFlushAllTss()))
 	log.Debug("receive GetFlushAllState request")
 
 	var err error

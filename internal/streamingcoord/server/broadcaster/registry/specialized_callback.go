@@ -26,6 +26,7 @@ var (
 
 	// Cluster
 	RegisterAlterReplicateConfigV2AckCallback = registerMessageAckCallback[*message.AlterReplicateConfigMessageHeader, *message.AlterReplicateConfigMessageBody]
+	RegisterFlushAllV2AckCallback             = registerMessageAckCallback[*message.FlushAllMessageHeader, *message.FlushAllMessageBody]
 
 	// Collection
 	RegisterAlterCollectionV2AckCallback  = registerMessageAckCallback[*message.AlterCollectionMessageHeader, *message.AlterCollectionMessageBody]
@@ -77,6 +78,7 @@ func resetMessageAckCallbacks() {
 
 		// Cluster
 		message.MessageTypeAlterReplicateConfigV2: syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeFlushAllV2:             syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Collection
 		message.MessageTypeAlterCollectionV2:  syncutil.NewFuture[messageInnerAckCallback](),

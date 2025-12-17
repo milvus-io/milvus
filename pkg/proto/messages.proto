@@ -58,6 +58,7 @@ enum MessageType {
     CreateIndex          = 34;
     AlterIndex           = 35;
     DropIndex            = 36;
+    FlushAll             = 37;
 
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
@@ -583,6 +584,10 @@ message LegacyProxyCollectionMetaCache {
 message ManualFlushExtraResponse {
     repeated int64 segment_ids = 1;
 }
+
+message FlushAllMessageHeader {}
+
+message FlushAllMessageBody {}
 
 // TxnContext is the context of transaction.
 // It will be carried by every message in a transaction.
