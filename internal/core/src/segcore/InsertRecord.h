@@ -29,6 +29,7 @@
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
+#include "segcore/ConcurrentVectorArray.h"
 #include <type_traits>
 
 namespace milvus::segcore {
@@ -678,7 +679,7 @@ class InsertRecordGrowing {
                     }
                 }
             }
-            append_field_meta(
+            append_field_container(
                 field_id, field_meta, size_per_chunk, mmap_descriptor);
         }
     }
@@ -792,7 +793,7 @@ class InsertRecordGrowing {
     }
 
     void
-    append_field_meta(
+    append_field_container(
         FieldId field_id,
         const FieldMeta& field_meta,
         int64_t size_per_chunk,
@@ -829,46 +830,50 @@ class InsertRecordGrowing {
         }
         if (field_meta.is_vector()) {
             if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                this->append_data<FloatVector>(field_id,
-                                               field_meta.get_dim(),
-                                               size_per_chunk,
-                                               dense_vec_mmap_descriptor);
+                this->append_container<FloatVector>(field_id,
+                                                    field_meta.get_dim(),
+                                                    size_per_chunk,
+                                                    dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-                this->append_data<BinaryVector>(field_id,
-                                                field_meta.get_dim(),
-                                                size_per_chunk,
-                                                dense_vec_mmap_descriptor);
+                this->append_container<BinaryVector>(field_id,
+                                                     field_meta.get_dim(),
+                                                     size_per_chunk,
+                                                     dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-                this->append_data<Float16Vector>(field_id,
-                                                 field_meta.get_dim(),
-                                                 size_per_chunk,
-                                                 dense_vec_mmap_descriptor);
+                this->append_container<Float16Vector>(
+                    field_id,
+                    field_meta.get_dim(),
+                    size_per_chunk,
+                    dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
-                this->append_data<BFloat16Vector>(field_id,
-                                                  field_meta.get_dim(),
-                                                  size_per_chunk,
-                                                  dense_vec_mmap_descriptor);
+                this->append_container<BFloat16Vector>(
+                    field_id,
+                    field_meta.get_dim(),
+                    size_per_chunk,
+                    dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_U32_F32) {
-                this->append_data<SparseFloatVector>(
+                this->append_container<SparseFloatVector>(
                     field_id, size_per_chunk, vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
-                this->append_data<Int8Vector>(field_id,
-                                              field_meta.get_dim(),
-                                              size_per_chunk,
-                                              dense_vec_mmap_descriptor);
+                this->append_container<Int8Vector>(field_id,
+                                                   field_meta.get_dim(),
+                                                   size_per_chunk,
+                                                   dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-                this->append_data<VectorArray>(field_id,
-                                               field_meta.get_dim(),
-                                               size_per_chunk,
-                                               dense_vec_mmap_descriptor);
+                this->append_container<VectorArray>(
+                    field_id,
+                    field_meta.get_dim(),
+                    field_meta.get_element_type(),
+                    size_per_chunk,
+                    dense_vec_mmap_descriptor);
                 return;
             } else {
                 ThrowInfo(DataTypeInvalid,
@@ -878,63 +883,63 @@ class InsertRecordGrowing {
         }
         switch (field_meta.get_data_type()) {
             case DataType::BOOL: {
-                this->append_data<bool>(
+                this->append_container<bool>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT8: {
-                this->append_data<int8_t>(
+                this->append_container<int8_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT16: {
-                this->append_data<int16_t>(
+                this->append_container<int16_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT32: {
-                this->append_data<int32_t>(
+                this->append_container<int32_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT64: {
-                this->append_data<int64_t>(
+                this->append_container<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::FLOAT: {
-                this->append_data<float>(
+                this->append_container<float>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::DOUBLE: {
-                this->append_data<double>(
+                this->append_container<double>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::TIMESTAMPTZ: {
-                this->append_data<int64_t>(
+                this->append_container<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::VARCHAR:
             case DataType::TEXT: {
-                this->append_data<std::string>(
+                this->append_container<std::string>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::JSON: {
-                this->append_data<Json>(
+                this->append_container<Json>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::ARRAY: {
-                this->append_data<Array>(
+                this->append_container<Array>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::GEOMETRY: {
-                this->append_data<std::string>(
+                this->append_container<std::string>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
@@ -1010,7 +1015,9 @@ class InsertRecordGrowing {
             auto size = data->get_chunk_size(chunk_id);
             auto element_offset = data->get_element_offset(chunk_id);
             return SpanBase(
-                data->get_chunk_data(chunk_id),
+                // the guard of the non-vector-array type is just a simple wrapper
+                // so we can safely get the data from the wrapper
+                data->get_chunk_data(chunk_id)->data(),
                 get_valid_data(field_id)->get_chunk_data(element_offset),
                 size,
                 data->get_element_size());
@@ -1028,23 +1035,37 @@ class InsertRecordGrowing {
     // vector not support nullable, not pass valid data ptr
     template <typename VectorType>
     void
-    append_data(FieldId field_id,
-                int64_t dim,
-                int64_t size_per_chunk,
-                const storage::MmapChunkDescriptorPtr mmap_descriptor) {
+    append_container(FieldId field_id,
+                     int64_t dim,
+                     int64_t size_per_chunk,
+                     const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
         data_.emplace(field_id,
                       std::make_unique<ConcurrentVector<VectorType>>(
                           dim, size_per_chunk, mmap_descriptor));
     }
 
-    // append a column of scalar or sparse float vector type
-    template <typename Type>
+    // append a column of VectorArray type
+    template <typename Type,
+              std::enable_if_t<std::is_same_v<Type, VectorArray>, int> = 0>
     void
-    append_data(FieldId field_id,
-                int64_t size_per_chunk,
-                const storage::MmapChunkDescriptorPtr mmap_descriptor) {
-        static_assert(IsScalar<Type> || IsSparse<Type>);
+    append_container(FieldId field_id,
+                     int64_t dim,
+                     DataType element_type,
+                     int64_t size_per_chunk,
+                     const storage::MmapChunkDescriptorPtr mmap_descriptor) {
+        data_.emplace(field_id,
+                      std::make_unique<ConcurrentVectorArray>(
+                          dim, element_type, size_per_chunk, mmap_descriptor));
+    }
+
+    // append a column of scalar or sparse float vector type
+    template <typename Type,
+              std::enable_if_t<IsScalar<Type> || IsSparse<Type>, int> = 0>
+    void
+    append_container(FieldId field_id,
+                     int64_t size_per_chunk,
+                     const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         data_.emplace(
             field_id,
             std::make_unique<ConcurrentVector<Type>>(

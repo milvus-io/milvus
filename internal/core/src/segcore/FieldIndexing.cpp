@@ -25,6 +25,7 @@
 #include "index/RTreeIndex.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "segcore/ConcurrentVectorArray.h"
 
 namespace milvus::segcore {
 using std::unique_ptr;
@@ -43,11 +44,14 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
           segcore_config,
           SegmentType::Growing,
           IsSparseFloatVectorDataType(field_meta.get_data_type()))) {
-    recreate_index(field_meta.get_data_type(), field_raw_data);
+    recreate_index(field_meta.get_data_type(),
+                   field_meta.get_element_type(),
+                   field_raw_data);
 }
 
 void
 VectorFieldIndexing::recreate_index(DataType data_type,
+                                    DataType element_type,
                                     const VectorBase* field_raw_data) {
     if (IsSparseFloatVectorDataType(data_type)) {
         index_ = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
@@ -77,7 +81,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             reinterpret_cast<const ConcurrentVector<Float16Vector>*>(
                 field_raw_data);
         AssertInfo(concurrent_fp16_vec != nullptr,
-                   "Fail to generate a cocurrent vector when    recreate_index "
+                   "Fail to generate a cocurrent vector when recreate_index "
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_fp16_vec](size_t id) {
@@ -94,7 +98,7 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             reinterpret_cast<const ConcurrentVector<BFloat16Vector>*>(
                 field_raw_data);
         AssertInfo(concurrent_bf16_vec != nullptr,
-                   "Fail to generate a cocurrent vector when    recreate_index "
+                   "Fail to generate a cocurrent vector when recreate_index "
                    "in growing segment.");
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
                                               concurrent_bf16_vec](size_t id) {
@@ -106,6 +110,26 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
             view_data);
+    } else if (data_type == DataType::VECTOR_ARRAY) {
+        // if (element_type == DataType::VECTOR_FLOAT) {
+        //     auto concurrent_float_vec_array =
+        //         reinterpret_cast<const ConcurrentVectorArray*>(field_raw_data);
+        //     AssertInfo(
+        //         concurrent_float_vec_array != nullptr,
+        //         "Fail to generate a cocurrent vector when recreate_index "
+        //         "in growing segment.");
+        //     knowhere::ViewDataOp view_data = [field_raw_data_ptr =
+        //                                           concurrent_float_vec_array](
+        //                                          size_t id) {
+        //         return (const VectorArray*)field_raw_data_ptr->get_element(id);
+        //     };
+        //     index_ = std::make_unique<index::VectorMemIndex<float>>(
+        //         DataType::NONE,
+        //         config_->GetIndexType(),
+        //         config_->GetMetricType(),
+        //         knowhere::Version::GetCurrentVersion().VersionNumber(),
+        //         view_data);
+        // }
     }
 }
 
@@ -156,7 +180,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
         while (total_rows > 0) {
             auto mat = static_cast<
                 const knowhere::sparse::SparseRow<SparseValueType>*>(
-                source->get_chunk_data(chunk_id));
+                source->get_chunk_data(chunk_id)->data());
             auto rows = std::min(source->get_size_per_chunk(), total_rows);
             auto dataset = knowhere::GenDataSet(rows, dim, mat);
             dataset->SetIsSparse(true);
@@ -168,7 +192,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                 }
             } catch (SegcoreError& error) {
                 LOG_ERROR("growing sparse index build error: {}", error.what());
-                recreate_index(get_data_type(), nullptr);
+                recreate_index(get_data_type(), get_element_type(), nullptr);
                 index_cur_ = 0;
                 return;
             }
@@ -226,9 +250,11 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         // for train index
         const void* data_addr;
         unique_ptr<char[]> vec_data;
+        std::unique_ptr<VectorBase::ChunkDataAccessor> chunk_data;
         //all train data in one chunk
         if (chunk_id_beg == chunk_id_end) {
-            data_addr = field_raw_data->get_chunk_data(chunk_id_beg);
+            chunk_data = field_raw_data->get_chunk_data(chunk_id_beg);
+            data_addr = chunk_data->data();
         } else {
             //merge data from multiple chunks together
             vec_data = std::make_unique<char[]>(vec_num * vec_length);
@@ -243,8 +269,9 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                         : size_per_chunk;
                 std::memcpy(
                     (void*)((const char*)vec_data.get() + offset * vec_length),
-                    (void*)((const char*)field_raw_data->get_chunk_data(
-                                chunk_id) +
+                    (void*)((const char*)field_raw_data
+                                ->get_chunk_data(chunk_id)
+                                ->data() +
                             chunk_offset * vec_length),
                     chunk_copysz * vec_length);
                 offset += chunk_copysz;
@@ -257,7 +284,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             index_->BuildWithDataset(dataset, conf);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index build error: {}", error.what());
-            recreate_index(get_data_type(), field_raw_data);
+            recreate_index(get_data_type(), get_element_type(), field_raw_data);
             return;
         }
         index_cur_.fetch_add(vec_num);
@@ -290,11 +317,11 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                 chunk_id == chunk_id_end
                     ? vector_id_end % size_per_chunk - chunk_offset + 1
                     : size_per_chunk - chunk_offset;
+            auto chunk_data = field_raw_data->get_chunk_data(chunk_id);
             auto dataset = knowhere::GenDataSet(
                 chunk_sz,
                 dim,
-                (const char*)field_raw_data->get_chunk_data(chunk_id) +
-                    chunk_offset * vec_length);
+                (const char*)chunk_data->data() + chunk_offset * vec_length);
             index_->AddWithDataset(dataset, conf);
             index_cur_.fetch_add(chunk_sz);
         }
@@ -564,7 +591,8 @@ CreateIndex(const FieldMeta& field_meta,
             field_meta.get_data_type() == DataType::VECTOR_FLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_BFLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_INT8 ||
-            field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32) {
+            field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32 ||
+            field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
             return std::make_unique<VectorFieldIndexing>(field_meta,
                                                          field_index_meta,
                                                          segment_max_row_count,

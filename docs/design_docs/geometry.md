@@ -458,7 +458,7 @@ results = milvus_client.query(
 | -------------------------- | --------------------------------------------------------- |
 | ChunkSegmentSealedImpl.cpp | Add geo type processing during loading and index building |
 | ConcurrentVector.cpp       | Store inserted data and add support for geo type          |
-| InsertRecord.h             | Add geo support in append_field_meta                      |
+| InsertRecord.h             | Add geo support in append_field_container                      |
 | SegmentGrowingImpl.cpp/h   | Add geo processing logic to the Insert method             |
 | SegmentSealedImpl.cpp      | Add geo support to the data loading logic                 |
 | Utils.cpp                  | Add geo-related support to the utility function           |

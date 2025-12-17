@@ -56,7 +56,7 @@ CachedSearchIterator::InitializeChunkedIterators(
     for (int64_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
         auto [chunk_data, chunk_size] = get_chunk_data(chunk_id);
         auto sub_data = query::dataset::RawDataset{
-            offset, query_ds.dim, chunk_size, chunk_data};
+            offset, query_ds.dim, chunk_size, chunk_data->data()};
 
         auto expected_iterators = GetBruteForceSearchIterators(
             query_ds, sub_data, search_info, index_info, bitset, data_type);
@@ -105,11 +105,11 @@ CachedSearchIterator::CachedSearchIterator(
         bitset,
         data_type,
         [&vec_data, vec_size_per_chunk, row_count](int64_t chunk_id) {
-            const void* chunk_data = vec_data->get_chunk_data(chunk_id);
+            auto chunk_data = vec_data->get_chunk_data(chunk_id);
             // no need to store a PinWrapper for growing, because vec_data is guaranteed to not be evicted.
             int64_t chunk_size = std::min(
                 vec_size_per_chunk, row_count - chunk_id * vec_size_per_chunk);
-            return std::make_pair(chunk_data, chunk_size);
+            return std::make_pair(std::move(chunk_data), chunk_size);
         });
 }
 
@@ -148,7 +148,11 @@ CachedSearchIterator::CachedSearchIterator(
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
             pin_wrappers_.emplace_back(std::move(pw));
-            return std::make_pair(chunk_data, chunk_size);
+            return std::make_pair(
+                std::make_unique<
+                    milvus::segcore::VectorBase::SimpleChunkDataAccessor>(
+                    chunk_data),
+                chunk_size);
         });
 }
 

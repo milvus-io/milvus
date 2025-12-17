@@ -22,6 +22,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
 #include "exec/operator/Utils.h"
+#include "segcore/ConcurrentVectorArray.h"
 
 namespace milvus::query {
 
@@ -174,6 +175,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
         auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
+        LOG_INFO("debug=== optimized search on growing, max_chunk: {}",
+                 max_chunk);
+        auto now = std::chrono::high_resolution_clock::now();
+
         for (int chunk_id = current_chunk_id; chunk_id < max_chunk;
              ++chunk_id) {
             auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
@@ -184,40 +189,21 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             auto size_per_chunk = element_end - element_begin;
 
             query::dataset::RawDataset sub_data;
-            std::unique_ptr<uint8_t[]> buf = nullptr;
-            std::vector<size_t> offsets;
-            if (data_type != DataType::VECTOR_ARRAY) {
+            if (data_type == DataType::VECTOR_ARRAY) {
+                auto concurrent_vector_array =
+                    dynamic_cast<const milvus::segcore::ConcurrentVectorArray*>(
+                        vec_ptr);
+                AssertInfo(concurrent_vector_array != nullptr,
+                           "ConcurrentVectorArray dynamic cast failed");
                 sub_data = query::dataset::RawDataset{
-                    element_begin, dim, size_per_chunk, chunk_data};
+                    element_begin,
+                    dim,
+                    size_per_chunk,
+                    chunk_data->data(),
+                    concurrent_vector_array->get_chunk_offsets(chunk_id)};
             } else {
-                // TODO(SpadeA): For VectorArray(Embedding List), data is
-                // discreted stored in FixedVector which means we will copy the
-                // data to a contiguous memory buffer. This is inefficient and
-                // will be optimized in the future.
-                auto vec_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
-                auto size = 0;
-                for (int i = 0; i < size_per_chunk; ++i) {
-                    size += vec_ptr[i].byte_size();
-                }
-
-                buf = std::make_unique<uint8_t[]>(size);
-                offsets.reserve(size_per_chunk + 1);
-                offsets.push_back(0);
-
-                auto offset = 0;
-                auto ptr = buf.get();
-                for (int i = 0; i < size_per_chunk; ++i) {
-                    memcpy(ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
-                    ptr += vec_ptr[i].byte_size();
-
-                    offset += vec_ptr[i].length();
-                    offsets.push_back(offset);
-                }
-                sub_data = query::dataset::RawDataset{element_begin,
-                                                      dim,
-                                                      size_per_chunk,
-                                                      buf.get(),
-                                                      offsets.data()};
+                sub_data = query::dataset::RawDataset{
+                    element_begin, dim, size_per_chunk, chunk_data->data()};
             }
 
             if (data_type == DataType::VECTOR_ARRAY) {
@@ -251,6 +237,14 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 final_qr.merge(sub_qr);
             }
         }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - now)
+                .count();
+        LOG_INFO("debug=== optimized search on growing, duration: {} ms",
+                 duration);
+
         if (milvus::exec::UseVectorIterator(info)) {
             std::vector<int64_t> chunk_rows(max_chunk, 0);
             for (int i = 1; i < max_chunk; ++i) {

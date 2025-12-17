@@ -48,13 +48,9 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(
                 element_offset, VEC_FIELD_DATA(data, int8), element_count);
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-            auto& vector_array = data->vectors().vector_array().data();
-            std::vector<VectorArray> data_raw{};
-            data_raw.reserve(vector_array.size());
-            for (auto& e : vector_array) {
-                data_raw.emplace_back(VectorArray(e));
-            }
-            return set_data_raw(element_offset, data_raw.data(), element_count);
+            ThrowInfo(
+                DataTypeInvalid,
+                "ConcurrentVectorArray should be used for vector array data");
         } else {
             ThrowInfo(DataTypeInvalid, "unsupported vector type");
         }

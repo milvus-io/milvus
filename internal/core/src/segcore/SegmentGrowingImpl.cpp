@@ -36,6 +36,7 @@
 #include "nlohmann/json.hpp"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
+#include "segcore/ConcurrentVectorArray.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/Utils.h"
@@ -122,7 +123,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                               true,
                               std::nullopt);
             auto field_meta = schema_->get_fields().at(field_id);
-            insert_record_.append_field_meta(
+            insert_record_.append_field_container(
                 field_id, field_meta, size_per_chunk(), mmap_descriptor_);
             auto data = bulk_subscript_not_exist_field(field_meta, exist_rows);
             insert_record_.get_data_base(field_id)->set_data_raw(
@@ -1136,13 +1137,12 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) const {
-    auto vec_ptr = dynamic_cast<const ConcurrentVector<VectorArray>*>(&vec_raw);
+    auto vec_ptr = dynamic_cast<const ConcurrentVectorArray*>(&vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
-    auto& vec = *vec_ptr;
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec[offset].output_data();
+            dst->at(i) = vec_ptr->view_vector_array(offset).output_data();
         }
     }
 }
@@ -1559,7 +1559,7 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     // append meta only needed when schema is old
     // loading old segment with new schema will have meta appended
     if (!insert_record_.is_data_exist(field_id)) {
-        insert_record_.append_field_meta(
+        insert_record_.append_field_container(
             field_id, field_meta, size_per_chunk(), mmap_descriptor_);
     }
 

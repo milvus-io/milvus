@@ -1630,17 +1630,19 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
                "System field isn't ready when do bulk_insert, segID:{}",
                id_);
     switch (system_type) {
-        case SystemFieldType::Timestamp:
+        case SystemFieldType::Timestamp: {
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk of timestamp not equal to 1 for "
                        "sealed segment");
-            bulk_subscript_impl<Timestamp>(
-                op_ctx,
-                this->insert_record_.timestamps_.get_chunk_data(0),
-                seg_offsets,
-                count,
-                static_cast<Timestamp*>(output));
+            auto chunk_data =
+                this->insert_record_.timestamps_.get_chunk_data(0);
+            bulk_subscript_impl<Timestamp>(op_ctx,
+                                           chunk_data->data(),
+                                           seg_offsets,
+                                           count,
+                                           static_cast<Timestamp*>(output));
             break;
+        }
         case SystemFieldType::RowId:
             ThrowInfo(ErrorCode::Unsupported, "RowId retrieve not supported");
             break;
@@ -2426,8 +2428,9 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
+    auto chunk_data = insert_record_.timestamps_.get_chunk_data(0);
     auto timestamps_data =
-        (const milvus::Timestamp*)insert_record_.timestamps_.get_chunk_data(0);
+        static_cast<const milvus::Timestamp*>(chunk_data->data());
     auto timestamps_data_size = insert_record_.timestamps_.get_chunk_size(0);
     if (collection_ttl > 0) {
         auto range =

@@ -102,6 +102,28 @@ using ThreadSafeValidDataPtr = std::shared_ptr<ThreadSafeValidData>;
 
 class VectorBase {
  public:
+    // Guard class for safe access to chunk data
+    class ChunkDataAccessor {
+     public:
+        virtual ~ChunkDataAccessor() = default;
+        virtual const void*
+        data() const = 0;
+    };
+
+    // Simple pointer wrapper for scenarios where data address is stable
+    class SimpleChunkDataAccessor : public ChunkDataAccessor {
+     public:
+        explicit SimpleChunkDataAccessor(const void* data) : data_(data) {
+        }
+        const void*
+        data() const override {
+            return data_;
+        }
+
+     private:
+        const void* data_;
+    };
+
     explicit VectorBase(int64_t size_per_chunk)
         : size_per_chunk_(size_per_chunk) {
     }
@@ -122,10 +144,6 @@ class VectorBase {
                  const DataArray* data,
                  const FieldMeta& field_meta);
 
-    // used only by sealed segment to load system field
-    virtual void
-    fill_chunk_data(const std::vector<FieldDataPtr>& data) = 0;
-
     virtual SpanBase
     get_span_base(int64_t chunk_id) const = 0;
 
@@ -134,7 +152,7 @@ class VectorBase {
         return size_per_chunk_;
     }
 
-    virtual const void*
+    virtual std::unique_ptr<ChunkDataAccessor>
     get_chunk_data(ssize_t chunk_index) const = 0;
 
     virtual int64_t
@@ -219,24 +237,6 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     void
-    fill_chunk_data(const std::vector<FieldDataPtr>& datas) override {
-        AssertInfo(chunks_ptr_->size() == 0, "non empty concurrent vector");
-
-        int64_t element_count = 0;
-        for (auto& field_data : datas) {
-            element_count += field_data->get_num_rows();
-        }
-        chunks_ptr_->emplace_to_at_least(1, elements_per_row_ * element_count);
-        int64_t offset = 0;
-        for (auto& field_data : datas) {
-            auto num_rows = field_data->get_num_rows();
-            set_data(
-                offset, static_cast<const Type*>(field_data->Data()), num_rows);
-            offset += num_rows;
-        }
-    }
-
-    void
     set_data_raw(ssize_t element_offset,
                  const std::vector<FieldDataPtr>& datas) override {
         for (auto& field_data : datas) {
@@ -262,9 +262,10 @@ class ConcurrentVectorImpl : public VectorBase {
             element_offset, static_cast<const Type*>(source), element_count);
     }
 
-    const void*
+    std::unique_ptr<ChunkDataAccessor>
     get_chunk_data(ssize_t chunk_index) const override {
-        return (const void*)chunks_ptr_->get_chunk_data(chunk_index);
+        return std::make_unique<SimpleChunkDataAccessor>(
+            chunks_ptr_->get_chunk_data(chunk_index));
     }
 
     int64_t
@@ -485,20 +486,6 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         return chunks_ptr_->view_element(chunk_id, chunk_offset);
-    }
-};
-
-template <>
-class ConcurrentVector<VectorArray>
-    : public ConcurrentVectorImpl<VectorArray, true> {
- public:
-    explicit ConcurrentVector(
-        int64_t dim /* not use it*/,
-        int64_t size_per_chunk,
-        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
-        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
-        : ConcurrentVectorImpl<VectorArray, true>::ConcurrentVectorImpl(
-              1, size_per_chunk, std::move(mmap_descriptor), valid_data_ptr) {
     }
 };
 
