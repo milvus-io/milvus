@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "FilterBitsNode.h"
+#include "common/Tracer.h"
+#include "fmt/format.h"
 
 #include "monitor/Monitor.h"
 
@@ -65,6 +67,10 @@ PhyFilterBitsNode::GetOutput() {
         return nullptr;
     }
 
+    tracer::AutoSpan span(
+        "PhyFilterBitsNode::Execute", tracer::GetRootSpan(), true);
+    tracer::AddEvent(fmt::format("input_rows: {}", need_process_rows_));
+
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
 
@@ -104,8 +110,10 @@ PhyFilterBitsNode::GetOutput() {
                bitset.size(),
                need_process_rows_);
     Assert(valid_bitset.size() == need_process_rows_);
+
+    auto filtered_count = bitset.count();
     auto filter_ratio =
-        bitset.size() != 0 ? 1 - float(bitset.count()) / bitset.size() : 0;
+        bitset.size() != 0 ? 1 - float(filtered_count) / bitset.size() : 0;
     milvus::monitor::internal_core_expr_filter_ratio.Observe(filter_ratio);
     // num_processed_rows_ = need_process_rows_;
     std::vector<VectorPtr> col_res;
@@ -118,6 +126,10 @@ PhyFilterBitsNode::GetOutput() {
             .count();
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
+
+    tracer::AddEvent(fmt::format("output_rows: {}, filtered: {}",
+                                 need_process_rows_ - filtered_count,
+                                 filtered_count));
 
     return std::make_shared<RowVector>(col_res);
 }
