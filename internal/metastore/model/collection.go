@@ -28,30 +28,36 @@ import (
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
 type Collection struct {
-	TenantID               string
-	DBID                   int64
-	CollectionID           int64
-	Partitions             []*Partition
-	Name                   string
-	DBName                 string
-	Description            string
-	AutoID                 bool
-	Fields                 []*Field
-	StructArrayFields      []*StructArrayField
-	Functions              []*Function
-	VirtualChannelNames    []string
-	PhysicalChannelNames   []string
-	ShardsNum              int32
-	StartPositions         []*commonpb.KeyDataPair
-	CreateTime             uint64
-	ConsistencyLevel       commonpb.ConsistencyLevel
-	Aliases                []string // TODO: deprecate this.
-	Properties             []*commonpb.KeyValuePair
-	State                  pb.CollectionState
-	EnableDynamicField     bool
-	UpdateTimestamp        uint64
-	SchemaVersion          int32
-	LastTruncateTimestamps map[string]uint64
+	TenantID             string
+	DBID                 int64
+	CollectionID         int64
+	Partitions           []*Partition
+	Name                 string
+	DBName               string
+	Description          string
+	AutoID               bool
+	Fields               []*Field
+	StructArrayFields    []*StructArrayField
+	Functions            []*Function
+	VirtualChannelNames  []string
+	PhysicalChannelNames []string
+	ShardsNum            int32
+	StartPositions       []*commonpb.KeyDataPair
+	CreateTime           uint64
+	ConsistencyLevel     commonpb.ConsistencyLevel
+	Aliases              []string // TODO: deprecate this.
+	Properties           []*commonpb.KeyValuePair
+	State                pb.CollectionState
+	EnableDynamicField   bool
+	UpdateTimestamp      uint64
+	SchemaVersion        int32
+	ShardInfos           map[string]*ShardInfo
+}
+
+type ShardInfo struct {
+	PChannelName         string // the pchannel name of the shard, it is the same with the physical channel name.
+	VChannelName         string // the vchannel name of the shard, it is the same with the virtual channel name.
+	LastTruncateTimeTick uint64 // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
 }
 
 func (c *Collection) Available() bool {
@@ -60,59 +66,67 @@ func (c *Collection) Available() bool {
 
 func (c *Collection) ShallowClone() *Collection {
 	return &Collection{
-		TenantID:               c.TenantID,
-		DBID:                   c.DBID,
-		CollectionID:           c.CollectionID,
-		Name:                   c.Name,
-		DBName:                 c.DBName,
-		Description:            c.Description,
-		AutoID:                 c.AutoID,
-		Fields:                 c.Fields,
-		StructArrayFields:      c.StructArrayFields,
-		Partitions:             c.Partitions,
-		VirtualChannelNames:    c.VirtualChannelNames,
-		PhysicalChannelNames:   c.PhysicalChannelNames,
-		ShardsNum:              c.ShardsNum,
-		ConsistencyLevel:       c.ConsistencyLevel,
-		CreateTime:             c.CreateTime,
-		StartPositions:         c.StartPositions,
-		Aliases:                c.Aliases,
-		Properties:             c.Properties,
-		State:                  c.State,
-		EnableDynamicField:     c.EnableDynamicField,
-		Functions:              c.Functions,
-		UpdateTimestamp:        c.UpdateTimestamp,
-		SchemaVersion:          c.SchemaVersion,
-		LastTruncateTimestamps: c.LastTruncateTimestamps,
+		TenantID:             c.TenantID,
+		DBID:                 c.DBID,
+		CollectionID:         c.CollectionID,
+		Name:                 c.Name,
+		DBName:               c.DBName,
+		Description:          c.Description,
+		AutoID:               c.AutoID,
+		Fields:               c.Fields,
+		StructArrayFields:    c.StructArrayFields,
+		Partitions:           c.Partitions,
+		VirtualChannelNames:  c.VirtualChannelNames,
+		PhysicalChannelNames: c.PhysicalChannelNames,
+		ShardsNum:            c.ShardsNum,
+		ConsistencyLevel:     c.ConsistencyLevel,
+		CreateTime:           c.CreateTime,
+		StartPositions:       c.StartPositions,
+		Aliases:              c.Aliases,
+		Properties:           c.Properties,
+		State:                c.State,
+		EnableDynamicField:   c.EnableDynamicField,
+		Functions:            c.Functions,
+		UpdateTimestamp:      c.UpdateTimestamp,
+		SchemaVersion:        c.SchemaVersion,
+		ShardInfos:           c.ShardInfos,
 	}
 }
 
 func (c *Collection) Clone() *Collection {
+	shardInfos := make(map[string]*ShardInfo, len(c.ShardInfos))
+	for channelName, shardInfo := range c.ShardInfos {
+		shardInfos[channelName] = &ShardInfo{
+			VChannelName:         channelName,
+			PChannelName:         shardInfo.PChannelName,
+			LastTruncateTimeTick: shardInfo.LastTruncateTimeTick,
+		}
+	}
 	return &Collection{
-		TenantID:               c.TenantID,
-		DBID:                   c.DBID,
-		CollectionID:           c.CollectionID,
-		Name:                   c.Name,
-		DBName:                 c.DBName,
-		Description:            c.Description,
-		AutoID:                 c.AutoID,
-		Fields:                 CloneFields(c.Fields),
-		StructArrayFields:      CloneStructArrayFields(c.StructArrayFields),
-		Partitions:             ClonePartitions(c.Partitions),
-		VirtualChannelNames:    common.CloneStringList(c.VirtualChannelNames),
-		PhysicalChannelNames:   common.CloneStringList(c.PhysicalChannelNames),
-		ShardsNum:              c.ShardsNum,
-		ConsistencyLevel:       c.ConsistencyLevel,
-		CreateTime:             c.CreateTime,
-		StartPositions:         common.CloneKeyDataPairs(c.StartPositions),
-		Aliases:                common.CloneStringList(c.Aliases),
-		Properties:             common.CloneKeyValuePairs(c.Properties),
-		State:                  c.State,
-		EnableDynamicField:     c.EnableDynamicField,
-		Functions:              CloneFunctions(c.Functions),
-		UpdateTimestamp:        c.UpdateTimestamp,
-		SchemaVersion:          c.SchemaVersion,
-		LastTruncateTimestamps: common.CloneMap(c.LastTruncateTimestamps),
+		TenantID:             c.TenantID,
+		DBID:                 c.DBID,
+		CollectionID:         c.CollectionID,
+		Name:                 c.Name,
+		DBName:               c.DBName,
+		Description:          c.Description,
+		AutoID:               c.AutoID,
+		Fields:               CloneFields(c.Fields),
+		StructArrayFields:    CloneStructArrayFields(c.StructArrayFields),
+		Partitions:           ClonePartitions(c.Partitions),
+		VirtualChannelNames:  common.CloneStringList(c.VirtualChannelNames),
+		PhysicalChannelNames: common.CloneStringList(c.PhysicalChannelNames),
+		ShardsNum:            c.ShardsNum,
+		ConsistencyLevel:     c.ConsistencyLevel,
+		CreateTime:           c.CreateTime,
+		StartPositions:       common.CloneKeyDataPairs(c.StartPositions),
+		Aliases:              common.CloneStringList(c.Aliases),
+		Properties:           common.CloneKeyValuePairs(c.Properties),
+		State:                c.State,
+		EnableDynamicField:   c.EnableDynamicField,
+		Functions:            CloneFunctions(c.Functions),
+		UpdateTimestamp:      c.UpdateTimestamp,
+		SchemaVersion:        c.SchemaVersion,
+		ShardInfos:           shardInfos,
 	}
 }
 
@@ -179,29 +193,45 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 			PartitionCreatedTimestamp: coll.PartitionCreatedTimestamps[idx],
 		}
 	}
+	shardInfos := make(map[string]*ShardInfo, len(coll.VirtualChannelNames))
+	for idx, channelName := range coll.VirtualChannelNames {
+		if len(coll.ShardInfos) == 0 {
+			shardInfos[channelName] = &ShardInfo{
+				VChannelName:         channelName,
+				PChannelName:         coll.PhysicalChannelNames[idx],
+				LastTruncateTimeTick: 0,
+			}
+		} else {
+			shardInfos[channelName] = &ShardInfo{
+				VChannelName:         channelName,
+				PChannelName:         coll.PhysicalChannelNames[idx],
+				LastTruncateTimeTick: coll.ShardInfos[idx].LastTruncateTimeTick,
+			}
+		}
+	}
 
 	return &Collection{
-		CollectionID:           coll.ID,
-		DBID:                   coll.DbId,
-		Name:                   coll.Schema.Name,
-		DBName:                 coll.Schema.DbName,
-		Description:            coll.Schema.Description,
-		AutoID:                 coll.Schema.AutoID,
-		Fields:                 UnmarshalFieldModels(coll.GetSchema().GetFields()),
-		StructArrayFields:      UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
-		Partitions:             partitions,
-		VirtualChannelNames:    coll.VirtualChannelNames,
-		PhysicalChannelNames:   coll.PhysicalChannelNames,
-		ShardsNum:              coll.ShardsNum,
-		ConsistencyLevel:       coll.ConsistencyLevel,
-		CreateTime:             coll.CreateTime,
-		StartPositions:         coll.StartPositions,
-		State:                  coll.State,
-		Properties:             coll.Properties,
-		EnableDynamicField:     coll.Schema.EnableDynamicField,
-		UpdateTimestamp:        coll.UpdateTimestamp,
-		SchemaVersion:          coll.Schema.Version,
-		LastTruncateTimestamps: coll.LastTruncateTimestamps,
+		CollectionID:         coll.ID,
+		DBID:                 coll.DbId,
+		Name:                 coll.Schema.Name,
+		DBName:               coll.Schema.DbName,
+		Description:          coll.Schema.Description,
+		AutoID:               coll.Schema.AutoID,
+		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
+		StructArrayFields:    UnmarshalStructArrayFieldModels(coll.GetSchema().GetStructArrayFields()),
+		Partitions:           partitions,
+		VirtualChannelNames:  coll.VirtualChannelNames,
+		PhysicalChannelNames: coll.PhysicalChannelNames,
+		ShardsNum:            coll.ShardsNum,
+		ConsistencyLevel:     coll.ConsistencyLevel,
+		CreateTime:           coll.CreateTime,
+		StartPositions:       coll.StartPositions,
+		State:                coll.State,
+		Properties:           coll.Properties,
+		EnableDynamicField:   coll.Schema.EnableDynamicField,
+		UpdateTimestamp:      coll.UpdateTimestamp,
+		SchemaVersion:        coll.Schema.Version,
+		ShardInfos:           shardInfos,
 	}
 }
 
@@ -265,20 +295,32 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		collSchema.StructArrayFields = structArrayFields
 	}
 
+	shardInfos := make([]*pb.CollectionShardInfo, len(coll.ShardInfos))
+	for idx, channelName := range coll.VirtualChannelNames {
+		if shard, ok := coll.ShardInfos[channelName]; ok {
+			shardInfos[idx] = &pb.CollectionShardInfo{
+				LastTruncateTimeTick: shard.LastTruncateTimeTick,
+			}
+		} else {
+			shardInfos[idx] = &pb.CollectionShardInfo{
+				LastTruncateTimeTick: 0,
+			}
+		}
+	}
 	collectionPb := &pb.CollectionInfo{
-		ID:                     coll.CollectionID,
-		DbId:                   coll.DBID,
-		Schema:                 collSchema,
-		CreateTime:             coll.CreateTime,
-		VirtualChannelNames:    coll.VirtualChannelNames,
-		PhysicalChannelNames:   coll.PhysicalChannelNames,
-		ShardsNum:              coll.ShardsNum,
-		ConsistencyLevel:       coll.ConsistencyLevel,
-		StartPositions:         coll.StartPositions,
-		State:                  coll.State,
-		Properties:             coll.Properties,
-		UpdateTimestamp:        coll.UpdateTimestamp,
-		LastTruncateTimestamps: coll.LastTruncateTimestamps,
+		ID:                   coll.CollectionID,
+		DbId:                 coll.DBID,
+		Schema:               collSchema,
+		CreateTime:           coll.CreateTime,
+		VirtualChannelNames:  coll.VirtualChannelNames,
+		PhysicalChannelNames: coll.PhysicalChannelNames,
+		ShardsNum:            coll.ShardsNum,
+		ConsistencyLevel:     coll.ConsistencyLevel,
+		StartPositions:       coll.StartPositions,
+		State:                coll.State,
+		Properties:           coll.Properties,
+		UpdateTimestamp:      coll.UpdateTimestamp,
+		ShardInfos:           shardInfos,
 	}
 
 	if c.withPartitions {

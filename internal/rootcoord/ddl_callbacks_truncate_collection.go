@@ -19,8 +19,11 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -52,7 +55,7 @@ func (c *Core) broadcastTruncateCollection(ctx context.Context, req *milvuspb.Tr
 	msg := message.NewTruncateCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(body).
-		WithBroadcast(channels).
+		WithBroadcast(channels, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -75,16 +78,51 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 	}
 
 	// Drop segments that were updated before the flush timestamp
-	err := c.mixCoord.DropSegmentsByTime(ctx, header.CollectionId, flushTsList)
-	if err != nil {
-		return err
+	if err := c.mixCoord.DropSegmentsByTime(ctx, header.CollectionId, flushTsList); err != nil {
+		return errors.Wrap(err, "when dropping segments by time")
 	}
 
 	// manually update current target to sync QueryCoord's view
-	err = c.mixCoord.ManualUpdateCurrentTarget(ctx, header.CollectionId)
-	if err != nil {
-		return err
+	if err := c.mixCoord.ManualUpdateCurrentTarget(ctx, header.CollectionId); err != nil {
+		return errors.Wrap(err, "when manually updating current target")
 	}
 
+	if err := c.meta.TruncateCollection(ctx, result); err != nil {
+		if errors.Is(err, errAlterCollectionNotFound) {
+			log.Ctx(ctx).Warn("truncate a non-existent collection, ignore it", log.FieldMessage(result.Message))
+			return nil
+		}
+		return errors.Wrap(err, "when truncating collection")
+	}
+
+	// notify datacoord to update their meta cache
+	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
+		return errors.Wrap(err, "when broadcasting altered collection")
+	}
+	return nil
+}
+
+// truncateCollectionV2AckOnceCallback is called when the truncate collection message is acknowledged once
+func (c *DDLCallback) truncateCollectionV2AckOnceCallback(ctx context.Context, result message.AckResultTruncateCollectionMessageV2) error {
+	msg := result.Message
+	// When the ack callback of truncate collection operation is executing,
+	// the compaction and flush operation may be executed in parallel.
+	// So if some vchannel flush a new segment which order after the truncate collection operation,
+	// the segment should not be dropped, but the compaction may compact it with the segment which order before the truncate collection operation.
+	// the new compacted segment can not be dropped as whole, break the design of truncate collection operation.
+	// we need to forbid the compaction of current collection here.
+	collectionID := msg.Header().CollectionId
+	if err := c.meta.BeginTruncateCollection(ctx, collectionID); err != nil {
+		if errors.Is(err, errAlterCollectionNotFound) {
+			log.Ctx(ctx).Warn("begin to truncate a non-existent collection, ignore it", log.FieldMessage(result.Message))
+			return nil
+		}
+		return errors.Wrap(err, "when beginning truncate collection")
+	}
+
+	// notify datacoord to update their meta cache
+	if err := c.broker.BroadcastAlteredCollection(ctx, collectionID); err != nil {
+		return errors.Wrap(err, "when broadcasting altered collection")
+	}
 	return nil
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	pb "github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -2287,4 +2288,95 @@ func TestMetaTable_PrivilegeGroup(t *testing.T) {
 	assert.Error(t, err)
 	_, err = mt.ListPrivilegeGroups(context.TODO())
 	assert.NoError(t, err)
+}
+
+func TestMetaTable_TruncateCollection(t *testing.T) {
+	channel.ResetStaticPChannelStatsManager()
+
+	kv, _ := kvfactory.GetEtcdAndPath()
+	path := funcutil.RandomString(10) + "/meta"
+	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	ss, err := rootcoord.NewSuffixSnapshot(catalogKV, rootcoord.SnapshotsSep, path, rootcoord.SnapshotPrefix)
+	require.NoError(t, err)
+	catalog := rootcoord.NewCatalog(catalogKV, ss)
+
+	allocator := mocktso.NewAllocator(t)
+	allocator.EXPECT().GenerateTSO(mock.Anything).Return(1000, nil)
+
+	meta, err := NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+
+	err = meta.AddCollection(context.Background(), &model.Collection{
+		CollectionID:         1,
+		PhysicalChannelNames: []string{"pchannel1"},
+		VirtualChannelNames:  []string{"vchannel1"},
+		State:                pb.CollectionState_CollectionCreated,
+		DBID:                 util.DefaultDBID,
+		Properties:           common.NewKeyValuePairs(map[string]string{}),
+		ShardInfos: map[string]*model.ShardInfo{
+			"vchannel1": {
+				VChannelName:         "vchannel1",
+				PChannelName:         "pchannel1",
+				LastTruncateTimeTick: 0,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// begin truncate collection
+	err = meta.BeginTruncateCollection(context.Background(), 1)
+	require.NoError(t, err)
+	coll, err := meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "1", m[common.CollectionOnTruncatingKey])
+	require.Equal(t, uint64(0), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+
+	// reload the meta
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	require.Equal(t, "1", m[common.CollectionOnTruncatingKey])
+	require.Equal(t, uint64(0), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+
+	// remove the temp property
+	b := message.NewTruncateCollectionMessageBuilderV2().
+		WithHeader(&message.TruncateCollectionMessageHeader{
+			CollectionId: 1,
+		}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast()
+
+	meta.TruncateCollection(context.Background(), message.BroadcastResultTruncateCollectionMessageV2{
+		Message: message.MustAsBroadcastTruncateCollectionMessageV2(b),
+		Results: map[string]*message.AppendResult{
+			"vchannel1": {
+				TimeTick: 1000,
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	_, ok := m[common.CollectionOnTruncatingKey]
+	require.False(t, ok)
+	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
+
+	// reload the meta again
+	channel.ResetStaticPChannelStatsManager()
+	meta, err = NewMetaTable(context.Background(), catalog, allocator)
+	require.NoError(t, err)
+	coll, err = meta.GetCollectionByID(context.Background(), util.DefaultDBName, 1, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	m = common.CloneKeyValuePairs(coll.Properties).ToMap()
+	_, ok = m[common.CollectionOnTruncatingKey]
+	require.False(t, ok)
+	require.Equal(t, 1, len(coll.ShardInfos))
+	require.Equal(t, uint64(1000), coll.ShardInfos["vchannel1"].LastTruncateTimeTick)
 }

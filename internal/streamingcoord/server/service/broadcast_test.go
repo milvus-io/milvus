@@ -52,7 +52,7 @@ func TestBroadcastService(t *testing.T) {
 	msg := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(&message.CreateCollectionMessageHeader{}).
 		WithBody(&msgpb.CreateCollectionRequest{}).
-		WithBroadcast([]string{"v1"}, message.NewCollectionNameResourceKey("r1")).
+		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 
 	service := NewBroadcastService()

@@ -8,6 +8,7 @@ import (
 
 // init the message ack callbacks
 func init() {
+	resetMessageAckOnceCallbacks()
 	resetMessageAckCallbacks()
 	resetMessageCheckCallbacks()
 }
