@@ -1020,7 +1020,7 @@ func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
 	// clean stopping/offline nodes
 	assignedNodes := typeutil.NewUniqueSet()
 	for _, rg := range rm.groups {
-		for _, node := range rg.GetNodes() {
+		for _, node := range rg.GetMeta().GetNodes() {
 			assignedNodes.Insert(node)
 			info := rm.nodeMgr.Get(node)
 			if info == nil {
