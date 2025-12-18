@@ -252,6 +252,12 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 			Description: "dynamic schema",
 			DataType:    schemapb.DataType_JSON,
 			IsDynamic:   true,
+			Nullable:    true,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_BytesData{
+					BytesData: []byte("{}"),
+				},
+			},
 		})
 		log.Ctx(ctx).Info("append dynamic field", zap.String("collection", schema.Name))
 	}
