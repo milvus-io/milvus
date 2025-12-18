@@ -29,14 +29,19 @@ type CreateCollectionConfig struct {
 	ResourceGroups   []string
 }
 
-func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectionName string, rowNum, dim int) error {
+type PrimaryKeyConfig struct {
+	FieldName   string
+	FieldType   schemapb.DataType
+	NumChannels int
+}
+
+func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectionName string, rowNum, dim int, pkConfig *PrimaryKeyConfig) error {
+	pkColumn := GenerateChannelBalancedPrimaryKeys(pkConfig.FieldName, pkConfig.FieldType, rowNum, pkConfig.NumChannels)
 	fVecColumn := NewFloatVectorFieldData(FloatVecField, rowNum, dim)
-	hashKeys := GenerateHashKeys(rowNum)
 	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
-		HashKeys:       hashKeys,
+		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
 		NumRows:        uint32(rowNum),
 	})
 	if err != nil {
@@ -73,7 +78,7 @@ func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectio
 }
 
 func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context, cfg *CreateCollectionConfig) {
-	schema := ConstructSchema(cfg.CollectionName, cfg.Dim, true)
+	schema := ConstructSchema(cfg.CollectionName, cfg.Dim, false)
 	s.CreateCollection(ctx, cfg, schema)
 }
 
@@ -108,7 +113,11 @@ func (s *MiniClusterSuite) CreateCollection(ctx context.Context, cfg *CreateColl
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	for i := 0; i < cfg.SegmentNum; i++ {
-		err = s.InsertAndFlush(ctx, cfg.DBName, cfg.CollectionName, cfg.RowNumPerSegment, cfg.Dim)
+		err = s.InsertAndFlush(ctx, cfg.DBName, cfg.CollectionName, cfg.RowNumPerSegment, cfg.Dim, &PrimaryKeyConfig{
+			FieldName:   Int64Field,
+			FieldType:   schemapb.DataType_Int64,
+			NumChannels: cfg.ChannelNum,
+		})
 		s.NoError(err)
 	}
 
