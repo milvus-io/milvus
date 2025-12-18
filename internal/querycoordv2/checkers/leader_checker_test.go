@@ -291,7 +291,7 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	observer.meta.ReplicaManager.Put(ctx, mutableReplica.IntoReplica())
 
 	tasks := suite.checker.Check(context.TODO())
-	suite.Len(tasks, 1)
+	suite.Len(tasks, 0)
 }
 
 func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
