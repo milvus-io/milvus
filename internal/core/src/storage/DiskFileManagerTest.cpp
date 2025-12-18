@@ -184,6 +184,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     write_offset += small_index_size;
     close(fd);
     EXPECT_EQ(os->Tell(), write_offset);
+    os->Close();
 
     auto is = diskAnnFileManager->OpenInputStream(index_file_path);
     size_t read_offset = 0;
