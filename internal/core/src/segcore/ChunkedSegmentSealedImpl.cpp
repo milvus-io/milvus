@@ -545,12 +545,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 chunked_column_group, field_id, field_meta);
             auto data_type = field_meta.get_data_type();
 
-            load_field_data_common(field_id,
-                                   column,
-                                   num_rows,
-                                   data_type,
-                                   info.enable_mmap,
-                                   true);
+            load_field_data_common(
+                field_id, column, num_rows, data_type, info.enable_mmap, true);
             if (field_id == TimestampFieldID) {
                 auto timestamp_proxy_column = get_column(TimestampFieldID);
                 AssertInfo(timestamp_proxy_column != nullptr,
