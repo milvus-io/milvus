@@ -40,6 +40,10 @@ BitsetType
 ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
+    tracer::AutoSpan span("ExecuteTask", tracer::GetRootSpan(), true);
+    span.GetSpan()->SetAttribute("active_count",
+                                 query_context->get_active_count());
+
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plan.plan_node_->ToString(),
               query_context->get_active_count(),
@@ -66,6 +70,10 @@ ExecPlanNodeVisitor::ExecuteTask(
             ThrowInfo(UnexpectedError, "expr return type not matched");
         }
     }
+
+    span.GetSpan()->SetAttribute("total_rows", processed_num);
+    span.GetSpan()->SetAttribute("matched_rows", bitset_holder.count());
+
     return bitset_holder;
 }
 
@@ -133,7 +141,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
             op_context.storage_usage.scanned_total_bytes.load();
     } else {
         retrieve_result.total_data_cnt_ = bitset_holder.size();
-        tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
+        tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan(), true);
         auto results_pair = segment->find_first(node.limit_, bitset_holder);
         retrieve_result.result_offsets_ = std::move(results_pair.first);
         retrieve_result.has_more_result = results_pair.second;

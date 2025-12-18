@@ -178,6 +178,8 @@ std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  proto::plan::OpType op_type,
                                  exec::SegmentExpr* segment) {
+    tracer::AutoSpan span(
+        "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }
@@ -186,6 +188,11 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         case proto::plan::OpType::Match:
             return MatchQuery(literal, segment);
         case proto::plan::OpType::InnerMatch: {
+            span.GetSpan()->SetAttribute("op_type", "InnerMatch");
+            span.GetSpan()->SetAttribute("query_literal_length",
+                                         static_cast<int>(literal.length()));
+            span.GetSpan()->SetAttribute("min_gram", min_gram_);
+            span.GetSpan()->SetAttribute("max_gram", max_gram_);
             bool need_post_filter = literal.length() > max_gram_;
 
             if (schema_.data_type() == proto::schema::DataType::JSON) {
@@ -211,6 +218,11 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
             }
         }
         case proto::plan::OpType::PrefixMatch: {
+            span.GetSpan()->SetAttribute("op_type", "PrefixMatch");
+            span.GetSpan()->SetAttribute("query_literal_length",
+                                         static_cast<int>(literal.length()));
+            span.GetSpan()->SetAttribute("min_gram", min_gram_);
+            span.GetSpan()->SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
                     auto x =
@@ -239,6 +251,11 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
             }
         }
         case proto::plan::OpType::PostfixMatch: {
+            span.GetSpan()->SetAttribute("op_type", "PostfixMatch");
+            span.GetSpan()->SetAttribute("query_literal_length",
+                                         static_cast<int>(literal.length()));
+            span.GetSpan()->SetAttribute("min_gram", min_gram_);
+            span.GetSpan()->SetAttribute("max_gram", max_gram_);
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
                     auto x =
@@ -301,6 +318,9 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
 
+    auto ngram_hit_count = bitset.count();
+    auto final_result_count = ngram_hit_count;
+
     if (need_post_filter) {
         TargetBitmapView res(bitset);
         TargetBitmap valid(res.size(), true);
@@ -321,6 +341,16 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(
 
         segment->ProcessAllDataChunk<T>(
             execute_batch, std::nullptr_t{}, res, valid_res);
+        final_result_count = bitset.count();
+    }
+
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("need_post_filter", need_post_filter);
+        root_span->SetAttribute("ngram_hit_count",
+                                static_cast<int>(ngram_hit_count));
+        root_span->SetAttribute("final_result_count",
+                                static_cast<int>(final_result_count));
+        root_span->SetAttribute("total_count", static_cast<int>(bitset.size()));
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));
@@ -359,6 +389,12 @@ split_by_wildcard(const std::string& literal) {
 std::optional<TargetBitmap>
 NgramInvertedIndex::MatchQuery(const std::string& literal,
                                exec::SegmentExpr* segment) {
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("match_query_literal_length",
+                                static_cast<int>(literal.length()));
+        root_span->SetAttribute("match_query_min_gram", min_gram_);
+        root_span->SetAttribute("match_query_max_gram", max_gram_);
+    }
     TargetBitmap bitset{static_cast<size_t>(Count())};
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
@@ -375,6 +411,8 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     PatternMatchTranslator translator;
     auto regex_pattern = translator(literal);
     RegexMatcher matcher(regex_pattern);
+
+    auto ngram_hit_count = bitset.count();
 
     if (schema_.data_type() == proto::schema::DataType::JSON) {
         auto predicate = [&literal, &matcher, this](const milvus::Json& data) {
@@ -421,6 +459,17 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
             };
         segment->ProcessAllDataChunk<std::string_view>(
             execute_batch, std::nullptr_t{}, res, valid_res);
+    }
+
+    auto final_result_count = bitset.count();
+
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("match_ngram_hit_count",
+                                static_cast<int>(ngram_hit_count));
+        root_span->SetAttribute("match_final_result_count",
+                                static_cast<int>(final_result_count));
+        root_span->SetAttribute("match_total_count",
+                                static_cast<int>(bitset.size()));
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));

@@ -594,6 +594,8 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::In(const size_t n, const T* values) {
+    tracer::AutoSpan span("BitmapIndex::In", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
 
@@ -633,6 +635,8 @@ BitmapIndex<T>::In(const size_t n, const T* values) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::NotIn(const size_t n, const T* values) {
+    tracer::AutoSpan span("BitmapIndex::NotIn", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
 
     if (is_mmap_) {
@@ -682,6 +686,8 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
 template <typename T>
 const TargetBitmap
 BitmapIndex<T>::IsNull() {
+    tracer::AutoSpan span("BitmapIndex::IsNull", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, true);
     res &= valid_bitset_;
@@ -692,6 +698,8 @@ BitmapIndex<T>::IsNull() {
 template <typename T>
 TargetBitmap
 BitmapIndex<T>::IsNotNull() {
+    tracer::AutoSpan span("BitmapIndex::IsNotNull", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, true);
     res &= valid_bitset_;
@@ -701,6 +709,8 @@ BitmapIndex<T>::IsNotNull() {
 template <typename T>
 TargetBitmap
 BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
+    tracer::AutoSpan span("BitmapIndex::RangeForBitset", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
     if (ShouldSkip(value, value, op)) {
@@ -773,6 +783,8 @@ BitmapIndex<T>::Range(const T value, OpType op) {
 template <typename T>
 TargetBitmap
 BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
+    tracer::AutoSpan span("BitmapIndex::RangeForMmap", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
     if (ShouldSkip(value, value, op)) {
@@ -835,6 +847,9 @@ BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
 template <typename T>
 TargetBitmap
 BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
+    tracer::AutoSpan span("BitmapIndex::RangeForRoaring",
+                          tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
     if (ShouldSkip(value, value, op)) {
@@ -899,6 +914,8 @@ BitmapIndex<T>::RangeForBitset(const T lower_value,
                                bool lb_inclusive,
                                const T upper_value,
                                bool ub_inclusive) {
+    tracer::AutoSpan span("BitmapIndex::RangeForBitset", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
     if (lower_value > upper_value ||
@@ -975,6 +992,8 @@ BitmapIndex<T>::RangeForMmap(const T lower_value,
                              bool lb_inclusive,
                              const T upper_value,
                              bool ub_inclusive) {
+    tracer::AutoSpan span("BitmapIndex::RangeForMmap", tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
     if (lower_value > upper_value ||
@@ -1034,6 +1053,9 @@ BitmapIndex<T>::RangeForRoaring(const T lower_value,
                                 bool lb_inclusive,
                                 const T upper_value,
                                 bool ub_inclusive) {
+    tracer::AutoSpan span("BitmapIndex::RangeForRoaring",
+                          tracer::GetRootSpan());
+
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, false);
     if (lower_value > upper_value ||
@@ -1107,6 +1129,7 @@ std::optional<T>
 BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(is_built_, "index has not been built");
     AssertInfo(idx < total_num_rows_, "out of range of total count");
+    tracer::AutoSpan span("BitmapIndex::Reverse_Lookup", tracer::GetRootSpan());
 
     if (!valid_bitset_[idx]) {
         return std::nullopt;
@@ -1225,6 +1248,7 @@ template <>
 const TargetBitmap
 BitmapIndex<std::string>::Query(const DatasetPtr& dataset) {
     AssertInfo(is_built_, "index has not been built");
+    tracer::AutoSpan span("BitmapIndex::Query", tracer::GetRootSpan());
 
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     auto val = dataset->Get<std::string>(MATCH_VALUE);
@@ -1272,6 +1296,8 @@ template <>
 const TargetBitmap
 BitmapIndex<std::string>::RegexQuery(const std::string& regex_pattern) {
     AssertInfo(is_built_, "index has not been built");
+    tracer::AutoSpan span("BitmapIndex::RegexQuery", tracer::GetRootSpan());
+
     RegexMatcher matcher(regex_pattern);
     TargetBitmap res(total_num_rows_, false);
     if (is_mmap_) {
