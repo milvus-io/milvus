@@ -358,11 +358,11 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 			for _, t := range test.tasks {
 				s.handler.submitTask(t)
 			}
-		gotTasks := s.handler.schedule()
-		gotPlanIDs := lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
-			return t.GetTaskProto().GetPlanID()
-		})
-		s.ElementsMatch(test.expectedOut, gotPlanIDs)
+			gotTasks := s.handler.schedule()
+			gotPlanIDs := lo.Map(gotTasks, func(t CompactionTask, _ int) int64 {
+				return t.GetTaskProto().GetPlanID()
+			})
+			s.ElementsMatch(test.expectedOut, gotPlanIDs)
 		})
 	}
 }

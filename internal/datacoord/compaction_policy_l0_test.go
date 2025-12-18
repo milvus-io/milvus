@@ -615,8 +615,8 @@ func (s *L0CompactionPolicySuite) TestLevelZeroCompactionViewString() {
 		triggerID: 123,
 		label:     label,
 		l0Segments: []*SegmentView{
-{ID: 100, Level: datapb.SegmentLevel_L0, DeltaSize: 4 * MB, DeltalogCount: 1},
-{ID: 101, Level: datapb.SegmentLevel_L0, DeltaSize: 8 * MB, DeltalogCount: 2},
+			{ID: 100, Level: datapb.SegmentLevel_L0, DeltaSize: 4 * MB, DeltalogCount: 1},
+			{ID: 101, Level: datapb.SegmentLevel_L0, DeltaSize: 8 * MB, DeltalogCount: 2},
 		},
 		latestDeletePos: &msgpb.MsgPosition{Timestamp: 30000},
 	}
