@@ -8,39 +8,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// A system preserved message, should not allowed to provide outside of the streaming system.
-var systemMessageType = map[MessageType]struct{}{
-	MessageTypeTimeTick:    {},
-	MessageTypeBeginTxn:    {},
-	MessageTypeCommitTxn:   {},
-	MessageTypeRollbackTxn: {},
-	MessageTypeTxn:         {},
-}
-
-var selfControlledMessageType = map[MessageType]struct{}{
-	MessageTypeTimeTick:      {},
-	MessageTypeCreateSegment: {},
-	MessageTypeFlush:         {},
-}
-
-var cipherMessageType = map[MessageType]struct{}{
-	MessageTypeInsert: {},
-	MessageTypeDelete: {},
-}
-
-var exclusiveRequiredMessageType = map[MessageType]struct{}{
-	MessageTypeCreateCollection:     {},
-	MessageTypeDropCollection:       {},
-	MessageTypeCreatePartition:      {},
-	MessageTypeDropPartition:        {},
-	MessageTypeManualFlush:          {},
-	MessageTypeFlushAll:             {},
-	MessageTypeSchemaChange:         {},
-	MessageTypeAlterReplicateConfig: {},
-	MessageTypeAlterCollection:      {},
-	MessageTypeTruncateCollection:   {},
-}
-
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.
 // It will panic if the message is not the target specialized message or failed to decode the specialized header.
 func mustAsSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMessage) specializedMutableMessage[H, B] {
