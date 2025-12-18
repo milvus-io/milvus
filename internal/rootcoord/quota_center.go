@@ -163,7 +163,7 @@ type QuotaCenter struct {
 	// TODO many metrics information only have collection id currently, it can be removed after db id add into all metrics.
 	collectionIDToDBID *typeutil.ConcurrentMap[int64, int64] // collection id ->  db id
 
-	collectionProps *typeutil.ConcurrentMap[int64, map[string]string] // collection id -> collection properties
+	collectionProps map[int64]map[string]string // collection id -> collection properties
 
 	rateLimiter *rlinternal.RateLimiterTree
 
@@ -174,7 +174,7 @@ type QuotaCenter struct {
 	// Cache previous collection rates (baseLimit * factor) to avoid unnecessary updates
 	// If rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
 	// Key format: "collectionID-rateType"
-	prevRates *typeutil.ConcurrentMap[string, float64]
+	prevRates map[string]float64
 
 	stopOnce sync.Once
 	stopChan chan struct{}
@@ -196,10 +196,10 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 		meta:                 meta,
 		readableCollections:  make(map[int64]map[int64][]int64, 0),
 		writableCollections:  make(map[int64]map[int64][]int64, 0),
-		collectionProps:      typeutil.NewConcurrentMap[int64, map[string]string](),
+		collectionProps:      make(map[int64]map[string]string),
 		rateLimiter:          rlinternal.NewRateLimiterTree(initInfLimiter(internalpb.RateScope_Cluster, allOps)),
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
-		prevRates:            typeutil.NewConcurrentMap[string, float64](),
+		prevRates:            make(map[string]float64),
 		stopChan:             make(chan struct{}),
 	}
 	q.clearMetrics()
@@ -381,7 +381,7 @@ func (q *QuotaCenter) clearMetrics() {
 	q.collectionIDToDBID = typeutil.NewConcurrentMap[int64, int64]()
 	q.collections = typeutil.NewConcurrentMap[string, int64]()
 	q.dbs = typeutil.NewConcurrentMap[string, int64]()
-	q.collectionProps = typeutil.NewConcurrentMap[int64, map[string]string]()
+	q.collectionProps = make(map[int64]map[string]string)
 }
 
 func updateNumEntitiesLoaded(current map[int64]int64, qn *metricsinfo.QueryNodeCollectionMetrics) map[int64]int64 {
@@ -931,7 +931,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			// If the rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
 			newRate := float64(v.Limit() * Limit(factor))
 			rateKey := strconv.FormatInt(collection, 10) + "-" + strconv.FormatInt(int64(rt), 10)
-			prevRate, ok := q.prevRates.Get(rateKey)
+			prevRate, ok := q.prevRates[rateKey]
 			if ok && prevRate > 0 {
 				relativeChange := math.Abs(newRate-prevRate) / prevRate
 				if relativeChange < factorChangeThreshold {
@@ -939,7 +939,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 				}
 			}
 			v.SetLimit(Limit(newRate))
-			q.prevRates.Insert(rateKey, newRate)
+			q.prevRates[rateKey] = newRate
 		}
 
 		collectionProps := q.getCollectionLimitProperties(collection)
@@ -1370,7 +1370,7 @@ func (q *QuotaCenter) getCollectionMaxLimit(rt internalpb.RateType, collectionID
 func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]string {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
 
-	if props, ok := q.collectionProps.Get(collection); ok {
+	if props, ok := q.collectionProps[collection]; ok {
 		return props
 	}
 
@@ -1387,7 +1387,7 @@ func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	q.collectionProps.Insert(collection, properties)
+	q.collectionProps[collection] = properties
 
 	return properties
 }

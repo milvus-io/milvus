@@ -481,15 +481,15 @@ func getBinlogFileCount(s *datapb.SegmentInfo) int {
 
 func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	info := &metricsinfo.DataCoordQuotaMetrics{}
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	// collection id => l0 delta entry count
 	collectionL0RowCounts := make(map[UniqueID]int64)
 
-	m.segMu.RLock()
 	segments := m.segments.GetSegments()
-	m.segMu.RUnlock()
 	var total int64
 	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
 	binlogFileCount := make(map[string]int64)             // map[collectionID]count
