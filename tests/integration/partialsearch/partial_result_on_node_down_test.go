@@ -25,7 +25,21 @@ const (
 	dbName = ""
 
 	timeout = 10 * time.Second
+
+	// hashDistributionTolerance accounts for hash-based channel distribution imbalance
+	// Hash distribution doesn't guarantee exact even split between channels
+	hashDistributionTolerance = 0.1 // 10% tolerance
 )
+
+// checkPartialResultRowCount checks if the returned row count meets the partial result requirement
+// considering hash distribution tolerance across channels
+func checkPartialResultRowCount(numEntities, totalEntities int, requiredRatio float64) bool {
+	adjustedRatio := requiredRatio - hashDistributionTolerance
+	if adjustedRatio < 0 {
+		adjustedRatio = 0
+	}
+	return numEntities >= int(float64(totalEntities)*adjustedRatio)
+}
 
 type PartialSearchTestSuit struct {
 	integration.MiniClusterSuite
@@ -135,7 +149,7 @@ func (s *PartialSearchTestSuit) TestSingleNodeDownOnSingleReplica() {
 				} else if numEntities < totalEntities {
 					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
-					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+					s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 				}
 			}
 		}
@@ -202,7 +216,7 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 						log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 						partialResultCounter.Inc()
 						partialResultRecoverTs.Store(time.Now().UnixNano())
-						s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+						s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 					} else {
 						log.Info("query return full result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 						fullResultRecoverTs.Store(time.Now().UnixNano())
@@ -276,7 +290,7 @@ func (s *PartialSearchTestSuit) TestSingleNodeDownOnMultiReplica() {
 				} else if numEntities < totalEntities {
 					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
-					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+					s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 				}
 			}
 		}
@@ -341,7 +355,7 @@ func (s *PartialSearchTestSuit) TestEachReplicaHasNodeDownOnMultiReplica() {
 				} else if numEntities < totalEntities {
 					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
-					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+					s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 				}
 			}
 		}
@@ -418,7 +432,7 @@ func (s *PartialSearchTestSuit) TestPartialResultRequiredDataRatioTooHigh() {
 				} else if numEntities < totalEntities {
 					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
-					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+					s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 				}
 			}
 		}
@@ -476,7 +490,7 @@ func (s *PartialSearchTestSuit) TestPartialResultRequiredDataRatioTooHigh() {
 // 				} else if numEntities < totalEntities {
 // 					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 // 					partialResultCounter.Inc()
-// 					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+// 					s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 // 				}
 // 			}
 // 		}
@@ -540,7 +554,7 @@ func (s *PartialSearchTestSuit) TestSkipWaitTSafe() {
 				} else if numEntities < totalEntities {
 					log.Info("query return partial result", zap.Int("numEntities", numEntities), zap.Int("totalEntities", totalEntities))
 					partialResultCounter.Inc()
-					s.True(numEntities >= int((float64(totalEntities) * partialResultRequiredDataRatio)))
+					s.True(checkPartialResultRowCount(numEntities, totalEntities, partialResultRequiredDataRatio))
 				}
 			}
 		}
