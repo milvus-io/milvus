@@ -60,7 +60,7 @@ func TestConfigFromRemote(t *testing.T) {
 	mgr, _ := Init(WithEnvSource(formatKey),
 		WithFilesSource(&FileInfo{[]string{"../../configs/milvus.yaml"}, -1}),
 		WithEtcdSource(&EtcdInfo{
-			Endpoints:       []string{cfg.ACUrls[0].Host},
+			Endpoints:       []string{cfg.AdvertiseClientUrls[0].Host},
 			KeyPrefix:       "test",
 			RefreshInterval: 10 * time.Millisecond,
 		}))
