@@ -205,8 +205,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     sub_data = query::dataset::RawDataset{element_begin,
                                                           dim,
                                                           total_embeddings,
-                                                          chunk_data->data(),
-                                                          chunk_offsets};
+                                                          chunk_data->data()};
                     element_begin += total_embeddings;
                 } else {
                     sub_data = query::dataset::RawDataset{row_begin,
