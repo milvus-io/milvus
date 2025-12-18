@@ -132,6 +132,7 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 		zap.Int64("version", newTarget.GetTargetVersion()),
 		zap.String("partStatsVersion", partStatsVersionInfo),
 	)
+	GlobalFailedLoadCache.Remove(collectionID)
 	return true
 }
 

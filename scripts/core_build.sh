@@ -232,7 +232,7 @@ if [ -f /etc/os-release ]; then
     . /etc/os-release
     OS=$ID
 fi
-if [ "$OS" = "ubuntu" ] || [ "$OS" = "rocky" ] || [ "$OS" = "amzn" ]; then
+if [ "$OS" = "velinux" ]||[ "$OS" = "ubuntu" ] || [ "$OS" = "rocky" ] || [ "$OS" = "amzn" ]; then
   BUILD_DISK_ANN=ON
 fi
 
