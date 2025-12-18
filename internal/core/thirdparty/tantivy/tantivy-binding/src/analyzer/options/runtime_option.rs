@@ -1,3 +1,5 @@
+use super::common::*;
+use super::resource_info::{FileResourcePathBuilder, FileResourcePathHelper, ResourceInfo};
 use crate::error::{Result, TantivyBindingError};
 use once_cell::sync::Lazy;
 use serde_json as json;
@@ -6,14 +8,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 static GLOBAL_OPTIONS: Lazy<Arc<RuntimeOption>> = Lazy::new(|| Arc::new(RuntimeOption::new()));
-
-// cache key
-static LINDERA_DOWNLOAD_KEY: &str = "lindera_download_urls";
-static RESOURCE_MAP_KEY: &str = "resource_map";
-
-// normal key
-pub static DEFAULT_DICT_PATH_KEY: &str = "default_dict_path";
-pub static RESOURCE_PATH_KEY: &str = "resource_path";
 
 pub fn set_options(params: &String) -> Result<()> {
     GLOBAL_OPTIONS.set_json(params)
@@ -27,8 +21,8 @@ pub fn get_lindera_download_url(kind: &str) -> Option<Vec<String>> {
     GLOBAL_OPTIONS.get_lindera_download_urls(kind)
 }
 
-pub fn get_resource_file_path(resource_name: &str, file_name: &str) -> Result<PathBuf> {
-    GLOBAL_OPTIONS.get_resource_file_path(resource_name, file_name)
+pub fn get_global_file_resource_helper() -> FileResourcePathHelper {
+    FileResourcePathHelper::new(GLOBAL_OPTIONS.clone())
 }
 
 // analyzer options
@@ -57,35 +51,25 @@ impl RuntimeOption {
         let r = self.inner.read().unwrap();
         r.lindera_download_urls.get(kind).map(|v| v.clone())
     }
+}
 
-    fn get_resource_file_path(&self, resource_name: &str, file_name: &str) -> Result<PathBuf> {
+// file resource
+impl FileResourcePathBuilder for RuntimeOption {
+    fn get_resource_file_path(
+        &self,
+        resource_name: &str,
+        file_name: &str,
+    ) -> Result<(i64, PathBuf)> {
         let r = self.inner.read().unwrap();
-        let resource_id =
-            r.resource_map
-                .get(resource_name)
-                .ok_or(TantivyBindingError::InternalError(format!(
-                    "file resource: {} not found in local resource list",
-                    resource_name
-                )))?;
-        let base = r
-            .params
-            .get(RESOURCE_PATH_KEY)
-            .ok_or(TantivyBindingError::InternalError(
-                "local_resource_path config not init success".to_string(),
-            ))?
-            .as_str()
-            .ok_or("local_resource_path must set as string")?;
-
-        return Ok(PathBuf::new()
-            .join(base)
-            .join(resource_id.to_string())
-            .join(file_name));
+        return r
+            .resource_info
+            .get_resource_file_path(resource_name, file_name);
     }
 }
 
 struct RuntimeOptionInner {
     params: HashMap<String, json::Value>,
-    resource_map: HashMap<String, i64>, // resource name -> resource id
+    resource_info: ResourceInfo, // resource name -> resource id
     lindera_download_urls: HashMap<String, Vec<String>>, // dict name -> url
 }
 
@@ -93,7 +77,7 @@ impl RuntimeOptionInner {
     fn new() -> Self {
         RuntimeOptionInner {
             params: HashMap::new(),
-            resource_map: HashMap::new(),
+            resource_info: ResourceInfo::new(),
             lindera_download_urls: HashMap::new(),
         }
     }
@@ -124,7 +108,7 @@ impl RuntimeOptionInner {
 
             for (key, value) in m {
                 let array = value.as_array().ok_or(TantivyBindingError::InternalError(
-                    "lindera download urls shoud be list".to_string(),
+                    "lindera download urls should be list".to_string(),
                 ))?;
 
                 if !array.iter().all(|v| v.is_string()) {
@@ -143,18 +127,7 @@ impl RuntimeOptionInner {
         }
 
         if key == RESOURCE_MAP_KEY {
-            self.resource_map = HashMap::new();
-
-            let m = value.as_object().ok_or(TantivyBindingError::InternalError(
-                "lindera download urls should be a json map".to_string(),
-            ))?;
-
-            for (key, value) in m {
-                let url = value.as_i64().ok_or(TantivyBindingError::InternalError(
-                    "lindera download url shoud be string".to_string(),
-                ))?;
-                self.resource_map.insert(key.to_string(), url);
-            }
+            self.resource_info = ResourceInfo::from_global_json(&value)?;
             return Ok(());
         }
 

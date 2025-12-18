@@ -1037,6 +1037,7 @@ message ValidateAnalyzerRequest{
 
 message ValidateAnalyzerResponse{
     common.Status status = 1;
+    repeated int64 resource_ids = 2;
 }
 
 message HighlightOptions{
