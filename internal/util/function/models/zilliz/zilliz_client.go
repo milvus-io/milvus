@@ -247,3 +247,22 @@ func (c *ZillizClient) Rerank(ctx context.Context, query string, texts []string,
 	}
 	return res.Scores, nil
 }
+
+func (c *ZillizClient) Highlight(ctx context.Context, query string, texts []string, params map[string]string) ([][]string, error) {
+	stub := modelservicepb.NewHighlightServiceClient(c.conn)
+	req := &modelservicepb.HighlightRequest{
+		Query:     query,
+		Documents: texts,
+		Params:    params,
+	}
+	ctx = c.setMeta(ctx)
+	res, err := stub.Highlight(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	highlights := make([][]string, 0, len(res.GetResults()))
+	for _, ret := range res.GetResults() {
+		highlights = append(highlights, ret.GetSentences())
+	}
+	return highlights, nil
+}
