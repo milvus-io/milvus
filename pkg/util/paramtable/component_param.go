@@ -3444,6 +3444,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
+		Forbidden:    true,
 		Doc: `options: sync, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
@@ -3457,6 +3458,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
+		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupScalarIndex.Init(base.mgr)
@@ -3465,6 +3467,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorField",
 		Version:      "2.6.0",
 		DefaultValue: "disable",
+		Forbidden:    true,
 		Doc:          `cache warmup for vector field raw data is by default disabled.`,
 		Export:       true,
 	}
@@ -3474,6 +3477,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.warmup.vectorIndex",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
+		Forbidden:    true,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
@@ -3482,6 +3486,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",
 		Version:      "2.6.0",
 		DefaultValue: "false",
+		Forbidden:    true,
 		Doc: `Enable eviction for Tiered Storage. Defaults to false.
 Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.`,
 		Export: true,
@@ -3492,6 +3497,7 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		Key:          "queryNode.segcore.tieredStorage.evictableMemoryCacheRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.3",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3513,6 +3519,7 @@ It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached)
 		Key:          "queryNode.segcore.tieredStorage.evictableDiskCacheRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.3",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3534,6 +3541,7 @@ It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), 
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.75",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3554,6 +3562,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.memoryHighWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.8",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3569,6 +3578,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.75",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3584,6 +3594,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.diskHighWatermarkRatio",
 		Version:      "2.6.0",
 		DefaultValue: "0.8",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3599,6 +3610,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.cacheTouchWindowMs",
 		Version:      "2.6.0",
 		DefaultValue: "3000",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			window := getAsInt64(v)
 			if window < 0 {
@@ -3615,6 +3627,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Key:          "queryNode.segcore.tieredStorage.backgroundEvictionEnabled",
 		Version:      "2.6.2",
 		DefaultValue: "false",
+		Forbidden:    true,
 		Doc: `Enable background eviction for Tiered Storage. Defaults to false.
 Background eviction is used to do periodic eviction in a separate thread.
 And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled' are set to 'true'.`,
@@ -3626,6 +3639,7 @@ And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled
 		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
 		Version:      "2.6.0",
 		DefaultValue: "1000",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			window := getAsInt64(v)
 			if window < 0 {
@@ -3642,6 +3656,7 @@ And it will only work when both 'evictionEnabled' and 'backgroundEvictionEnabled
 		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
 		Version:      "2.6.0",
 		DefaultValue: "0",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			timeout := getAsInt64(v)
 			if timeout <= 0 {
@@ -3660,6 +3675,7 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.storageUsageTrackingEnabled",
 		Version:      "2.6.3",
 		DefaultValue: "false",
+		Forbidden:    true,
 		Doc:          "Enable storage usage tracking for Tiered Storage. Defaults to false.",
 		Export:       true,
 	}
@@ -3669,6 +3685,7 @@ If set to 0, time based eviction is disabled.`,
 		Key:          "queryNode.segcore.tieredStorage.loadingResourceFactor",
 		Version:      "2.6.0",
 		DefaultValue: "1.0",
+		Forbidden:    true,
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor < 1.0 {
