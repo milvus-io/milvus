@@ -2854,6 +2854,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
              this->get_segment_id(),
              index);
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
@@ -2862,6 +2866,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             std::move(chunk_reader),
             field_metas,
             use_mmap,
+            mmap_dir_path,
             column_group->columns.size(),
             segment_load_info_.GetPriority());
     auto chunked_column_group =
