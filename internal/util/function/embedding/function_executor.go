@@ -277,7 +277,7 @@ func (executor *FunctionExecutor) ProcessBulkInsert(ctx context.Context, data *s
 	for _, runner := range executor.runners {
 		output, err := executor.processSingleBulkInsert(ctx, runner, data)
 		if err != nil {
-			return nil
+			return err
 		}
 		for k, v := range output {
 			data.Data[k] = v

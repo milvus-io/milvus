@@ -245,6 +245,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			err = RunEmbeddingFunction(t, data)
 			if err != nil {
 				return err
+				log.Warn("run embedding function failed", WrapLogFields(t, zap.Error(err))...)
 			}
 		}
 		hashedData, err := HashData(t, data)
