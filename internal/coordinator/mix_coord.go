@@ -75,9 +75,6 @@ type mixCoordImpl struct {
 
 	factory dependency.Factory
 
-	enableActiveStandBy bool
-	activateFunc        func() error
-
 	metricsRequest *metricsinfo.MetricsRequest
 
 	metaKVCreator  func() kv.MetaKv
@@ -97,13 +94,12 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	dataCoordServer := datacoord.CreateServer(c, factory)
 
 	return &mixCoordImpl{
-		ctx:                 ctx,
-		cancel:              cancel,
-		rootcoordServer:     rootCoordServer,
-		queryCoordServer:    queryCoordServer,
-		datacoordServer:     dataCoordServer,
-		enableActiveStandBy: Params.MixCoordCfg.EnableActiveStandby.GetAsBool(),
-		factory:             factory,
+		ctx:              ctx,
+		cancel:           cancel,
+		rootcoordServer:  rootCoordServer,
+		queryCoordServer: queryCoordServer,
+		datacoordServer:  dataCoordServer,
+		factory:          factory,
 	}, nil
 }
 
@@ -115,21 +111,17 @@ func (s *mixCoordImpl) Register() error {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
 		log.Info("MixCoord Register Finished")
 	}
-	if s.enableActiveStandBy {
-		go func() {
-			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-				if s.ctx.Err() == context.Canceled {
-					log.Info("standby process canceled due to server shutdown")
-					return
-				}
-				log.Error("failed to activate standby server", zap.Error(err))
-				panic(err)
+	go func() {
+		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+			if s.ctx.Err() == context.Canceled {
+				log.Info("standby process canceled due to server shutdown")
+				return
 			}
-			afterRegister()
-		}()
-	} else {
+			log.Error("failed to activate standby server", zap.Error(err))
+			panic(err)
+		}
 		afterRegister()
-	}
+	}()
 	return nil
 }
 
@@ -142,33 +134,25 @@ func (s *mixCoordImpl) Init() error {
 	s.factory.Init(Params)
 	s.initKVCreator()
 	s.initStreamingCoord()
-	if s.enableActiveStandBy {
-		s.activateFunc = func() error {
-			log.Info("mixCoord switch from standby to active, activating")
+	s.UpdateStateCode(commonpb.StateCode_StandBy)
+	log.Info("MixCoord enter standby mode successfully")
+	return nil
+}
 
-			var err error
-			s.initOnce.Do(func() {
-				if err = s.initInternal(); err != nil {
-					log.Error("mixCoord init failed", zap.Error(err))
-				}
-			})
-			if err != nil {
-				return err
-			}
-			log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
-			s.startAndUpdateHealthy()
-			return err
+func (s *mixCoordImpl) activateFunc() error {
+	log.Info("mixCoord switch from standby to active, activating")
+	var err error
+	s.initOnce.Do(func() {
+		if err = s.initInternal(); err != nil {
+			log.Error("mixCoord init failed", zap.Error(err))
 		}
-		s.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("MixCoord enter standby mode successfully")
-	} else {
-		s.initOnce.Do(func() {
-			if initErr = s.initInternal(); initErr != nil {
-				log.Error("mixCoord init failed", zap.Error(initErr))
-			}
-		})
+	})
+	if err != nil {
+		return err
 	}
-	return initErr
+	log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
+	s.startAndUpdateHealthy()
+	return err
 }
 
 func (s *mixCoordImpl) initInternal() error {
@@ -235,9 +219,6 @@ func (s *mixCoordImpl) initKVCreator() {
 }
 
 func (s *mixCoordImpl) Start() error {
-	if !s.enableActiveStandBy {
-		s.startAndUpdateHealthy()
-	}
 	return nil
 }
 
@@ -380,15 +361,12 @@ func (s *mixCoordImpl) initStreamingCoord() {
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
 	s.session.Init(typeutil.MixCoordRole, s.address, true, true)
-	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+	s.session.SetEnableActiveStandBy(true)
 	s.rootcoordServer.SetSession(s.session)
 	s.datacoordServer.SetSession(s.session)
 	s.queryCoordServer.SetSession(s.session)
 
 	return nil
-}
-
-func (s *mixCoordImpl) startHealthCheck() {
 }
 
 func (s *mixCoordImpl) SetAddress(address string) {
