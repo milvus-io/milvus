@@ -191,8 +191,16 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     }
 
     int64_t
-    ByteSize() const {
-        return wrapper_->index_size_bytes();
+    ByteSize() const override {
+        int64_t total = ScalarIndex<T>::ByteSize();
+
+        // Tantivy index size
+        total += wrapper_->index_size_bytes();
+
+        // null_offset_: vector<size_t>
+        total += null_offset_.capacity() * sizeof(size_t);
+
+        return total;
     }
 
     virtual const TargetBitmap

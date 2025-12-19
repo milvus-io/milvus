@@ -58,6 +58,28 @@ StringIndexMarisa::Size() {
 }
 
 int64_t
+StringIndexMarisa::ByteSize() const {
+    int64_t total = StringIndex::ByteSize();
+
+    // Size of the trie structure (marisa trie uses io_size() for serialized/memory size)
+    total += trie_.io_size();
+
+    // str_ids_: vector<int64_t>
+    total += str_ids_.capacity() * sizeof(int64_t);
+
+    // str_ids_to_offsets_: map<size_t, vector<size_t>>
+    for (const auto& [key, vec] : str_ids_to_offsets_) {
+        total += sizeof(size_t);                   // key
+        total += vec.capacity() * sizeof(size_t);  // vector capacity
+        total += sizeof(std::vector<size_t>);      // vector object overhead
+    }
+    // Map node overhead (rough estimate: ~40 bytes per node for std::map)
+    total += str_ids_to_offsets_.size() * 40;
+
+    return total;
+}
+
+int64_t
 StringIndexMarisa::CalculateTotalSize() const {
     int64_t size = 0;
 

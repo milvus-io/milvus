@@ -413,6 +413,25 @@ StringIndexSort::CalculateTotalSize() const {
     return size;
 }
 
+int64_t
+StringIndexSort::ByteSize() const {
+    int64_t total = StringIndex::ByteSize();
+
+    // Common structures (always in memory)
+    // idx_to_offsets_: vector<int32_t>
+    total += idx_to_offsets_.capacity() * sizeof(int32_t);
+
+    // valid_bitset_: TargetBitmap
+    total += valid_bitset_.size_in_bytes();
+
+    // Add impl-specific memory usage
+    if (impl_) {
+        total += impl_->ByteSize();
+    }
+
+    return total;
+}
+
 void
 StringIndexSortMemoryImpl::BuildFromMap(
     std::map<std::string, PostingList>&& map,
@@ -855,6 +874,36 @@ StringIndexSortMemoryImpl::Size() {
     return size;
 }
 
+int64_t
+StringIndexSortMemoryImpl::ByteSize() const {
+    int64_t total = 0;
+
+    // unique_values_: vector<string>
+    // sizeof(std::string) includes the SSO buffer
+    // For heap-allocated strings (capacity > SSO threshold), we need to add external buffer
+    const size_t sso_threshold = GetStringSSOThreshold();
+    total += unique_values_.capacity() * sizeof(std::string);
+    for (const auto& str : unique_values_) {
+        // Only add capacity for heap-allocated strings (non-SSO)
+        if (str.capacity() > sso_threshold) {
+            total += str.capacity();
+        }
+    }
+
+    // posting_lists_: vector<PostingList>
+    // PostingList is folly::small_vector<uint32_t, 4>
+    // sizeof(PostingList) includes the inline buffer for 4 elements
+    total += posting_lists_.capacity() * sizeof(PostingList);
+    for (const auto& list : posting_lists_) {
+        // If the capacity exceeds inline capacity (4), it allocates on heap
+        if (list.capacity() > 4) {
+            total += list.capacity() * sizeof(uint32_t);
+        }
+    }
+
+    return total;
+}
+
 StringIndexSortMmapImpl::~StringIndexSortMmapImpl() {
     if (mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
         munmap(mmap_data_, mmap_size_);
@@ -1144,6 +1193,12 @@ StringIndexSortMmapImpl::Reverse_Lookup(
 
 int64_t
 StringIndexSortMmapImpl::Size() {
+    return mmap_size_;
+}
+
+int64_t
+StringIndexSortMmapImpl::ByteSize() const {
+    // mmap size (O(n) - the mapped index data)
     return mmap_size_;
 }
 

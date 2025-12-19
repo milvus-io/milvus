@@ -91,6 +91,13 @@ class IndexBase {
         cell_size_ = cell_size;
     }
 
+    // Returns the memory usage in bytes that scales with data size (O(n)).
+    // Fixed overhead are minimal and thus not included.
+    virtual int64_t
+    ByteSize() const {
+        return 0;
+    }
+
  protected:
     explicit IndexBase(IndexType index_type)
         : index_type_(std::move(index_type)) {
