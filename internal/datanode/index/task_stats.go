@@ -542,9 +542,11 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	)
 
 	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
-		log.Info("create json key index failed dataformat invalid")
+		log.Warn("create json key index failed dataformat invalid", zap.Int64("dataformat version", jsonKeyStatsDataFormat),
+			zap.Int64("code version", common.JSONStatsDataFormatVersion))
 		return nil
 	}
+
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
