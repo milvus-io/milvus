@@ -222,7 +222,9 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
     EXPECT_EQ(segment->get_row_count(), data_n);
 
-    EXPECT_TRUE(segment->HasFieldData(vec_field_id));
+    // When interim index has raw data, field data is dropped to save memory
+    EXPECT_EQ(segment->HasFieldData(vec_field_id),
+              !intermin_index_has_raw_data);
 
     // 2. search binlog index
     auto num_queries = 10;
@@ -318,7 +320,9 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
     //assert segment has been built binlog index
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
     EXPECT_EQ(segment->get_row_count(), data_n);
-    EXPECT_TRUE(segment->HasFieldData(vec_field_id));
+    // When interim index has raw data, field data is dropped to save memory
+    EXPECT_EQ(segment->HasFieldData(vec_field_id),
+              !intermin_index_has_raw_data);
 
     // 2. search binlog index
     auto num_queries = 10;
