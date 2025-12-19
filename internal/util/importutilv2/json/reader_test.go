@@ -19,9 +19,7 @@ package json
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -31,24 +29,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
-
-type mockReader struct {
-	io.Reader
-	io.Closer
-	io.ReaderAt
-	io.Seeker
-	size int64
-}
-
-func (mr *mockReader) Size() (int64, error) {
-	return mr.size, nil
-}
 
 type ReaderSuite struct {
 	suite.Suite
@@ -145,11 +132,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-		reader := strings.NewReader(string(jsonBytes))
-		r := &mockReader{
-			Reader: reader,
-			Closer: io.NopCloser(reader),
-		}
+		r := importcommon.NewMockReader(string(jsonBytes))
 		return r, nil
 	})
 	cm.EXPECT().Size(mock.Anything, "mockPath").Return(128, nil)
@@ -236,7 +219,7 @@ func (suite *ReaderSuite) runWithDefaultValue(dataType schemapb.DataType, elemTy
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+		r := importcommon.NewMockReader(string(jsonBytes))
 		return r, nil
 	})
 	reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
@@ -341,8 +324,8 @@ func (suite *ReaderSuite) TestDecodeError() {
 
 		cm := mocks.NewChunkManager(suite.T())
 		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-			r := &mockReader{Reader: strings.NewReader(jsonContent)}
-			return r, ioErr
+			r := importcommon.NewMockReader(jsonContent)
+			return r, nil
 		})
 		var reader *reader
 		var err error
@@ -436,7 +419,7 @@ func (suite *ReaderSuite) TestReadCount() {
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+		r := importcommon.NewMockReader(string(jsonBytes))
 		return r, nil
 	})
 
@@ -503,7 +486,7 @@ func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
 	{
 		cm := mocks.NewChunkManager(suite.T())
 		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-			r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+			r := importcommon.NewMockReader(string(jsonBytes))
 			return r, nil
 		})
 		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
@@ -518,7 +501,7 @@ func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
 		schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
 		cm := mocks.NewChunkManager(suite.T())
 		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-			r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+			r := importcommon.NewMockReader(string(jsonBytes))
 			return r, nil
 		})
 		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
