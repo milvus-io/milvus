@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -90,7 +91,7 @@ func (m *replicateMetrics) OnConfirmed(msg message.ImmutableMessage) {
 	metrics.CDCLastReplicatedTimeTick.WithLabelValues(
 		m.replicateInfo.GetSourceChannelName(),
 		m.replicateInfo.GetTargetChannelName(),
-	).Set(float64(msg.TimeTick()))
+	).Set(tsoutil.PhysicalTimeSeconds(msg.TimeTick()))
 }
 
 func (m *replicateMetrics) OnInitiate() {
