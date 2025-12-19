@@ -395,13 +395,15 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
         root_span->SetAttribute("match_query_min_gram", min_gram_);
         root_span->SetAttribute("match_query_max_gram", max_gram_);
     }
-    TargetBitmap bitset{static_cast<size_t>(Count())};
+    TargetBitmap bitset(static_cast<size_t>(Count()), true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
         if (l.length() < min_gram_) {
             return std::nullopt;
         }
-        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &bitset);
+        TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);
+        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &tmp_bitset);
+        bitset &= tmp_bitset;
     }
 
     TargetBitmapView res(bitset);
