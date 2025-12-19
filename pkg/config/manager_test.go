@@ -143,7 +143,7 @@ func TestOnEvent(t *testing.T) {
 			RefreshInterval: 10 * time.Millisecond,
 		}),
 		WithEtcdSource(&EtcdInfo{
-			Endpoints:       []string{cfg.ACUrls[0].Host},
+			Endpoints:       []string{cfg.AdvertiseClientUrls[0].Host},
 			KeyPrefix:       "test",
 			RefreshInterval: 10 * time.Millisecond,
 		}))
@@ -253,7 +253,7 @@ func TestCachedConfig(t *testing.T) {
 			RefreshInterval: 10 * time.Millisecond,
 		}),
 		WithEtcdSource(&EtcdInfo{
-			Endpoints:       []string{cfg.ACUrls[0].Host},
+			Endpoints:       []string{cfg.AdvertiseClientUrls[0].Host},
 			KeyPrefix:       "test",
 			RefreshInterval: 10 * time.Millisecond,
 		}))
