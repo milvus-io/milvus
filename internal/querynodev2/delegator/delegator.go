@@ -1207,6 +1207,17 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		}
 	}
 
+	for _, field := range collection.Schema().GetFields() {
+		helper := typeutil.CreateFieldSchemaHelper(field)
+		if helper.EnableAnalyzer() && sd.analyzerRunners[field.GetFieldID()] == nil {
+			analyzerRunner, err := function.NewAnalyzerRunner(field)
+			if err != nil {
+				return nil, err
+			}
+			sd.analyzerRunners[field.GetFieldID()] = analyzerRunner
+		}
+	}
+
 	if len(sd.isBM25Field) > 0 {
 		sd.idfOracle = NewIDFOracle(sd.vchannelName, collection.Schema().GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
