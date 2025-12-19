@@ -49,6 +49,11 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                  proto::plan::OpType op_type,
                  exec::SegmentExpr* segment);
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::NGRAM;
+    }
+
     void
     finish() {
         this->wrapper_->finish();
