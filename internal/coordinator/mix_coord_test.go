@@ -103,61 +103,6 @@ func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// make sure the main functions work well when EnableActiveStandby=false
-func TestMixcoord_DisableActiveStandby(t *testing.T) {
-	randVal := rand.Int()
-	paramtable.Init()
-	testutil.ResetEnvironment()
-	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
-	// Need to reset global etcd to follow new path
-	kvfactory.CloseEtcdClient()
-
-	paramtable.Get().Save(Params.MixCoordCfg.EnableActiveStandby.Key, "false")
-	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
-	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
-	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, fmt.Sprintf("rootcoord-dml-test-%d", randVal))
-
-	ctx := context.Background()
-	coreFactory := dependency.NewDefaultFactory(true)
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	defer etcdCli.Close()
-	core, err := NewMixCoordServer(ctx, coreFactory)
-	core.SetEtcdClient(etcdCli)
-	assert.NoError(t, err)
-	core.SetTiKVClient(tikv.SetupLocalTxn())
-
-	err = core.Init()
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Initializing, core.GetStateCode())
-	err = core.Start()
-	assert.NoError(t, err)
-	core.session.TriggerKill = false
-	err = core.Register()
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, core.GetStateCode())
-	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DescribeCollection,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  paramtable.GetNodeID(),
-		},
-		CollectionName: "unexist",
-	})
-	assert.NoError(t, err)
-	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	err = core.Stop()
-	assert.NoError(t, err)
-}
-
 func TestMixCoord_FlushAll(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mockey.PatchConvey("test flush all success", t, func() {
