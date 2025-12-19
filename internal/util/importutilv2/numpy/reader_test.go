@@ -36,23 +36,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-type mockReader struct {
-	io.Reader
-	io.Closer
-	io.ReaderAt
-	io.Seeker
-	size int64
-}
-
-func (mr *mockReader) Size() (int64, error) {
-	return mr.size, nil
-}
 
 type ReaderSuite struct {
 	suite.Suite
@@ -201,9 +190,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 
 		reader, err := CreateReader(data)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
@@ -328,9 +315,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 
 		reader, err := CreateReader(data)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
