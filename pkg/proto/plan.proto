@@ -252,6 +252,22 @@ message ElementFilterExpr {
   Expr predicate = 3;
 }
 
+// MatchType defines the type of match operation for struct array queries
+enum MatchType {
+  MatchAll = 0;    // All elements must match the predicate
+  MatchAny = 1;    // At least one element matches the predicate
+  MatchLeast = 2;  // At least N elements match the predicate
+  MatchMost = 3;   // At most N elements match the predicate
+  MatchExact = 4;  // Exactly N elements match the predicate
+}
+
+message MatchExpr {
+  string struct_name = 1;      // The struct array field name (e.g., struct_array)
+  Expr predicate = 2;          // The condition expression using $[field] syntax (e.g., $[intField] == 1 && $[strField] == "aaa")
+  MatchType match_type = 3;    // Type of match operation
+  int64 count = 4;             // For MatchLeast/MatchMost: the count parameter (N)
+}
+
 message AlwaysTrueExpr {}
 
 message Interval {
@@ -293,6 +309,7 @@ message Expr {
     GISFunctionFilterExpr gisfunction_filter_expr = 17;
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
     ElementFilterExpr element_filter_expr = 19;
+    MatchExpr match_expr = 21;
   };
   bool is_template = 20;
 }

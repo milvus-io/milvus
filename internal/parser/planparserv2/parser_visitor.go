@@ -192,7 +192,7 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 }
 
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
-	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 {
+	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 && !columnInfo.GetIsElementLevel() {
 		return errors.New("can not comparisons array fields directly")
 	}
 	return nil
@@ -664,6 +664,10 @@ func isElementFilterExpr(expr *ExprWithType) bool {
 	return expr.expr.GetElementFilterExpr() != nil
 }
 
+func isMatchExpr(expr *ExprWithType) bool {
+	return expr.expr.GetMatchExpr() != nil
+}
+
 const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
@@ -715,7 +719,10 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	}
 
 	dataType := columnInfo.GetDataType()
-	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
+	// Use element type for IN operation in two cases:
+	// 1. Array with nested path (e.g., arr[0] IN [1, 2, 3])
+	// 2. Array with element level flag (e.g., $[intField] IN [1, 2] in MATCH_ALL/ElementFilter)
+	if typeutil.IsArrayType(dataType) && (len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
 		dataType = columnInfo.GetElementType()
 	}
 
@@ -1131,8 +1138,8 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return errors.New("random sample expression cannot be used in logical and expression")
 	}
 
-	if isElementFilterExpr(leftExpr) {
-		return errors.New("element filter expression can only be the last expression in the logical or expression")
+	if isElementFilterExpr(leftExpr) || isMatchExpr(leftExpr) {
+		return errors.New("element filter/match expression can only be the last expression in the logical or expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
@@ -1187,8 +1194,8 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return errors.New("random sample expression can only be the last expression in the logical and expression")
 	}
 
-	if isElementFilterExpr(leftExpr) {
-		return errors.New("element filter expression can only be the last expression in the logical and expression")
+	if isElementFilterExpr(leftExpr) || isMatchExpr(leftExpr) {
+		return errors.New("element filter/match expression can only be the last expression in the logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
@@ -2298,9 +2305,9 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	// Remove "$[" prefix and "]" suffix
 	fieldName := tokenText[2 : len(tokenText)-1]
 
-	// Check if we're inside an ElementFilter context
+	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
-		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter", fieldName)
+		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter or MATCH_ALL/MATCH_ANY/MATCH_LEAST/MATCH_MOST", fieldName)
 	}
 
 	// Construct full field name for struct array field
@@ -2311,7 +2318,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 		return fmt.Errorf("array field not found: %s, error: %s", fullFieldName, err)
 	}
 
-	// In element-level context, data_type should be the element type
+	// In element-level context, use Array as storage type, element type for operations
 	elementType := field.GetElementType()
 
 	return &ExprWithType{
@@ -2320,12 +2327,12 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 				ColumnExpr: &planpb.ColumnExpr{
 					Info: &planpb.ColumnInfo{
 						FieldId:         field.FieldID,
-						DataType:        elementType, // Use element type, not storage type
+						DataType:        schemapb.DataType_Array, // Storage type is Array
 						IsPrimaryKey:    field.IsPrimaryKey,
 						IsAutoID:        field.AutoID,
 						IsPartitionKey:  field.IsPartitionKey,
 						IsClusteringKey: field.IsClusteringKey,
-						ElementType:     elementType,
+						ElementType:     elementType, // Element type for operations
 						Nullable:        field.GetNullable(),
 						IsElementLevel:  true, // Mark as element-level access
 					},
@@ -2335,4 +2342,114 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 		dataType:      elementType, // Expression evaluates to element type
 		nodeDependent: true,
 	}
+}
+
+// parseMatchExpr is a helper function for parsing match expressions
+// matchType: the type of match operation (MatchAll, MatchAny, MatchLeast, MatchMost)
+// count: for MatchLeast/MatchMost, the count parameter (N); for MatchAll/MatchAny, this is ignored (0)
+func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
+	// Check for nested match expression - not allowed
+	if v.currentStructArrayField != "" {
+		return fmt.Errorf("nested %s is not supported, already inside match expression for field: %s", funcName, v.currentStructArrayField)
+	}
+
+	// Set current context for element expression parsing
+	v.currentStructArrayField = structArrayFieldName
+	defer func() { v.currentStructArrayField = "" }()
+
+	// Parse the predicate expression
+	predicate := exprCtx.Accept(v)
+	if err := getError(predicate); err != nil {
+		return fmt.Errorf("cannot parse predicate expression: %s, error: %s", exprCtx.GetText(), err)
+	}
+
+	predicateExpr := getExpr(predicate)
+	if predicateExpr == nil {
+		return fmt.Errorf("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+
+	// Build MatchExpr proto
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_MatchExpr{
+				MatchExpr: &planpb.MatchExpr{
+					StructName: structArrayFieldName,
+					Predicate:  predicateExpr.expr,
+					MatchType:  matchType,
+					Count:      count,
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// VisitMatchAll handles MATCH_ALL expressions
+// Syntax: MATCH_ALL(structArrayField, $[intField] == 1 && $[strField] == "aaa")
+// All elements must match the predicate
+func (v *ParserVisitor) VisitMatchAll(ctx *parser.MatchAllContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchAll, 0, "MATCH_ALL")
+}
+
+// VisitMatchAny handles MATCH_ANY expressions
+// Syntax: MATCH_ANY(structArrayField, $[intField] == 1 && $[strField] == "aaa")
+// At least one element must match the predicate
+func (v *ParserVisitor) VisitMatchAny(ctx *parser.MatchAnyContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchAny, 0, "MATCH_ANY")
+}
+
+// VisitMatchLeast handles MATCH_LEAST expressions
+// Syntax: MATCH_LEAST(structArrayField, $[intField] == 1 && $[strField] == "aaa", N)
+// At least N elements must match the predicate
+func (v *ParserVisitor) VisitMatchLeast(ctx *parser.MatchLeastContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+
+	countStr := ctx.IntegerConstant().GetText()
+	count, err := strconv.ParseInt(countStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid count in MATCH_LEAST: %s", countStr)
+	}
+	if count <= 0 {
+		return fmt.Errorf("count in MATCH_LEAST must be positive, got: %d", count)
+	}
+
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchLeast, count, "MATCH_LEAST")
+}
+
+// VisitMatchMost handles MATCH_MOST expressions
+// Syntax: MATCH_MOST(structArrayField, $[intField] == 1 && $[strField] == "aaa", N)
+// At most N elements must match the predicate
+func (v *ParserVisitor) VisitMatchMost(ctx *parser.MatchMostContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+
+	countStr := ctx.IntegerConstant().GetText()
+	count, err := strconv.ParseInt(countStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid count in MATCH_MOST: %s", countStr)
+	}
+	if count < 0 {
+		return fmt.Errorf("count in MATCH_MOST cannot be negative, got: %d", count)
+	}
+
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchMost, count, "MATCH_MOST")
+}
+
+// VisitMatchExact handles MATCH_EXACT expressions
+// Syntax: MATCH_EXACT(structArrayField, $[intField] == 1 && $[strField] == "aaa", N)
+// Exactly N elements must match the predicate
+func (v *ParserVisitor) VisitMatchExact(ctx *parser.MatchExactContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+
+	countStr := ctx.IntegerConstant().GetText()
+	count, err := strconv.ParseInt(countStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid count in MATCH_EXACT: %s", countStr)
+	}
+	if count < 0 {
+		return fmt.Errorf("count in MATCH_EXACT cannot be negative, got: %d", count)
+	}
+
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchExact, count, "MATCH_EXACT")
 }

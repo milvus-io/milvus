@@ -34,7 +34,11 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     context.set_apply_valid_data_after_flip(false);
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    switch (expr_->column_.data_type_) {
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::JSON: {
             if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
                 result = EvalJsonExistsForIndex();
@@ -46,7 +50,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
-                      expr_->column_.data_type_);
+                      data_type);
     }
 }
 
