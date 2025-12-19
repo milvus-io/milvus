@@ -193,3 +193,91 @@ var RerankService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "model_service.proto",
 }
+
+const (
+	HighlightService_Highlight_FullMethodName = "/milvus.proto.modelservice.HighlightService/Highlight"
+)
+
+// HighlightServiceClient is the client API for HighlightService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type HighlightServiceClient interface {
+	Highlight(ctx context.Context, in *HighlightRequest, opts ...grpc.CallOption) (*HighlightResponse, error)
+}
+
+type highlightServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewHighlightServiceClient(cc grpc.ClientConnInterface) HighlightServiceClient {
+	return &highlightServiceClient{cc}
+}
+
+func (c *highlightServiceClient) Highlight(ctx context.Context, in *HighlightRequest, opts ...grpc.CallOption) (*HighlightResponse, error) {
+	out := new(HighlightResponse)
+	err := c.cc.Invoke(ctx, HighlightService_Highlight_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// HighlightServiceServer is the server API for HighlightService service.
+// All implementations should embed UnimplementedHighlightServiceServer
+// for forward compatibility
+type HighlightServiceServer interface {
+	Highlight(context.Context, *HighlightRequest) (*HighlightResponse, error)
+}
+
+// UnimplementedHighlightServiceServer should be embedded to have forward compatible implementations.
+type UnimplementedHighlightServiceServer struct {
+}
+
+func (UnimplementedHighlightServiceServer) Highlight(context.Context, *HighlightRequest) (*HighlightResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Highlight not implemented")
+}
+
+// UnsafeHighlightServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to HighlightServiceServer will
+// result in compilation errors.
+type UnsafeHighlightServiceServer interface {
+	mustEmbedUnimplementedHighlightServiceServer()
+}
+
+func RegisterHighlightServiceServer(s grpc.ServiceRegistrar, srv HighlightServiceServer) {
+	s.RegisterService(&HighlightService_ServiceDesc, srv)
+}
+
+func _HighlightService_Highlight_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HighlightRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HighlightServiceServer).Highlight(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HighlightService_Highlight_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HighlightServiceServer).Highlight(ctx, req.(*HighlightRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// HighlightService_ServiceDesc is the grpc.ServiceDesc for HighlightService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var HighlightService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "milvus.proto.modelservice.HighlightService",
+	HandlerType: (*HighlightServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Highlight",
+			Handler:    _HighlightService_Highlight_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "model_service.proto",
+}
