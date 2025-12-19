@@ -14,8 +14,6 @@ WORKDIR /milvus
 # Copy go mod and sum files
 COPY client/go.mod client/go.mod
 COPY client/go.sum client/go.sum
-COPY pkg/go.mod pkg/go.mod
-COPY pkg/go.sum pkg/go.sum
 COPY tests/go_client/go.mod tests/go_client/
 COPY tests/go_client/go.sum tests/go_client/
 
@@ -24,7 +22,6 @@ RUN cd tests/go_client && go mod download
 
 # Copy the source code into the container
 COPY client client
-COPY pkg pkg
 COPY tests/go_client tests/go_client
 
 WORKDIR /milvus/tests/go_client
