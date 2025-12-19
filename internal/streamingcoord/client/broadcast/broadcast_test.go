@@ -24,7 +24,7 @@ func TestBroadcast(t *testing.T) {
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&message.DropCollectionMessageHeader{}).
 		WithBody(&msgpb.DropCollectionRequest{}).
-		WithBroadcast([]string{"v1"}, message.NewCollectionNameResourceKey("r1")).
+		WithBroadcast([]string{"v1"}).
 		MustBuildBroadcast()
 	_, err := bs.Broadcast(context.Background(), msg)
 	assert.NoError(t, err)

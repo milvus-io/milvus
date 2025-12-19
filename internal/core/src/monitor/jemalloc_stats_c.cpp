@@ -14,35 +14,44 @@
 
 #include "monitor/jemalloc_stats_c.h"
 
-#ifdef MILVUS_JEMALLOC_ENABLED
-#include <jemalloc/jemalloc.h>
 #include <cstddef>
 #include <cstring>
+
+#ifdef __linux__
+#include <dlfcn.h>
 #endif
+
+// jemalloc mallctl function type
+typedef int (*mallctl_t)(const char*, void*, size_t*, void*, size_t);
+
+// get mallctl function pointer at runtime via dlsym
+// Returns nullptr if jemalloc is not loaded (e.g., via LD_PRELOAD)
+static mallctl_t
+get_mallctl() {
+#ifdef __linux__
+    static mallctl_t fn = (mallctl_t)dlsym(RTLD_DEFAULT, "mallctl");
+    return fn;
+#else
+    return nullptr;
+#endif
+}
 
 JemallocStats
 GetJemallocStats() {
     JemallocStats stats;
-    // initialize all fields to zero
-#ifdef MILVUS_JEMALLOC_ENABLED
     std::memset(&stats, 0, sizeof(JemallocStats));
-#else
-    stats.allocated = 0;
-    stats.active = 0;
-    stats.metadata = 0;
-    stats.resident = 0;
-    stats.mapped = 0;
-    stats.retained = 0;
-    stats.fragmentation = 0;
-    stats.overhead = 0;
-#endif
     stats.success = false;
 
-#ifdef MILVUS_JEMALLOC_ENABLED
+    mallctl_t mallctl_fn = get_mallctl();
+    if (mallctl_fn == nullptr) {
+        // jemalloc is not available, return zeros
+        return stats;
+    }
+
     // refresh jemalloc stats epoch to get current values
     uint64_t epoch = 1;
     size_t epoch_sz = sizeof(epoch);
-    if (mallctl("epoch", &epoch, &epoch_sz, &epoch, epoch_sz) != 0) {
+    if (mallctl_fn("epoch", &epoch, &epoch_sz, &epoch, epoch_sz) != 0) {
         return stats;
     }
 
@@ -55,32 +64,32 @@ GetJemallocStats() {
     size_t retained = 0;
 
     // get allocated bytes (total allocated by application)
-    if (mallctl("stats.allocated", &allocated, &sz, nullptr, 0) != 0) {
+    if (mallctl_fn("stats.allocated", &allocated, &sz, nullptr, 0) != 0) {
         return stats;
     }
 
     // get active bytes (in active pages, includes fragmentation)
-    if (mallctl("stats.active", &active, &sz, nullptr, 0) != 0) {
+    if (mallctl_fn("stats.active", &active, &sz, nullptr, 0) != 0) {
         return stats;
     }
 
     // get metadata bytes (jemalloc's own overhead)
-    if (mallctl("stats.metadata", &metadata, &sz, nullptr, 0) != 0) {
+    if (mallctl_fn("stats.metadata", &metadata, &sz, nullptr, 0) != 0) {
         return stats;
     }
 
     // get resident bytes (physically resident memory, RSS)
-    if (mallctl("stats.resident", &resident, &sz, nullptr, 0) != 0) {
+    if (mallctl_fn("stats.resident", &resident, &sz, nullptr, 0) != 0) {
         return stats;
     }
 
     // get mapped bytes (total virtual memory mappings)
-    if (mallctl("stats.mapped", &mapped, &sz, nullptr, 0) != 0) {
+    if (mallctl_fn("stats.mapped", &mapped, &sz, nullptr, 0) != 0) {
         return stats;
     }
 
     // get retained bytes (virtual memory that could be returned to OS)
-    if (mallctl("stats.retained", &retained, &sz, nullptr, 0) != 0) {
+    if (mallctl_fn("stats.retained", &retained, &sz, nullptr, 0) != 0) {
         return stats;
     }
 
@@ -99,10 +108,6 @@ GetJemallocStats() {
     stats.overhead = (resident > active) ? (resident - active) : 0;
 
     stats.success = true;
-#else
-    // on platforms without jemalloc (e.g., macOS), return empty stats
-    // with success = false to indicate jemalloc is not available
-#endif
 
     return stats;
 }

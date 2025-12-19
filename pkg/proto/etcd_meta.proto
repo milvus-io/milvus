@@ -70,6 +70,11 @@ message CollectionInfo {
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
   uint64 UpdateTimestamp = 16;
+  repeated CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
+}
+
+message CollectionShardInfo {
+  uint64 last_truncate_time_tick = 1; // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
 }
 
 message PartitionInfo {

@@ -202,6 +202,6 @@ func (m *GrpcQueryCoordClient) ComputePhraseMatchSlop(ctx context.Context, req *
 	return &querypb.ComputePhraseMatchSlopResponse{}, m.Err
 }
 
-func (m *GrpcQueryCoordClient) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (m *GrpcQueryCoordClient) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
+	return &querypb.ValidateAnalyzerResponse{}, m.Err
 }

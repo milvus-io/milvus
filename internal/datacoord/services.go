@@ -219,30 +219,34 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 		return pchannel
 	})
 
-	res, err := broadcaster.Broadcast(ctx, message.NewFlushAllMessageBuilderV2().
+	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
 		WithBroadcast(broadcastPChannels).
-		MustBuildBroadcast(),
-	)
+		MustBuildBroadcast()
+	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
 		log.Ctx(ctx).Warn("broadcast FlushAllMessage fail", zap.Error(err))
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	flushAllTss := make(map[string]uint64, len(res.AppendResults))
-	for appendChannel, result := range res.AppendResults {
+
+	flushAllMsgs := make(map[string]*commonpb.ImmutableMessage, len(res.AppendResults))
+	msgs := broadcastFlushAllMsg.SplitIntoMutableMessage()
+	for _, msg := range msgs {
+		appendResult := res.GetAppendResult(msg.VChannel())
 		// if is control channel, convert it to physical channel.
-		// it's ok to call ToPhysicalChannel even if it's a physical channel,
-		// so no need to check if it's a control channel here.
-		channel := funcutil.ToPhysicalChannel(appendChannel)
-		flushAllTss[channel] = result.TimeTick
+		channel := funcutil.ToPhysicalChannel(msg.VChannel())
+		flushAllMsgs[channel] = msg.WithTimeTick(appendResult.TimeTick).
+			WithLastConfirmed(appendResult.LastConfirmedMessageID).
+			IntoImmutableMessage(appendResult.MessageID).
+			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllTss", flushAllTss))
+	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllMsgs", flushAllMsgs))
 	return &datapb.FlushAllResponse{
-		Status:      merr.Success(),
-		FlushAllTss: flushAllTss,
+		Status:       merr.Success(),
+		FlushAllMsgs: flushAllMsgs,
 		ClusterInfo: &milvuspb.ClusterInfo{
 			ClusterId: Params.CommonCfg.ClusterID.GetValue(),
 			Cchannel:  controlChannel,
@@ -2105,4 +2109,31 @@ func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.Create
 func (s *Server) SyncFileResources(ctx context.Context) error {
 	resources, version := s.meta.ListFileResource(ctx)
 	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
+}
+
+// DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
+func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("receive DropSegmentsByTime request",
+		zap.Int64("collectionID", collectionID))
+
+	for channelName, flushTs := range flushTsList {
+		// wait until the checkpoint reaches or exceeds the flush timestamp
+		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
+		if err != nil {
+			log.Ctx(ctx).Warn("WatchChannelCheckpoint failed", zap.Error(err))
+			return err
+		}
+		// drop segments that were updated before the flush timestamp
+		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
+		if err != nil {
+			log.Warn("TruncateChannelByTime failed", zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
 }

@@ -339,6 +339,10 @@ func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDa
 	return s.mixCoord.AlterDatabase(ctx, request)
 }
 
+func (s *Server) BackupEzk(ctx context.Context, request *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.mixCoord.BackupEzk(ctx, request)
+}
+
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.mixCoord.CheckHealth(ctx, request)
 }
@@ -943,7 +947,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	return s.mixCoord.RunAnalyzer(ctx, req)
 }
 
-func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.mixCoord.ValidateAnalyzer(ctx, req)
 }
 
@@ -964,4 +968,9 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 // ListFileResources list file resources
 func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.mixCoord.ListFileResources(ctx, req)
+}
+
+// TruncateCollection truncate a collection
+func (s *Server) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return s.mixCoord.TruncateCollection(ctx, in)
 }

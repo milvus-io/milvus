@@ -60,8 +60,8 @@ const (
 	QueryCoord_CheckQueryNodeDistribution_FullMethodName = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
 	QueryCoord_UpdateLoadConfig_FullMethodName           = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
 	QueryCoord_RunAnalyzer_FullMethodName                = "/milvus.proto.query.QueryCoord/RunAnalyzer"
-	QueryCoord_ValidateAnalyzer_FullMethodName           = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
 	QueryCoord_ComputePhraseMatchSlop_FullMethodName     = "/milvus.proto.query.QueryCoord/ComputePhraseMatchSlop"
+	QueryCoord_ValidateAnalyzer_FullMethodName           = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
 )
 
 // QueryCoordClient is the client API for QueryCoord service.
@@ -110,8 +110,8 @@ type QueryCoordClient interface {
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
-	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
+	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 }
 
 type queryCoordClient struct {
@@ -465,18 +465,18 @@ func (c *queryCoordClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerReque
 	return out, nil
 }
 
-func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, QueryCoord_ValidateAnalyzer_FullMethodName, in, out, opts...)
+func (c *queryCoordClient) ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error) {
+	out := new(ComputePhraseMatchSlopResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_ComputePhraseMatchSlop_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *queryCoordClient) ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error) {
-	out := new(ComputePhraseMatchSlopResponse)
-	err := c.cc.Invoke(ctx, QueryCoord_ComputePhraseMatchSlop_FullMethodName, in, out, opts...)
+func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error) {
+	out := new(ValidateAnalyzerResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_ValidateAnalyzer_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -529,8 +529,8 @@ type QueryCoordServer interface {
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
-	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
+	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 }
 
 // UnimplementedQueryCoordServer should be embedded to have forward compatible implementations.
@@ -651,11 +651,11 @@ func (UnimplementedQueryCoordServer) UpdateLoadConfig(context.Context, *UpdateLo
 func (UnimplementedQueryCoordServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
 }
-func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
-}
 func (UnimplementedQueryCoordServer) ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ComputePhraseMatchSlop not implemented")
+}
+func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 
 // UnsafeQueryCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1353,24 +1353,6 @@ func _QueryCoord_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _QueryCoord_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ValidateAnalyzerRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(QueryCoordServer).ValidateAnalyzer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: QueryCoord_ValidateAnalyzer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(QueryCoordServer).ValidateAnalyzer(ctx, req.(*ValidateAnalyzerRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _QueryCoord_ComputePhraseMatchSlop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ComputePhraseMatchSlopRequest)
 	if err := dec(in); err != nil {
@@ -1385,6 +1367,24 @@ func _QueryCoord_ComputePhraseMatchSlop_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(QueryCoordServer).ComputePhraseMatchSlop(ctx, req.(*ComputePhraseMatchSlopRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryCoord_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).ValidateAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_ValidateAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).ValidateAnalyzer(ctx, req.(*ValidateAnalyzerRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1549,12 +1549,12 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _QueryCoord_RunAnalyzer_Handler,
 		},
 		{
-			MethodName: "ValidateAnalyzer",
-			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
-		},
-		{
 			MethodName: "ComputePhraseMatchSlop",
 			Handler:    _QueryCoord_ComputePhraseMatchSlop_Handler,
+		},
+		{
+			MethodName: "ValidateAnalyzer",
+			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -1632,7 +1632,7 @@ type QueryNodeClient interface {
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
@@ -1953,8 +1953,8 @@ func (c *queryNodeClient) DropIndex(ctx context.Context, in *DropIndexRequest, o
 	return out, nil
 }
 
-func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
+func (c *queryNodeClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error) {
+	out := new(ValidateAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryNode_ValidateAnalyzer_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -2016,7 +2016,7 @@ type QueryNodeServer interface {
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
-	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error)
+	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
@@ -2113,7 +2113,7 @@ func (UnimplementedQueryNodeServer) GetHighlight(context.Context, *GetHighlightR
 func (UnimplementedQueryNodeServer) DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropIndex not implemented")
 }
-func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
 }
 func (UnimplementedQueryNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {

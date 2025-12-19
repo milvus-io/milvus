@@ -2582,7 +2582,6 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	server.initMessageCallback()
 
 	// Test Import message check callback
-	resourceKey := message.NewImportJobIDResourceKey(1)
 	msg, err := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&msgpb.ImportMsg{
@@ -2591,7 +2590,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 			},
 			Schema: &schemapb.CollectionSchema{},
 		}).
-		WithBroadcast([]string{"ch-0"}, resourceKey).
+		WithBroadcast([]string{"ch-0"}).
 		BuildBroadcast()
 	err = registry.CallMessageCheckCallback(ctx, msg)
 	assert.NoError(t, err)
@@ -2605,7 +2604,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 			},
 			Schema: &schemapb.CollectionSchema{},
 		}).
-		WithBroadcast([]string{"test_channel"}, resourceKey).
+		WithBroadcast([]string{"test_channel"}).
 		MustBuildBroadcast()
 	err = registry.CallMessageAckCallback(ctx, importMsg, map[string]*message.AppendResult{
 		"test_channel": {

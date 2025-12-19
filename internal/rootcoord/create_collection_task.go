@@ -208,7 +208,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 			return err
 		}
 
-		if err := merr.Error(resp); err != nil {
+		if err := merr.Error(resp.GetStatus()); err != nil {
 			return err
 		}
 	}
@@ -269,6 +269,12 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 			Description: "dynamic schema",
 			DataType:    schemapb.DataType_JSON,
 			IsDynamic:   true,
+			Nullable:    true,
+			DefaultValue: &schemapb.ValueField{
+				Data: &schemapb.ValueField_BytesData{
+					BytesData: []byte("{}"),
+				},
+			},
 		})
 		log.Ctx(ctx).Info("append dynamic field", zap.String("collection", schema.Name))
 	}
@@ -486,9 +492,7 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = append(properties, timezoneKV)
 	}
 
-	if ezProps := hookutil.GetEzPropByDBProperties(db.Properties); ezProps != nil {
-		t.Req.Properties = append(t.Req.Properties, ezProps)
-	}
+	t.Req.Properties = hookutil.TidyCollPropsByDBProps(t.Req.Properties, db.Properties)
 
 	t.header.DbId = db.ID
 	t.body.DbID = t.header.DbId

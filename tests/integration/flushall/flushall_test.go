@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -41,7 +42,10 @@ type FlushAllSuite struct {
 	integration.MiniClusterSuite
 }
 
-func (s *FlushAllSuite) WaitForFlushAll(ctx context.Context, flushTss map[string]uint64) {
+func (s *FlushAllSuite) WaitForFlushAll(ctx context.Context, flushAllMsgs map[string]*commonpb.ImmutableMessage) {
+	flushTss := lo.MapValues(flushAllMsgs, func(msg *commonpb.ImmutableMessage, _ string) uint64 {
+		return message.MilvusMessageToImmutableMessage(msg).TimeTick()
+	})
 	flushed := func() bool {
 		resp, err := s.Cluster.MilvusClient.GetFlushAllState(ctx, &milvuspb.GetFlushAllStateRequest{
 			FlushAllTss: flushTss,
@@ -130,8 +134,8 @@ func (s *FlushAllSuite) TestFlushAll() {
 	// flush all
 	flushAllResp, err := c.MilvusClient.FlushAll(ctx, &milvuspb.FlushAllRequest{})
 	s.NoError(merr.CheckRPCCall(flushAllResp, err))
-	log.Info("FlushAll succeed", zap.Any("flushAllTss", flushAllResp.GetFlushAllTss()))
-	s.WaitForFlushAll(ctx, flushAllResp.GetFlushAllTss())
+	log.Info("FlushAll succeed")
+	s.WaitForFlushAll(ctx, flushAllResp.GetFlushAllMsgs())
 
 	// show and validate segments
 	for collectionName, dbName := range collectionNames {

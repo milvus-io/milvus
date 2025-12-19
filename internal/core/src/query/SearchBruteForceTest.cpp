@@ -151,7 +151,7 @@ class TestFloatSearchBruteForce : public ::testing::Test {
                            dim,
                            topk,
                            metric_type);
-            auto ans = result.get_seg_offsets() + i * topk;
+            auto ans = result.get_offsets() + i * topk;
             AssertMatch(ref, ans);
         }
     }

@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -621,6 +622,78 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return dct.result, nil
+}
+
+// TruncateCollection truncate a collection.
+func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
+	defer sp.End()
+	method := "TruncateCollection"
+	tr := timerecord.NewTimeRecorder(method)
+
+	dct := &truncateCollectionTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		TruncateCollectionRequest: request,
+		mixCoord:                  node.mixCoord,
+		chMgr:                     node.chMgr,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+	)
+
+	log.Info("TruncateCollection received")
+
+	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+		log.Warn("TruncateCollection failed to enqueue",
+			zap.Error(err))
+
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug(
+		"TruncateCollection enqueued",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+
+	if err := dct.WaitToFinish(); err != nil {
+		log.Warn("TruncateCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTs", dct.BeginTs()),
+			zap.Uint64("EndTs", dct.EndTs()))
+
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info(
+		"TruncateCollection done",
+		zap.Uint64("BeginTs", dct.BeginTs()),
+		zap.Uint64("EndTs", dct.EndTs()),
+	)
+	DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
+
+	metrics.ProxyReqLatency.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+	).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &milvuspb.TruncateCollectionResponse{
+		Status: dct.result.GetStatus(),
+	}, nil
 }
 
 // HasCollection check if the specific collection exists in Milvus.
@@ -4100,22 +4173,22 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 	method := "FlushAll"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
 
-	log.Debug(rpcReceived(method))
+	logger.Debug(rpcReceived(method))
 
 	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
-		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		logger.Warn(rpcFailedToEnqueue(method), zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	log.Debug(rpcEnqueued(method),
+	logger.Debug(rpcEnqueued(method),
 		zap.Uint64("BeginTs", ft.BeginTs()),
 		zap.Uint64("EndTs", ft.EndTs()))
 
 	if err := ft.WaitToFinish(); err != nil {
-		log.Warn(
+		logger.Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", ft.BeginTs()),
@@ -4125,8 +4198,10 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	log.Debug(rpcDone(method),
-		zap.Any("FlushAllTss", ft.result.GetFlushAllTss()))
+	logger.Debug(rpcDone(method))
+	for channel, msg := range ft.result.GetFlushAllMsgs() {
+		logger.Debug("flushall message", zap.String("channel", channel), log.FieldMessage(message.MilvusMessageToImmutableMessage(msg)))
+	}
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil

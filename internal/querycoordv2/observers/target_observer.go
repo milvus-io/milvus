@@ -461,16 +461,14 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		readyDelegatorsInCollection = append(readyDelegatorsInCollection, readyDelegatorsInReplica...)
 	}
 
-	// If no ready delegators exist in any replica, don't update current target
-	if len(readyDelegatorsInCollection) == 0 {
-		log.RatedInfo(10, "no ready delegators in any replica",
-			zap.Int64("collectionID", collectionID),
-			zap.Int("replicaCount", len(replicas)),
-		)
-		return false
-	}
+	// segment data satisfies next target spec
+	segmentDataReady := !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
+		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
 
-	return ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
+	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
+	syncedChannelNames := lo.Uniq(lo.Map(readyDelegatorsInCollection, func(ch *meta.DmChannel, _ int) string { return ch.ChannelName }))
+	// only after all channel are synced, we can consider the current target is ready
+	return syncSuccess && lo.Every(syncedChannelNames, lo.Keys(channelNames)) && segmentDataReady
 }
 
 // sync next target info to delegator as readable snapshot

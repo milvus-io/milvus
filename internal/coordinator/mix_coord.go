@@ -536,6 +536,10 @@ func (s *mixCoordImpl) DescribeCollectionInternal(ctx context.Context, in *milvu
 	return s.rootcoordServer.DescribeCollectionInternal(ctx, in)
 }
 
+func (s *mixCoordImpl) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.rootcoordServer.BackupEzk(ctx, in)
+}
+
 // DropAlias drop collection alias
 func (c *mixCoordImpl) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	return c.rootcoordServer.DropAlias(ctx, in)
@@ -1218,7 +1222,7 @@ func (s *mixCoordImpl) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	return s.queryCoordServer.RunAnalyzer(ctx, req)
 }
 
-func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
 }
 
@@ -1248,4 +1252,19 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 // CreateExternalCollection creates an external collection
 func (s *mixCoordImpl) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return s.datacoordServer.CreateExternalCollection(ctx, req)
+}
+
+// TruncateCollection truncate collection
+func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return s.rootcoordServer.TruncateCollection(ctx, req)
+}
+
+// DropSegmentsByTime drop segments by time for TruncateCollection
+func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	return s.datacoordServer.DropSegmentsByTime(ctx, collectionID, flushTsList)
+}
+
+// ManualUpdateCurrentTarget manually update current target for TruncateCollection
+func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
 }

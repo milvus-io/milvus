@@ -1950,13 +1950,13 @@ func (c *Client) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerReques
 	})
 }
 
-func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
-	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ValidateAnalyzerResponse, error) {
 		return client.ValidateAnalyzer(ctx, req)
 	})
 }
@@ -1969,5 +1969,28 @@ func (c *Client) ComputePhraseMatchSlop(ctx context.Context, req *querypb.Comput
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ComputePhraseMatchSlopResponse, error) {
 		return client.ComputePhraseMatchSlop(ctx, req)
+	})
+}
+
+// TruncateCollection truncate collection
+func (c *Client) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.TruncateCollectionResponse, error) {
+		return client.TruncateCollection(ctx, in)
+	})
+}
+
+func (c *Client) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.BackupEzkResponse, error) {
+		return client.BackupEzk(ctx, req)
 	})
 }
