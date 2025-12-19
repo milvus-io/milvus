@@ -384,7 +384,7 @@ class TestCompactionParams(TestcaseBase):
 
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.compact()
-        sleep(ct.max_compaction_interval + 1)
+        sleep(10)  # modified by nico, debug compaction time from 60s to 10s
 
         # verify queryNode load the compacted segments
         collection_w.load()
