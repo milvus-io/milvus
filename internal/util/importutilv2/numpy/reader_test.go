@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -46,18 +47,6 @@ import (
 const (
 	dim = 8
 )
-
-type mockReader struct {
-	io.Reader
-	io.Closer
-	io.ReaderAt
-	io.Seeker
-	size int64
-}
-
-func (mr *mockReader) Size() (int64, error) {
-	return mr.size, nil
-}
 
 type ReaderSuite struct {
 	suite.Suite
@@ -220,10 +209,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		reader, err := createReader(fieldData, dataType)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-			Closer: io.NopCloser(reader),
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 		cm.EXPECT().Size(mock.Anything, files[fieldID]).Return(128, nil)
 	}
 
@@ -317,9 +303,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		reader, err := createReader(fieldData, dataType)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
@@ -394,9 +378,7 @@ func (suite *ReaderSuite) runNullable(dt schemapb.DataType, hasFile bool) {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		reader, err := createReader(fieldData, dataType)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
