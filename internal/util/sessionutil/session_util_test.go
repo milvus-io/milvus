@@ -1080,6 +1080,31 @@ func (s *SessionSuite) TestGetSessions() {
 	assert.Equal(s.T(), "value2", ret["key2"])
 }
 
+func (s *SessionSuite) TestVersionKey() {
+	ctx := context.Background()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init(typeutil.MixCoordRole, "normal", false, false)
+
+	session.Register()
+
+	resp, err := s.client.Get(ctx, session.versionKey)
+	s.Require().NoError(err)
+	s.Equal(0, len(resp.Kvs))
+
+	s.client.Put(ctx, session.versionKey, "2.6.8")
+
+	s.Panics(func() {
+		session2 := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+		session2.Init(typeutil.MixCoordRole, "normal", false, false)
+		session2.Register()
+
+		resp, err = s.client.Get(ctx, session2.versionKey)
+		s.Require().NoError(err)
+		s.Equal(1, len(resp.Kvs))
+		s.Equal(common.Version.String(), string(resp.Kvs[0].Value))
+	})
+}
+
 func TestSessionSuite(t *testing.T) {
 	suite.Run(t, new(SessionSuite))
 }

@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -51,7 +52,16 @@ const (
 	DefaultIDKey                        = "id"
 	SupportedLabelPrefix                = "MILVUS_SERVER_LABEL_"
 	LabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_STREAMING-EMBEDDED" // Used for upgrading from 2.5.x to 2.6.0.
+
+	serverVersionKey = "version"
 )
+
+var errSessionVersionCheckFailure = errors.New("session version check failure")
+
+// isSessionVersionCheckFailure checks if the error is a session version check failure.
+func isSessionVersionCheckFailure(err error) bool {
+	return !errors.Is(err, errSessionVersionCheckFailure)
+}
 
 // SessionEventType session event type
 type SessionEventType int
@@ -155,6 +165,7 @@ type Session struct {
 	isStandby           atomic.Value
 	enableActiveStandBy bool
 	activeKey           string
+	versionKey          string
 
 	sessionTTL        int64
 	sessionRetryTimes int64
@@ -303,6 +314,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 	}
 	s.ServerID = serverID
 	s.ServerLabels = GetServerLabelsFromEnv(serverName)
+	s.versionKey = path.Join(s.metaRoot, DefaultServiceRoot, serverVersionKey)
 	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID), zap.Any("server_labels", s.ServerLabels))
 }
 
@@ -321,6 +333,29 @@ func (s *Session) Register() {
 	s.liveCh = make(chan struct{})
 	s.processKeepAliveResponse(ch)
 	s.UpdateRegistered(true)
+}
+
+// isCoordinator checks if the session needs to check the version.
+func (s *Session) isCoordinator() bool {
+	return s.ServerName == typeutil.MixCoordRole ||
+		s.ServerName == typeutil.QueryCoordRole ||
+		s.ServerName == typeutil.DataCoordRole ||
+		s.ServerName == typeutil.RootCoordRole ||
+		s.ServerName == typeutil.IndexCoordRole
+}
+
+// checkVersion checks the version of the session and returns the error if the version is not found or expired.
+func (s *Session) checkVersionForCoordinator() error {
+	resp, err := s.etcdCli.Get(s.ctx, s.versionKey)
+	if err != nil {
+		return err
+	}
+	if resp.Count <= 0 {
+		// no version key found.
+		return nil
+	}
+	version := semver.MustParse(string(resp.Kvs[0].Value))
+	return errors.Wrapf(errSessionVersionCheckFailure, "current version(%s), session version(%s)", common.Version.String(), version.String())
 }
 
 var serverIDMu sync.Mutex
@@ -486,19 +521,31 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			return err
 		}
 
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(
-			clientv3.Compare(
-				clientv3.Version(completeKey),
-				"=",
-				0)).
-			Then(clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+		compareOps := []clientv3.Cmp{
+			clientv3.Compare(clientv3.Version(completeKey), "=", 0),
+		}
+		ops := []clientv3.Op{
+			clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID)),
+		}
+
+		if s.isCoordinator() && !s.enableActiveStandBy {
+			if err := s.checkVersionForCoordinator(); err != nil {
+				return err
+			}
+			compareOps = append(compareOps,
+				// the version key is introduced in 2.6.8, so we only check the version key when the version key exists here.
+				clientv3.Compare(clientv3.Version(s.versionKey), "=", 0),
+				// mixcoord is also introduced in 2.6.0, so we need to check it here.
+				clientv3.Compare(clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, typeutil.MixCoordRole)), "=", 0))
+		}
+
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Commit()
 		if err != nil {
 			log.Warn("register on etcd error, check the availability of etcd ", zap.Error(err))
 			return err
 		}
 
 		if txnResp != nil && !txnResp.Succeeded {
-			s.handleRestart(completeKey)
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", s.ServerName)
 		}
 		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
@@ -514,41 +561,11 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(s.sessionRetryTimes)))
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(s.sessionRetryTimes)), retry.RetryErr(isSessionVersionCheckFailure))
 	if err != nil {
 		return nil, err
 	}
 	return ch, nil
-}
-
-// Handle restart is fast path to handle node restart.
-// This should be only a fast path for coordinator
-// If we find previous session have same address as current , simply purge the old one so the recovery can be much faster
-func (s *Session) handleRestart(key string) {
-	resp, err := s.etcdCli.Get(s.ctx, key)
-	log := log.With(zap.String("key", key))
-	if err != nil {
-		log.Warn("failed to read old session from etcd, ignore", zap.Error(err))
-		return
-	}
-	for _, kv := range resp.Kvs {
-		session := &Session{}
-		err = json.Unmarshal(kv.Value, session)
-		if err != nil {
-			log.Warn("failed to unmarshal old session from etcd, ignore", zap.Error(err))
-			return
-		}
-
-		if session.Address == s.Address && session.ServerID < s.ServerID {
-			log.Warn("find old session is same as current node, assume it as restart, purge old session", zap.String("key", key),
-				zap.String("address", session.Address))
-			_, err := s.etcdCli.Delete(s.ctx, key)
-			if err != nil {
-				log.Warn("failed to unmarshal old session from etcd, ignore", zap.Error(err))
-				return
-			}
-		}
-	}
 }
 
 // processKeepAliveResponse processes the response of etcd keepAlive interface
@@ -1075,12 +1092,26 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			log.Error("json marshal error", zap.Error(err))
 			return false, -1, err
 		}
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(
-			clientv3.Compare(
-				clientv3.Version(s.activeKey),
-				"=",
-				0)).
-			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))).Commit()
+
+		compareOps := []clientv3.Cmp{
+			clientv3.Compare(clientv3.Version(s.activeKey), "=", 0),
+		}
+		ops := []clientv3.Op{
+			clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID)),
+		}
+
+		if s.isCoordinator() {
+			if err := s.checkVersionForCoordinator(); err != nil {
+				return false, -1, err
+			}
+			compareOps = append(compareOps,
+				// the version key is introduced in 2.6.8, so we only check the version key when the version key exists here.
+				clientv3.Compare(clientv3.Version(s.versionKey), "=", 0),
+				// mixcoord is also introduced in 2.6.0, so we need to check it here.
+				clientv3.Compare(clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, typeutil.MixCoordRole)), "=", 0))
+		}
+
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Commit()
 		if err != nil {
 			log.Error("register active key to etcd failed", zap.Error(err))
 			return false, -1, err
@@ -1108,6 +1139,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		if err != nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
+		}
+		if errors.Is(err, errSessionVersionCheckFailure) {
+			return err
 		}
 		if registered {
 			break
