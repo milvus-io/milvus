@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/internal/util/textmatch"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -1788,4 +1789,47 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
+}
+
+func (node *QueryNode) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	return node.computePhraseMatchSlopByParams(req)
+}
+
+func (node *QueryNode) computePhraseMatchSlopByParams(req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	query := req.GetQueryText()
+	datas := req.GetDataTexts()
+
+	if query == "" || len(datas) == 0 {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Success(), // Empty result
+		}, nil
+	}
+
+	isMatches := make([]bool, len(datas))
+	slops := make([]int64, len(datas))
+
+	for i, data := range datas {
+		slop, err := textmatch.ComputePhraseMatchSlop(req.GetAnalyzerParams(), query, data)
+		if err != nil {
+			isMatches[i] = false
+			slops[i] = -1
+		} else {
+			isMatches[i] = true
+			slops[i] = int64(slop)
+		}
+	}
+
+	return &querypb.ComputePhraseMatchSlopResponse{
+		Status:  merr.Success(),
+		IsMatch: isMatches,
+		Slops:   slops,
+	}, nil
 }

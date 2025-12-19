@@ -419,3 +419,14 @@ func (c *Client) SyncFileResource(ctx context.Context, req *internalpb.SyncFileR
 		return client.SyncFileResource(ctx, req)
 	})
 }
+
+func (c *Client) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest, _ ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.ComputePhraseMatchSlopResponse, error) {
+		return client.ComputePhraseMatchSlop(ctx, req)
+	})
+}

@@ -6931,3 +6931,42 @@ func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateRep
 	}
 	return s.Execute()
 }
+
+func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.ComputePhraseMatchSlopRequest) (*milvuspb.ComputePhraseMatchSlopResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ComputePhraseMatchSlop")
+	defer sp.End()
+
+	method := "ComputePhraseMatchSlop"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+
+	log.Debug(rpcReceived(method))
+
+	resp, err := node.mixCoord.ComputePhraseMatchSlop(ctx, &querypb.ComputePhraseMatchSlopRequest{
+		AnalyzerParams: req.GetAnalyzerParams(),
+		QueryText:      req.GetQueryText(),
+		DataTexts:      req.GetDataTexts(),
+	})
+	if err != nil {
+		return &milvuspb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug(rpcDone(method))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &milvuspb.ComputePhraseMatchSlopResponse{
+		Status:  resp.GetStatus(),
+		IsMatch: resp.GetIsMatch(),
+		Slops:   resp.GetSlops(),
+	}, nil
+}

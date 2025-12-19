@@ -216,6 +216,10 @@ func (m *mockMixCoord) FlushAll(ctx context.Context, req *datapb.FlushAllRequest
 	panic("implement me")
 }
 
+func (m *mockMixCoord) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	panic("implement me")
+}
+
 func (m *mockMixCoord) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return &datapb.CreateExternalCollectionResponse{
 		Status: merr.Success(),

@@ -1212,6 +1212,31 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 	return resp, nil
 }
 
+func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(errors.Wrap(err, "failed to compute phrase match slop")),
+		}, nil
+	}
+
+	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
+
+	if len(nodeIDs) == 0 {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(errors.New("failed to compute phrase match slop, no query node available")),
+		}, nil
+	}
+
+	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))
+	resp, err := s.cluster.ComputePhraseMatchSlop(ctx, nodeIDs[idx], req)
+	if err != nil {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return resp, nil
+}
+
 // ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
 func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	log := log.Ctx(ctx).With(
