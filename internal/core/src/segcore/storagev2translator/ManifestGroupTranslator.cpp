@@ -53,6 +53,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     bool use_mmap,
+    const std::string& mmap_dir_path,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
@@ -60,6 +61,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       chunk_reader_(std::move(chunk_reader)),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_index)),
       field_metas_(field_metas),
+      mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
