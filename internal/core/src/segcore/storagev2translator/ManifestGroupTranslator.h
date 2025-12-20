@@ -51,6 +51,7 @@ class ManifestGroupTranslator
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
      * @param use_mmap Whether to use memory mapping for data loading
+     * @param mmap_dir_path Directory path for memory mapping
      * @param num_fields Total number of fields in the column group
      * @param load_priority Priority level for loading operations
      */
@@ -60,6 +61,7 @@ class ManifestGroupTranslator
         std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         bool use_mmap,
+        const std::string& mmap_dir_path,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority);
     ~ManifestGroupTranslator() = default;
