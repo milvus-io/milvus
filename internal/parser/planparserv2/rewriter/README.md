@@ -5,7 +5,7 @@ This module performs rule-based logical rewrites on parsed `planpb.Expr` trees r
 ### Entry
 - `RewriteExpr(*planpb.Expr) *planpb.Expr` (in `entry.go`)
   - Recursively visits the expression tree and applies a set of composable, side-effect-free rewrite rules.
-  - Uses global configuration from `paramtable.Get().ProxyCfg.OptimizeExpr`
+  - Uses global configuration from `paramtable.Get().CommonCfg.EnabledOptimizeExpr`
 - `RewriteExprWithConfig(*planpb.Expr, bool) *planpb.Expr` (in `entry.go`)
   - Same as `RewriteExpr` but allows custom configuration for testing or special cases.
 
@@ -15,7 +15,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `proxy.optimizeExpr` | `true` | Enable query expression optimization including range simplification, IN/NOT IN merge, TEXT_MATCH merge, and all other optimizations |
+| `common.enabledOptimizeExpr` | `true` | Enable query expression optimization including range simplification, IN/NOT IN merge, TEXT_MATCH merge, and all other optimizations |
 
 **IMPORTANT**: IN/NOT IN value list sorting and deduplication **always** runs regardless of this configuration setting, because the execution engine depends on sorted value lists.
 

@@ -88,7 +88,7 @@ func TestRewrite_TextMatch_OR_MoreMultiFields_Merge(t *testing.T) {
 	expr, err := parser.ParseExpr(helper, `text_match(VarCharField, "A") or (text_match(StringField, "C") or text_match(VarCharField, "B")) or text_match(StringField, "D")`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	// should be text_match(VarCharField, "A B") or text_match(StringField, "A")
+	// should be text_match(VarCharField, "A B") or text_match(StringField, "C D")
 	be := expr.GetBinaryExpr()
 	require.NotNil(t, be)
 	require.Equal(t, planpb.BinaryExpr_LogicalOr, be.GetOp())

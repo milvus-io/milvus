@@ -6,7 +6,7 @@ import (
 )
 
 func RewriteExpr(e *planpb.Expr) *planpb.Expr {
-	optimizeEnabled := paramtable.Get().ProxyCfg.OptimizeExpr.GetAsBool()
+	optimizeEnabled := paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool()
 	return RewriteExprWithConfig(e, optimizeEnabled)
 }
 
