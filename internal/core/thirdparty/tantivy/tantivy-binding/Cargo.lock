@@ -3003,7 +3003,7 @@ dependencies = [
 [[package]]
 name = "ownedbytes"
 version = "0.7.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -3954,7 +3954,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.23.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -4060,7 +4060,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.6.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "bitpacking 0.9.2",
 ]
@@ -4083,7 +4083,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "downcast-rs",
  "fastdivide",
@@ -4110,7 +4110,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.7.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -4153,7 +4153,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.22.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "nom",
 ]
@@ -4171,7 +4171,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
@@ -4193,7 +4193,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "murmurhash32",
  "rand_distr",
@@ -4211,7 +4211,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#ae05d37a3eb901dc2aa5674d0d0dd0fc01a0298d"
+source = "git+https://github.com/zhengbuqian/tantivy.git?branch=optimize-mem-final#65362859611c50ebf3187e6fd6bf8f17c5624157"
 dependencies = [
  "serde",
 ]

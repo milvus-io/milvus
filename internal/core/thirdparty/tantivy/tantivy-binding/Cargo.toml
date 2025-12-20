@@ -23,7 +23,7 @@ panic = "unwind"
 overflow-checks = false
 
 [dependencies]
-tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
+tantivy = { git = "https://github.com/zhengbuqian/tantivy.git", branch = "optimize-mem-final" }
 tantivy-5 = { package = "tantivy", git = "https://github.com/zilliztech/tantivy", tag = "0.21.1-fix4" }
 lindera = "0.42.4"
 fs2 = "0.4"
