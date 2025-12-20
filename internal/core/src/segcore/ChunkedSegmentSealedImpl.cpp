@@ -2880,11 +2880,7 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path,
         cg_field_ids.emplace_back(i, std::move(milvus_field_ids));
     }
 
-<<<<<<< HEAD
-    LoadColumnGroups(column_groups, properties, cg_field_ids_map, op_ctx);
-=======
-    LoadColumnGroups(column_groups, properties, cg_field_ids);
->>>>>>> 48f8b3b585 (enhance: Unify segment Load and Reopen through diff-based loading (#46536))
+    LoadColumnGroups(column_groups, properties, cg_field_ids, op_ctx);
 }
 
 void
@@ -3013,6 +3009,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     LOG_INFO("[StorageV2] segment {} loads manifest cg index {}",
              this->get_segment_id(),
              index);
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
 
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
