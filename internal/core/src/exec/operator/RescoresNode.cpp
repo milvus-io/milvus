@@ -111,7 +111,7 @@ PhyRescoresNode::GetOutput() {
         filters.emplace_back(filter);
         auto expr_set = std::make_unique<ExprSet>(filters, exec_context);
         std::vector<VectorPtr> results;
-        EvalCtx eval_ctx(exec_context, expr_set.get());
+        EvalCtx eval_ctx(exec_context);
 
         const auto& exprs = expr_set->exprs();
         bool is_native_supported = true;

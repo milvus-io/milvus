@@ -77,6 +77,24 @@ class PhyMatchFilterExpr : public Expr {
             nullopt;  // Match expressions don't have a single column info
     }
 
+    inline bool
+    MatchExprHit(int64_t hit_count, int64_t element_count) {
+        switch (expr_->get_match_type()) {
+            case milvus::expr::MatchType::MatchAny:
+                return hit_count > 0;
+            case milvus::expr::MatchType::MatchLeast:
+                return hit_count >= expr_->get_count();
+            case milvus::expr::MatchType::MatchMost:
+                return hit_count <= expr_->get_count();
+            case milvus::expr::MatchType::MatchExact:
+                return hit_count == expr_->get_count();
+            case milvus::expr::MatchType::MatchAll:
+                return hit_count == element_count;
+            default:
+                return false;
+        }
+    }
+
  private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
