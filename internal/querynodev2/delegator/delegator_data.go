@@ -834,11 +834,13 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	sd.AddExcludedSegments(droppedInfos)
 
 	if len(sealed) > 0 {
-		sd.pkOracle.Remove(
+		removed := sd.pkOracle.Remove(
 			pkoracle.WithSegmentIDs(lo.Map(sealed, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Sealed),
 			pkoracle.WithWorkerID(targetNodeID),
 		)
+		// Refund bloom filter resources for removed sealed segment candidates
+		segments.RefundBloomFilterSetResource(removed)
 	}
 	if len(growing) > 0 {
 		sd.pkOracle.Remove(

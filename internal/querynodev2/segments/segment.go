@@ -99,6 +99,9 @@ type baseSegment struct {
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
+
+	// Resource tracking for growing segment's Go-side data structures
+	bloomFilterSize *atomic.Int64 // Track memory size of bloom filter
 }
 
 func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) (baseSegment, error) {
@@ -119,6 +122,8 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
+
+		bloomFilterSize: atomic.NewInt64(0),
 	}
 	return bs, nil
 }
@@ -497,6 +502,78 @@ func (s *LocalSegment) MemSize() int64 {
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
+}
+
+// ChargeBloomFilterResource charges memory resource for bloom filter via caching layer.
+// This should be called after loading bloom filter for all segment types.
+// If called multiple times, it will refund the previous charge before charging the new amount.
+// This method properly accounts for both currentStat and historyStats in the BloomFilterSet.
+func (s *LocalSegment) ChargeBloomFilterResource(bfs *pkoracle.BloomFilterSet) {
+	if bfs == nil {
+		return
+	}
+
+	// Calculate total bloom filter size including all historical stats
+	size := bfs.MemSize()
+	if size <= 0 {
+		return
+	}
+
+	// Swap atomically and get the old size
+	oldSize := s.bloomFilterSize.Swap(size)
+
+	// Refund first, then charge to avoid temporary over-accounting
+	// if a panic occurs between the two C calls
+	if oldSize > 0 {
+		C.RefundLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(oldSize),
+			disk_bytes:   0,
+		})
+	}
+
+	C.ChargeLoadedResource(C.CResourceUsage{
+		memory_bytes: C.int64_t(size),
+		disk_bytes:   0,
+	})
+}
+
+// RefundBloomFilterResource refunds the charged resources for bloom filter.
+// This should be called when the segment is released.
+func (s *LocalSegment) RefundBloomFilterResource() {
+	bfSize := s.bloomFilterSize.Swap(0)
+
+	if bfSize > 0 {
+		C.RefundLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(bfSize),
+			disk_bytes:   0,
+		})
+	}
+}
+
+// UpdateBloomFilter updates bloom filter with provided pks and charges resource if BF is newly created.
+// This overrides baseSegment.UpdateBloomFilter to handle resource charging for growing segments.
+func (s *LocalSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
+	if s.skipGrowingBF {
+		return
+	}
+
+	// Update bloom filter (may create new BF if not exist)
+	s.bloomFilterSet.UpdateBloomFilter(pks)
+
+	// Get current BF size and use CAS to ensure only one goroutine charges
+	// when the BF is first created. This handles the race condition where
+	// multiple goroutines might call UpdateBloomFilter concurrently.
+	newSize := s.bloomFilterSet.MemSize()
+	if newSize > 0 {
+		// Only charge if we successfully transition from 0 to newSize
+		// (i.e., this is the first time we're tracking this BF)
+		if s.bloomFilterSize.CompareAndSwap(0, newSize) {
+			C.ChargeLoadedResource(C.CResourceUsage{
+				memory_bytes: C.int64_t(newSize),
+				disk_bytes:   0,
+			})
+		}
+	}
 }
 
 func (s *LocalSegment) GetIndexByID(indexID int64) *IndexedFieldInfo {
@@ -1448,6 +1525,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	// TODO: disable logical resource handling for now
 	// usage := s.ResourceUsageEstimate()
 	// s.manager.SubLogicalResource(usage)
+
+	// Refund bloom filter resource for growing segments
+	s.RefundBloomFilterResource()
 
 	binlogSize := s.binlogSize.Load()
 	if binlogSize > 0 {
