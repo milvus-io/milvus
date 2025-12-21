@@ -394,12 +394,14 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 
 		if !segment.BloomFilterExist() {
-			log.Debug("BloomFilterExist", zap.Int64("segid", segment.ID()))
+			log.Debug("loading bloom filter for segment", zap.Int64("segmentID", segment.ID()))
 			bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
 			if err != nil {
 				return errors.Wrap(err, "At LoadBloomFilter")
 			}
 			segment.SetBloomFilter(bfs)
+			// Charge bloom filter resource
+			bfs.Charge()
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
@@ -722,11 +724,44 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, err
 	}
 	pkField := GetPkField(collection.Schema())
+	pkFieldID := pkField.GetFieldID()
+
+	// Calculate total memory size needed for bloom filters (PK stats)
+	var totalMemorySize int64
+	for _, info := range infos {
+		for _, fieldBinlog := range info.Statslogs {
+			if fieldBinlog.FieldID == pkFieldID {
+				totalMemorySize += getBinlogDataMemorySize(fieldBinlog)
+			}
+		}
+	}
+
+	// Reserve memory resource if tiered eviction is enabled
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
+		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
+			// double loading memory size for bloom filters to avoid OOM during loading
+			memory_bytes: C.int64_t(totalMemorySize * 2),
+			disk_bytes:   C.int64_t(0),
+		}, 1000); !ok {
+			return nil, fmt.Errorf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
+				logutil.ToMB(float64(totalMemorySize)))
+		}
+		log.Info("reserved loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+	}
+
+	defer func() {
+		if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
+			C.ReleaseLoadingResource(C.CResourceUsage{
+				memory_bytes: C.int64_t(totalMemorySize * 2),
+				disk_bytes:   C.int64_t(0),
+			})
+			log.Info("released loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+		}
+	}()
 
 	log.Info("start loading remote...", zap.Int("segmentNum", segmentNum))
 
 	loadedBfs := typeutil.NewConcurrentSet[*pkoracle.BloomFilterSet]()
-	// TODO check memory for bf size
 	loadRemoteFunc := func(idx int) error {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
@@ -756,7 +791,14 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, err
 	}
 
-	return loadedBfs.Collect(), nil
+	result := loadedBfs.Collect()
+
+	// Charge loaded resource for bloom filters
+	for _, bfs := range result {
+		bfs.Charge()
+	}
+
+	return result, nil
 }
 
 func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*IndexedFieldInfo, []*datapb.FieldBinlog) {
