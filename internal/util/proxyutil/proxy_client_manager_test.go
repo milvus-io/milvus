@@ -103,22 +103,38 @@ func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Ref
 	return merr.Success(), nil
 }
 
-func TestProxyClientManager_AddProxyClients(t *testing.T) {
-	proxyCreator := func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
-		return nil, errors.New("failed")
-	}
+func TestProxyClientManager_SetProxyClients(t *testing.T) {
+	p1 := mocks.NewMockProxyClient(t)
+	p1.EXPECT().Close().Return(nil).Once()
+	p2 := mocks.NewMockProxyClient(t)
+	p3 := mocks.NewMockProxyClient(t)
 
+	proxyCreator := func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error) {
+		return p3, nil
+	}
 	pcm := NewProxyClientManager(proxyCreator)
 
-	session := &sessionutil.Session{
-		SessionRaw: sessionutil.SessionRaw{
-			ServerID: 100,
-			Address:  "localhost",
-		},
-	}
+	// Initial state: proxy 1, 2
+	pcm.proxyClient.Insert(1, p1)
+	pcm.proxyClient.Insert(2, p2)
+	assert.Equal(t, 2, pcm.GetProxyCount())
 
-	sessions := []*sessionutil.Session{session}
-	pcm.AddProxyClients(sessions)
+	// New snapshot: proxy 2, 3
+	sessions := []*sessionutil.Session{
+		{SessionRaw: sessionutil.SessionRaw{ServerID: 2, Address: "addr2"}},
+		{SessionRaw: sessionutil.SessionRaw{ServerID: 4, Address: "addr4"}},
+	}
+	pcm.SetProxyClients(sessions)
+
+	// Verify: proxy 1 removed, proxy 2 kept, proxy 3 added
+	_, ok := pcm.proxyClient.Get(1)
+	assert.False(t, ok, "stale proxy 1 should be removed")
+	_, ok = pcm.proxyClient.Get(2)
+	assert.True(t, ok, "proxy 2 should still exist")
+	_, ok = pcm.proxyClient.Get(4)
+	assert.True(t, ok, "proxy 4 should be added")
+
+	assert.Equal(t, 2, pcm.GetProxyCount())
 }
 
 func TestProxyClientManager_AddProxyClient(t *testing.T) {
