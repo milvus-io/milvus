@@ -138,13 +138,21 @@ func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (Fil
 }
 
 func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
-	objectInfo, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
-	if err != nil {
-		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return 0, err
-	}
-
-	return objectInfo, nil
+	var objectInfo int64
+	var err error
+	retry.Handle(ctx, func() (bool, error) {
+		objectInfo, err = mcm.getObjectSize(ctx, mcm.bucketName, filePath)
+		if err == nil {
+			return false, nil
+		}
+		log.Warn("failed to get object size", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		err = checkObjectStorageError(filePath, err)
+		if merr.IsRetryableErr(err) {
+			return true, err
+		}
+		return false, err
+	}, retry.Attempts(mcm.readRetryAttempts))
+	return objectInfo, err
 }
 
 // Write writes the data to minio storage.
