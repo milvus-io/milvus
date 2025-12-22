@@ -321,6 +321,10 @@ test-tso:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t tso)
 
+test-pkg:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t pkg)
+
 test-kv:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t kv)
