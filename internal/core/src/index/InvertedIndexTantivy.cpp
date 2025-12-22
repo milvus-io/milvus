@@ -635,7 +635,6 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                       fmt::format("Inverted index not supported on {}",
                                   schema_.data_type()));
     }
-    ComputeByteSize();
 }
 
 template <typename T>

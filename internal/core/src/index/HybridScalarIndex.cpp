@@ -265,7 +265,6 @@ HybridScalarIndex<T>::Build(const Config& config) {
         index_meta.segment_id,
         index_meta.field_id);
     is_built_ = true;
-    ComputeByteSize();
 }
 
 template <typename T>
