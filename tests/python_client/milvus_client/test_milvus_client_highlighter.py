@@ -35,7 +35,7 @@ default_sparse_vector_field_name = f"{default_text_field_name}_sparse_emb"
 default_sparse_vector_field_name_chinese = f"{default_text_field_name_chinese}_sparse_emb"
 default_sparse_vector_field_name_multi_analyzer = f"{default_text_field_name_multi_analyzer}_sparse_emb"
 
-COLLECTION_NAME = "test_hightligher" + cf.gen_unique_str("_")
+COLLECTION_NAME = "test_hightligher"
 @pytest.mark.xdist_group("TestMilvusClientHighlighter")
 class TestMilvusClientHighlighter(TestMilvusClientV2Base):
     """
@@ -54,8 +54,6 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
-        if client.has_collection(collection_name):
-            client.drop_collection(collection_name)
         
         analyzer_params = {
             "tokenizer": "standard"
