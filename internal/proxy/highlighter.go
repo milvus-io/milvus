@@ -24,7 +24,7 @@ const (
 	PreTagsKey             = "pre_tags"
 	PostTagsKey            = "post_tags"
 	HighlightSearchTextKey = "highlight_search_text"
-	HighlightQueryKey      = "queries"
+	HighlightQueryKey      = "highlight_query"
 	FragmentOffsetKey      = "fragment_offset"
 	FragmentSizeKey        = "fragment_size"
 	FragmentNumKey         = "num_of_fragments"
