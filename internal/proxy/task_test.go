@@ -2140,6 +2140,96 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	assert.Equal(t, 2, len(task.result.Schema.Fields))
 }
 
+func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
+	mix := NewMixCoordMock()
+	ctx := context.Background()
+	InitMetaCache(ctx, mix)
+
+	dbName := ""
+	collectionName := "TestDescribeCollectionTask_FilterNamespaceField"
+
+	schema := &schemapb.CollectionSchema{
+		Name:               collectionName,
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.StartOfUserFieldID,
+				Name:         "id",
+				IsPrimaryKey: true,
+				AutoID:       true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  common.StartOfUserFieldID + 1,
+				Name:     "fvec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(8),
+					},
+				},
+			},
+			{
+				FieldID:         common.StartOfUserFieldID + 2,
+				Name:            common.NamespaceFieldName,
+				IsPartitionKey:  true,
+				DataType:        schemapb.DataType_VarChar,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}},
+				IsClusteringKey: false,
+			},
+			{
+				FieldID:   common.StartOfUserFieldID + 3,
+				Name:      common.MetaFieldName,
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: true,
+			},
+		},
+	}
+
+	mix.SetDescribeCollectionFunc(func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			Schema:       schema,
+			CollectionID: 1,
+		}, nil
+	})
+
+	task := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     100,
+				Timestamp: 100,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	err := task.PreExecute(ctx)
+	assert.NoError(t, err)
+
+	err = task.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.GetStatus().GetErrorCode())
+
+	fieldNames := make(map[string]struct{})
+	for _, f := range task.result.Schema.Fields {
+		fieldNames[f.GetName()] = struct{}{}
+	}
+	_, hasNamespace := fieldNames[common.NamespaceFieldName]
+	assert.False(t, hasNamespace)
+	_, hasMeta := fieldNames[common.MetaFieldName]
+	assert.False(t, hasMeta)
+
+	assert.Equal(t, 2, len(task.result.Schema.Fields))
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
+}
+
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
