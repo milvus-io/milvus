@@ -63,8 +63,8 @@ const (
 
 var errSessionVersionCheckFailure = errors.New("session version check failure")
 
-// isSessionVersionCheckFailure checks if the error is a session version check failure.
-func isSessionVersionCheckFailure(err error) bool {
+// isNotSessionVersionCheckFailure checks if the error is not a session version check failure.
+func isNotSessionVersionCheckFailure(err error) bool {
 	return !errors.Is(err, errSessionVersionCheckFailure)
 }
 
@@ -528,7 +528,7 @@ func (s *Session) registerService() error {
 		s.Logger().Info("put session key into etcd, service registered successfully", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 		return nil
 	}
-	return retry.Do(s.ctx, registerFn, retry.Attempts(uint(s.sessionRetryTimes)), retry.RetryErr(isSessionVersionCheckFailure))
+	return retry.Do(s.ctx, registerFn, retry.Attempts(uint(s.sessionRetryTimes)), retry.RetryErr(isNotSessionVersionCheckFailure))
 }
 
 // getOpsForCoordinator gets the ops and compare ops for coordinator.
