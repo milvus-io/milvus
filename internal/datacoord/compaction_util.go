@@ -110,3 +110,11 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		return
 	}
 }
+
+func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
+	return t.GetState() == datapb.CompactionTaskState_failed ||
+		t.GetState() == datapb.CompactionTaskState_timeout ||
+		t.GetState() == datapb.CompactionTaskState_completed ||
+		t.GetState() == datapb.CompactionTaskState_cleaned ||
+		t.GetState() == datapb.CompactionTaskState_unknown
+}
