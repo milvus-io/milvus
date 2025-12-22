@@ -911,9 +911,12 @@ func TestFlushRate(t *testing.T) {
 	}
 	wg.Wait()
 
+	errCnt := 0
 	for _, err := range errs {
 		if err != nil {
 			common.CheckErr(t, err, false, "request is rejected by grpc RateLimiter middleware, please retry later: rate limit exceeded")
+			errCnt++
 		}
 	}
+	require.NotZero(t, errCnt)
 }
