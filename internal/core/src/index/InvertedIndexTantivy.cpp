@@ -202,6 +202,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveIndexFiles();
     }
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -548,6 +549,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
     wrapper_->create_reader(milvus::index::SetBitsetSealed);
     finish();
     wrapper_->reload();
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -633,6 +635,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                       fmt::format("Inverted index not supported on {}",
                                   schema_.data_type()));
     }
+    ComputeByteSize();
 }
 
 template <typename T>

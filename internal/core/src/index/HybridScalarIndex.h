@@ -153,13 +153,14 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->Size();
     }
 
-    int64_t
-    ByteSize() const override {
-        int64_t total = ScalarIndex<T>::ByteSize();
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
         if (internal_index_) {
             total += internal_index_->ByteSize();
         }
-        return total;
+        this->cached_byte_size_ = total;
     }
 
     const bool
