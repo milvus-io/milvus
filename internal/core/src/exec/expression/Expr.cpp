@@ -36,7 +36,6 @@
 #include "expr/ITypeExpr.h"
 #include "exec/expression/ValueExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
-#include "expr/ITypeExpr.h"
 #include "monitor/Monitor.h"
 
 #include <memory>
@@ -472,24 +471,26 @@ SetNamespaceSkipIndex(std::shared_ptr<PhyConjunctFilterExpr> conjunct_expr,
         return;
     }
     auto namespace_field_meta = schema[namespace_field_id.value()];
-    auto& skip_index =
-        context->get_query_context()->get_segment()->GetSkipIndex();
+    auto* skip_index_ptr =
+        &context->get_query_context()->get_segment()->GetSkipIndex();
     if (namespace_field_meta.get_data_type() == DataType::INT64) {
-        auto skip_namespace_func = [&](int64_t chunk_id) -> bool {
-            return skip_index.CanSkipUnaryRange<int64_t>(
-                namespace_field_id.value(),
-                chunk_id,
-                proto::plan::OpType::Equal,
-                namespace_expr->GetLogicalExpr()->GetValue().int64_val());
+        const auto ns_field_id = namespace_field_id.value();
+        const auto ns_value =
+            namespace_expr->GetLogicalExpr()->GetValue().int64_val();
+        auto skip_namespace_func =
+            [skip_index_ptr, ns_field_id, ns_value](int64_t chunk_id) -> bool {
+            return skip_index_ptr->CanSkipUnaryRange<int64_t>(
+                ns_field_id, chunk_id, proto::plan::OpType::Equal, ns_value);
         };
         namespace_expr->SetNamespaceSkipFunc(skip_namespace_func);
     } else {
-        auto skip_namespace_func = [&](int64_t chunk_id) -> bool {
-            return skip_index.CanSkipUnaryRange<std::string>(
-                namespace_field_id.value(),
-                chunk_id,
-                proto::plan::OpType::Equal,
-                namespace_expr->GetLogicalExpr()->GetValue().string_val());
+        const auto ns_field_id = namespace_field_id.value();
+        const std::string ns_value =
+            namespace_expr->GetLogicalExpr()->GetValue().string_val();
+        auto skip_namespace_func =
+            [skip_index_ptr, ns_field_id, ns_value](int64_t chunk_id) -> bool {
+            return skip_index_ptr->CanSkipUnaryRange<std::string>(
+                ns_field_id, chunk_id, proto::plan::OpType::Equal, ns_value);
         };
         namespace_expr->SetNamespaceSkipFunc(skip_namespace_func);
     }

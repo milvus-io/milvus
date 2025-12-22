@@ -1921,7 +1921,7 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeMixCompactionMutation(t, result)
 	case datapb.CompactionType_ClusteringCompaction:
 		return m.completeClusterCompactionMutation(t, result)
-	case datapb.CompactionType_SortCompaction:
+	case datapb.CompactionType_SortCompaction, datapb.CompactionType_PartitionKeySortCompaction:
 		return m.completeSortCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")

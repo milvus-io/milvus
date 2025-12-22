@@ -580,7 +580,7 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_PartitionKeySortCompaction:
 		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = newL0CompactionTask(t, c.allocator, c.meta)

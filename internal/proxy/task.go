@@ -964,7 +964,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	for _, field := range result.Schema.Fields {
-		if field.IsDynamic {
+		if field.IsDynamic || field.Name == common.NamespaceFieldName {
 			continue
 		}
 		if field.FieldID >= common.StartOfUserFieldID {
