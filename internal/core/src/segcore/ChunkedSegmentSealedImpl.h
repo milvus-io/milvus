@@ -87,7 +87,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
              FieldId field_id,
              bool include_ngram = false) const override {
         auto [scalar_indexings, ngram_fields] =
-            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+            lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
         if (!include_ngram) {
             if (ngram_fields->find(field_id) != ngram_fields->end()) {
                 return {};
