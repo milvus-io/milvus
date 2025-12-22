@@ -54,6 +54,8 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         """
         client = self._client()
         collection_name = COLLECTION_NAME
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
         
         analyzer_params = {
             "tokenizer": "standard"
