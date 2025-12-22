@@ -587,8 +587,6 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 
 func TestInsertTask_Namespace(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("true")
-	defer paramtable.Get().CommonCfg.EnableNamespace.SwapTempValue("false")
 	cache := NewMockCache(t)
 	globalMetaCache = cache
 	cache.On("GetDatabaseInfo",
@@ -616,9 +614,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 				{Key: common.MaxLengthKey, Value: "100"},
 			}},
 		},
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.NamespaceEnabledKey, Value: "true"},
-		},
+		EnableNamespace: true,
 	}
 
 	schemaWithNamespaceDisabled := &schemapb.CollectionSchema{

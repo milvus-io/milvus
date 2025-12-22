@@ -51,6 +51,7 @@ type Collection struct {
 	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
 	EnableDynamicField   bool
+	EnableNamespace      bool
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
@@ -89,6 +90,7 @@ func (c *Collection) ShallowClone() *Collection {
 		Properties:           c.Properties,
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		EnableNamespace:      c.EnableNamespace,
 		Functions:            c.Functions,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -127,6 +129,7 @@ func (c *Collection) Clone() *Collection {
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 		EnableDynamicField:   c.EnableDynamicField,
+		EnableNamespace:      c.EnableNamespace,
 		Functions:            CloneFunctions(c.Functions),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
@@ -154,7 +157,8 @@ func (c *Collection) Equal(other Collection) bool {
 		c.ShardsNum == other.ShardsNum &&
 		c.ConsistencyLevel == other.ConsistencyLevel &&
 		checkParamsEqual(c.Properties, other.Properties) &&
-		c.EnableDynamicField == other.EnableDynamicField
+		c.EnableDynamicField == other.EnableDynamicField &&
+		c.EnableNamespace == other.EnableNamespace
 }
 
 func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, body *message.AlterCollectionMessageBody) {
@@ -177,6 +181,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.AutoID = updates.Schema.AutoID
 			c.Fields = UnmarshalFieldModels(updates.Schema.Fields)
 			c.EnableDynamicField = updates.Schema.EnableDynamicField
+			c.EnableNamespace = updates.Schema.EnableNamespace
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
@@ -234,6 +239,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		State:                coll.State,
 		Properties:           coll.Properties,
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
+		EnableNamespace:      coll.Schema.EnableNamespace,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
@@ -287,6 +293,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		Description:        coll.Description,
 		AutoID:             coll.AutoID,
 		EnableDynamicField: coll.EnableDynamicField,
+		EnableNamespace:    coll.EnableNamespace,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
 		FileResourceIds:    coll.FileResourceIds,
