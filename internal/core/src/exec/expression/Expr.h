@@ -128,12 +128,6 @@ class Expr {
         return inputs_;
     }
 
-    using SkipNamespaceFunc = std::function<bool(int64_t chunk_id)>;
-    virtual void
-    SetNamespaceSkipFunc(SkipNamespaceFunc skip_namespace_func) {
-        namespace_skip_func_ = std::move(skip_namespace_func);
-    }
-
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
@@ -143,10 +137,6 @@ class Expr {
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
     bool has_offset_input_ = false;
-    // check if we can skip a chunk for namespace field.
-    // if there's no namespace field, this is std::nullopt.
-    // TODO: for expression like f1 > 1 and f2 > 2, we can use skip function of f1 when evaluating f2.
-    std::optional<SkipNamespaceFunc> namespace_skip_func_;
 };
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
@@ -433,9 +423,7 @@ class SegmentExpr : public Expr {
         auto pw = segment_->get_batch_views<T>(
             op_ctx_, field_id_, 0, current_data_chunk_pos_, need_size);
         auto views_info = pw.get();
-        if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-            (!namespace_skip_func_.has_value() ||
-             !namespace_skip_func_.value()(0))) {
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             // first is the raw data, second is valid_data
             // use valid_data to see if raw data is null
             if constexpr (NeedSegmentOffsets) {
@@ -490,9 +478,7 @@ class SegmentExpr : public Expr {
         auto pw =
             segment_->get_views_by_offsets<T>(op_ctx_, field_id_, 0, *input);
         auto [data_vec, valid_data] = pw.get();
-        if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-            (!namespace_skip_func_.has_value() ||
-             !namespace_skip_func_.value()(0))) {
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             func(data_vec.data(),
                  valid_data.data(),
                  nullptr,
@@ -551,9 +537,7 @@ class SegmentExpr : public Expr {
         auto valid_result = index_ptr->IsNotNull();
         auto batch_size = input->size();
 
-        if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-            (!namespace_skip_func_.has_value() ||
-             !namespace_skip_func_.value()(0))) {
+        if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
             for (auto i = 0; i < batch_size; ++i) {
                 auto offset = (*input)[i];
                 auto raw = index_ptr->Reverse_Lookup(offset);
@@ -619,10 +603,8 @@ class SegmentExpr : public Expr {
                             chunk_id,
                             {int32_t(chunk_offset)});
                         auto [data_vec, valid_data] = pw.get();
-                        if ((!skip_func ||
-                             !skip_func(skip_index, field_id_, chunk_id)) &&
-                            (!namespace_skip_func_.has_value() ||
-                             !namespace_skip_func_.value()(chunk_id))) {
+                        if (!skip_func ||
+                            !skip_func(skip_index, field_id_, chunk_id)) {
                             func.template operator()<FilterType::random>(
                                 data_vec.data(),
                                 valid_data.data(),
@@ -654,10 +636,8 @@ class SegmentExpr : public Expr {
                     if (valid_data != nullptr) {
                         valid_data += chunk_offset;
                     }
-                    if ((!skip_func ||
-                         !skip_func(skip_index, field_id_, chunk_id)) &&
-                        (!namespace_skip_func_.has_value() ||
-                         !namespace_skip_func_.value()(chunk_id))) {
+                    if (!skip_func ||
+                        !skip_func(skip_index, field_id_, chunk_id)) {
                         func.template operator()<FilterType::random>(
                             data,
                             valid_data,
@@ -686,9 +666,7 @@ class SegmentExpr : public Expr {
                 auto chunk = pw.get();
                 const T* data = chunk.data();
                 const bool* valid_data = chunk.valid_data();
-                if ((!skip_func || !skip_func(skip_index, field_id_, 0)) &&
-                    (!namespace_skip_func_.has_value() ||
-                     !namespace_skip_func_.value()(0))) {
+                if (!skip_func || !skip_func(skip_index, field_id_, 0)) {
                     func.template operator()<FilterType::random>(data,
                                                                  valid_data,
                                                                  input->data(),
@@ -714,10 +692,7 @@ class SegmentExpr : public Expr {
                 if (valid_data != nullptr) {
                     valid_data += chunk_offset;
                 }
-                if ((!skip_func ||
-                     !skip_func(skip_index, field_id_, chunk_id)) &&
-                    (!namespace_skip_func_.has_value() ||
-                     !namespace_skip_func_.value()(chunk_id))) {
+                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
                     func.template operator()<FilterType::random>(
                         data,
                         valid_data,
@@ -815,10 +790,8 @@ class SegmentExpr : public Expr {
                 for (size_t j = 0; j < offsets.size(); j++) {
                     size_t result_idx = batch_start + j;
 
-                    if ((!skip_func ||
-                         !skip_func(skip_index, field_id_, chunk_id)) &&
-                        (!namespace_skip_func_.has_value() ||
-                         !namespace_skip_func_.value()(chunk_id))) {
+                    if (!skip_func ||
+                        !skip_func(skip_index, field_id_, chunk_id)) {
                         // Extract element from ArrayView
                         auto value =
                             array_vec[j].template get_data<ElementType>(
@@ -875,10 +848,7 @@ class SegmentExpr : public Expr {
                     valid_data += chunk_offset;
                 }
 
-                if ((!skip_func ||
-                     !skip_func(skip_index, field_id_, chunk_id)) &&
-                    (!namespace_skip_func_.has_value() ||
-                     !namespace_skip_func_.value()(chunk_id))) {
+                if (!skip_func || !skip_func(skip_index, field_id_, chunk_id)) {
                     // Extract element from Array
                     auto value = array_ptr->get_data<ElementType>(elem_idx);
                     bool is_valid = !valid_data || valid_data[0];
@@ -1197,9 +1167,7 @@ class SegmentExpr : public Expr {
             if (valid_data != nullptr) {
                 valid_data += data_pos;
             }
-            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
-                (!namespace_skip_func_.has_value() ||
-                 !namespace_skip_func_.value()(i))) {
+            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 const T* data = chunk.data() + data_pos;
 
                 if constexpr (NeedSegmentOffsets) {
@@ -1315,9 +1283,7 @@ class SegmentExpr : public Expr {
                 segment_offsets_array[j] = static_cast<int32_t>(offset);
             }
             auto& skip_index = segment_->GetSkipIndex();
-            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
-                (!namespace_skip_func_.has_value() ||
-                 !namespace_skip_func_.value()(i))) {
+            if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||

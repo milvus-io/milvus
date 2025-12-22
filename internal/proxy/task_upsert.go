@@ -1137,21 +1137,20 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
+	var err error
 	if it.schema.EnableDynamicField {
-		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+		err = checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
 		}
 	}
 
-	if Params.CommonCfg.EnableNamespace.GetAsBool() {
-		err := addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-		if err != nil {
-			return err
-		}
+	err = addNamespaceData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		return err
 	}
 
-	if err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
+	if err = checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg); err != nil {
 		return err
 	}
 
@@ -1159,7 +1158,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
-	var err error
 	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {

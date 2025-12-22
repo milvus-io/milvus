@@ -1017,6 +1017,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
 	t.result.Schema.ExternalSource = result.Schema.ExternalSource
 	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
+	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -1053,7 +1054,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	for _, field := range result.Schema.Fields {
-		if field.IsDynamic {
+		if field.IsDynamic || field.Name == common.NamespaceFieldName {
 			continue
 		}
 		if field.FieldID >= common.StartOfUserFieldID {

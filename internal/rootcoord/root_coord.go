@@ -1097,6 +1097,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		StructArrayFields:  model.MarshalStructArrayFieldModels(collInfo.StructArrayFields),
 		Functions:          model.MarshalFunctionModels(collInfo.Functions),
 		EnableDynamicField: collInfo.EnableDynamicField,
+		EnableNamespace:    collInfo.EnableNamespace,
 		Properties:         collInfo.Properties,
 		FileResourceIds:    collInfo.FileResourceIds,
 		ExternalSource:     collInfo.ExternalSource,

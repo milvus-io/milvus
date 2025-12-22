@@ -37,7 +37,6 @@
 #include "expr/ITypeExpr.h"
 #include "exec/expression/ValueExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
-#include "expr/ITypeExpr.h"
 #include "monitor/Monitor.h"
 #include "segcore/Utils.h"
 
@@ -449,6 +448,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     if (!segment || !expr) {
         return;
     }
+    auto schema = segment->get_schema();
+    auto namespace_field_id = schema.get_namespace_field_id();
     std::vector<size_t> reorder;
     std::vector<size_t> numeric_expr;
     std::vector<size_t> indexed_expr;
@@ -467,8 +468,21 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
 
     const auto& inputs = expr->GetInputsRef();
     bool and_conjunction = expr->IsAnd();
+    std::optional<size_t> namespace_expr_idx;
     for (int i = 0; i < inputs.size(); i++) {
         auto input = inputs[i];
+
+        if (namespace_field_id.has_value() &&
+            input->name() == "PhyUnaryRangeFilterExpr") {
+            auto unary =
+                std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
+            if (unary && unary->GetColumnInfo().has_value() &&
+                unary->GetColumnInfo()->field_id_ ==
+                    namespace_field_id.value()) {
+                namespace_expr_idx = i;
+                continue;
+            }
+        }
 
         if (input->IsSource() && input->GetColumnInfo().has_value()) {
             auto column = input->GetColumnInfo().value();
@@ -544,6 +558,10 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         other_expr.push_back(i);
     }
 
+    reorder.reserve(inputs.size());
+    if (namespace_expr_idx.has_value()) {
+        reorder.push_back(*namespace_expr_idx);
+    }
     // Final reorder sequence:
     // 1. Numeric column expressions (fastest to evaluate)
     // 2. Indexed column expressions (can use index for efficient filtering)
@@ -591,54 +609,7 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
 }
 
 inline void
-SetNamespaceSkipIndex(std::shared_ptr<PhyConjunctFilterExpr> conjunct_expr,
-                      ExecContext* context) {
-    auto schema = context->get_query_context()->get_segment()->get_schema();
-    auto namespace_field_id = schema.get_namespace_field_id();
-    auto inputs = conjunct_expr->GetInputsRef();
-    std::shared_ptr<PhyUnaryRangeFilterExpr> namespace_expr = nullptr;
-    for (const auto& input : inputs) {
-        auto unary = std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(input);
-        if (!unary) {
-            continue;
-        }
-        if (unary->GetColumnInfo().value().field_id_ ==
-                namespace_field_id.value() &&
-            unary->GetOpType() == proto::plan::OpType::Equal) {
-            namespace_expr = unary;
-        }
-    }
-    if (!namespace_expr) {
-        return;
-    }
-    auto namespace_field_meta = schema[namespace_field_id.value()];
-    auto& skip_index =
-        context->get_query_context()->get_segment()->GetSkipIndex();
-    if (namespace_field_meta.get_data_type() == DataType::INT64) {
-        auto skip_namespace_func = [&](int64_t chunk_id) -> bool {
-            return skip_index.CanSkipUnaryRange<int64_t>(
-                namespace_field_id.value(),
-                chunk_id,
-                proto::plan::OpType::Equal,
-                namespace_expr->GetLogicalExpr()->GetValue().int64_val());
-        };
-        namespace_expr->SetNamespaceSkipFunc(skip_namespace_func);
-    } else {
-        auto skip_namespace_func = [&](int64_t chunk_id) -> bool {
-            return skip_index.CanSkipUnaryRange<std::string>(
-                namespace_field_id.value(),
-                chunk_id,
-                proto::plan::OpType::Equal,
-                namespace_expr->GetLogicalExpr()->GetValue().string_val());
-        };
-        namespace_expr->SetNamespaceSkipFunc(skip_namespace_func);
-    }
-}
-
-inline void
 OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
-    auto schema = context->get_query_context()->get_segment()->get_schema();
-    auto namespace_field_id = schema.get_namespace_field_id();
     std::chrono::high_resolution_clock::time_point start =
         std::chrono::high_resolution_clock::now();
     for (const auto& expr : exprs) {
@@ -649,9 +620,6 @@ OptimizeCompiledExprs(ExecContext* context, const std::vector<ExprPtr>& exprs) {
             bool has_heavy_operation = false;
             ReorderConjunctExpr(conjunct_expr, context, has_heavy_operation);
             LOG_DEBUG("after reorder filter expression: {}", expr->ToString());
-            if (namespace_field_id.has_value()) {
-                SetNamespaceSkipIndex(conjunct_expr, context);
-            }
         }
     }
     std::chrono::high_resolution_clock::time_point end =

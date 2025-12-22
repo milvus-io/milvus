@@ -256,7 +256,6 @@ const (
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
-	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
 	TimezoneKey             = "timezone"
@@ -547,19 +546,6 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 	return nil
 }
 
-func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
-	for _, p := range props {
-		if p.GetKey() == NamespaceEnabledKey {
-			value, err := strconv.ParseBool(p.GetValue())
-			if err != nil {
-				return false, false, fmt.Errorf("invalid namespace prop value: %s", p.GetValue())
-			}
-			return value, true, nil
-		}
-	}
-	return false, false, nil
-}
-
 func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, clusterID uint64) (int64, int64, error) {
 	idStart, idEnd, err := allocFunc(rowNum)
 	if err != nil {
@@ -645,10 +631,7 @@ func GetCollectionTTLFromMap(kvs map[string]string) (time.Duration, error) {
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
-	enabled, _, err := ParseNamespaceProp(schema.Properties...)
-	if err != nil {
-		return err
-	}
+	enabled := schema.GetEnableNamespace()
 	namespaceIsSet := namespace != nil
 	if enabled != namespaceIsSet {
 		if namespaceIsSet {

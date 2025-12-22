@@ -306,6 +306,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		zap.Int("expired rows", entityFilter.GetExpiredCount()),
 		zap.Duration("total elapse", time.Since(sortStartTime)))
 
+	isNamespaceSorted := t.plan.GetSchema().GetEnableNamespace()
+	isSorted := !isNamespaceSorted
 	res := []*datapb.CompactionSegment{
 		{
 			PlanID:              t.GetPlanID(),
@@ -315,7 +317,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			Field2StatslogPaths: statsLogs,
 			Bm25Logs:            bm25StatsLogs,
 			Channel:             t.GetChannelName(),
-			IsSorted:            true,
+			IsSorted:            isSorted,
+			IsNamespaceSorted:   isNamespaceSorted,
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
 			ExpirQuantiles:      expirQuantiles,
