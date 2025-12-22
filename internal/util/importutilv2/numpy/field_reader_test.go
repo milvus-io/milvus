@@ -32,7 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func init() {
+	paramtable.Init()
+}
 
 func encodeToGB2312(input string) ([]byte, error) {
 	encoder := simplifiedchinese.GB18030.NewEncoder() // GB18030 is compatible with GB2312.
