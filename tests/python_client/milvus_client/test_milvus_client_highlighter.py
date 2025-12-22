@@ -35,32 +35,28 @@ default_sparse_vector_field_name = f"{default_text_field_name}_sparse_emb"
 default_sparse_vector_field_name_chinese = f"{default_text_field_name_chinese}_sparse_emb"
 default_sparse_vector_field_name_multi_analyzer = f"{default_text_field_name_multi_analyzer}_sparse_emb"
 
-class TestMilvusClientHighlighterInit(TestMilvusClientV2Base):
+COLLECTION_NAME = "test_hightligher" + cf.gen_unique_str("_")
+@pytest.mark.xdist_group("TestMilvusClientHighlighter")
+class TestMilvusClientHighlighter(TestMilvusClientV2Base):
     """
     #########################################################
     Init collection with highlighter so all the tests can use the same collection
     This aims to save time for the tests
-    Also, highlighter is difficult to compare the results, 
+    Also, highlighter is difficult to compare the results,
     so we need to init the collection with pre-defined data
     #########################################################
     """
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_highlighter_init(self):
+    @pytest.fixture(scope="module", autouse=True)
+    def prepare_highlighter_collection(self, request):
         """
-        target: Test highlighter can be successfully initialized
-        method:
-            1. Create a collection with highlighter
-            2. Insert data into the collection
-            3. Search the data
-        expected: Step 3 should result success
+        Ensure the shared highlighter collection exists before any tests in this module,
+        and drop it after all tests in this module complete.
         """
-        # step 1: create collection
         client = self._client()
-
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         if client.has_collection(collection_name):
             client.drop_collection(collection_name)
-
+        
         analyzer_params = {
             "tokenizer": "standard"
         }
@@ -130,10 +126,10 @@ class TestMilvusClientHighlighterInit(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_text_field_name_chinese, index_type="AUTOINDEX")
         client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params, consistency_level="Strong")
 
-        text = ["Is there a leakage?", 
-                "A leakage of what?", 
-                "I have the seat full of water! Like, full of water!", 
-                "Must be water.", 
+        text = ["Is there a leakage?",
+                "A leakage of what?",
+                "I have the seat full of water! Like, full of water!",
+                "Must be water.",
                 "Let's add that to the words of wisdom",
                 "7654321 keyword 1234567",
                 "key key key key key key key key",
@@ -145,38 +141,38 @@ class TestMilvusClientHighlighterInit(TestMilvusClientV2Base):
                 "",
                 None,
                 ("Dusk settled gently upon Embermoor, turning streets into ribbons in twilight glow. "
-                 "In this quiet district, young Teren roamed with restless intent. He sought purpose, "
-                 "something bright enough to hush turmoil pressing within his chest.\n"
-                 "Teren’s trouble began when curious murmurs drifted through town concerning shimmering "
-                 "lights rising nightly beyond hills. Elders insisted it stemmed from old ruins, relics "
-                 "left behind by wanderers long gone. Yet no one ventured there; timid hearts kept them "
-                 "grounded.\n"
-                 "One evening, driven by stubborn courage, Teren set out alone. Crisp wind brushed his "
-                 "cheeks, guiding him through slender trees trembling under midnight hush. Crickets chirped "
-                 "rhythmically, echoing his steady footsteps. He pressed forward until dim ruins emerged, "
-                 "stones bent by centuries yet proud in their quiet endurance.\n"
-                 "Upon entering, Teren sensed something stirring—bright pulses drifting through corridors "
-                 "like living embers. One ember hovered close, swirling gently, studying him with earnest "
-                 "curiosity. It emitted tender hums resonating deep within Teren’s chest, soothing worry "
-                 "stitched into his spirit.\n"
-                 "Ember drifted higher, inviting him to follow. Teren stepped through crumbled chambers "
-                 "until they reached an inner court where hundreds curled in silent orbits—tiny spheres "
-                 "burning with soft brilliance. Together they formed swirling constellations, shimmering "
-                 "Instantly, warmth surged through him—not harsh, not wild, but gentle strength reminding "
-                 "him he belonged in this immense world. Hidden burdens loosened. He felt courage blooming, "
-                 "rooted in something deeper than fear.\n"
-                 "When dawn arrived, Ember escorting him outside, Teren turned to ruins glowing faintly "
-                 "beneath morning light. He understood now: these spirits lingered not for warning but for "
-                 "guiding tender souls seeking direction.\n"
-                 "He returned to Embermoor changed. Not every problem dissolved, yet Teren moved through "
-                 "his days with renewed stride, carrying brilliance gifted during his midnight journey."),
+                "In this quiet district, young Teren roamed with restless intent. He sought purpose, "
+                "something bright enough to hush turmoil pressing within his chest.\n"
+                "Teren’s trouble began when curious murmurs drifted through town concerning shimmering "
+                "lights rising nightly beyond hills. Elders insisted it stemmed from old ruins, relics "
+                "left behind by wanderers long gone. Yet no one ventured there; timid hearts kept them "
+                "grounded.\n"
+                "One evening, driven by stubborn courage, Teren set out alone. Crisp wind brushed his "
+                "cheeks, guiding him through slender trees trembling under midnight hush. Crickets chirped "
+                "rhythmically, echoing his steady footsteps. He pressed forward until dim ruins emerged, "
+                "stones bent by centuries yet proud in their quiet endurance.\n"
+                "Upon entering, Teren sensed something stirring—bright pulses drifting through corridors "
+                "like living embers. One ember hovered close, swirling gently, studying him with earnest "
+                "curiosity. It emitted tender hums resonating deep within Teren’s chest, soothing worry "
+                "stitched into his spirit.\n"
+                "Ember drifted higher, inviting him to follow. Teren stepped through crumbled chambers "
+                "until they reached an inner court where hundreds curled in silent orbits—tiny spheres "
+                "burning with soft brilliance. Together they formed swirling constellations, shimmering "
+                "Instantly, warmth surged through him—not harsh, not wild, but gentle strength reminding "
+                "him he belonged in this immense world. Hidden burdens loosened. He felt courage blooming, "
+                "rooted in something deeper than fear.\n"
+                "When dawn arrived, Ember escorting him outside, Teren turned to ruins glowing faintly "
+                "beneath morning light. He understood now: these spirits lingered not for warning but for "
+                "guiding tender souls seeking direction.\n"
+                "He returned to Embermoor changed. Not every problem dissolved, yet Teren moved through "
+                "his days with renewed stride, carrying brilliance gifted during his midnight journey."),
                 ("黄昏降临在静谧城镇，灯影沿着街道缓缓铺展。青年林舟怀着不安在巷道行走，心跳与脚步相互呼应。他渴望找到方向，却被往昔失落缠绕。"
-                 "传言提到远处丘陵夜晚会浮现微光，长者劝人别靠近，担忧未知带来风险。林舟仍被好奇牵引，选择独自前往。冷风掠过树梢，星辰悬挂高空，陪伴他穿越草径。"
-                 "残破遗迹映入眼帘，石壁布满岁月痕迹。踏入其内，柔亮光点缓缓旋转，如同呼吸般起伏。某个光点靠近他，散发温暖振动，仿佛聆听他内心低语。"
-                 "光点引领他走向空旷庭院，成群光辉在空域盘旋，编织出壮丽图景。那瞬间，林舟感到胸口释然，恐惧逐渐消散，勇气悄然生根。"
-                 "黎明到来，他回望遗迹，光辉渐隐却留存于心。归途上，他步伐坚定，明白指引并未消失，只是化作持续前行力量。每当夜色再度降临，他都会抬头微笑，感谢那段静默旅程。"),
+                "传言提到远处丘陵夜晚会浮现微光，长者劝人别靠近，担忧未知带来风险。林舟仍被好奇牵引，选择独自前往。冷风掠过树梢，星辰悬挂高空，陪伴他穿越草径。"
+                "残破遗迹映入眼帘，石壁布满岁月痕迹。踏入其内，柔亮光点缓缓旋转，如同呼吸般起伏。某个光点靠近他，散发温暖振动，仿佛聆听他内心低语。"
+                "光点引领他走向空旷庭院，成群光辉在空域盘旋，编织出壮丽图景。那瞬间，林舟感到胸口释然，恐惧逐渐消散，勇气悄然生根。"
+                "黎明到来，他回望遗迹，光辉渐隐却留存于心。归途上，他步伐坚定，明白指引并未消失，只是化作持续前行力量。每当夜色再度降临，他都会抬头微笑，感谢那段静默旅程。"),
                 "甲，甲乙，甲乙丙，甲乙丙丁，甲乙丙丁戊，甲乙丙丁戊己，甲乙丙丁戊己庚，甲乙丙丁戊己庚辛，甲乙丙丁戊己庚辛壬，甲乙丙丁戊己庚辛壬癸"]
- 
+
         l = len(text)
 
         rows = cf.gen_row_data_by_schema(nb=l, schema=schema)
@@ -188,12 +184,18 @@ class TestMilvusClientHighlighterInit(TestMilvusClientV2Base):
             row["language"] = "en" if i % 2 == 0 else "zh"
 
         client.insert(collection_name=collection_name, data=rows)
+        
+        def teardown():
+            try:
+                if self.has_collection(self._client(), COLLECTION_NAME):
+                    self.drop_collection(self._client(), COLLECTION_NAME)
+            except Exception:
+                pass
+        request.addfinalizer(teardown)
 
-
-class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
     """
     ******************************************************************
-    #  The following are valid base cases
+    #  The following are valid test cases
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
@@ -205,7 +207,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
         highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags, 
@@ -259,7 +261,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         pre_tags = ["{", "<", "="]
         post_tags = ["}", ">", "="]
         highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags, 
@@ -301,7 +303,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         fragment_size = [1, 9, 100]
         num_of_fragments = [0, 1, 2]
         
@@ -344,7 +346,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         fragment_offset = [0, 5, 100]
 
         expected = [[["=water="],         ['=water=', '=water=']],
@@ -382,7 +384,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
 
         expected = [[['word {1}'], ['{1} 2 3']],
                     [['7654321 keyword {1234567}']]]
@@ -418,7 +420,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ["4321 {keyword}"]
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -450,7 +452,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = [['{A} {leakage} {of}', 'e of {what}?'], 
                     ['re a {leakage}'], 
                     ['{A} B C D 一二'], 
@@ -487,7 +489,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = []
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -517,7 +519,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ["{sub}"]
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -549,7 +551,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         pre_tags = ["{" * 999]
         post_tags = ["}" * 999]
         expected = [f"{pre_tags[0]}water{post_tags[0]}"]
@@ -583,7 +585,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ["{Embermoor}", "{Embermoor}"]
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -616,7 +618,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
                                fragment_offset=0, 
@@ -643,7 +645,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ["{二}"]
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -689,7 +691,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ["{呼}","{如同呼吸般起伏}"]
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -720,7 +722,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
         highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags, 
@@ -758,7 +760,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ['{water}! Like, full of <water>!']
         
         highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"], 
@@ -852,7 +854,7 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         expected = ["{甲乙丙丁戊己庚辛壬}"]
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
@@ -873,10 +875,10 @@ class TestMilvusClientHighlighterValid(TestMilvusClientV2Base):
             assert result['highlight'][default_text_field_name_chinese] == expected
 
 
-class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
+
     """
     ******************************************************************
-    #  The following are invalid base cases
+    #  The following are invalid test cases
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L0)
@@ -889,7 +891,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
                                fragment_offset=0, 
@@ -922,7 +924,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
                                fragment_offset=fragment_offset, 
@@ -953,7 +955,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                highlight_search_text = True, 
                                fragment_offset=0, 
@@ -983,7 +985,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
         highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags, 
@@ -1019,7 +1021,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         pre_tags = ["<<<<<<<"]
         post_tags = [">>>>>>"]
         highlight = LexicalHighlighter(pre_tags=pre_tags, post_tags=post_tags, 
@@ -1072,7 +1074,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         
         highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"], 
                                     highlight_search_text = True, 
@@ -1107,7 +1109,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
 
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                         highlight_search_text = True, 
@@ -1141,7 +1143,7 @@ class TestMilvusClientHighlighterInvalid(TestMilvusClientV2Base):
         expected: Step 1 should result success
         """
         client = self._client()
-        collection_name = f"test_hightligher"
+        collection_name = COLLECTION_NAME
         highlight = LexicalHighlighter(pre_tags=[], post_tags=[],
                                        highlight_search_text = True, 
                                        fragment_offset=0, 
