@@ -25,14 +25,13 @@ extern "C" {
 namespace milvus {
 namespace planparserv2 {
 
-std::string PlanParser::RegisterSchema(const std::vector<uint8_t>& schema_proto) {
+SchemaHandle PlanParser::RegisterSchema(const std::vector<uint8_t>& schema_proto) {
     void* proto_blob = const_cast<void*>(static_cast<const void*>(schema_proto.data()));
     int len = static_cast<int>(schema_proto.size());
+    char* err_msg = nullptr;
 
-    // Use :: to refer to the global C function
-    char* result = ::RegisterSchema(proto_blob, len);
-    if (result == nullptr) {
-        char* err_msg = ::GetLastErrorMessage();
+    SchemaHandle handle = ::RegisterSchema(proto_blob, len, &err_msg);
+    if (handle == kInvalidSchemaHandle) {
         std::string err_str = "Unknown error";
         if (err_msg != nullptr) {
             err_str = std::string(err_msg);
@@ -41,25 +40,30 @@ std::string PlanParser::RegisterSchema(const std::vector<uint8_t>& schema_proto)
         throw std::runtime_error("Failed to register schema: " + err_str);
     }
 
-    std::string schema_name(result);
-    ::Free(result); 
-
-    return schema_name;
+    return handle;
 }
 
-void PlanParser::UnregisterSchema(const std::string& schema_name) {
-    char* c_name = const_cast<char*>(schema_name.c_str());
-    ::UnregisterSchema(c_name);
+std::string PlanParser::UnregisterSchema(SchemaHandle handle) {
+    char* err_msg = nullptr;
+
+    int result = ::UnregisterSchema(handle, &err_msg);
+    if (result != 0) {
+        std::string err = err_msg ? std::string(err_msg) : "unknown error";
+        if (err_msg != nullptr) {
+            ::Free(err_msg);
+        }
+        return err;
+    }
+    return "";
 }
 
-std::vector<uint8_t> PlanParser::Parse(const std::string& schema_name, const std::string& expr) {
-    char* c_schema = const_cast<char*>(schema_name.c_str());
+std::vector<uint8_t> PlanParser::Parse(SchemaHandle handle, const std::string& expr) {
     char* c_expr = const_cast<char*>(expr.c_str());
+    char* err_msg = nullptr;
     int length = 0;
 
-    void* result = ::ParseProto(c_schema, c_expr, &length);
+    void* result = ::Parse(handle, c_expr, &length, &err_msg);
     if (result == nullptr) {
-        char* err_msg = ::GetLastErrorMessage();
         std::string err_str = "Unknown error";
         if (err_msg != nullptr) {
             err_str = std::string(err_msg);
@@ -80,4 +84,3 @@ std::vector<uint8_t> PlanParser::Parse(const std::string& schema_name, const std
 
 } // namespace planparserv2
 } // namespace milvus
-
