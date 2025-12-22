@@ -35,7 +35,7 @@ default_sparse_vector_field_name = f"{default_text_field_name}_sparse_emb"
 default_sparse_vector_field_name_chinese = f"{default_text_field_name_chinese}_sparse_emb"
 default_sparse_vector_field_name_multi_analyzer = f"{default_text_field_name_multi_analyzer}_sparse_emb"
 
-COLLECTION_NAME = "test_hightligher"
+COLLECTION_NAME = "test_hightligher" + cf.gen_unique_str("_")
 @pytest.mark.xdist_group("TestMilvusClientHighlighter")
 class TestMilvusClientHighlighter(TestMilvusClientV2Base):
     """
@@ -602,7 +602,6 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
             highlighter = highlight
         )
         # assert to make sure the results are not empty
-        print(f"the results are {results}")
         assert results[0] != []
         for result in results[0]:
             assert result['highlight'][default_text_field_name] == expected
