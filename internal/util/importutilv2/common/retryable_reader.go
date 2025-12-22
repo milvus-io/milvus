@@ -57,7 +57,7 @@ func NewRetryableReader(ctx context.Context, path string, reader storage.FileRea
 func (r *retryableReader) Read(p []byte) (int, error) {
 	var n int
 	var err error
-	retry.Handle(r.ctx, func() (bool, error) {
+	err = retry.Handle(r.ctx, func() (bool, error) {
 		n, err = r.FileReader.Read(p)
 		if err == nil {
 			return false, nil

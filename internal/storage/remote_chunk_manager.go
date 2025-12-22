@@ -148,7 +148,7 @@ func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (Fil
 func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
 	var objectInfo int64
 	var err error
-	retry.Handle(ctx, func() (bool, error) {
+	err = retry.Handle(ctx, func() (bool, error) {
 		objectInfo, err = mcm.getObjectSize(ctx, mcm.bucketName, filePath)
 		if err == nil {
 			return false, nil
