@@ -26,7 +26,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func init() {
+	paramtable.Init()
+}
 
 func TestRetryableReader_ReadSuccess(t *testing.T) {
 	ctx := context.Background()
