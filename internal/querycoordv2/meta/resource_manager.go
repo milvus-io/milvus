@@ -648,7 +648,7 @@ func (rm *ResourceManager) recoverMissingNodeRG(ctx context.Context, rgName stri
 			return ErrNodeNotEnough
 		}
 
-		err := rm.transferNode(ctx, targetRG.GetName(), node)
+		err := rm.transferNode(ctx, sourceRG.GetName(), targetRG.GetName(), node)
 		if err != nil {
 			log.Warn("failed to recover missing node by transfer node from other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
@@ -723,7 +723,7 @@ func (rm *ResourceManager) recoverRedundantNodeRG(ctx context.Context, rgName st
 			return errors.New("all resource group reach limits")
 		}
 
-		if err := rm.transferNode(ctx, targetRG.GetName(), node); err != nil {
+		if err := rm.transferNode(ctx, sourceRG.GetName(), targetRG.GetName(), node); err != nil {
 			log.Warn("failed to recover redundant node by transfer node to other resource group",
 				zap.String("sourceRG", sourceRG.GetName()),
 				zap.String("targetRG", targetRG.GetName()),
@@ -829,7 +829,7 @@ func (rm *ResourceManager) assignIncomingNode(ctx context.Context, node int64) (
 
 	// select a resource group to assign incoming node.
 	rg = rm.mustSelectAssignIncomingNodeTargetRG(node)
-	if err := rm.transferNode(ctx, rg.GetName(), node); err != nil {
+	if err := rm.transferNode(ctx, "", rg.GetName(), node); err != nil {
 		return "", errors.Wrap(err, "at finally assign to default resource group")
 	}
 	return rg.GetName(), nil
@@ -880,48 +880,55 @@ func (rm *ResourceManager) findMaxRGWithGivenFilter(filter func(rg *ResourceGrou
 }
 
 // transferNode transfer given node to given resource group.
-// if given node is assigned in given resource group, do nothing.
-// if given node is assigned to other resource group, it will be unassigned first.
-func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node int64) error {
-	if rm.groups[rgName] == nil {
-		return merr.WrapErrResourceGroupNotFound(rgName)
+// Idempotent promise: if given node is already in target resource group,
+// and source resource group is cleaned up, do nothing.
+// sourceRGName is optional, if not specified, it will be looked up from nodeIDMap.
+// When sourceRGName is specified, this function ensures the node is removed from source RG
+// even if nodeIDMap points to a different RG (handles inconsistent state).
+func (rm *ResourceManager) transferNode(ctx context.Context, sourceRGName, targetRGName string, node int64) error {
+	if rm.groups[targetRGName] == nil {
+		return merr.WrapErrResourceGroupNotFound(targetRGName)
 	}
 
 	updates := make([]*querypb.ResourceGroup, 0, 2)
 	modifiedRG := make([]*ResourceGroup, 0, 2)
-	originalRG := "_"
-	// Check if node is already assign to rg.
-	if rg := rm.getResourceGroupByNodeID(node); rg != nil {
-		if rg.GetName() == rgName {
-			// node is already assign to rg.
-			log.Info("node already assign to resource group",
-				zap.String("rgName", rgName),
-				zap.Int64("node", node),
-			)
-			return nil
-		}
-		// Apply update.
-		mrg := rg.CopyForWrite()
-		mrg.UnassignNode(node)
-		rg := mrg.ToResourceGroup()
 
-		updates = append(updates, rg.GetMeta())
-		modifiedRG = append(modifiedRG, rg)
-		originalRG = rg.GetName()
+	// Unassign node from source RG if specified and node exists there.
+	// This ensures cleanup even when nodeIDMap is inconsistent.
+	if sourceRGName != "" && sourceRGName != targetRGName {
+		if sourceRG := rm.groups[sourceRGName]; sourceRG != nil && sourceRG.ContainNode(node) {
+			mrg := sourceRG.CopyForWrite()
+			mrg.UnassignNode(node)
+			rg := mrg.ToResourceGroup()
+			updates = append(updates, rg.GetMeta())
+			modifiedRG = append(modifiedRG, rg)
+		}
 	}
 
-	// assign the node to rg.
-	mrg := rm.groups[rgName].CopyForWrite()
-	mrg.AssignNode(node)
-	rg := mrg.ToResourceGroup()
-	updates = append(updates, rg.GetMeta())
-	modifiedRG = append(modifiedRG, rg)
+	// Assign the node to target RG if not already present.
+	if !rm.groups[targetRGName].ContainNode(node) {
+		mrg := rm.groups[targetRGName].CopyForWrite()
+		mrg.AssignNode(node)
+		rg := mrg.ToResourceGroup()
+		updates = append(updates, rg.GetMeta())
+		modifiedRG = append(modifiedRG, rg)
+	}
+
+	// Idempotent: if no updates needed, return directly.
+	if len(updates) == 0 {
+		log.Info("node already in target resource group, no update needed",
+			zap.String("sourceRGName", sourceRGName),
+			zap.String("targetRGName", targetRGName),
+			zap.Int64("node", node),
+		)
+		return nil
+	}
 
 	// Commit updates to meta storage.
 	if err := rm.catalog.SaveResourceGroup(ctx, updates...); err != nil {
 		log.Warn("failed to transfer node to resource group",
-			zap.String("rgName", rgName),
-			zap.String("originalRG", originalRG),
+			zap.String("sourceRGName", sourceRGName),
+			zap.String("targetRGName", targetRGName),
 			zap.Int64("node", node),
 			zap.Error(err),
 		)
@@ -932,10 +939,10 @@ func (rm *ResourceManager) transferNode(ctx context.Context, rgName string, node
 	for _, rg := range modifiedRG {
 		rm.setupInMemResourceGroup(rg)
 	}
-	rm.nodeIDMap[node] = rgName
+	rm.nodeIDMap[node] = targetRGName
 	log.Info("transfer node to resource group",
-		zap.String("rgName", rgName),
-		zap.String("originalRG", originalRG),
+		zap.String("sourceRGName", sourceRGName),
+		zap.String("targetRGName", targetRGName),
 		zap.Int64("node", node),
 	)
 
