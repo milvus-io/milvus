@@ -139,6 +139,7 @@ StringIndexSort::Build(size_t n,
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void
@@ -182,6 +183,7 @@ StringIndexSort::BuildWithFieldData(
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 BinarySet
@@ -335,6 +337,7 @@ StringIndexSort::LoadWithoutAssemble(const BinarySet& binary_set,
 
     is_built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 const TargetBitmap
@@ -413,9 +416,10 @@ StringIndexSort::CalculateTotalSize() const {
     return size;
 }
 
-int64_t
-StringIndexSort::ByteSize() const {
-    int64_t total = StringIndex::ByteSize();
+void
+StringIndexSort::ComputeByteSize() {
+    StringIndex::ComputeByteSize();
+    int64_t total = cached_byte_size_;
 
     // Common structures (always in memory)
     // idx_to_offsets_: vector<int32_t>
@@ -429,7 +433,7 @@ StringIndexSort::ByteSize() const {
         total += impl_->ByteSize();
     }
 
-    return total;
+    cached_byte_size_ = total;
 }
 
 void

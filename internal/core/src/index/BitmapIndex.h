@@ -114,9 +114,10 @@ class BitmapIndex : public ScalarIndex<T> {
         return Count();
     }
 
-    int64_t
-    ByteSize() const override {
-        int64_t total = ScalarIndex<T>::ByteSize();
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
 
         // valid_bitset_
         total += valid_bitset_.size_in_bytes();
@@ -173,7 +174,7 @@ class BitmapIndex : public ScalarIndex<T> {
         total += mmap_offsets_cache_.capacity() *
                  sizeof(typename decltype(mmap_offsets_cache_)::value_type);
 
-        return total;
+        this->cached_byte_size_ = total;
     }
 
     IndexStatsPtr

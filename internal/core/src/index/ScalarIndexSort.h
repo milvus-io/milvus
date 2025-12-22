@@ -116,9 +116,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return size_ == 0;
     }
 
-    int64_t
-    ByteSize() const override {
-        int64_t total = ScalarIndex<T>::ByteSize();
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
 
         // idx_to_offsets_: vector<int32_t>
         total += idx_to_offsets_.capacity() * sizeof(int32_t);
@@ -134,7 +135,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
             total += data_.capacity() * sizeof(IndexStructure<T>);
         }
 
-        return total;
+        this->cached_byte_size_ = total;
     }
 
     IndexStatsPtr

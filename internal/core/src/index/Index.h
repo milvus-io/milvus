@@ -93,9 +93,25 @@ class IndexBase {
 
     // Returns the memory usage in bytes that scales with data size (O(n)).
     // Fixed overhead are minimal and thus not included.
-    virtual int64_t
+    //
+    // NOTE: This method returns a cached value computed by ComputeByteSize().
+    // It is designed for SEALED SEGMENTS only, where the index is fully built
+    // or loaded and no more data will be added. For GROWING SEGMENTS with
+    // ongoing inserts, the cached value will NOT be updated automatically.
+    // ComputeByteSize() should only be called after Build() or Load() completes
+    // on sealed segments.
+    int64_t
     ByteSize() const {
-        return 0;
+        return cached_byte_size_;
+    }
+
+    // Computes and caches the memory usage in bytes.
+    // Subclasses should override this method to calculate their specific memory usage
+    // and store the result in cached_byte_size_.
+    // This method should be called at the end of Build() or Load() for sealed segments.
+    virtual void
+    ComputeByteSize() {
+        cached_byte_size_ = 0;
     }
 
  protected:
@@ -105,6 +121,7 @@ class IndexBase {
 
     IndexType index_type_ = "";
     cachinglayer::ResourceUsage cell_size_ = {0, 0};
+    mutable int64_t cached_byte_size_ = 0;
 
     std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 };

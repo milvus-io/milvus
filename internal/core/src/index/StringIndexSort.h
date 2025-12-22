@@ -123,10 +123,10 @@ class StringIndexSort : public StringIndex {
     int64_t
     Size() override;
 
-    // Returns the total memory usage in bytes.
+    // Computes and caches the total memory usage in bytes.
     // For mmap mode, this includes both memory-resident structures and mmap size.
-    int64_t
-    ByteSize() const override;
+    void
+    ComputeByteSize() override;
 
  protected:
     int64_t

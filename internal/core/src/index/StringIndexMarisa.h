@@ -35,8 +35,8 @@ class StringIndexMarisa : public StringIndex {
     int64_t
     Size() override;
 
-    int64_t
-    ByteSize() const override;
+    void
+    ComputeByteSize() override;
 
     BinarySet
     Serialize(const Config& config) override;
