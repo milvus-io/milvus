@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -52,10 +51,6 @@ type ReaderSuite struct {
 	numRows     int
 	pkDataType  schemapb.DataType
 	vecDataType schemapb.DataType
-}
-
-func (s *ReaderSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
 func (s *ReaderSuite) SetupTest() {

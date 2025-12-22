@@ -34,16 +34,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+func init() {
+	paramtable.Init()
+}
+
 type ReaderSuite struct {
 	suite.Suite
 
 	numRows     int
 	pkDataType  schemapb.DataType
 	vecDataType schemapb.DataType
-}
-
-func (suite *ReaderSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
 func (suite *ReaderSuite) SetupTest() {
