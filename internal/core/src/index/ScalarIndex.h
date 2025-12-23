@@ -144,7 +144,8 @@ class ScalarIndex : public IndexBase {
                index_type_ == milvus::index::HYBRID_INDEX_TYPE ||
                index_type_ == milvus::index::INVERTED_INDEX_TYPE ||
                index_type_ == milvus::index::MARISA_TRIE ||
-               index_type_ == milvus::index::MARISA_TRIE_UPPER;
+               index_type_ == milvus::index::MARISA_TRIE_UPPER ||
+               index_type_ == milvus::index::ASCENDING_SORT;
     }
 
     virtual int64_t

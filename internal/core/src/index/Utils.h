@@ -234,4 +234,12 @@ void inline SetBitsetGrowing(void* bitset,
     }
 }
 
+// Get the SSO (Small String Optimization) threshold for std::string.
+// Strings with capacity <= this threshold store data inline (no heap allocation).
+inline size_t
+GetStringSSOThreshold() {
+    static const size_t threshold = std::string().capacity();
+    return threshold;
+}
+
 }  // namespace milvus::index
