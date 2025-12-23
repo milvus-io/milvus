@@ -947,7 +947,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 
 	p.StorageReadRetryAttempts = ParamItem{
 		Key:          "common.storage.readRetryAttempts",
-		Version:      "2.6.8",
+		Version:      "2.5.25",
 		DefaultValue: "10",
 		Doc:          "The number of retry attempts for reading from object storage; only retryable errors will trigger a retry.",
 		Export:       false,
