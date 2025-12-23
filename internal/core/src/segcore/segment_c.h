@@ -69,6 +69,27 @@ NewSegmentWithLoadInfo(CCollection collection,
 CStatus
 SegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
 
+/**
+ * @brief Reopen an existing segment with updated load information
+ *
+ * This function reopens a segment with new load configuration, typically used
+ * when the segment needs to be reconfigured due to schema changes or updated
+ * load parameters. The segment will be reinitialized with the provided load info
+ * while preserving its identity (segment_id).
+ *
+ * @param c_trace Tracing context for distributed tracing and debugging
+ * @param c_segment The segment handle to be reopened
+ * @param load_info_blob Serialized SegmentLoadInfo protobuf message containing
+ *                       the new load configuration (field data info, index info, etc.)
+ * @param load_info_length Length of the load_info_blob in bytes
+ * @return CStatus indicating success or failure with error details
+ */
+CStatus
+ReopenSegment(CTraceContext c_trace,
+              CSegmentInterface c_segment,
+              const uint8_t* load_info_blob,
+              const int64_t load_info_length);
+
 void
 DeleteSegment(CSegmentInterface c_segment);
 

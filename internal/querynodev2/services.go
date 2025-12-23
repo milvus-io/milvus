@@ -528,14 +528,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
-	if req.GetLoadScope() == querypb.LoadScope_Delta {
+	switch req.GetLoadScope() {
+	case querypb.LoadScope_Delta:
 		return node.loadDeltaLogs(ctx, req), nil
-	}
-	if req.GetLoadScope() == querypb.LoadScope_Index {
+	case querypb.LoadScope_Index:
 		return node.loadIndex(ctx, req), nil
-	}
-	if req.GetLoadScope() == querypb.LoadScope_Stats {
+	case querypb.LoadScope_Stats:
 		return node.loadStats(ctx, req), nil
+	case querypb.LoadScope_Reopen:
+		return node.reopenSegments(ctx, req), nil
 	}
 
 	// Actual load segment
@@ -1276,6 +1277,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
 			JsonStatsInfo: s.GetFieldJSONIndexStats(),
+			ManifestPath:  s.LoadInfo().GetManifestPath(),
 		})
 	}
 

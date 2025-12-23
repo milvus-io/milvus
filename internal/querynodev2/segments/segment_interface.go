@@ -88,6 +88,7 @@ type Segment interface {
 	Load(ctx context.Context) error
 	FinishLoad() error
 	Release(ctx context.Context, opts ...releaseOption)
+	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 
 	// Bloom filter related
 	SetBloomFilter(bf *pkoracle.BloomFilterSet)
