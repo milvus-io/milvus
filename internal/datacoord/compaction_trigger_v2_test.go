@@ -432,14 +432,14 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 		}).Return(nil).Once()
 
 	// Test L0 manual trigger
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true, 0)
 	s.NoError(err)
 	s.Equal(int64(12345), triggerID)
 }
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	// Test with both clustering and L0 compaction false
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false, 0)
 	s.NoError(err)
 	s.Equal(int64(0), triggerID)
 }
