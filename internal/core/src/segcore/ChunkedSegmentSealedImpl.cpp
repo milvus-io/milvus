@@ -3126,63 +3126,6 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     auto diff = segment_load_info_.GetLoadDiff();
     ApplyLoadDiff(segment_load_info_, diff);
 
-    // // Step 1: Separate indexed and non-indexed fields
-    // std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>
-    //     field_id_to_index_info;
-    // std::set<FieldId> indexed_fields;
-
-    // for (int i = 0; i < segment_load_info_.GetIndexInfoCount(); i++) {
-    //     const auto& index_info = segment_load_info_.GetIndexInfo(i);
-    //     if (index_info.index_file_paths_size() == 0) {
-    //         continue;
-    //     }
-    //     auto field_id = FieldId(index_info.fieldid());
-    //     field_id_to_index_info[field_id].push_back(&index_info);
-    //     indexed_fields.insert(field_id);
-    // }
-
-    // // Step 2: Load indexes in parallel using thread pool
-    // LoadBatchIndexes(trace_ctx, field_id_to_index_info);
-
-    // LOG_INFO("Finished loading {} indexes for segment {}",
-    //          field_id_to_index_info.size(),
-    //          id_);
-
-    // // Step 3.a: Load with manifest
-    // auto manifest_path = segment_load_info_.GetManifestPath();
-    // if (manifest_path != "") {
-    //     LoadManifest(manifest_path);
-    //     return;
-    // }
-
-    // // Step 3.b: Load with field binlog
-    // std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
-    //     field_binlog_to_load;
-    // for (int i = 0; i < segment_load_info_.GetBinlogPathCount(); i++) {
-    //     LoadFieldDataInfo load_field_data_info;
-    //     load_field_data_info.storage_version =
-    //         segment_load_info_.GetStorageVersion();
-
-    //     const auto& field_binlog = segment_load_info_.GetBinlogPath(i);
-
-    //     std::vector<FieldId> field_ids;
-    //     // when child fields specified, field id is group id, child field ids are actual id values here
-    //     if (field_binlog.child_fields_size() > 0) {
-    //         field_ids.reserve(field_binlog.child_fields_size());
-    //         for (auto field_id : field_binlog.child_fields()) {
-    //             field_ids.emplace_back(field_id);
-    //         }
-    //     } else {
-    //         field_ids.emplace_back(field_binlog.fieldid());
-    //     }
-
-    //     field_binlog_to_load.emplace_back(field_ids, field_binlog);
-    // }
-
-    // if (!field_binlog_to_load.empty()) {
-    //     LoadBatchFieldData(trace_ctx, field_binlog_to_load);
-    // }
-
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
 
