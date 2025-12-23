@@ -10,7 +10,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func init() {
+	paramtable.Init()
+}
 
 func TestCatalog(t *testing.T) {
 	kv := mocks.NewMetaKv(t)

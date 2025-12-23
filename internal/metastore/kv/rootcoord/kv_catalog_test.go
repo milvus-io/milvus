@@ -39,6 +39,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func init() {
+	paramtable.Init()
+}
+
 var (
 	indexName = "idx"
 	IndexID   = 1
