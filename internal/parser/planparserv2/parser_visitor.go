@@ -1138,8 +1138,8 @@ func (v *ParserVisitor) VisitLogicalOr(ctx *parser.LogicalOrContext) interface{}
 		return errors.New("random sample expression cannot be used in logical and expression")
 	}
 
-	if isElementFilterExpr(leftExpr) || isMatchExpr(leftExpr) {
-		return errors.New("element filter/match expression can only be the last expression in the logical or expression")
+	if isElementFilterExpr(leftExpr) {
+		return errors.New("element filter expression can only be the last expression in the logical or expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
@@ -1194,8 +1194,8 @@ func (v *ParserVisitor) VisitLogicalAnd(ctx *parser.LogicalAndContext) interface
 		return errors.New("random sample expression can only be the last expression in the logical and expression")
 	}
 
-	if isElementFilterExpr(leftExpr) || isMatchExpr(leftExpr) {
-		return errors.New("element filter/match expression can only be the last expression in the logical and expression")
+	if isElementFilterExpr(leftExpr) {
+		return errors.New("element filter expression can only be the last expression in the logical and expression")
 	}
 
 	if !canBeExecuted(leftExpr) || !canBeExecuted(rightExpr) {
