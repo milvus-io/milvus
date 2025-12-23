@@ -38,6 +38,7 @@ enum class ScalarIndexType {
     HYBRID,
     JSONSTATS,
     RTREE,
+    NGRAM,
 };
 
 inline std::string
@@ -57,6 +58,8 @@ ToString(ScalarIndexType type) {
             return "HYBRID";
         case ScalarIndexType::RTREE:
             return "RTREE";
+        case ScalarIndexType::NGRAM:
+            return "NGRAM";
         default:
             return "UNKNOWN";
     }
