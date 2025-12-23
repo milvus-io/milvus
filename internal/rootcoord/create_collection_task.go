@@ -48,9 +48,6 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
-	// If set, use these pchannels instead of load-balanced allocation.
-	// Used by snapshot restore to preserve pchannel mapping from the source collection.
-	preferredPChannels []string
 }
 
 func (t *createCollectionTask) validate(ctx context.Context) error {
@@ -506,20 +503,10 @@ func (t *createCollectionTask) assignPartitionIDs(ctx context.Context) error {
 }
 
 func (t *createCollectionTask) assignChannels(ctx context.Context) error {
-	var vchannels []string
-	var err error
-
-	if len(t.preferredPChannels) > 0 {
-		// Use specified pchannels for snapshot restore
-		vchannels, err = snmanager.StaticStreamingNodeManager.AllocVirtualChannelsWithPChannels(
-			ctx, t.header.GetCollectionId(), t.preferredPChannels)
-	} else {
-		// Normal allocation with load balancing
-		vchannels, err = snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
-			CollectionID: t.header.GetCollectionId(),
-			Num:          int(t.Req.GetShardsNum()),
-		})
-	}
+	vchannels, err := snmanager.StaticStreamingNodeManager.AllocVirtualChannels(ctx, balancer.AllocVChannelParam{
+		CollectionID: t.header.GetCollectionId(),
+		Num:          int(t.Req.GetShardsNum()),
+	})
 	if err != nil {
 		return err
 	}

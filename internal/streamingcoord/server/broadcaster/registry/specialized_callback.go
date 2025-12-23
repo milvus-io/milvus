@@ -73,8 +73,9 @@ var (
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 
 	// Snapshot
-	RegisterCreateSnapshotV2AckCallback = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
-	RegisterDropSnapshotV2AckCallback   = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
+	RegisterCreateSnapshotV2AckCallback  = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
+	RegisterDropSnapshotV2AckCallback    = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
+	RegisterRestoreSnapshotV2AckCallback = registerMessageAckCallback[*message.RestoreSnapshotMessageHeader, *message.RestoreSnapshotMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -130,7 +131,8 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Snapshot
-		message.MessageTypeCreateSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropSnapshotV2:   syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeCreateSnapshotV2:  syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeDropSnapshotV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRestoreSnapshotV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

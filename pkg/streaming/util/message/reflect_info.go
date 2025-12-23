@@ -68,6 +68,7 @@ const (
 	MessageTypeFlushAll             MessageType = MessageType(messagespb.MessageType_FlushAll)
 	MessageTypeCreateSnapshot       MessageType = MessageType(messagespb.MessageType_CreateSnapshot)
 	MessageTypeDropSnapshot         MessageType = MessageType(messagespb.MessageType_DropSnapshot)
+	MessageTypeRestoreSnapshot      MessageType = MessageType(messagespb.MessageType_RestoreSnapshot)
 )
 
 // Export extra message type
@@ -176,6 +177,8 @@ type (
 	CreateSnapshotMessageBody         = messagespb.CreateSnapshotMessageBody
 	DropSnapshotMessageHeader         = messagespb.DropSnapshotMessageHeader
 	DropSnapshotMessageBody           = messagespb.DropSnapshotMessageBody
+	RestoreSnapshotMessageHeader      = messagespb.RestoreSnapshotMessageHeader
+	RestoreSnapshotMessageBody        = messagespb.RestoreSnapshotMessageBody
 )
 
 // Type aliases for TimeTickMessageV1
@@ -2045,6 +2048,47 @@ var MustAsBroadcastDropSnapshotMessageV2 = MustAsSpecializedBroadcastMessage[*Dr
 // NewDropSnapshotMessageBuilderV2 creates a new message builder for DropSnapshotMessageV2
 var NewDropSnapshotMessageBuilderV2 = newMutableMessageBuilder[*DropSnapshotMessageHeader, *DropSnapshotMessageBody]
 
+// Type aliases for RestoreSnapshotMessageV2
+type (
+	MutableRestoreSnapshotMessageV2         = specializedMutableMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+	ImmutableRestoreSnapshotMessageV2       = SpecializedImmutableMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+	BroadcastRestoreSnapshotMessageV2       = SpecializedBroadcastMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+	BroadcastResultRestoreSnapshotMessageV2 = BroadcastResult[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+)
+
+// MessageTypeWithVersion for RestoreSnapshotMessageV2
+var MessageTypeRestoreSnapshotV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeRestoreSnapshot,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for RestoreSnapshotMessageV2
+var SpecializedTypeRestoreSnapshotV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*RestoreSnapshotMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*RestoreSnapshotMessageHeader)(nil)),
+}
+
+// AsMutableRestoreSnapshotMessageV2 converts a BasicMessage to MutableRestoreSnapshotMessageV2
+var AsMutableRestoreSnapshotMessageV2 = asSpecializedMutableMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
+// MustAsMutableRestoreSnapshotMessageV2 converts a BasicMessage to MutableRestoreSnapshotMessageV2, panics on error
+var MustAsMutableRestoreSnapshotMessageV2 = mustAsSpecializedMutableMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
+// AsImmutableRestoreSnapshotMessageV2 converts an ImmutableMessage to ImmutableRestoreSnapshotMessageV2
+var AsImmutableRestoreSnapshotMessageV2 = asSpecializedImmutableMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
+// MustAsImmutableRestoreSnapshotMessageV2 converts an ImmutableMessage to ImmutableRestoreSnapshotMessageV2, panics on error
+var MustAsImmutableRestoreSnapshotMessageV2 = MustAsSpecializedImmutableMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
+// AsBroadcastRestoreSnapshotMessageV2 converts a BasicMessage to BroadcastRestoreSnapshotMessageV2
+var AsBroadcastRestoreSnapshotMessageV2 = asSpecializedBroadcastMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
+// MustAsBroadcastRestoreSnapshotMessageV2 converts a BasicMessage to BroadcastRestoreSnapshotMessageV2, panics on error
+var MustAsBroadcastRestoreSnapshotMessageV2 = MustAsSpecializedBroadcastMessage[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
+// NewRestoreSnapshotMessageBuilderV2 creates a new message builder for RestoreSnapshotMessageV2
+var NewRestoreSnapshotMessageBuilderV2 = newMutableMessageBuilder[*RestoreSnapshotMessageHeader, *RestoreSnapshotMessageBody]
+
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):           MessageTypeAlterAlias,
@@ -2087,6 +2131,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.InsertMessageHeader{}):               MessageTypeInsert,
 	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):          MessageTypeManualFlush,
 	reflect.TypeOf(&messagespb.RestoreRBACMessageHeader{}):          MessageTypeRestoreRBAC,
+	reflect.TypeOf(&messagespb.RestoreSnapshotMessageHeader{}):      MessageTypeRestoreSnapshot,
 	reflect.TypeOf(&messagespb.RollbackTxnMessageHeader{}):          MessageTypeRollbackTxn,
 	reflect.TypeOf(&messagespb.SchemaChangeMessageHeader{}):         MessageTypeSchemaChange,
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):             MessageTypeTimeTick,
@@ -2152,6 +2197,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeInsertV1:               SpecializedTypeInsertV1,
 	MessageTypeManualFlushV2:          SpecializedTypeManualFlushV2,
 	MessageTypeRestoreRBACV2:          SpecializedTypeRestoreRBACV2,
+	MessageTypeRestoreSnapshotV2:      SpecializedTypeRestoreSnapshotV2,
 	MessageTypeRollbackTxnV2:          SpecializedTypeRollbackTxnV2,
 	MessageTypeSchemaChangeV2:         SpecializedTypeSchemaChangeV2,
 	MessageTypeTimeTickV1:             SpecializedTypeTimeTickV1,
@@ -2201,6 +2247,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeInsertV1:               MessageTypeInsertV1,
 	SpecializedTypeManualFlushV2:          MessageTypeManualFlushV2,
 	SpecializedTypeRestoreRBACV2:          MessageTypeRestoreRBACV2,
+	SpecializedTypeRestoreSnapshotV2:      MessageTypeRestoreSnapshotV2,
 	SpecializedTypeRollbackTxnV2:          MessageTypeRollbackTxnV2,
 	SpecializedTypeSchemaChangeV2:         MessageTypeSchemaChangeV2,
 	SpecializedTypeTimeTickV1:             MessageTypeTimeTickV1,

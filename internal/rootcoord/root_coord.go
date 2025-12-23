@@ -3170,36 +3170,3 @@ func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) 
 		Ezk:    ezkJSON,
 	}, nil
 }
-
-// RestoreSnapshot orchestrates snapshot restoration by creating collection, partitions,
-// and delegating data/index restoration to DataCoord via DDL framework.
-func (c *Core) RestoreSnapshot(ctx context.Context, in *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("RestoreSnapshot", metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder("RestoreSnapshot")
-
-	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
-		zap.String("dbName", in.GetDbName()),
-		zap.String("collectionName", in.GetCollectionName()),
-		zap.String("snapshotName", in.GetName()))
-	logger.Info("received request to restore snapshot")
-
-	// Use DDL framework to broadcast restore snapshot message
-	jobID, err := c.broadcastRestoreSnapshotV2(ctx, in)
-	if err != nil {
-		logger.Info("failed to restore snapshot", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("RestoreSnapshot", metrics.FailLabel).Inc()
-		return &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("RestoreSnapshot", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("RestoreSnapshot").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	logger.Info("done to restore snapshot", zap.Int64("jobID", jobID))
-	return &milvuspb.RestoreSnapshotResponse{
-		Status: merr.Success(),
-		JobId:  jobID,
-	}, nil
-}

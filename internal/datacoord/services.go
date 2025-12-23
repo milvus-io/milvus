@@ -2165,7 +2165,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// Start broadcast with collection lock (also validates collection existence)
 	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
 	if err != nil {
-		return nil, err
+		log.Warn("CreateSnapshot failed to describe collection", zap.Error(err))
+		return merr.Status(err), nil
 	}
 	dbName := coll.GetDbName()
 	collectionName := coll.GetCollectionName()
@@ -2175,7 +2176,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		message.NewExclusiveSnapshotNameResourceKey(req.GetName()),
 	)
 	if err != nil {
-		return nil, err
+		log.Warn("CreateSnapshot failed to start broadcast", zap.Error(err))
+		return merr.Status(err), nil
 	}
 	defer broadcaster.Close()
 
@@ -2270,47 +2272,76 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 	return resp, nil
 }
 
-// RestoreSnapshotData restores snapshot data to the target collection.
-// Index restoration is handled by RootCoord DDL callback.
-func (s *Server) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+// RestoreSnapshot restores snapshot data to a new collection.
+// This method validates parameters and delegates to snapshotManager for the actual restore.
+func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("snapshot", req.GetName()),
-		zap.Int64("collectionID", req.GetCollectionId()),
-		zap.Int64("jobID", req.GetJobId()))
+		zap.String("dbName", req.GetDbName()),
+		zap.String("collectionName", req.GetCollectionName()))
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-	log.Info("receive RestoreSnapshotData request")
+	log.Info("receive RestoreSnapshot request")
 
-	// Validate that jobID is provided (must be pre-allocated by RootCoord)
-	if req.GetJobId() <= 0 {
-		err := merr.WrapErrParameterInvalidMsg("jobID must be provided and greater than 0")
-		log.Warn("invalid jobID in request", zap.Error(err))
+	// Validate parameters
+	if req.GetName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("snapshot name is required")
+		log.Warn("invalid request", zap.Error(err))
+		return &datapb.RestoreSnapshotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if req.GetCollectionName() == "" {
+		err := merr.WrapErrParameterInvalidMsg("collection name is required")
+		log.Warn("invalid request", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	// Delegate data restore to SnapshotManager
-	if err := s.snapshotManager.RestoreSnapshot(
+	// Delegate to snapshot manager
+	collectionID, err := s.snapshotManager.RestoreSnapshot(
 		ctx,
 		req.GetName(),
-		req.GetCollectionId(),
-		req.GetJobId(),
-	); err != nil {
-		log.Error("failed to restore snapshot", zap.Error(err))
+		req.GetCollectionName(),
+		req.GetDbName(),
+		s.startBroadcastForRestoreSnapshot,
+		s.rollbackRestoreSnapshot,
+		s.validateRestoreSnapshotResources,
+	)
+	if err != nil {
+		log.Error("restore snapshot failed", zap.Error(err))
 		return &datapb.RestoreSnapshotResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	log.Info("restore job created successfully")
+	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID))
 	return &datapb.RestoreSnapshotResponse{
-		Status: merr.Success(),
-		JobId:  req.GetJobId(),
+		Status:       merr.Success(),
+		CollectionId: collectionID,
 	}, nil
+}
+
+// rollbackRestoreSnapshot drops the newly created collection when restore fails.
+func (s *Server) rollbackRestoreSnapshot(ctx context.Context, dbName, collectionName string) error {
+	log := log.Ctx(ctx).With(
+		zap.String("dbName", dbName),
+		zap.String("collectionName", collectionName),
+	)
+	log.Info("rolling back restore snapshot, dropping collection")
+
+	if err := s.broker.DropCollection(ctx, dbName, collectionName); err != nil {
+		log.Error("failed to drop collection during rollback", zap.Error(err))
+		return err
+	}
+
+	log.Info("rollback completed, collection dropped")
+	return nil
 }
 
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {

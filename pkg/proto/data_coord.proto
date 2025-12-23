@@ -118,7 +118,7 @@ service DataCoord {
   rpc DropSnapshot(DropSnapshotRequest) returns(common.Status){}
   rpc ListSnapshots(ListSnapshotsRequest) returns(ListSnapshotsResponse){}
   rpc DescribeSnapshot(DescribeSnapshotRequest) returns(DescribeSnapshotResponse){}
-  rpc RestoreSnapshotData(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns(RestoreSnapshotResponse){}
   rpc GetRestoreSnapshotState(GetRestoreSnapshotStateRequest) returns(GetRestoreSnapshotStateResponse){}
   rpc ListRestoreSnapshotJobs(ListRestoreSnapshotJobsRequest) returns(ListRestoreSnapshotJobsResponse){}
 }
@@ -1150,6 +1150,7 @@ enum SnapshotState {
   SnapshotStateUnknown = 0;    // Default/unknown state
   SnapshotStatePending = 1;    // S3 files are being written
   SnapshotStateCommitted = 2;  // S3 write completed, snapshot is ready
+  SnapshotStateDeleting = 3;   // Marked for deletion, S3 cleanup in progress
 }
 
 // RestoreSnapshotState defines the state machine for restore snapshot jobs
@@ -1439,7 +1440,7 @@ message CollectionDescription {
   int64 num_shards = 3; // num of shards
   common.ConsistencyLevel consistency_level = 4; // consistency level
   repeated common.KeyValuePair properties = 5; // properties
-  map<int64, string> user_created_partitions = 6; // user created partitions through create partition api
+  map<string, int64> partitions = 6; // partition name to id mapping
   repeated string virtual_channel_names = 7; // virtual channel names for restore to preserve pchannel mapping
 }
 
@@ -1453,6 +1454,32 @@ message SnapshotInfo {
   string s3_location = 7; // s3 location of the snapshot meta file if snapshot is exported to s3.
   SnapshotState state = 8; // snapshot state for 2PC commit (Pending/Committed)
   int64 pending_start_time = 9; // timestamp when pending started, for GC timeout
+}
+
+// StorageV2SegmentManifest maps a segment ID to its StorageV2 manifest file path.
+// StorageV2 is Milvus's newer storage format that uses Lance/Arrow for better performance.
+message StorageV2SegmentManifest {
+  int64 segment_id = 1;
+  string manifest = 2;
+}
+
+// SnapshotMetadata is the root structure for snapshot metadata JSON file.
+// This file serves as the entry point for reading a snapshot, containing:
+//   - Snapshot identification and status information
+//   - Collection schema and properties
+//   - References to segment manifest files
+//   - Pre-computed ID lists for optimized loading
+//
+// File path: snapshots/{collection_id}/metadata/{snapshot_id}.json
+message SnapshotMetadata {
+  int32 format_version = 1;
+  SnapshotInfo snapshot_info = 2;
+  CollectionDescription collection = 3;
+  repeated index.IndexInfo indexes = 4;
+  repeated string manifest_list = 5;
+  repeated StorageV2SegmentManifest storagev2_manifest_list = 6;
+  repeated int64 segment_ids = 7;
+  repeated int64 index_ids = 8;
 }
 
 message RestoreSnapshotInfo {
@@ -1481,18 +1508,22 @@ message DescribeSnapshotResponse {
   repeated index.IndexInfo index_infos = 4; // index infos, if include_collection_info is true, it will return index infos.
 }
 
-// restore a snapshot to a given collection
+// restore a snapshot to a new collection (DataCoord-driven flow)
+// DataCoord creates the collection and partitions via RootCoord, then creates copy segment jobs
 message RestoreSnapshotRequest {
   common.MsgBase base = 1;
   string name = 2; // snapshot name
-  int64 collection_id = 3; // target collection id
-  reserved 4; // previously: create_indexes (now handled by RootCoord DDL callback)
-  int64 job_id = 5; // pre-allocated job ID from RootCoord, if 0 DataCoord will allocate
+  reserved 3; // previously: collection_id (removed, DataCoord creates collection)
+  reserved 4; // previously: create_indexes (handled by RootCoord DDL callback)
+  reserved 5; // previously: job_id (DataCoord allocates internally)
+  string db_name = 6; // target database name
+  string collection_name = 7; // target collection name (must not exist)
 }
 
 message RestoreSnapshotResponse {
   common.Status status = 1;
-  int64 job_id = 2; // restore job ID for async tracking
+  int64 job_id = 2; // restore job ID for async tracking (deprecated, use ListRestoreJobs)
+  int64 collection_id = 3; // target collection ID
 }
 
 message GetRestoreSnapshotStateRequest {

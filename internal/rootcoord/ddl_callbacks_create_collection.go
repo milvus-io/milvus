@@ -19,11 +19,8 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -31,16 +28,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/ce"
-	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -70,6 +64,10 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	defer broadcaster.Close()
 
 	// prepare and validate the creation collection message.
+	preserveFieldID, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(util.PreserveFieldIdsKey, req.GetProperties())
+	if !exist {
+		preserveFieldID = "false"
+	}
 	createCollectionTask := createCollectionTask{
 		Core:   c,
 		Req:    req,
@@ -79,6 +77,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 			CollectionName:   req.GetCollectionName(),
 			CollectionSchema: schema,
 		},
+		preserveFieldID: preserveFieldID == "true",
 	}
 	if err := createCollectionTask.Prepare(ctx); err != nil {
 		return err
@@ -116,19 +115,6 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
 		return errors.Wrap(err, "failed to add collection to meta table")
-	}
-
-	// Handle snapshot restore if restore_from_snapshot is true
-	if header.GetRestoreFromSnapshot() {
-		if err := c.restoreFromSnapshot(ctx, header, body, result); err != nil {
-			// Log error but don't fail - collection is already created successfully
-			// The restore can be retried manually via job status
-			log.Ctx(ctx).Warn("failed to restore from snapshot, manual restore may be needed",
-				zap.String("snapshotName", header.GetSnapshotName()),
-				zap.Int64("jobID", header.GetJobId()),
-				zap.Int64("collectionID", header.GetCollectionId()),
-				zap.Error(err))
-		}
 	}
 
 	return c.ExpireCaches(ctx, ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
@@ -244,130 +230,4 @@ func mustConsumeConsistencyLevel(properties []*commonpb.KeyValuePair) (commonpb.
 		newProperties = append(newProperties, property)
 	}
 	return consistencyLevel, newProperties
-}
-
-// restoreFromSnapshot handles the snapshot restore logic after collection is created.
-// It creates user partitions, indexes, and triggers data restore.
-// All snapshot metadata is passed via header to avoid a second DescribeSnapshot RPC call.
-func (c *DDLCallback) restoreFromSnapshot(
-	ctx context.Context,
-	header *message.CreateCollectionMessageHeader,
-	body *message.CreateCollectionRequest,
-	result message.BroadcastResultCreateCollectionMessageV1,
-) error {
-	logger := log.Ctx(ctx).With(
-		zap.String("snapshotName", header.GetSnapshotName()),
-		zap.Int64("collectionID", header.GetCollectionId()),
-		zap.Int64("jobID", header.GetJobId()),
-	)
-	logger.Info("restoring from snapshot after collection creation")
-
-	// Use snapshot metadata from header directly (no RPC needed)
-	userPartitions := header.GetUserCreatedPartitions()
-	indexInfos := header.GetIndexInfos()
-
-	broadcastID := result.Message.BroadcastHeader().BroadcastID
-	broadcastChannel := lo.Keys(result.Results)
-
-	// Step 1: Create user partitions
-	if len(userPartitions) > 0 {
-		logger.Info("creating user partitions", zap.Int("count", len(userPartitions)))
-	}
-	for _, partitionName := range userPartitions {
-		partID, err := c.idAllocator.AllocOne()
-		if err != nil {
-			logger.Error("failed to allocate partition ID", zap.String("partitionName", partitionName), zap.Error(err))
-			return errors.Wrap(err, "failed to allocate partition ID")
-		}
-
-		logger.Info("creating partition", zap.String("partitionName", partitionName), zap.Int64("partitionID", partID))
-
-		partMsg := message.NewCreatePartitionMessageBuilderV1().
-			WithHeader(&message.CreatePartitionMessageHeader{
-				CollectionId: header.GetCollectionId(),
-				PartitionId:  partID,
-			}).
-			WithBody(&message.CreatePartitionRequest{
-				Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition)),
-				DbName:         body.DbName,
-				CollectionName: body.CollectionName,
-				PartitionName:  partitionName,
-				DbID:           header.GetDbId(),
-				CollectionID:   header.GetCollectionId(),
-				PartitionID:    partID,
-			}).
-			WithBroadcast(broadcastChannel).
-			MustBuildBroadcast().
-			WithBroadcastID(broadcastID)
-
-		if err := registry.CallMessageAckCallback(ctx, partMsg, result.Results); err != nil {
-			logger.Error("failed to create partition", zap.String("partitionName", partitionName), zap.Error(err))
-			return errors.Wrap(err, "failed to broadcast create partition message")
-		}
-		logger.Info("partition created successfully", zap.String("partitionName", partitionName), zap.Int64("partitionID", partID))
-	}
-
-	// Step 2: Create indexes
-	logger.Info("restoring indexes", zap.Int("indexCount", len(indexInfos)))
-
-	for _, indexInfo := range indexInfos {
-		// Update CollectionID to the new restored collection ID
-		indexInfo.CollectionID = header.GetCollectionId()
-
-		logger.Info("creating index",
-			zap.Int64("indexID", indexInfo.GetIndexID()),
-			zap.String("indexName", indexInfo.GetIndexName()),
-			zap.Int64("fieldID", indexInfo.GetFieldID()))
-
-		createIndexMsg := message.NewCreateIndexMessageBuilderV2().
-			WithHeader(&message.CreateIndexMessageHeader{
-				DbId:         header.GetDbId(),
-				CollectionId: header.GetCollectionId(),
-				FieldId:      indexInfo.GetFieldID(),
-				IndexId:      indexInfo.GetIndexID(),
-				IndexName:    indexInfo.GetIndexName(),
-			}).
-			WithBody(&message.CreateIndexMessageBody{
-				FieldIndex: &indexpb.FieldIndex{
-					IndexInfo:  indexInfo,
-					Deleted:    false,
-					CreateTime: uint64(time.Now().UnixNano()),
-				},
-			}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-			MustBuildBroadcast().
-			WithBroadcastID(broadcastID)
-
-		if err := registry.CallMessageAckCallback(ctx, createIndexMsg, result.Results); err != nil {
-			logger.Error("failed to create index",
-				zap.Int64("indexID", indexInfo.GetIndexID()),
-				zap.String("indexName", indexInfo.GetIndexName()),
-				zap.Error(err))
-			return errors.Wrap(err, "failed to broadcast create index message")
-		}
-
-		logger.Info("index created successfully",
-			zap.Int64("indexID", indexInfo.GetIndexID()),
-			zap.String("indexName", indexInfo.GetIndexName()))
-	}
-
-	logger.Info("all indexes restored successfully")
-
-	// Step 3: Restore data
-	restoreResp, err := c.mixCoord.RestoreSnapshotData(ctx, &datapb.RestoreSnapshotRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_RestoreSnapshot),
-		),
-		Name:         header.GetSnapshotName(),
-		CollectionId: header.GetCollectionId(),
-		JobId:        header.GetJobId(),
-	})
-	if err := merr.CheckRPCCall(restoreResp, err); err != nil {
-		logger.Warn("data restore returned error, please check job status",
-			zap.String("reason", restoreResp.GetStatus().GetReason()))
-	} else {
-		logger.Info("data restore triggered successfully")
-	}
-
-	return nil
 }

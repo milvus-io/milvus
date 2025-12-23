@@ -163,7 +163,7 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_CreateTasks() {
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
 
 	// Should create 2 tasks (2 segments + 1 segment)
-	tasks := s.copyMeta.GetTaskBy(context.TODO(), WithCopyTaskJob(s.jobID))
+	tasks := s.copyMeta.GetTasksByJobID(context.TODO(), s.jobID)
 	s.Len(tasks, 2)
 
 	// Collect mapping counts from all tasks (order doesn't matter)

@@ -28,12 +28,13 @@ Snapshots are stored in object storage with the following structure:
 ```
 snapshots/{collection_id}/
 ├── metadata/
-│   ├── 00001-{uuid}.json          # Snapshot metadata (JSON format)
-│   ├── 00002-{uuid}.json          # Additional snapshot versions
-│   └── ...
+│   └── {snapshot_id}.json         # Snapshot metadata (JSON format)
+│
 └── manifests/
-    ├── data-file-manifest-{uuid}.avro         # Segment details (Avro format)
-    └── ...
+    └── {snapshot_id}/             # Directory for each snapshot
+        ├── {segment_id_1}.avro    # Individual segment manifest (Avro format)
+        ├── {segment_id_2}.avro
+        └── ...
 ```
 
 **Note**: The metadata JSON file directly contains an array of manifest file paths, eliminating the need for a separate manifest list file.

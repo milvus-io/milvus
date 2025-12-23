@@ -21,19 +21,51 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+// StartBroadcasterFunc creates a broadcaster for restore operations.
+// Used by RestoreSnapshot to delegate broadcaster creation to the caller (Server).
+type StartBroadcasterFunc func(ctx context.Context, collectionID int64, snapshotName string) (broadcaster.BroadcastAPI, error)
+
+// RollbackFunc performs rollback on restore failure.
+// Used by RestoreSnapshot to delegate collection cleanup to the caller (Server).
+type RollbackFunc func(ctx context.Context, dbName, collectionName string) error
+
+// ValidateResourcesFunc validates that all required resources exist.
+// Used by RestoreSnapshot to validate partitions and indexes after creation.
+type ValidateResourcesFunc func(ctx context.Context, collectionID int64, snapshotData *SnapshotData) error
+
+// ============================================================================
+// Interface Definition
+// ============================================================================
 
 // SnapshotManager centralizes all snapshot-related business logic.
 // It provides a unified interface for snapshot lifecycle management (create, drop, describe, list)
@@ -79,6 +111,18 @@ type SnapshotManager interface {
 	//   - error: If snapshot not found or deletion fails
 	DropSnapshot(ctx context.Context, name string) error
 
+	// GetSnapshot retrieves basic snapshot metadata by name.
+	// This is a lightweight operation that only reads from memory cache.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - name: Name of the snapshot
+	//
+	// Returns:
+	//   - snapshotInfo: Basic snapshot metadata (id, name, collection_id, etc.)
+	//   - error: If snapshot not found
+	GetSnapshot(ctx context.Context, name string) (*datapb.SnapshotInfo, error)
+
 	// DescribeSnapshot retrieves detailed information about a snapshot.
 	// It reads the complete snapshot data from S3, including segments, indexes, and schema.
 	//
@@ -105,31 +149,96 @@ type SnapshotManager interface {
 
 	// Restore operations
 
-	// RestoreSnapshot initiates a snapshot restore operation to a target collection.
-	// It creates channel/partition mappings, validates compatibility, pre-registers target segments,
-	// and creates a copy segment job for background execution.
-	//
-	// Note: Index creation is NOT handled by this method. The caller (services.go)
-	// is responsible for creating indexes before calling this method.
+	// RestoreSnapshot orchestrates the complete snapshot restoration process.
+	// It reads snapshot data, creates collection/partitions/indexes, validates resources,
+	// and broadcasts the restore message.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
 	//   - snapshotName: Name of the snapshot to restore
-	//   - targetCollectionID: ID of the collection to restore data into
-	//   - jobID: Pre-allocated job ID from RootCoord (must be > 0)
+	//   - targetCollectionName: Name for the restored collection
+	//   - targetDbName: Database name for the restored collection
+	//   - startBroadcaster: Function to start a broadcaster for DDL operations
+	//   - rollback: Function to rollback on failure (drops collection)
+	//   - validateResources: Function to validate that all resources exist
 	//
 	// Returns:
-	//   - error: If snapshot not found, channel/partition mismatch, or job creation fails
+	//   - collectionID: ID of the restored collection
+	//   - error: If any step fails
+	RestoreSnapshot(
+		ctx context.Context,
+		snapshotName string,
+		targetCollectionName string,
+		targetDbName string,
+		startBroadcaster StartBroadcasterFunc,
+		rollback RollbackFunc,
+		validateResources ValidateResourcesFunc,
+	) (int64, error)
+
+	// RestoreCollection creates a new collection and its user partitions based on snapshot data.
+	// It marshals the schema, sets preserve field IDs property, calls RootCoord to create collection,
+	// then creates user-defined partitions (filtering out default and partition-key partitions).
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - snapshotData: Snapshot data containing collection schema and partition info
+	//   - targetCollectionName: Name for the new collection
+	//   - targetDbName: Database name for the new collection
+	//
+	// Returns:
+	//   - collectionID: ID of the created collection
+	//   - error: If creation fails
+	RestoreCollection(ctx context.Context, snapshotData *SnapshotData, targetCollectionName, targetDbName string) (int64, error)
+
+	// RestoreIndexes restores indexes from snapshot data by broadcasting CreateIndex messages.
+	// This method bypasses CreateIndex validation (e.g., ParseAndVerifyNestedPath) because
+	// snapshot data already contains properly formatted index parameters.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - snapshotData: Snapshot data containing index information
+	//   - collectionID: ID of the target collection
+	//   - startBroadcaster: Function to create a new broadcaster for each index
+	//     (each broadcaster can only be used once due to resource key lock consumption)
+	//
+	// Returns:
+	//   - error: If any index creation fails
+	RestoreIndexes(ctx context.Context, snapshotData *SnapshotData, collectionID int64, startBroadcaster StartBroadcasterFunc, snapshotName string) error
+
+	// RestoreData handles the data restoration phase of snapshot restore.
+	// It builds partition/channel mappings and creates copy segment jobs.
+	// Collection/partition creation and index restore should be handled by caller (services.go).
 	//
 	// Process flow:
-	//  1. Read snapshot data
-	//  2. Generate channel mapping (snapshot channels → target channels)
-	//  3. Generate partition mapping (snapshot partitions → target partitions)
-	//  4. Validate channel and partition count matches
-	//  5. Create restore job with ID mappings
-	//  6. Pre-register target segments in Importing state
-	//  7. Background checker/inspector will execute the job
-	RestoreSnapshot(ctx context.Context, snapshotName string, targetCollectionID int64, jobID int64) error
+	//  1. Check if job already exists (idempotency)
+	//  2. Build partition mapping
+	//  3. Build channel mapping
+	//  4. Create copy segment job for background execution
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - snapshotData: Pre-loaded snapshot data
+	//   - collectionID: ID of the target collection (already created)
+	//   - jobID: Pre-allocated job ID for idempotency (from WAL message)
+	//
+	// Returns:
+	//   - jobID: The restore job ID (same as input if job created, or existing job ID)
+	//   - error: If mapping fails or job creation fails
+	RestoreData(ctx context.Context, snapshotData *SnapshotData, collectionID int64, jobID int64) (int64, error)
+
+	// Restore state query
+
+	// ReadSnapshotData reads complete snapshot data from storage.
+	// This is used by services.go to get snapshot data before calling RestoreData.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - snapshotName: Name of the snapshot to read
+	//
+	// Returns:
+	//   - snapshotData: Complete snapshot data including segments, indexes, schema
+	//   - error: If snapshot not found or read fails
+	ReadSnapshotData(ctx context.Context, snapshotName string) (*SnapshotData, error)
 
 	// GetRestoreState retrieves the current state of a restore job.
 	//
@@ -152,19 +261,11 @@ type SnapshotManager interface {
 	//   - restoreInfos: List of restore job information
 	//   - error: If listing fails
 	ListRestoreJobs(ctx context.Context, collectionIDFilter int64) ([]*datapb.RestoreSnapshotInfo, error)
-
-	// GetSnapshot retrieves basic snapshot metadata by name.
-	// This is a lightweight operation that only reads from memory cache.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout
-	//   - name: Name of the snapshot
-	//
-	// Returns:
-	//   - snapshotInfo: Basic snapshot metadata (id, name, collection_id, etc.)
-	//   - error: If snapshot not found
-	GetSnapshot(ctx context.Context, name string) (*datapb.SnapshotInfo, error)
 }
+
+// ============================================================================
+// Implementation: Struct and Constructor
+// ============================================================================
 
 // snapshotManager implements the SnapshotManager interface.
 type snapshotManager struct {
@@ -182,6 +283,10 @@ type snapshotManager struct {
 
 	// Helper closures
 	getChannelsByCollectionID func(context.Context, int64) ([]RWChannel, error) // For channel mapping
+
+	// Concurrency control
+	// createSnapshotMu protects CreateSnapshot to prevent TOCTOU race on snapshot name uniqueness
+	createSnapshotMu sync.Mutex
 }
 
 // NewSnapshotManager creates a new SnapshotManager instance.
@@ -217,16 +322,24 @@ func NewSnapshotManager(
 	}
 }
 
+// ============================================================================
+// Snapshot Lifecycle Management
+// ============================================================================
+
 // CreateSnapshot creates a new snapshot for the specified collection.
 func (sm *snapshotManager) CreateSnapshot(
 	ctx context.Context,
 	collectionID int64,
 	name, description string,
 ) (int64, error) {
+	// Lock to prevent TOCTOU race on snapshot name uniqueness check
+	sm.createSnapshotMu.Lock()
+	defer sm.createSnapshotMu.Unlock()
+
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.String("name", name))
 	log.Info("create snapshot request received", zap.String("description", description))
 
-	// Validate snapshot name uniqueness
+	// Validate snapshot name uniqueness (protected by createSnapshotMu)
 	if _, err := sm.snapshotMeta.GetSnapshot(ctx, name); err == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
 	}
@@ -317,115 +430,391 @@ func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, part
 	return snapshots, nil
 }
 
-// RestoreSnapshot initiates a snapshot restore operation to a target collection.
-// Note: Index creation is handled by the caller (services.go), not this method.
-// The jobID must be pre-allocated by the caller (RootCoord) and passed in.
+// ============================================================================
+// Restore Main Flow
+// ============================================================================
+
+// RestoreSnapshot orchestrates the complete snapshot restoration process.
+// It reads snapshot data, creates collection/partitions/indexes, validates resources,
+// and broadcasts the restore message.
 func (sm *snapshotManager) RestoreSnapshot(
 	ctx context.Context,
 	snapshotName string,
-	targetCollectionID int64,
-	jobID int64,
-) error {
+	targetCollectionName string,
+	targetDbName string,
+	startBroadcaster StartBroadcasterFunc,
+	rollback RollbackFunc,
+	validateResources ValidateResourcesFunc,
+) (int64, error) {
 	log := log.Ctx(ctx).With(
-		zap.String("snapshot", snapshotName),
-		zap.Int64("targetCollectionID", targetCollectionID),
-		zap.Int64("jobID", jobID))
-	log.Info("restore snapshot request received")
+		zap.String("snapshotName", snapshotName),
+		zap.String("targetCollection", targetCollectionName),
+		zap.String("targetDb", targetDbName),
+	)
 
-	// Validate jobID (defensive check - services.go also validates, but interface should enforce contract)
-	if jobID <= 0 {
-		log.Warn("invalid jobID")
-		return merr.WrapErrParameterInvalidMsg("jobID must be > 0")
-	}
-
-	// Read snapshot data with full segment information for restore
-	snapshotData, err := sm.snapshotMeta.ReadSnapshotData(ctx, snapshotName, true)
+	// Phase 1: Read snapshot data
+	snapshotData, err := sm.ReadSnapshotData(ctx, snapshotName)
 	if err != nil {
-		log.Error("failed to read snapshot data", zap.Error(err))
-		return err
+		return 0, fmt.Errorf("failed to read snapshot data: %w", err)
 	}
+	log.Info("snapshot data loaded",
+		zap.Int("segmentCount", len(snapshotData.Segments)),
+		zap.Int("indexCount", len(snapshotData.Indexes)))
 
-	// Generate channel mapping
-	channelMapping, err := sm.buildChannelMapping(ctx, snapshotData, targetCollectionID)
+	// Phase 2: Restore collection and partitions
+	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
 	if err != nil {
-		return err
+		return 0, fmt.Errorf("failed to restore collection: %w", err)
+	}
+	log.Info("collection and partitions restored", zap.Int64("collectionID", collectionID))
+
+	// Phase 3: Restore indexes
+	// Note: Each broadcaster can only be used once, so we pass the factory function
+	if err := sm.RestoreIndexes(ctx, snapshotData, collectionID, startBroadcaster, snapshotName); err != nil {
+		log.Error("failed to restore indexes, rolling back", zap.Error(err))
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		return 0, fmt.Errorf("failed to restore indexes: %w", err)
+	}
+	log.Info("indexes restored", zap.Int("indexCount", len(snapshotData.Indexes)))
+
+	// Phase 4: Validate resources
+	if err := validateResources(ctx, collectionID, snapshotData); err != nil {
+		log.Error("resource validation failed, rolling back", zap.Error(err))
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		return 0, fmt.Errorf("resource validation failed: %w", err)
 	}
 
-	// Generate partition mapping
-	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, targetCollectionID)
+	// Phase 5: Pre-allocate job ID and broadcast restore message
+	// Pre-allocating jobID ensures idempotency when WAL is replayed after restart
+	jobID, err := sm.allocator.AllocID(ctx)
 	if err != nil {
-		return err
+		log.Error("failed to allocate job ID, rolling back", zap.Error(err))
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		return 0, fmt.Errorf("failed to allocate job ID: %w", err)
+	}
+	log.Info("pre-allocated job ID for restore", zap.Int64("jobID", jobID))
+
+	// Create broadcaster for restore message
+	restoreBroadcaster, err := startBroadcaster(ctx, collectionID, snapshotName)
+	if err != nil {
+		log.Error("failed to start broadcaster for restore message, rolling back", zap.Error(err))
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		return 0, fmt.Errorf("failed to start broadcaster for restore message: %w", err)
+	}
+	defer restoreBroadcaster.Close()
+
+	msg := message.NewRestoreSnapshotMessageBuilderV2().
+		WithHeader(&message.RestoreSnapshotMessageHeader{
+			SnapshotName: snapshotName,
+			CollectionId: collectionID,
+			JobId:        jobID,
+		}).
+		WithBody(&message.RestoreSnapshotMessageBody{}).
+		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		MustBuildBroadcast()
+
+	if _, err := restoreBroadcaster.Broadcast(ctx, msg); err != nil {
+		log.Error("failed to broadcast restore message, rolling back", zap.Error(err))
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			log.Error("rollback failed", zap.Error(rollbackErr))
+		}
+		return 0, fmt.Errorf("failed to broadcast restore message: %w", err)
 	}
 
-	// Create restore job using the provided jobID
-	if err := sm.createRestoreJob(ctx, targetCollectionID, channelMapping, partitionMapping, snapshotData, jobID); err != nil {
-		log.Error("failed to create restore job", zap.Error(err))
-		return err
+	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID))
+	return collectionID, nil
+}
+
+// RestoreCollection creates a new collection and its user partitions based on snapshot data.
+func (sm *snapshotManager) RestoreCollection(
+	ctx context.Context,
+	snapshotData *SnapshotData,
+	targetCollectionName, targetDbName string,
+) (int64, error) {
+	collection := snapshotData.Collection
+
+	// Clone the schema to avoid modifying the original snapshot data,
+	// and update the schema name to match the target collection name.
+	// This is required because Milvus validates that CollectionName == Schema.Name.
+	schema := proto.Clone(collection.Schema).(*schemapb.CollectionSchema)
+	schema.Name = targetCollectionName
+
+	schemaInBytes, err := proto.Marshal(schema)
+	if err != nil {
+		return 0, err
 	}
 
-	log.Info("restore job created successfully")
+	// preserve field ids
+	properties := collection.Properties
+	properties = append(properties, &commonpb.KeyValuePair{
+		Key:   util.PreserveFieldIdsKey,
+		Value: strconv.FormatBool(true),
+	})
+
+	// Build CreateCollectionRequest
+	req := &milvuspb.CreateCollectionRequest{
+		DbName:           targetDbName,
+		CollectionName:   targetCollectionName,
+		Schema:           schemaInBytes,
+		ShardsNum:        int32(collection.NumShards),
+		ConsistencyLevel: collection.ConsistencyLevel,
+		Properties:       properties,
+		NumPartitions:    collection.NumPartitions,
+	}
+
+	// Call RootCoord to create collection
+	if err := sm.broker.CreateCollection(ctx, req); err != nil {
+		return 0, err
+	}
+
+	// Get the new collection ID by querying with collection name
+	resp, err := sm.broker.DescribeCollectionByName(ctx, targetDbName, targetCollectionName)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return 0, err
+	}
+	collectionID := resp.GetCollectionID()
+
+	// Create user partitions
+	if err := sm.restoreUserPartitions(ctx, snapshotData, targetCollectionName, targetDbName); err != nil {
+		return 0, err
+	}
+
+	return collectionID, nil
+}
+
+// RestoreIndexes restores indexes from snapshot data by broadcasting CreateIndex messages directly to DDL WAL.
+// This bypasses CreateIndex validation (e.g., ParseAndVerifyNestedPath) because snapshot data
+// already contains properly formatted index parameters (e.g., json_path in JSON Pointer format).
+//
+// Note: Each broadcaster can only be used once due to resource key lock consumption,
+// so we need to create a new broadcaster for each index.
+func (sm *snapshotManager) RestoreIndexes(
+	ctx context.Context,
+	snapshotData *SnapshotData,
+	collectionID int64,
+	startBroadcaster StartBroadcasterFunc,
+	snapshotName string,
+) error {
+	// Get collection info for dbId
+	coll, err := sm.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return fmt.Errorf("failed to describe collection %d: %w", collectionID, err)
+	}
+
+	for _, indexInfo := range snapshotData.Indexes {
+		// Allocate new index ID
+		indexID, err := sm.allocator.AllocID(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to allocate index ID: %w", err)
+		}
+
+		// Build index model from snapshot data
+		// Note: TypeParams may contain mmap_enabled which should be filtered out
+		index := &model.Index{
+			CollectionID:    collectionID,
+			FieldID:         indexInfo.GetFieldID(),
+			IndexID:         indexID,
+			IndexName:       indexInfo.GetIndexName(),
+			TypeParams:      DeleteParams(indexInfo.GetTypeParams(), []string{common.MmapEnabledKey}),
+			IndexParams:     indexInfo.GetIndexParams(),
+			CreateTime:      uint64(time.Now().UnixNano()),
+			IsAutoIndex:     indexInfo.GetIsAutoIndex(),
+			UserIndexParams: indexInfo.GetUserIndexParams(),
+		}
+
+		// Validate the index params (basic validation without JSON path parsing)
+		if err := ValidateIndexParams(index); err != nil {
+			return fmt.Errorf("failed to validate index %s: %w", indexInfo.GetIndexName(), err)
+		}
+
+		// Create a new broadcaster for each index
+		// (each broadcaster can only be used once due to resource key lock consumption)
+		b, err := startBroadcaster(ctx, collectionID, snapshotName)
+		if err != nil {
+			return fmt.Errorf("failed to start broadcaster for index %s: %w", indexInfo.GetIndexName(), err)
+		}
+
+		// Broadcast CreateIndex message directly to DDL WAL
+		_, err = b.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
+			WithHeader(&message.CreateIndexMessageHeader{
+				DbId:         coll.GetDbId(),
+				CollectionId: collectionID,
+				FieldId:      indexInfo.GetFieldID(),
+				IndexId:      indexID,
+				IndexName:    indexInfo.GetIndexName(),
+			}).
+			WithBody(&message.CreateIndexMessageBody{
+				FieldIndex: model.MarshalIndexModel(index),
+			}).
+			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			MustBuildBroadcast(),
+		)
+		b.Close()
+		if err != nil {
+			return fmt.Errorf("failed to broadcast create index %s: %w", indexInfo.GetIndexName(), err)
+		}
+
+		log.Ctx(ctx).Info("index restored via DDL WAL broadcast",
+			zap.String("indexName", indexInfo.GetIndexName()),
+			zap.Int64("fieldID", indexInfo.GetFieldID()),
+			zap.Int64("indexID", indexID))
+	}
 	return nil
 }
 
-// GetRestoreState retrieves the current state of a restore job.
-func (sm *snapshotManager) GetRestoreState(ctx context.Context, jobID int64) (*datapb.RestoreSnapshotInfo, error) {
-	log := log.Ctx(ctx).With(zap.Int64("jobID", jobID))
+// RestoreData handles the data restoration phase of snapshot restore.
+// It builds partition/channel mappings and creates the copy segment job.
+// Collection and partition creation should be handled by the caller (services.go).
+//
+// Process flow:
+//  1. Check if job already exists (idempotency)
+//  2. Build partition mapping
+//  3. Build channel mapping
+//  4. Create copy segment job
+func (sm *snapshotManager) RestoreData(
+	ctx context.Context,
+	snapshotData *SnapshotData,
+	collectionID int64,
+	jobID int64,
+) (int64, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("snapshot", snapshotData.SnapshotInfo.GetName()),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("jobID", jobID),
+	)
+	log.Info("restore data started")
 
-	// Get job
-	job := sm.copySegmentMeta.GetJob(ctx, jobID)
-	if job == nil {
-		err := merr.WrapErrImportFailed(fmt.Sprintf("restore job not found: jobID=%d", jobID))
-		log.Warn("restore job not found")
+	// ========== Phase 1: Idempotency check ==========
+	// Check if job already exists (WAL replay scenario)
+	existingJob := sm.copySegmentMeta.GetJob(ctx, jobID)
+	if existingJob != nil {
+		log.Info("job already exists, skip creation (idempotent)")
+		return jobID, nil
+	}
+
+	// ========== Phase 2: Build partition mapping ==========
+	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, collectionID)
+	if err != nil {
+		log.Error("failed to build partition mapping", zap.Error(err))
+		return 0, fmt.Errorf("partition mapping failed: %w", err)
+	}
+	log.Info("partition mapping built", zap.Any("partitionMapping", partitionMapping))
+
+	// ========== Phase 3: Build channel mapping ==========
+	channelMapping, err := sm.buildChannelMapping(ctx, snapshotData, collectionID)
+	if err != nil {
+		log.Error("failed to build channel mapping", zap.Error(err))
+		return 0, fmt.Errorf("channel mapping failed: %w", err)
+	}
+
+	// ========== Phase 4: Create copy segment job ==========
+	// Use the pre-allocated jobID from the WAL message
+	if err := sm.createRestoreJob(ctx, collectionID, channelMapping, partitionMapping, snapshotData, jobID); err != nil {
+		log.Error("failed to create restore job", zap.Error(err))
+		return 0, fmt.Errorf("restore job creation failed: %w", err)
+	}
+
+	log.Info("restore data completed successfully",
+		zap.Int64("jobID", jobID),
+		zap.Int64("collectionID", collectionID))
+
+	return jobID, nil
+}
+
+// ============================================================================
+// Restore Helper Functions (private)
+// ============================================================================
+
+// restoreUserPartitions creates user partitions based on snapshot data.
+// It creates partitions that exist in the snapshot but not in the target collection.
+func (sm *snapshotManager) restoreUserPartitions(
+	ctx context.Context,
+	snapshotData *SnapshotData,
+	targetCollectionName, targetDbName string,
+) error {
+	hasPartitionKey := typeutil.HasPartitionKey(snapshotData.Collection.GetSchema())
+	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
+	userCreatedPartitions := make([]string, 0)
+	if !hasPartitionKey {
+		for partitionName := range snapshotData.Collection.GetPartitions() {
+			if partitionName == defaultPartitionName {
+				continue
+			}
+
+			parts := strings.Split(partitionName, "_")
+			if len(parts) == 2 && parts[0] == defaultPartitionName {
+				continue
+			}
+			userCreatedPartitions = append(userCreatedPartitions, partitionName)
+		}
+	}
+
+	// Create user partitions that don't exist yet
+	for _, partitionName := range userCreatedPartitions {
+		// Create the partition
+		req := &milvuspb.CreatePartitionRequest{
+			DbName:         targetDbName,
+			CollectionName: targetCollectionName,
+			PartitionName:  partitionName,
+		}
+
+		if err := sm.broker.CreatePartition(ctx, req); err != nil {
+			return fmt.Errorf("failed to create partition %s: %w", partitionName, err)
+		}
+	}
+
+	return nil
+}
+
+// buildPartitionMapping builds a mapping from snapshot partition IDs to target partition IDs.
+func (sm *snapshotManager) buildPartitionMapping(
+	ctx context.Context,
+	snapshotData *SnapshotData,
+	collectionID int64,
+) (map[int64]int64, error) {
+	// Get current partitions
+	currentPartitions, err := sm.broker.ShowPartitions(ctx, collectionID)
+	if err != nil {
 		return nil, err
 	}
 
-	// Build restore info using centralized helper
-	restoreInfo := sm.buildRestoreInfo(job)
-
-	log.Info("get restore state completed",
-		zap.String("state", restoreInfo.GetState().String()),
-		zap.Int32("progress", restoreInfo.GetProgress()))
-
-	return restoreInfo, nil
-}
-
-// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID.
-func (sm *snapshotManager) ListRestoreJobs(
-	ctx context.Context,
-	collectionIDFilter int64,
-) ([]*datapb.RestoreSnapshotInfo, error) {
-	// Get all jobs
-	jobs := sm.copySegmentMeta.GetJobBy(ctx)
-
-	// Filter by collection and build restore info list
-	restoreInfos := make([]*datapb.RestoreSnapshotInfo, 0)
-	for _, job := range jobs {
-		if collectionIDFilter != 0 && job.GetCollectionId() != collectionIDFilter {
-			continue
-		}
-
-		restoreInfos = append(restoreInfos, sm.buildRestoreInfo(job))
+	// Build partition name to ID mapping for target collection
+	currrentPartitionMap := make(map[string]int64)
+	for i, name := range currentPartitions.GetPartitionNames() {
+		currrentPartitionMap[name] = currentPartitions.GetPartitionIDs()[i]
 	}
 
-	log.Ctx(ctx).Info("list restore jobs completed",
-		zap.Int("totalJobs", len(restoreInfos)),
-		zap.Int64("filterCollectionId", collectionIDFilter))
+	// Build snapshot partition ID to target partition ID mapping with same name
+	partitionMapping := make(map[int64]int64)
+	for partitionName, partitionID := range snapshotData.Collection.GetPartitions() {
+		targetPartID, ok := currrentPartitionMap[partitionName]
+		if !ok {
+			return nil, merr.WrapErrServiceInternal(
+				fmt.Sprintf("partition %s from snapshot not found in target collection", partitionName))
+		}
+		partitionMapping[partitionID] = targetPartID
+	}
 
-	return restoreInfos, nil
+	return partitionMapping, nil
 }
 
 // buildChannelMapping generates a mapping from snapshot channels to target collection channels.
-// It maps channels by pchannel to preserve pchannel relationships from the source collection.
-// For backward compatibility with old snapshots, falls back to sorted mapping if pchannel mapping fails.
+// It ensures that the channel count matches and returns a sorted mapping.
 func (sm *snapshotManager) buildChannelMapping(
 	ctx context.Context,
 	snapshotData *SnapshotData,
 	targetCollectionID int64,
 ) (map[string]string, error) {
-	channelMapping := make(map[string]string)
-
 	if len(snapshotData.Segments) == 0 {
-		return channelMapping, nil
+		return make(map[string]string), nil
 	}
 
 	snapshotChannels := snapshotData.Collection.VirtualChannelNames
@@ -444,66 +833,18 @@ func (sm *snapshotManager) buildChannelMapping(
 				len(snapshotChannels), len(targetChannels)))
 	}
 
-	// Build pchannel -> target vchannel map
-	pchannelToTarget := make(map[string]string)
-	for _, ch := range targetChannels {
-		pchannel := funcutil.ToPhysicalChannel(ch.GetName())
-		pchannelToTarget[pchannel] = ch.GetName()
-	}
-
-	// Map snapshot vchannel to target vchannel by pchannel
-	for _, snapshotVChannel := range snapshotData.Collection.VirtualChannelNames {
-		pchannel := funcutil.ToPhysicalChannel(snapshotVChannel)
-		targetVChannel, ok := pchannelToTarget[pchannel]
-		if !ok {
-			// Fallback to sorted mapping for backward compatibility with old snapshots
-			// where vchannels may not preserve pchannel relationships
-			log.Ctx(ctx).Warn("pchannel not found in target collection",
-				zap.String("snapshotVChannel", snapshotVChannel),
-				zap.String("pchannel", pchannel))
-			return nil, merr.WrapErrServiceInternal(
-				fmt.Sprintf("pchannel not found in target collection: snapshotVChannel=%s, pchannel=%s",
-					snapshotVChannel, pchannel))
-		}
-		channelMapping[snapshotVChannel] = targetVChannel
-	}
-
-	return channelMapping, nil
-}
-
-// buildPartitionMapping generates a mapping from snapshot partitions to target collection partitions.
-// It ensures that the partition count matches and returns a sorted mapping.
-func (sm *snapshotManager) buildPartitionMapping(
-	ctx context.Context,
-	snapshotData *SnapshotData,
-	targetCollectionID int64,
-) (map[int64]int64, error) {
-	partitionsInSnapshot := snapshotData.SnapshotInfo.GetPartitionIds()
-
-	// Get target collection partitions
-	targetPartitions, err := sm.broker.ShowPartitionsInternal(ctx, targetCollectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate count
-	if len(targetPartitions) != len(partitionsInSnapshot) {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("partition count mismatch between snapshot and target collection: snapshot=%d, target=%d",
-				len(partitionsInSnapshot), len(targetPartitions)))
-	}
-
 	// Build mapping (sorted)
-	sort.Slice(partitionsInSnapshot, func(i, j int) bool {
-		return partitionsInSnapshot[i] < partitionsInSnapshot[j]
-	})
-	sort.Slice(targetPartitions, func(i, j int) bool {
-		return targetPartitions[i] < targetPartitions[j]
-	})
+	sort.Strings(snapshotChannels)
 
-	mapping := make(map[int64]int64)
-	for i, partition := range targetPartitions {
-		mapping[partitionsInSnapshot[i]] = partition
+	targetChannelNames := make([]string, len(targetChannels))
+	for i, ch := range targetChannels {
+		targetChannelNames[i] = ch.GetName()
+	}
+	sort.Strings(targetChannelNames)
+
+	mapping := make(map[string]string)
+	for i, targetChannel := range targetChannelNames {
+		mapping[snapshotChannels[i]] = targetChannel
 	}
 
 	return mapping, nil
@@ -629,14 +970,29 @@ func (sm *snapshotManager) createRestoreJob(
 		}
 	}
 
+	// Pre-register channel's checkpoint
+	collection, err := sm.handler.GetCollection(ctx, targetCollection)
+	if err != nil {
+		log.Error("failed to get collection", zap.Error(err))
+		return err
+	}
+	for _, channel := range channelMapping {
+		startPosition := toMsgPosition(channel, collection.StartPositions)
+		if err := sm.meta.UpdateChannelCheckpoint(ctx, channel, startPosition); err != nil {
+			log.Error("failed to pre-register channel checkpoint", zap.Error(err))
+			return err
+		}
+	}
+
 	// Create copy segment job
+	jobTimeout := Params.DataCoordCfg.CopySegmentJobTimeout.GetAsDuration(time.Second)
 	copyJob := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        jobID,
 			CollectionId: targetCollection,
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:   idMappings,
-			TimeoutTs:    uint64(time.Now().Add(5 * time.Minute).UnixNano()),
+			TimeoutTs:    uint64(time.Now().Add(jobTimeout).UnixNano()),
 			StartTs:      uint64(time.Now().UnixNano()),
 			Options: []*commonpb.KeyValuePair{
 				{Key: "copy_index", Value: "true"},
@@ -661,6 +1017,67 @@ func (sm *snapshotManager) createRestoreJob(
 
 	return nil
 }
+
+// ============================================================================
+// Restore State Query
+// ============================================================================
+
+// ReadSnapshotData reads snapshot data from storage.
+// This is a convenience wrapper for snapshotMeta.ReadSnapshotData.
+func (sm *snapshotManager) ReadSnapshotData(ctx context.Context, snapshotName string) (*SnapshotData, error) {
+	return sm.snapshotMeta.ReadSnapshotData(ctx, snapshotName, true)
+}
+
+// GetRestoreState retrieves the current state of a restore job.
+func (sm *snapshotManager) GetRestoreState(ctx context.Context, jobID int64) (*datapb.RestoreSnapshotInfo, error) {
+	log := log.Ctx(ctx).With(zap.Int64("jobID", jobID))
+
+	// Get job
+	job := sm.copySegmentMeta.GetJob(ctx, jobID)
+	if job == nil {
+		err := merr.WrapErrImportFailed(fmt.Sprintf("restore job not found: jobID=%d", jobID))
+		log.Warn("restore job not found")
+		return nil, err
+	}
+
+	// Build restore info using centralized helper
+	restoreInfo := sm.buildRestoreInfo(job)
+
+	log.Info("get restore state completed",
+		zap.String("state", restoreInfo.GetState().String()),
+		zap.Int32("progress", restoreInfo.GetProgress()))
+
+	return restoreInfo, nil
+}
+
+// ListRestoreJobs returns a list of all restore jobs, optionally filtered by collection ID.
+func (sm *snapshotManager) ListRestoreJobs(
+	ctx context.Context,
+	collectionIDFilter int64,
+) ([]*datapb.RestoreSnapshotInfo, error) {
+	// Get all jobs
+	jobs := sm.copySegmentMeta.GetJobBy(ctx)
+
+	// Filter by collection and build restore info list
+	restoreInfos := make([]*datapb.RestoreSnapshotInfo, 0)
+	for _, job := range jobs {
+		if collectionIDFilter != 0 && job.GetCollectionId() != collectionIDFilter {
+			continue
+		}
+
+		restoreInfos = append(restoreInfos, sm.buildRestoreInfo(job))
+	}
+
+	log.Ctx(ctx).Info("list restore jobs completed",
+		zap.Int("totalJobs", len(restoreInfos)),
+		zap.Int64("filterCollectionId", collectionIDFilter))
+
+	return restoreInfos, nil
+}
+
+// ============================================================================
+// Common Helper Functions (private)
+// ============================================================================
 
 // buildRestoreInfo constructs a RestoreSnapshotInfo from a CopySegmentJob.
 // This centralizes the conversion logic to eliminate code duplication.
@@ -699,7 +1116,7 @@ func (sm *snapshotManager) calculateProgress(job CopySegmentJob) int32 {
 	if job.GetTotalSegments() > 0 {
 		return int32((job.GetCopiedSegments() * 100) / job.GetTotalSegments())
 	}
-	return 0
+	return 100
 }
 
 // calculateTimeCost computes the time cost in milliseconds.

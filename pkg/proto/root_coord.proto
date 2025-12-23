@@ -170,9 +170,6 @@ service RootCoord {
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
     rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
-
-    // Snapshot restore orchestration - coordinates CreateCollection, CreatePartition, and data restore
-    rpc RestoreSnapshot(milvus.RestoreSnapshotRequest) returns (milvus.RestoreSnapshotResponse) {}
 }
 
 message AllocTimestampRequest {

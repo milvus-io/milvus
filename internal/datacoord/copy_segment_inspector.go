@@ -189,7 +189,7 @@ func (s *copySegmentInspector) reloadFromMeta() {
 	})
 
 	for _, job := range jobs {
-		tasks := s.copyMeta.GetTaskBy(s.ctx, WithCopyTaskJob(job.GetJobId()))
+		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
 			if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress {
 				s.scheduler.Enqueue(task)
@@ -222,7 +222,7 @@ func (s *copySegmentInspector) inspect() {
 	})
 
 	for _, job := range jobs {
-		tasks := s.copyMeta.GetTaskBy(s.ctx, WithCopyTaskJob(job.GetJobId()))
+		tasks := s.copyMeta.GetTasksByJobID(s.ctx, job.GetJobId())
 		for _, task := range tasks {
 			switch task.GetState() {
 			case datapb.CopySegmentTaskState_CopySegmentTaskPending:

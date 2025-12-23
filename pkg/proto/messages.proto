@@ -202,19 +202,6 @@ message CreateCollectionMessageHeader {
     int64 collection_id          = 1;
     repeated int64 partition_ids = 2;
     int64 db_id                  = 3;
-    // Optional: Snapshot restore information
-    // When restore_from_snapshot is true, the callback will also:
-    // 1. Create user partitions from snapshot
-    // 2. Create indexes from snapshot
-    // 3. Trigger data restore job
-    string snapshot_name = 4;
-    int64 job_id = 5;  // Pre-allocated job ID for async restore tracking
-
-    // Snapshot restore metadata (populated when restore_from_snapshot is true)
-    // These fields avoid a second DescribeSnapshot RPC in the callback
-    bool restore_from_snapshot = 6;  // Explicitly mark this as a restore operation
-    map<int64, string> user_created_partitions = 7;  // partition_id -> name, for creating user partitions
-    repeated index.IndexInfo index_infos = 8;  // indexes to restore
 }
 
 // DropCollectionMessageHeader is the header of drop collection message.
@@ -591,6 +578,18 @@ message DropSnapshotMessageHeader {
 // DropSnapshotMessageBody is the body of drop snapshot message.
 // Empty - all info is in header.
 message DropSnapshotMessageBody {}
+
+// RestoreSnapshotMessageHeader is the header of restore snapshot message.
+// Used by DDL callback to restore indexes and data after collection is created.
+message RestoreSnapshotMessageHeader {
+    string snapshot_name = 1;    // Name of the snapshot to restore
+    int64 collection_id = 2;     // Target collection ID (already created)
+    int64 job_id = 3;            // Pre-allocated job ID for idempotency
+}
+
+// RestoreSnapshotMessageBody is the body of restore snapshot message.
+// Empty - all info is read from snapshot by snapshot_name.
+message RestoreSnapshotMessageBody {}
 
 // CacheExpirations is the cache expirations of proxy collection meta cache.
 message CacheExpirations {

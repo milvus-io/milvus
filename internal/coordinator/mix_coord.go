@@ -1259,16 +1259,8 @@ func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.Describ
 	return s.datacoordServer.DescribeSnapshot(ctx, req)
 }
 
-// RestoreSnapshot routes to RootCoord which orchestrates the full snapshot restore process:
-// DescribeSnapshot -> CreateCollection -> CreatePartitions -> RestoreSnapshotData (DataCoord)
-func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
-	return s.rootcoordServer.RestoreSnapshot(ctx, req)
-}
-
-// RestoreSnapshotData routes to DataCoord for data restoration
-// Called by RootCoord after collection, partitions, and indexes are created
-func (s *mixCoordImpl) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
-	return s.datacoordServer.RestoreSnapshotData(ctx, req)
+func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	return s.datacoordServer.RestoreSnapshot(ctx, req)
 }
 
 func (s *mixCoordImpl) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {

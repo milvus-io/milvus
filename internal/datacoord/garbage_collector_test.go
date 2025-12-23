@@ -594,6 +594,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
+		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+		defer mockIsRefIndexLoaded.UnPatch()
 		mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]UniqueID{}).Build()
 		defer mockGetSnapshotByIndex.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
@@ -614,6 +616,8 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
+		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+		defer mockIsRefIndexLoaded.UnPatch()
 		mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]UniqueID{}).Build()
 		defer mockGetSnapshotByIndex.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
@@ -1120,9 +1124,10 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: channelCPs,
-		segments:   NewSegmentsInfo(),
+		catalog:      catalog,
+		channelCPs:   channelCPs,
+		segments:     NewSegmentsInfo(),
+		snapshotMeta: &snapshotMeta{},
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -1404,6 +1409,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
 	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]UniqueID{}).Build()
 	defer mockGetSnapshotBySegment.UnPatch()
 	gc.recycleDroppedSegments(context.TODO(), signal)
@@ -1865,7 +1872,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 			CollectionID:  100,
 			PartitionID:   10,
 			State:         commonpb.SegmentState_Dropped,
-			DroppedAt:     uint64(time.Now().Add(-time.Hour).Unix()),
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
 			InsertChannel: "ch1",
 		},
 	}
@@ -1875,7 +1882,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 			CollectionID:  100,
 			PartitionID:   10,
 			State:         commonpb.SegmentState_Dropped,
-			DroppedAt:     uint64(time.Now().Add(-time.Hour).Unix()),
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
 			InsertChannel: "ch1",
 		},
 	}
@@ -1886,6 +1893,9 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	// Setup mocks
 	mock1 := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
 	defer mock1.UnPatch()
+
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
 
 	mock2 := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).To(func(ctx context.Context, collectionID, segmentID int64) []int64 {
 		if segmentID == 1001 {
@@ -2006,6 +2016,9 @@ func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T
 	}
 
 	// Setup mocks
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
 	mock1 := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).To(func(ctx context.Context, collectionID, indexID int64) []int64 {
 		if indexID == 301 {
 			return []int64{3, 4} // Index 301 is referenced by snapshots 3 and 4

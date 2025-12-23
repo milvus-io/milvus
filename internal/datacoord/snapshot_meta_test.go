@@ -25,6 +25,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	kv_datacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -71,14 +72,6 @@ func createTestSnapshotDataForMeta() *SnapshotData {
 	}
 }
 
-func createTestSnapshotDataInfo() *SnapshotDataInfo {
-	return &SnapshotDataInfo{
-		snapshotInfo: createTestSnapshotInfoForMeta(),
-		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
-		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
-	}
-}
-
 func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 	// Create empty Catalog for mockey to mock
 	catalog := &kv_datacoord.Catalog{}
@@ -88,10 +81,55 @@ func createTestSnapshotMeta(t *testing.T) *snapshotMeta {
 	tempChunkManager := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 
 	return &snapshotMeta{
-		catalog:             catalog,
-		snapshotID2DataInfo: typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotDataInfo](),
-		reader:              NewSnapshotReader(tempChunkManager),
-		writer:              NewSnapshotWriter(tempChunkManager),
+		catalog:                catalog,
+		snapshotID2Info:        typeutil.NewConcurrentMap[typeutil.UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[typeutil.UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[string, typeutil.UniqueID](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[typeutil.UniqueID, typeutil.UniqueSet](),
+		refIndexLoadDone:       make(chan struct{}),
+		reader:                 NewSnapshotReader(tempChunkManager),
+		writer:                 NewSnapshotWriter(tempChunkManager),
+	}
+}
+
+// createTestSnapshotMetaLoaded creates a snapshotMeta with refIndexLoadDone already closed.
+// Use this for tests that don't call reload() and need the RefIndex to appear loaded.
+func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
+	sm := createTestSnapshotMeta(t)
+	close(sm.refIndexLoadDone)
+	return sm
+}
+
+// insertTestSnapshot inserts snapshot data into snapshotMeta for testing.
+// Use this for setting up test data when you don't need to go through SaveSnapshot.
+func insertTestSnapshot(sm *snapshotMeta, info *datapb.SnapshotInfo, segmentIDs, indexIDs []int64) {
+	sm.snapshotID2Info.Insert(info.GetId(), info)
+	sm.snapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, indexIDs))
+	sm.addToSecondaryIndexes(info)
+}
+
+// saveTestSnapshots saves multiple snapshots to snapshotMeta using mocked catalog and writer.
+// This is the preferred way to set up test data as it exercises the real SaveSnapshot logic.
+// Returns cleanup function that must be deferred by the caller.
+func saveTestSnapshots(t *testing.T, sm *snapshotMeta, snapshots ...*SnapshotData) func() {
+	// Mock SnapshotWriter.Save
+	mock1 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, s *SnapshotData) (string, error) {
+		return fmt.Sprintf("s3://bucket/snapshots/%d/metadata.json", s.SnapshotInfo.GetId()), nil
+	}).Build()
+
+	// Mock catalog.SaveSnapshot
+	mock2 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+
+	// Save all snapshots
+	for _, snapshot := range snapshots {
+		err := sm.SaveSnapshot(context.Background(), snapshot)
+		assert.NoError(t, err)
+	}
+
+	// Return cleanup function
+	return func() {
+		mock1.UnPatch()
+		mock2.UnPatch()
 	}
 }
 
@@ -115,9 +153,9 @@ func TestSnapshotMeta_ListSnapshots_Success(t *testing.T) {
 	snapshot2.SnapshotInfo.CollectionId = 100
 	snapshot2.SnapshotInfo.PartitionIds = []int64{3, 4}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	cleanup := saveTestSnapshots(t, sm, snapshot1, snapshot2)
+	defer cleanup()
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -142,9 +180,9 @@ func TestSnapshotMeta_ListSnapshots_AllCollections(t *testing.T) {
 	snapshot2.SnapshotInfo.Name = "snapshot2"
 	snapshot2.SnapshotInfo.Id = 2
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshot1.SnapshotInfo, nil, nil)
+	insertTestSnapshot(sm, snapshot2.SnapshotInfo, nil, nil)
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -162,7 +200,7 @@ func TestSnapshotMeta_ListSnapshots_EmptyResult(t *testing.T) {
 	collectionID := int64(999) // Non-existent collection
 	partitionID := int64(0)
 
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -180,15 +218,16 @@ func TestSnapshotMeta_GetSnapshot_Success(t *testing.T) {
 	snapshotName := "test_snapshot"
 	snapshotData := createTestSnapshotDataForMeta()
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	cleanup := saveTestSnapshots(t, sm, snapshotData)
+	defer cleanup()
 
 	// Act
 	result, err := sm.GetSnapshot(ctx, snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Equal(t, snapshotData.SnapshotInfo, result)
+	assert.Equal(t, snapshotName, result.GetName())
 }
 
 func TestSnapshotMeta_GetSnapshot_NotFound(t *testing.T) {
@@ -196,7 +235,7 @@ func TestSnapshotMeta_GetSnapshot_NotFound(t *testing.T) {
 	ctx := context.Background()
 	snapshotName := "nonexistent_snapshot"
 
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
 	result, err := sm.GetSnapshot(ctx, snapshotName)
@@ -215,15 +254,16 @@ func TestSnapshotMeta_GetSnapshotByName_Success(t *testing.T) {
 	snapshotName := "test_snapshot"
 	snapshotData := createTestSnapshotDataForMeta()
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	cleanup := saveTestSnapshots(t, sm, snapshotData)
+	defer cleanup()
 
 	// Act
 	result, err := sm.getSnapshotByName(ctx, snapshotName)
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Equal(t, snapshotData.SnapshotInfo, result)
+	assert.Equal(t, snapshotName, result.GetName())
 }
 
 func TestSnapshotMeta_GetSnapshotByName_NotFound(t *testing.T) {
@@ -231,7 +271,7 @@ func TestSnapshotMeta_GetSnapshotByName_NotFound(t *testing.T) {
 	ctx := context.Background()
 	snapshotName := "nonexistent_snapshot"
 
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
 	result, err := sm.getSnapshotByName(ctx, snapshotName)
@@ -259,10 +299,9 @@ func TestSnapshotMeta_GetSnapshotByName_MultipleSnapshots(t *testing.T) {
 	snapshot3.SnapshotInfo.Name = "snapshot3"
 	snapshot3.SnapshotInfo.Id = 3
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
-	sm.snapshotID2DataInfo.Insert(3, &SnapshotDataInfo{snapshotInfo: snapshot3.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	cleanup := saveTestSnapshots(t, sm, snapshot1, snapshot2, snapshot3)
+	defer cleanup()
 
 	// Act
 	result, err := sm.getSnapshotByName(ctx, targetName)
@@ -283,41 +322,26 @@ func TestSnapshotMeta_GetSnapshotBySegment_Success(t *testing.T) {
 	snapshotInfo1 := createTestSnapshotInfoForMeta()
 	snapshotInfo1.CollectionId = 100
 	snapshotInfo1.Id = 1
-	dataInfo1 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo1,
-		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
-		IndexIDs:     typeutil.NewUniqueSet(2001),
-	}
 
 	snapshotInfo2 := createTestSnapshotInfoForMeta()
 	snapshotInfo2.CollectionId = 100
 	snapshotInfo2.Id = 2
-	dataInfo2 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo2,
-		SegmentIDs:   typeutil.NewUniqueSet(1003, 1004),
-		IndexIDs:     typeutil.NewUniqueSet(2002),
-	}
 
 	snapshotInfo3 := createTestSnapshotInfoForMeta()
 	snapshotInfo3.CollectionId = 200 // Different collection
 	snapshotInfo3.Id = 3
-	dataInfo3 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo3,
-		SegmentIDs:   typeutil.NewUniqueSet(1001),
-		IndexIDs:     typeutil.NewUniqueSet(2003),
-	}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, dataInfo1)
-	sm.snapshotID2DataInfo.Insert(2, dataInfo2)
-	sm.snapshotID2DataInfo.Insert(3, dataInfo3)
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002}, []int64{2001})
+	insertTestSnapshot(sm, snapshotInfo2, []int64{1003, 1004}, []int64{2002})
+	insertTestSnapshot(sm, snapshotInfo3, []int64{1001}, []int64{2003})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
 
 	// Assert
 	assert.Len(t, snapshotIDs, 1)
-	assert.Contains(t, snapshotIDs, UniqueID(1)) // Only dataInfo1 matches
+	assert.Contains(t, snapshotIDs, UniqueID(1)) // Only snapshot1 matches
 }
 
 func TestSnapshotMeta_GetSnapshotBySegment_EmptyResult(t *testing.T) {
@@ -329,14 +353,9 @@ func TestSnapshotMeta_GetSnapshotBySegment_EmptyResult(t *testing.T) {
 	snapshotInfo := createTestSnapshotInfoForMeta()
 	snapshotInfo.CollectionId = 100
 	snapshotInfo.Id = 1
-	dataInfo := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo,
-		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
-		IndexIDs:     typeutil.NewUniqueSet(2001),
-	}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, dataInfo)
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshotInfo, []int64{1001, 1002}, []int64{2001})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
@@ -354,24 +373,14 @@ func TestSnapshotMeta_GetSnapshotBySegment_MultipleMatches(t *testing.T) {
 	snapshotInfo1 := createTestSnapshotInfoForMeta()
 	snapshotInfo1.CollectionId = 100
 	snapshotInfo1.Id = 1
-	dataInfo1 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo1,
-		SegmentIDs:   typeutil.NewUniqueSet(1001, 1002),
-		IndexIDs:     typeutil.NewUniqueSet(2001),
-	}
 
 	snapshotInfo2 := createTestSnapshotInfoForMeta()
 	snapshotInfo2.CollectionId = 100
 	snapshotInfo2.Id = 2
-	dataInfo2 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo2,
-		SegmentIDs:   typeutil.NewUniqueSet(1001, 1003),
-		IndexIDs:     typeutil.NewUniqueSet(2002),
-	}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, dataInfo1)
-	sm.snapshotID2DataInfo.Insert(2, dataInfo2)
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshotInfo1, []int64{1001, 1002}, []int64{2001})
+	insertTestSnapshot(sm, snapshotInfo2, []int64{1001, 1003}, []int64{2002})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotBySegment(ctx, collectionID, segmentID)
@@ -393,41 +402,26 @@ func TestSnapshotMeta_GetSnapshotByIndex_Success(t *testing.T) {
 	snapshotInfo1 := createTestSnapshotInfoForMeta()
 	snapshotInfo1.CollectionId = 100
 	snapshotInfo1.Id = 1
-	dataInfo1 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo1,
-		SegmentIDs:   typeutil.NewUniqueSet(1001),
-		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
-	}
 
 	snapshotInfo2 := createTestSnapshotInfoForMeta()
 	snapshotInfo2.CollectionId = 100
 	snapshotInfo2.Id = 2
-	dataInfo2 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo2,
-		SegmentIDs:   typeutil.NewUniqueSet(1002),
-		IndexIDs:     typeutil.NewUniqueSet(2003, 2004),
-	}
 
 	snapshotInfo3 := createTestSnapshotInfoForMeta()
 	snapshotInfo3.CollectionId = 200 // Different collection
 	snapshotInfo3.Id = 3
-	dataInfo3 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo3,
-		SegmentIDs:   typeutil.NewUniqueSet(1003),
-		IndexIDs:     typeutil.NewUniqueSet(2001),
-	}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, dataInfo1)
-	sm.snapshotID2DataInfo.Insert(2, dataInfo2)
-	sm.snapshotID2DataInfo.Insert(3, dataInfo3)
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshotInfo1, []int64{1001}, []int64{2001, 2002})
+	insertTestSnapshot(sm, snapshotInfo2, []int64{1002}, []int64{2003, 2004})
+	insertTestSnapshot(sm, snapshotInfo3, []int64{1003}, []int64{2001})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotByIndex(ctx, collectionID, indexID)
 
 	// Assert
 	assert.Len(t, snapshotIDs, 1)
-	assert.Contains(t, snapshotIDs, UniqueID(1)) // Only dataInfo1 matches
+	assert.Contains(t, snapshotIDs, UniqueID(1)) // Only snapshot1 matches
 }
 
 func TestSnapshotMeta_GetSnapshotByIndex_EmptyResult(t *testing.T) {
@@ -439,14 +433,9 @@ func TestSnapshotMeta_GetSnapshotByIndex_EmptyResult(t *testing.T) {
 	snapshotInfo := createTestSnapshotInfoForMeta()
 	snapshotInfo.CollectionId = 100
 	snapshotInfo.Id = 1
-	dataInfo := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo,
-		SegmentIDs:   typeutil.NewUniqueSet(1001),
-		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
-	}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, dataInfo)
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshotInfo, []int64{1001}, []int64{2001, 2002})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotByIndex(ctx, collectionID, indexID)
@@ -464,24 +453,14 @@ func TestSnapshotMeta_GetSnapshotByIndex_MultipleMatches(t *testing.T) {
 	snapshotInfo1 := createTestSnapshotInfoForMeta()
 	snapshotInfo1.CollectionId = 100
 	snapshotInfo1.Id = 1
-	dataInfo1 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo1,
-		SegmentIDs:   typeutil.NewUniqueSet(1001),
-		IndexIDs:     typeutil.NewUniqueSet(2001, 2002),
-	}
 
 	snapshotInfo2 := createTestSnapshotInfoForMeta()
 	snapshotInfo2.CollectionId = 100
 	snapshotInfo2.Id = 2
-	dataInfo2 := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo2,
-		SegmentIDs:   typeutil.NewUniqueSet(1002),
-		IndexIDs:     typeutil.NewUniqueSet(2001, 2003),
-	}
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, dataInfo1)
-	sm.snapshotID2DataInfo.Insert(2, dataInfo2)
+	sm := createTestSnapshotMetaLoaded(t)
+	insertTestSnapshot(sm, snapshotInfo1, []int64{1001}, []int64{2001, 2002})
+	insertTestSnapshot(sm, snapshotInfo2, []int64{1002}, []int64{2001, 2003})
 
 	// Act
 	snapshotIDs := sm.GetSnapshotByIndex(ctx, collectionID, indexID)
@@ -514,7 +493,8 @@ func TestNewSnapshotMeta_Success_WithMockey(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, sm)
 	assert.Equal(t, mockCatalog, sm.catalog)
-	assert.NotNil(t, sm.snapshotID2DataInfo)
+	assert.NotNil(t, sm.snapshotID2Info)
+	assert.NotNil(t, sm.snapshotID2RefIndex)
 	assert.NotNil(t, sm.reader)
 	assert.NotNil(t, sm.writer)
 }
@@ -542,7 +522,9 @@ func TestNewSnapshotMeta_CatalogListError_WithMockey(t *testing.T) {
 	assert.Contains(t, err.Error(), "catalog list snapshots failed")
 }
 
-func TestNewSnapshotMeta_ReaderError_WithMockey(t *testing.T) {
+func TestNewSnapshotMeta_ReaderError_AsyncLoading_WithMockey(t *testing.T) {
+	// With async loading, reader errors don't fail newSnapshotMeta.
+	// The snapshot is still loaded, but with empty segment/index sets.
 	// Arrange
 	ctx := context.Background()
 	mockCatalog := &kv_datacoord.Catalog{}
@@ -552,8 +534,8 @@ func TestNewSnapshotMeta_ReaderError_WithMockey(t *testing.T) {
 		Id:           1,
 		CollectionId: 100,
 		Name:         "test_snapshot",
+		S3Location:   "s3://bucket/snapshot",
 	}
-	expectedErr := errors.New("reader failed")
 
 	// Mock catalog.ListSnapshots to return snapshot
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).To(func(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
@@ -563,17 +545,30 @@ func TestNewSnapshotMeta_ReaderError_WithMockey(t *testing.T) {
 
 	// Mock SnapshotReader.ReadSnapshot to return error
 	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, path string, includeSegments bool) (*SnapshotData, error) {
-		return nil, expectedErr
+		return nil, errors.New("reader failed")
 	}).Build()
 	defer mock2.UnPatch()
 
 	// Act
 	sm, err := newSnapshotMeta(ctx, mockCatalog, mockChunkManager)
 
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, sm)
-	assert.Contains(t, err.Error(), "reader failed")
+	// Assert - newSnapshotMeta succeeds even with reader error (async loading)
+	assert.NoError(t, err)
+	assert.NotNil(t, sm)
+
+	// Snapshot info is still available
+	info, exists := sm.snapshotID2Info.Get(snapshotInfo.Id)
+	assert.True(t, exists)
+	assert.Equal(t, snapshotInfo.Name, info.Name)
+
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
+	// RefIndex is loaded with empty sets (due to reader error)
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotInfo.Id)
+	assert.True(t, exists)
+	// Should return false since reader error causes empty data
+	assert.False(t, refIndex.ContainsSegment(1001))
 }
 
 // --- reload Tests (Mockey-based) ---
@@ -608,13 +603,21 @@ func TestSnapshotMeta_Reload_Success_WithMockey(t *testing.T) {
 
 	// Assert
 	assert.NoError(t, err)
-	// Verify snapshot was inserted into map
-	value, exists := sm.snapshotID2DataInfo.Get(snapshotData.SnapshotInfo.Id)
+	// Verify snapshot info was inserted into map immediately
+	info, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.Id)
 	assert.True(t, exists)
-	assert.Equal(t, snapshotData.SnapshotInfo, value.snapshotInfo)
-	// Verify segment and index IDs from fast path
-	assert.True(t, value.SegmentIDs.Contain(1001))
-	assert.True(t, value.IndexIDs.Contain(2001))
+	assert.Equal(t, snapshotData.SnapshotInfo, info)
+
+	// Verify refIndex exists and has loaded data
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.Id)
+	assert.True(t, exists)
+
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
+	// Verify segment and index IDs are correctly loaded
+	assert.True(t, refIndex.ContainsSegment(1001))
+	assert.True(t, refIndex.ContainsIndex(2001))
 }
 
 func TestSnapshotMeta_Reload_CatalogError_WithMockey(t *testing.T) {
@@ -715,21 +718,34 @@ func TestSnapshotMeta_Reload_Concurrent_MultipleSnapshots(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 
-	// Verify all snapshots were loaded
+	// Verify all snapshots were inserted immediately
 	for _, snapshotInfo := range snapshotInfos {
-		value, exists := sm.snapshotID2DataInfo.Get(snapshotInfo.Id)
+		info, exists := sm.snapshotID2Info.Get(snapshotInfo.Id)
 		assert.True(t, exists, "snapshot %d should be loaded", snapshotInfo.Id)
-		assert.Equal(t, snapshotInfo, value.snapshotInfo)
+		assert.Equal(t, snapshotInfo, info)
+	}
 
-		// Verify segment and index IDs are correctly loaded from pre-computed lists
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
+	// Verify segment and index IDs are correctly loaded
+	for _, snapshotInfo := range snapshotInfos {
+		refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotInfo.Id)
+		assert.True(t, exists)
+
 		expectedData, _ := snapshotDataMap.Load(snapshotInfo.Id)
-		assert.Equal(t, len(expectedData.(*SnapshotData).SegmentIDs), value.SegmentIDs.Len())
-		assert.Equal(t, len(expectedData.(*SnapshotData).IndexIDs), value.IndexIDs.Len())
+		for _, segID := range expectedData.(*SnapshotData).SegmentIDs {
+			assert.True(t, refIndex.ContainsSegment(segID))
+		}
+		for _, idxID := range expectedData.(*SnapshotData).IndexIDs {
+			assert.True(t, refIndex.ContainsIndex(idxID))
+		}
 	}
 }
 
 func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
-	// Test that if one snapshot fails to load, the entire reload fails
+	// Test that if one snapshot fails to load from S3, other snapshots still load successfully
+	// With async loading, reload returns immediately and failures are logged as warnings
 	// Arrange
 	ctx := context.Background()
 	sm := createTestSnapshotMeta(t)
@@ -747,11 +763,10 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 	}).Build()
 	defer mock1.UnPatch()
 
-	expectedErr := errors.New("s3 read error")
 	// Mock SnapshotReader.ReadSnapshot - fail on second snapshot (s3://bucket/1002)
 	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
 		if metadataFilePath == "s3://bucket/1002" {
-			return nil, expectedErr
+			return nil, errors.New("s3 read error")
 		}
 		// Find snapshot by S3Location
 		for _, info := range snapshotInfos {
@@ -760,6 +775,8 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 					SnapshotInfo: &datapb.SnapshotInfo{Id: info.Id, CollectionId: info.CollectionId, S3Location: info.S3Location},
 					Segments:     []*datapb.SegmentDescription{{SegmentId: info.Id * 10}},
 					Indexes:      []*indexpb.IndexInfo{{IndexID: info.Id * 100}},
+					SegmentIDs:   []int64{info.Id * 10},
+					IndexIDs:     []int64{info.Id * 100},
 				}, nil
 			}
 		}
@@ -770,9 +787,29 @@ func TestSnapshotMeta_Reload_Concurrent_PartialFailure(t *testing.T) {
 	// Act
 	err := sm.reload(ctx)
 
-	// Assert
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "s3 read error")
+	// Assert - reload returns immediately without error (async loading)
+	assert.NoError(t, err)
+
+	// All snapshots should be inserted
+	for _, info := range snapshotInfos {
+		infoVal, exists := sm.snapshotID2Info.Get(info.Id)
+		assert.True(t, exists, "snapshot %d should be inserted", info.Id)
+		assert.Equal(t, info, infoVal)
+	}
+
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
+	// Verify successful snapshots are loaded
+	refIndex1, _ := sm.snapshotID2RefIndex.Get(1001)
+	assert.True(t, refIndex1.ContainsSegment(10010))
+
+	refIndex3, _ := sm.snapshotID2RefIndex.Get(1003)
+	assert.True(t, refIndex3.ContainsSegment(10030))
+
+	// Verify failed snapshot has empty sets (loaded with nil data due to error)
+	refIndex2, _ := sm.snapshotID2RefIndex.Get(1002)
+	assert.False(t, refIndex2.ContainsSegment(10020))
 }
 
 func TestSnapshotMeta_Reload_EmptyList_WithMockey(t *testing.T) {
@@ -792,8 +829,37 @@ func TestSnapshotMeta_Reload_EmptyList_WithMockey(t *testing.T) {
 
 	// Assert
 	assert.NoError(t, err)
-	// Verify map is empty
-	assert.Equal(t, 0, sm.snapshotID2DataInfo.Len())
+	// Verify maps are empty
+	assert.Equal(t, 0, sm.snapshotID2Info.Len())
+	assert.Equal(t, 0, sm.snapshotID2RefIndex.Len())
+}
+
+// --- Test Helper Functions ---
+
+// setupSnapshotViaSaveSnapshot creates a snapshot using SaveSnapshot with mocked dependencies.
+// This function mocks catalog.SaveSnapshot and SnapshotWriter.Save, executes SaveSnapshot,
+// then unpatches the mocks so the actual test can set up its own mocks.
+func setupSnapshotViaSaveSnapshot(t *testing.T, sm *snapshotMeta, snapshotData *SnapshotData) {
+	ctx := context.Background()
+	metadataFilePath := "s3://bucket/snapshots/test/metadata.json"
+
+	// Mock catalog.SaveSnapshot to succeed
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+		return nil
+	}).Build()
+
+	// Mock SnapshotWriter.Save to succeed
+	mock2 := mockey.Mock((*SnapshotWriter).Save).To(func(ctx context.Context, snapshot *SnapshotData) (string, error) {
+		return metadataFilePath, nil
+	}).Build()
+
+	// Execute SaveSnapshot
+	err := sm.SaveSnapshot(ctx, snapshotData)
+	require.NoError(t, err)
+
+	// Unpatch immediately so the actual test can set up its own mocks
+	mock1.UnPatch()
+	mock2.UnPatch()
 }
 
 // --- SaveSnapshot Tests (Mockey-based) ---
@@ -801,7 +867,7 @@ func TestSnapshotMeta_Reload_EmptyList_WithMockey(t *testing.T) {
 func TestSnapshotMeta_SaveSnapshot_Success_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotData := createTestSnapshotDataForMeta()
 	metadataFilePath := "s3://bucket/snapshots/100/metadata/test-uuid.json"
 
@@ -835,12 +901,15 @@ func TestSnapshotMeta_SaveSnapshot_Success_WithMockey(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	assert.Equal(t, 2, catalogSaveCalls, "2PC should call catalog.SaveSnapshot twice")
-	// Verify snapshot data info was inserted
-	dataInfo, exists := sm.snapshotID2DataInfo.Get(snapshotData.SnapshotInfo.GetId())
+	// Verify snapshot info was inserted
+	info, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.GetId())
 	assert.True(t, exists)
-	assert.Equal(t, int64(100), dataInfo.snapshotInfo.CollectionId)
-	assert.True(t, dataInfo.SegmentIDs.Contain(1001))
-	assert.True(t, dataInfo.IndexIDs.Contain(2001))
+	assert.Equal(t, int64(100), info.CollectionId)
+	// Verify refIndex was inserted
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.True(t, exists)
+	assert.True(t, refIndex.ContainsSegment(1001))
+	assert.True(t, refIndex.ContainsIndex(2001))
 	// Verify S3Location was set
 	assert.Equal(t, metadataFilePath, snapshotData.SnapshotInfo.S3Location)
 }
@@ -848,7 +917,7 @@ func TestSnapshotMeta_SaveSnapshot_Success_WithMockey(t *testing.T) {
 func TestSnapshotMeta_SaveSnapshot_WriterError_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotData := createTestSnapshotDataForMeta()
 	expectedErr := errors.New("writer failed")
 
@@ -876,7 +945,7 @@ func TestSnapshotMeta_SaveSnapshot_CatalogPhase1Error_WithMockey(t *testing.T) {
 	// Test: Phase 1 (PENDING) catalog save fails
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotData := createTestSnapshotDataForMeta()
 	expectedErr := errors.New("catalog failed")
 
@@ -898,7 +967,7 @@ func TestSnapshotMeta_SaveSnapshot_CatalogPhase2Error_WithMockey(t *testing.T) {
 	// Test: Phase 2 (COMMITTED) catalog save fails after S3 write succeeds
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotData := createTestSnapshotDataForMeta()
 	metadataFilePath := "s3://bucket/snapshots/100/metadata/test-uuid.json"
 	expectedErr := errors.New("catalog phase 2 failed")
@@ -926,8 +995,10 @@ func TestSnapshotMeta_SaveSnapshot_CatalogPhase2Error_WithMockey(t *testing.T) {
 	// Assert - error is wrapped, and snapshot is NOT in memory (rolled back)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "catalog phase 2 failed")
-	_, exists := sm.snapshotID2DataInfo.Get(snapshotData.SnapshotInfo.GetId())
+	_, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.GetId())
 	assert.False(t, exists, "snapshot should not be in memory after Phase 2 failure")
+	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists, "refIndex should not be in memory after Phase 2 failure")
 }
 
 // --- DropSnapshot Tests (Mockey-based) ---
@@ -935,13 +1006,20 @@ func TestSnapshotMeta_SaveSnapshot_CatalogPhase2Error_WithMockey(t *testing.T) {
 func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotName := "test_snapshot"
 	snapshotData := createTestSnapshotDataForMeta()
 	snapshotData.SnapshotInfo.Name = snapshotName
 
-	// Insert snapshot into map
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	// Setup snapshot via SaveSnapshot with mocked dependencies
+	setupSnapshotViaSaveSnapshot(t, sm, snapshotData)
+
+	// Mock catalog.SaveSnapshot (for marking as Deleting - two-phase delete)
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+		assert.Equal(t, datapb.SnapshotState_SnapshotStateDeleting, snapshot.GetState())
+		return nil
+	}).Build()
+	defer mock0.UnPatch()
 
 	// Mock catalog.DropSnapshot
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
@@ -963,15 +1041,19 @@ func TestSnapshotMeta_DropSnapshot_Success_WithMockey(t *testing.T) {
 
 	// Assert
 	assert.NoError(t, err)
-	// Verify snapshot was removed from data info map
-	_, exists := sm.snapshotID2DataInfo.Get(snapshotData.SnapshotInfo.GetId())
+	// Verify snapshot was removed from both maps and secondary indexes
+	_, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists)
+	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists)
+	_, exists = sm.snapshotName2ID.Get(snapshotName)
 	assert.False(t, exists)
 }
 
 func TestSnapshotMeta_DropSnapshot_NotFound_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotName := "nonexistent_snapshot"
 
 	// Act
@@ -982,96 +1064,192 @@ func TestSnapshotMeta_DropSnapshot_NotFound_WithMockey(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestSnapshotMeta_DropSnapshot_CatalogError_WithMockey(t *testing.T) {
+func TestSnapshotMeta_DropSnapshot_CatalogDropError_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotName := "test_snapshot"
 	snapshotData := createTestSnapshotDataForMeta()
 	snapshotData.SnapshotInfo.Name = snapshotName
-	expectedErr := errors.New("catalog drop failed")
 
-	// Insert snapshot into map
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	// Setup snapshot via SaveSnapshot with mocked dependencies
+	setupSnapshotViaSaveSnapshot(t, sm, snapshotData)
 
-	// Mock catalog.DropSnapshot to return error
+	// Mock catalog.SaveSnapshot (for marking as Deleting - two-phase delete)
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+		return nil
+	}).Build()
+	defer mock0.UnPatch()
+
+	// Mock SnapshotWriter.Drop to succeed (S3 deletion succeeds)
+	mock2 := mockey.Mock((*SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
+		return nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Mock catalog.DropSnapshot to return error (catalog cleanup fails after S3 deletion)
 	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
-		return expectedErr
+		return errors.New("catalog drop failed")
 	}).Build()
 	defer mock1.UnPatch()
 
 	// Act
 	err := sm.DropSnapshot(ctx, snapshotName)
 
-	// Assert
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
+	// Assert - Two-phase delete: if S3 deletion succeeds, operation returns success
+	// even if catalog cleanup fails. GC will clean up the catalog record later.
+	assert.NoError(t, err)
+	// Verify snapshot was removed from memory (user sees deletion immediately)
+	_, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists)
+	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists)
 }
 
 func TestSnapshotMeta_DropSnapshot_WriterError_WithMockey(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 	snapshotName := "test_snapshot"
 	snapshotData := createTestSnapshotDataForMeta()
 	snapshotData.SnapshotInfo.Name = snapshotName
-	expectedErr := errors.New("writer drop failed")
+	writerErr := errors.New("writer drop failed")
 
-	// Insert snapshot into map
-	sm.snapshotID2DataInfo.Insert(snapshotData.SnapshotInfo.GetId(), &SnapshotDataInfo{snapshotInfo: snapshotData.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	// Setup snapshot via SaveSnapshot with mocked dependencies
+	setupSnapshotViaSaveSnapshot(t, sm, snapshotData)
 
-	// Mock catalog.DropSnapshot
-	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
+	// Mock catalog.SaveSnapshot (for marking as Deleting - two-phase delete)
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+		assert.Equal(t, datapb.SnapshotState_SnapshotStateDeleting, snapshot.GetState())
 		return nil
 	}).Build()
-	defer mock1.UnPatch()
+	defer mock0.UnPatch()
 
 	// Mock SnapshotWriter.Drop to return error - now takes metadataFilePath
+	// Two-phase delete: S3 error should NOT fail the operation, GC will retry
 	mock2 := mockey.Mock((*SnapshotWriter).Drop).To(func(ctx context.Context, metadataFilePath string) error {
-		return expectedErr
+		return writerErr
 	}).Build()
 	defer mock2.UnPatch()
 
 	// Act
 	err := sm.DropSnapshot(ctx, snapshotName)
 
-	// Assert
+	// Assert - Two-phase delete: S3 failure returns success, GC will clean up
+	assert.NoError(t, err)
+	// Verify snapshot was removed from memory (user sees deletion immediately)
+	_, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists)
+	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.False(t, exists)
+}
+
+func TestSnapshotMeta_DropSnapshot_MarkDeletingError_WithMockey(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+	snapshotName := "test_snapshot"
+	snapshotData := createTestSnapshotDataForMeta()
+	snapshotData.SnapshotInfo.Name = snapshotName
+	expectedErr := errors.New("catalog save failed")
+
+	// Setup snapshot via SaveSnapshot with mocked dependencies
+	setupSnapshotViaSaveSnapshot(t, sm, snapshotData)
+
+	// Mock catalog.SaveSnapshot to return error (marking as Deleting fails)
+	mock0 := mockey.Mock((*kv_datacoord.Catalog).SaveSnapshot).To(func(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+		return expectedErr
+	}).Build()
+	defer mock0.UnPatch()
+
+	// Act
+	err := sm.DropSnapshot(ctx, snapshotName)
+
+	// Assert - If marking as Deleting fails, operation should fail
 	assert.Error(t, err)
 	assert.Equal(t, expectedErr, err)
+	// Verify snapshot is still in memory (operation failed before removal)
+	_, exists := sm.snapshotID2Info.Get(snapshotData.SnapshotInfo.GetId())
+	assert.True(t, exists)
+	_, exists = sm.snapshotID2RefIndex.Get(snapshotData.SnapshotInfo.GetId())
+	assert.True(t, exists)
 }
 
-// --- Data Structure Tests ---
+// --- SnapshotRefIndex Tests ---
 
-func TestSnapshotDataInfo_Creation(t *testing.T) {
-	// Arrange & Act
-	dataInfo := createTestSnapshotDataInfo()
+func TestSnapshotRefIndex_NewLoaded(t *testing.T) {
+	// Test NewLoadedSnapshotRefIndex creates a pre-loaded refIndex
+	refIndex := NewLoadedSnapshotRefIndex([]int64{1001, 1002}, []int64{2001, 2002})
 
-	// Assert
-	assert.Equal(t, int64(100), dataInfo.snapshotInfo.CollectionId)
-	assert.True(t, dataInfo.SegmentIDs.Contain(1001))
-	assert.True(t, dataInfo.SegmentIDs.Contain(1002))
-	assert.True(t, dataInfo.IndexIDs.Contain(2001))
-	assert.True(t, dataInfo.IndexIDs.Contain(2002))
-	assert.Equal(t, 2, dataInfo.SegmentIDs.Len())
-	assert.Equal(t, 2, dataInfo.IndexIDs.Len())
+	// Should not block (already loaded)
+	assert.True(t, refIndex.ContainsSegment(1001))
+	assert.True(t, refIndex.ContainsSegment(1002))
+	assert.False(t, refIndex.ContainsSegment(1003))
+	assert.True(t, refIndex.ContainsIndex(2001))
+	assert.True(t, refIndex.ContainsIndex(2002))
+	assert.False(t, refIndex.ContainsIndex(2003))
 }
 
-func TestSnapshotDataInfo_EmptySets(t *testing.T) {
-	// Arrange & Act
-	snapshotInfo := createTestSnapshotInfoForMeta()
-	snapshotInfo.CollectionId = 100
-	dataInfo := &SnapshotDataInfo{
-		snapshotInfo: snapshotInfo,
-		SegmentIDs:   typeutil.NewUniqueSet(),
-		IndexIDs:     typeutil.NewUniqueSet(),
+func TestSnapshotRefIndex_SetLoaded(t *testing.T) {
+	// Test SetLoaded method
+	refIndex := NewSnapshotRefIndex()
+
+	// Initially empty
+	assert.False(t, refIndex.ContainsSegment(1001))
+	assert.False(t, refIndex.ContainsIndex(2001))
+
+	// Set loaded data
+	refIndex.SetLoaded([]int64{1001, 1002}, []int64{2001})
+
+	// Should contain the loaded IDs
+	assert.True(t, refIndex.ContainsSegment(1001))
+	assert.True(t, refIndex.ContainsSegment(1002))
+	assert.False(t, refIndex.ContainsSegment(1003))
+	assert.True(t, refIndex.ContainsIndex(2001))
+	assert.False(t, refIndex.ContainsIndex(2002))
+}
+
+func TestSnapshotRefIndex_EmptySets(t *testing.T) {
+	// Test refIndex with empty/nil sets (e.g., after load failure)
+	refIndex := NewLoadedSnapshotRefIndex(nil, nil)
+
+	// Should not block and should return false for all queries
+	assert.False(t, refIndex.ContainsSegment(1001))
+	assert.False(t, refIndex.ContainsIndex(2001))
+}
+
+// --- IsRefIndexLoaded Tests ---
+
+func TestSnapshotMeta_IsRefIndexLoaded_NotLoaded(t *testing.T) {
+	// Test IsRefIndexLoaded returns false when refIndexLoadDone is not closed
+	sm := &snapshotMeta{
+		refIndexLoadDone: make(chan struct{}), // Not closed = not loaded
 	}
 
-	// Assert
-	assert.Equal(t, int64(100), dataInfo.snapshotInfo.CollectionId)
-	assert.Equal(t, 0, dataInfo.SegmentIDs.Len())
-	assert.Equal(t, 0, dataInfo.IndexIDs.Len())
-	assert.False(t, dataInfo.SegmentIDs.Contain(1001))
-	assert.False(t, dataInfo.IndexIDs.Contain(2001))
+	assert.False(t, sm.IsRefIndexLoaded())
+}
+
+func TestSnapshotMeta_IsRefIndexLoaded_Loaded(t *testing.T) {
+	// Test IsRefIndexLoaded returns true when refIndexLoadDone is closed
+	sm := createTestSnapshotMetaLoaded(t) // createTestSnapshotMetaLoaded closes the channel
+
+	assert.True(t, sm.IsRefIndexLoaded())
+}
+
+func TestSnapshotMeta_IsRefIndexLoaded_AfterAsyncLoadComplete(t *testing.T) {
+	// Test that IsRefIndexLoaded returns true after async loading completes
+	sm := &snapshotMeta{
+		refIndexLoadDone: make(chan struct{}),
+	}
+
+	// Initially not loaded
+	assert.False(t, sm.IsRefIndexLoaded())
+
+	// Simulate async loading completion
+	close(sm.refIndexLoadDone)
+
+	// Now should be loaded
+	assert.True(t, sm.IsRefIndexLoaded())
 }
 
 // --- Concurrent Operations Tests ---
@@ -1079,17 +1257,13 @@ func TestSnapshotDataInfo_EmptySets(t *testing.T) {
 func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 
 	// Test concurrent map operations don't panic
 	snapshotData := createTestSnapshotDataForMeta()
 
 	// Act - simulate concurrent operations
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{
-		snapshotInfo: snapshotData.SnapshotInfo,
-		SegmentIDs:   typeutil.NewUniqueSet(1001),
-		IndexIDs:     typeutil.NewUniqueSet(2001),
-	})
+	insertTestSnapshot(sm, snapshotData.SnapshotInfo, []int64{1001}, []int64{2001})
 
 	// These operations should work concurrently
 	snapshots, err := sm.ListSnapshots(ctx, 0, 0)
@@ -1106,7 +1280,7 @@ func TestSnapshotMeta_ConcurrentOperations(t *testing.T) {
 func TestSnapshotMeta_EmptyMaps(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	sm := createTestSnapshotMeta(t)
+	sm := createTestSnapshotMetaLoaded(t)
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, 100, 1)
@@ -1143,9 +1317,9 @@ func TestSnapshotMeta_ListSnapshots_FilterByPartition(t *testing.T) {
 	snapshot2.SnapshotInfo.CollectionId = 100
 	snapshot2.SnapshotInfo.PartitionIds = []int64{2, 4} // Has partition 2
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	cleanup := saveTestSnapshots(t, sm, snapshot1, snapshot2)
+	defer cleanup()
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -1172,9 +1346,9 @@ func TestSnapshotMeta_ListSnapshots_FilterByCollection(t *testing.T) {
 	snapshot2.SnapshotInfo.Id = 2
 	snapshot2.SnapshotInfo.CollectionId = 200
 
-	sm := createTestSnapshotMeta(t)
-	sm.snapshotID2DataInfo.Insert(1, &SnapshotDataInfo{snapshotInfo: snapshot1.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
-	sm.snapshotID2DataInfo.Insert(2, &SnapshotDataInfo{snapshotInfo: snapshot2.SnapshotInfo, SegmentIDs: typeutil.NewUniqueSet(), IndexIDs: typeutil.NewUniqueSet()})
+	sm := createTestSnapshotMetaLoaded(t)
+	cleanup := saveTestSnapshots(t, sm, snapshot1, snapshot2)
+	defer cleanup()
 
 	// Act
 	snapshots, err := sm.ListSnapshots(ctx, collectionID, partitionID)
@@ -1231,13 +1405,21 @@ func TestSnapshotMeta_Reload_LegacyFormat_NoPrecomputedIDs(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 
-	// Verify snapshot was loaded (with empty ID sets for legacy format)
-	value, exists := sm.snapshotID2DataInfo.Get(snapshotInfo.Id)
+	// Verify snapshot info was inserted immediately
+	info, exists := sm.snapshotID2Info.Get(snapshotInfo.Id)
 	assert.True(t, exists)
-	assert.Equal(t, snapshotInfo, value.snapshotInfo)
+	assert.Equal(t, snapshotInfo, info)
+
+	// Verify refIndex exists
+	refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotInfo.Id)
+	assert.True(t, exists)
+
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
 	// Legacy snapshots will have empty ID sets
-	assert.Equal(t, 0, value.SegmentIDs.Len())
-	assert.Equal(t, 0, value.IndexIDs.Len())
+	assert.False(t, refIndex.ContainsSegment(1001))
+	assert.False(t, refIndex.ContainsIndex(2001))
 }
 
 func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
@@ -1312,24 +1494,238 @@ func TestSnapshotMeta_Reload_MixedFormats(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 
+	// Verify snapshots are inserted immediately
+	_, exists := sm.snapshotID2Info.Get(1001)
+	assert.True(t, exists)
+	_, exists = sm.snapshotID2Info.Get(1002)
+	assert.True(t, exists)
+
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
 	// Verify each snapshot was read exactly once (no slow path fallback)
+	newRefIndex, _ := sm.snapshotID2RefIndex.Get(1001)
+	legacyRefIndex, _ := sm.snapshotID2RefIndex.Get(1002)
+
+	// Verify new format snapshot has pre-computed IDs
+	assert.True(t, newRefIndex.ContainsSegment(10010))
+	assert.True(t, newRefIndex.ContainsSegment(10011))
+	assert.True(t, newRefIndex.ContainsIndex(100100))
+
+	// Verify legacy format snapshot has empty ID sets
+	assert.False(t, legacyRefIndex.ContainsSegment(10020))
+	assert.False(t, legacyRefIndex.ContainsIndex(100200))
+
+	// Verify call counts
 	newCount, _ := callCounts.Load(newFormatInfo.S3Location)
 	legacyCount, _ := callCounts.Load(legacyFormatInfo.S3Location)
 	assert.Equal(t, int32(1), *newCount.(*int32))
 	assert.Equal(t, int32(1), *legacyCount.(*int32))
+}
 
-	// Verify new format snapshot has pre-computed IDs
-	newValue, exists := sm.snapshotID2DataInfo.Get(1001)
-	assert.True(t, exists)
-	assert.Equal(t, 2, newValue.SegmentIDs.Len())
-	assert.True(t, newValue.SegmentIDs.Contain(10010))
-	assert.True(t, newValue.SegmentIDs.Contain(10011))
-	assert.Equal(t, 1, newValue.IndexIDs.Len())
-	assert.True(t, newValue.IndexIDs.Contain(100100))
+// --- Two-Phase Delete Tests ---
 
-	// Verify legacy format snapshot has empty ID sets
-	legacyValue, exists := sm.snapshotID2DataInfo.Get(1002)
+func TestSnapshotMeta_Reload_SkipPendingAndDeletingState_WithMockey(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMeta(t)
+
+	// Create snapshots with different states
+	committedSnapshot := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "committed_snapshot",
+		S3Location:   "s3://bucket/committed",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+	}
+	pendingSnapshot := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 100,
+		Name:         "pending_snapshot",
+		S3Location:   "s3://bucket/pending",
+		State:        datapb.SnapshotState_SnapshotStatePending,
+	}
+	deletingSnapshot := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 100,
+		Name:         "deleting_snapshot",
+		S3Location:   "s3://bucket/deleting",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+	}
+
+	// Mock catalog.ListSnapshots - return all three snapshots
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).To(func(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+		return []*datapb.SnapshotInfo{committedSnapshot, pendingSnapshot, deletingSnapshot}, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Mock SnapshotReader.ReadSnapshot - should only be called for committed snapshot
+	readCalled := false
+	mock2 := mockey.Mock((*SnapshotReader).ReadSnapshot).To(func(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+		assert.Equal(t, committedSnapshot.S3Location, metadataFilePath)
+		readCalled = true
+		return &SnapshotData{
+			SnapshotInfo: committedSnapshot,
+			SegmentIDs:   []int64{1001},
+			IndexIDs:     []int64{2001},
+		}, nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	// Act
+	err := sm.reload(ctx)
+
+	// Assert
+	assert.NoError(t, err)
+
+	// Verify only committed snapshot was inserted (pending/deleting skipped)
+	_, exists := sm.snapshotID2Info.Get(committedSnapshot.Id)
+	assert.True(t, exists, "Committed snapshot should be loaded")
+
+	_, exists = sm.snapshotID2Info.Get(pendingSnapshot.Id)
+	assert.False(t, exists, "Pending snapshot should be skipped")
+
+	_, exists = sm.snapshotID2Info.Get(deletingSnapshot.Id)
+	assert.False(t, exists, "Deleting snapshot should be skipped")
+
+	// Wait for async loading to complete
+	<-sm.refIndexLoadDone
+
+	// Verify refIndex for committed snapshot exists and can be accessed
+	refIndex, exists := sm.snapshotID2RefIndex.Get(committedSnapshot.Id)
 	assert.True(t, exists)
-	assert.Equal(t, 0, legacyValue.SegmentIDs.Len())
-	assert.Equal(t, 0, legacyValue.IndexIDs.Len())
+	// Verify data is loaded
+	assert.True(t, refIndex.ContainsSegment(1001))
+
+	// Verify ReadSnapshot was called for committed snapshot only
+	assert.True(t, readCalled, "ReadSnapshot should be called for committed snapshot")
+}
+
+func TestSnapshotMeta_GetDeletingSnapshots_WithMockey(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+
+	// Create snapshots with different states
+	committedSnapshot := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "committed_snapshot",
+		State:        datapb.SnapshotState_SnapshotStateCommitted,
+	}
+	deletingSnapshot1 := &datapb.SnapshotInfo{
+		Id:           2,
+		CollectionId: 100,
+		Name:         "deleting_snapshot_1",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+	}
+	deletingSnapshot2 := &datapb.SnapshotInfo{
+		Id:           3,
+		CollectionId: 200,
+		Name:         "deleting_snapshot_2",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+	}
+	pendingSnapshot := &datapb.SnapshotInfo{
+		Id:           4,
+		CollectionId: 100,
+		Name:         "pending_snapshot",
+		State:        datapb.SnapshotState_SnapshotStatePending,
+	}
+
+	// Mock catalog.ListSnapshots
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).To(func(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+		return []*datapb.SnapshotInfo{committedSnapshot, deletingSnapshot1, deletingSnapshot2, pendingSnapshot}, nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Act
+	deletingSnapshots, err := sm.GetDeletingSnapshots(ctx)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Len(t, deletingSnapshots, 2)
+
+	// Verify only Deleting state snapshots are returned
+	ids := make([]int64, len(deletingSnapshots))
+	for i, s := range deletingSnapshots {
+		ids[i] = s.Id
+	}
+	assert.Contains(t, ids, deletingSnapshot1.Id)
+	assert.Contains(t, ids, deletingSnapshot2.Id)
+}
+
+func TestSnapshotMeta_GetDeletingSnapshots_CatalogError_WithMockey(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+	expectedErr := errors.New("catalog error")
+
+	// Mock catalog.ListSnapshots to return error
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).To(func(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Act
+	deletingSnapshots, err := sm.GetDeletingSnapshots(ctx)
+
+	// Assert
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, expectedErr) // Use ErrorIs to check wrapped error
+	assert.Nil(t, deletingSnapshots)
+}
+
+func TestSnapshotMeta_CleanupDeletingSnapshot_Success_WithMockey(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+	snapshot := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "deleting_snapshot",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+	}
+
+	dropCalled := false
+	// Mock catalog.DropSnapshot
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
+		assert.Equal(t, snapshot.CollectionId, collectionID)
+		assert.Equal(t, snapshot.Id, snapshotID)
+		dropCalled = true
+		return nil
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Act
+	err := sm.CleanupDeletingSnapshot(ctx, snapshot)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.True(t, dropCalled, "catalog.DropSnapshot should be called")
+}
+
+func TestSnapshotMeta_CleanupDeletingSnapshot_CatalogError_WithMockey(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	sm := createTestSnapshotMetaLoaded(t)
+	snapshot := &datapb.SnapshotInfo{
+		Id:           1,
+		CollectionId: 100,
+		Name:         "deleting_snapshot",
+		State:        datapb.SnapshotState_SnapshotStateDeleting,
+	}
+	expectedErr := errors.New("catalog drop failed")
+
+	// Mock catalog.DropSnapshot to return error
+	mock1 := mockey.Mock((*kv_datacoord.Catalog).DropSnapshot).To(func(ctx context.Context, collectionID, snapshotID int64) error {
+		return expectedErr
+	}).Build()
+	defer mock1.UnPatch()
+
+	// Act
+	err := sm.CleanupDeletingSnapshot(ctx, snapshot)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Equal(t, expectedErr, err)
 }

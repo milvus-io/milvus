@@ -471,20 +471,30 @@ func (rst *restoreSnapshotTask) Execute(ctx context.Context) error {
 		zap.String("dbName", rst.req.GetDbName()),
 	)
 
-	// Delegate to RootCoord which orchestrates the entire restore process:
-	// 1. Get snapshot info from DataCoord
-	// 2. Create collection with preserved field IDs
-	// 3. Create user partitions
-	// 4. Restore data and indexes via DataCoord
-	resp, err := rst.mixCoord.RestoreSnapshot(ctx, rst.req)
+	// Delegate directly to DataCoord which handles the entire restore process
+	resp, err := rst.mixCoord.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RestoreSnapshot),
+		),
+		Name:           rst.req.GetName(),
+		DbName:         rst.req.GetDbName(),
+		CollectionName: rst.req.GetCollectionName(),
+	})
 	if err != nil {
 		log.Ctx(ctx).Warn("RestoreSnapshot failed",
 			zap.Error(err))
 		rst.result = &milvuspb.RestoreSnapshotResponse{Status: merr.Status(err)}
 		return err
 	}
-	rst.result = resp
-	return merr.CheckRPCCall(resp.GetStatus(), nil)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		rst.result = &milvuspb.RestoreSnapshotResponse{Status: resp.GetStatus()}
+		return err
+	}
+	rst.result = &milvuspb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  resp.GetJobId(),
+	}
+	return nil
 }
 
 func (rst *restoreSnapshotTask) PostExecute(ctx context.Context) error {

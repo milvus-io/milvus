@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -338,6 +339,33 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 // Task Lifecycle: Query DataNode Status
 // ===========================================================================================
 
+// markTaskAndJobFailed marks both task and job as failed with the given reason.
+// This implements fail-fast design: user should know immediately if restore is failing.
+func (t *copySegmentTask) markTaskAndJobFailed(reason string) {
+	updateErr := t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
+		UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
+		UpdateCopyTaskReason(reason))
+	if updateErr != nil {
+		log.Warn("failed to update copy segment task state to failed",
+			WrapCopySegmentTaskLog(t, zap.Error(updateErr))...)
+		return
+	}
+
+	// Sync job state immediately (fail-fast)
+	job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
+	if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
+		updateErr = t.copyMeta.UpdateJob(context.TODO(), t.GetJobId(),
+			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+			UpdateCopyJobReason(reason))
+		if updateErr != nil {
+			log.Warn("failed to update job state to Failed",
+				zap.Int64("jobID", t.GetJobId()), zap.Error(updateErr))
+		}
+	}
+	log.Warn("copy segment task failed",
+		WrapCopySegmentTaskLog(t, zap.String("reason", reason))...)
+}
+
 // QueryTaskOnWorker polls the DataNode for task execution status.
 //
 // Process flow:
@@ -368,29 +396,15 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskID: t.GetTaskId(),
 	}
 	resp, err := cluster.QueryCopySegment(nodeID, req)
-	if err != nil || resp.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed {
-		err = t.copyMeta.UpdateTask(context.TODO(), t.GetTaskId(),
-			UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed),
-			UpdateCopyTaskReason(resp.GetReason()))
-		if err != nil {
-			log.Warn("failed to update copy segment task state to failed",
-				WrapCopySegmentTaskLog(t, zap.Error(err))...)
-			return
-		}
+	// Handle RPC error separately to avoid nil resp dereference
+	if err != nil {
+		t.markTaskAndJobFailed(fmt.Sprintf("query copy segment RPC failed: %v", err))
+		return
+	}
 
-		// Sync job state immediately (fail-fast)
-		job := t.copyMeta.GetJob(context.TODO(), t.GetJobId())
-		if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
-			err = t.copyMeta.UpdateJob(context.TODO(), t.GetJobId(),
-				UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-				UpdateCopyJobReason(resp.GetReason()))
-			if err != nil {
-				log.Warn("failed to update job state to Failed",
-					zap.Int64("jobID", t.GetJobId()), zap.Error(err))
-			}
-		}
-		log.Warn("copy segment task failed",
-			WrapCopySegmentTaskLog(t, zap.String("reason", resp.GetReason()))...)
+	// Handle task execution failure (resp is guaranteed non-nil here)
+	if resp.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed {
+		t.markTaskAndJobFailed(resp.GetReason())
 		return
 	}
 

@@ -445,8 +445,8 @@ func (s *CopySegmentJobSuite) TestCombinedFilters() {
 }
 
 func (s *CopySegmentJobSuite) TestUpdateCopyJobState_CleanupTsCalculation() {
-	// Get current retention period setting
-	retentionDuration := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
+	// Get current retention period setting for copy segment jobs
+	retentionDuration := Params.DataCoordCfg.CopySegmentTaskRetention.GetAsDuration(time.Second)
 
 	job := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
@@ -485,7 +485,7 @@ func (s *CopySegmentJobSuite) TestJobWithEmptyIdMappings() {
 		tr: timerecord.NewTimeRecorder("test job"),
 	}
 
-	// Should return empty slice, not nil
+	// Protobuf getter returns nil for unset slice fields
 	mappings := job.GetIdMappings()
 	s.Nil(mappings)
 }
@@ -499,7 +499,7 @@ func (s *CopySegmentJobSuite) TestJobWithEmptyOptions() {
 		tr: timerecord.NewTimeRecorder("test job"),
 	}
 
-	// Should return empty slice, not nil
+	// Protobuf getter returns nil for unset slice fields
 	options := job.GetOptions()
 	s.Nil(options)
 }

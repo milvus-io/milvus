@@ -737,6 +737,13 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
+		// Check if snapshot RefIndex is loaded before querying snapshot references
+		// If not loaded, skip this segment and try again in next GC cycle
+		if !gc.meta.GetSnapshotMeta().IsRefIndexLoaded() {
+			log.Info("skip GC segment since snapshot RefIndex is not loaded yet")
+			continue
+		}
+
 		if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotBySegment(ctx, segment.GetCollectionID(), segmentID); len(snapshotIDs) > 0 {
 			log.Info("skip GC segment since it is referenced by snapshot",
 				zap.Int64("collectionID", segment.GetCollectionID()),
@@ -984,6 +991,13 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 				zap.Int64("buildID", segIdx.BuildID),
 				zap.Int64("nodeID", segIdx.NodeID),
 				zap.Int("indexFiles", len(indexFiles)))
+
+			// Check if snapshot RefIndex is loaded before querying snapshot references
+			// If not loaded, skip this index and try again in next GC cycle
+			if !gc.meta.GetSnapshotMeta().IsRefIndexLoaded() {
+				log.Info("skip GC segment index since snapshot RefIndex is not loaded yet")
+				continue
+			}
 
 			if snapshotIDs := gc.meta.GetSnapshotMeta().GetSnapshotByIndex(ctx, segIdx.CollectionID, segIdx.IndexID); len(snapshotIDs) > 0 {
 				log.Info("skip GC segment index since it is referenced by snapshot",
@@ -1517,6 +1531,62 @@ func (gc *garbageCollector) recyclePendingSnapshots(ctx context.Context, signal 
 	log.Info("pending snapshots cleanup completed",
 		zap.Int("totalPending", len(pendingSnapshots)),
 		zap.Int("cleanedCount", cleanedCount))
+
+	// Clean up DELETING snapshots (two-phase delete cleanup)
+	// These are snapshots that were marked for deletion but S3 cleanup failed
+	deletingSnapshots, err := snapshotMeta.GetDeletingSnapshots(ctx)
+	if err != nil {
+		log.Warn("failed to get deleting snapshots", zap.Error(err))
+	} else if len(deletingSnapshots) > 0 {
+		log.Info("found deleting snapshots to cleanup", zap.Int("count", len(deletingSnapshots)))
+		deletingCleanedCount := 0
+
+		for _, snapshot := range deletingSnapshots {
+			snapshotLog := log.With(
+				zap.String("snapshotName", snapshot.GetName()),
+				zap.Int64("snapshotID", snapshot.GetId()),
+				zap.Int64("collectionID", snapshot.GetCollectionId()),
+			)
+
+			gc.ackSignal(signal)
+
+			// Compute paths from collection_id + snapshot_id
+			manifestDir, metadataPath := GetSnapshotPaths(
+				gc.option.cli.RootPath(),
+				snapshot.GetCollectionId(),
+				snapshot.GetId(),
+			)
+
+			snapshotLog.Info("cleaning up deleting snapshot",
+				zap.String("manifestDir", manifestDir),
+				zap.String("metadataPath", metadataPath))
+
+			// Delete manifest directory
+			if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
+				snapshotLog.Warn("failed to remove deleting snapshot manifest directory", zap.Error(err))
+				// Continue with metadata and etcd cleanup even if S3 cleanup fails
+			}
+
+			// Delete metadata file
+			if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
+				snapshotLog.Warn("failed to remove deleting snapshot metadata file", zap.Error(err))
+				// Continue with etcd cleanup even if S3 cleanup fails
+			}
+
+			// Delete etcd record
+			if err := snapshotMeta.CleanupDeletingSnapshot(ctx, snapshot); err != nil {
+				snapshotLog.Warn("failed to drop deleting snapshot from catalog", zap.Error(err))
+				continue
+			}
+
+			snapshotLog.Info("successfully cleaned up deleting snapshot")
+			deletingCleanedCount++
+		}
+
+		log.Info("deleting snapshots cleanup completed",
+			zap.Int("totalDeleting", len(deletingSnapshots)),
+			zap.Int("cleanedCount", deletingCleanedCount))
+	}
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(1)
 }

@@ -87,6 +87,8 @@ type CopySegmentMeta interface {
 	AddTask(ctx context.Context, task CopySegmentTask) error
 	UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCopySegmentTaskAction) error
 	GetTask(ctx context.Context, taskID int64) CopySegmentTask
+	GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask
+	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
 	GetTaskBy(ctx context.Context, filters ...CopySegmentTaskFilter) []CopySegmentTask
 	RemoveTask(ctx context.Context, taskID int64) error
 }
@@ -96,14 +98,19 @@ type CopySegmentMeta interface {
 // ===========================================================================================
 
 // copySegmentTasks manages a collection of copy segment tasks with efficient lookup.
+// It maintains secondary indexes for O(1) lookup by jobID and collectionID.
 type copySegmentTasks struct {
-	tasks map[int64]CopySegmentTask // Task ID -> Task mapping
+	tasks           map[int64]CopySegmentTask    // Task ID -> Task mapping (primary index)
+	jobIndex        map[int64]map[int64]struct{} // Job ID -> Task IDs (secondary index)
+	collectionIndex map[int64]map[int64]struct{} // Collection ID -> Task IDs (secondary index)
 }
 
 // newCopySegmentTasks creates a new empty task collection.
 func newCopySegmentTasks() *copySegmentTasks {
 	return &copySegmentTasks{
-		tasks: make(map[int64]CopySegmentTask),
+		tasks:           make(map[int64]CopySegmentTask),
+		jobIndex:        make(map[int64]map[int64]struct{}),
+		collectionIndex: make(map[int64]map[int64]struct{}),
 	}
 }
 
@@ -116,19 +123,109 @@ func (t *copySegmentTasks) get(taskID int64) CopySegmentTask {
 	return ret
 }
 
-// add inserts or updates a task in the collection.
+// add inserts or updates a task in the collection and maintains secondary indexes.
 func (t *copySegmentTasks) add(task CopySegmentTask) {
-	t.tasks[task.GetTaskId()] = task
+	taskID := task.GetTaskId()
+
+	// If updating existing task, remove from old indexes first
+	if oldTask, exists := t.tasks[taskID]; exists {
+		t.removeFromIndexes(oldTask)
+	}
+
+	// Add to primary index
+	t.tasks[taskID] = task
+
+	// Add to secondary indexes
+	t.addToIndexes(task)
 }
 
-// remove deletes a task from the collection by ID.
+// addToIndexes adds the task to secondary indexes (jobIndex and collectionIndex).
+func (t *copySegmentTasks) addToIndexes(task CopySegmentTask) {
+	taskID := task.GetTaskId()
+	jobID := task.GetJobId()
+	collectionID := task.GetCollectionId()
+
+	// Add to job index
+	if _, ok := t.jobIndex[jobID]; !ok {
+		t.jobIndex[jobID] = make(map[int64]struct{})
+	}
+	t.jobIndex[jobID][taskID] = struct{}{}
+
+	// Add to collection index
+	if _, ok := t.collectionIndex[collectionID]; !ok {
+		t.collectionIndex[collectionID] = make(map[int64]struct{})
+	}
+	t.collectionIndex[collectionID][taskID] = struct{}{}
+}
+
+// removeFromIndexes removes the task from secondary indexes.
+func (t *copySegmentTasks) removeFromIndexes(task CopySegmentTask) {
+	taskID := task.GetTaskId()
+	jobID := task.GetJobId()
+	collectionID := task.GetCollectionId()
+
+	// Remove from job index
+	if taskIDs, ok := t.jobIndex[jobID]; ok {
+		delete(taskIDs, taskID)
+		if len(taskIDs) == 0 {
+			delete(t.jobIndex, jobID)
+		}
+	}
+
+	// Remove from collection index
+	if taskIDs, ok := t.collectionIndex[collectionID]; ok {
+		delete(taskIDs, taskID)
+		if len(taskIDs) == 0 {
+			delete(t.collectionIndex, collectionID)
+		}
+	}
+}
+
+// remove deletes a task from the collection by ID and cleans up secondary indexes.
 func (t *copySegmentTasks) remove(taskID int64) {
-	delete(t.tasks, taskID)
+	if task, exists := t.tasks[taskID]; exists {
+		t.removeFromIndexes(task)
+		delete(t.tasks, taskID)
+	}
 }
 
 // listTasks returns all tasks as a slice (unordered).
 func (t *copySegmentTasks) listTasks() []CopySegmentTask {
 	return maps.Values(t.tasks)
+}
+
+// getByJobID retrieves all tasks belonging to a specific job using secondary index.
+// Returns nil if no tasks found for the job.
+// Time complexity: O(M) where M is the number of tasks for this job.
+func (t *copySegmentTasks) getByJobID(jobID int64) []CopySegmentTask {
+	taskIDs, ok := t.jobIndex[jobID]
+	if !ok {
+		return nil
+	}
+	result := make([]CopySegmentTask, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		if task, exists := t.tasks[taskID]; exists {
+			result = append(result, task)
+		}
+	}
+	return result
+}
+
+// getByCollectionID retrieves all tasks belonging to a specific collection using secondary index.
+// Returns nil if no tasks found for the collection.
+// Time complexity: O(M) where M is the number of tasks for this collection.
+func (t *copySegmentTasks) getByCollectionID(collectionID int64) []CopySegmentTask {
+	taskIDs, ok := t.collectionIndex[collectionID]
+	if !ok {
+		return nil
+	}
+	result := make([]CopySegmentTask, 0, len(taskIDs))
+	for taskID := range taskIDs {
+		if task, exists := t.tasks[taskID]; exists {
+			result = append(result, task)
+		}
+	}
+	return result
 }
 
 // ===========================================================================================
@@ -390,6 +487,7 @@ func (m *copySegmentMeta) AddTask(ctx context.Context, task CopySegmentTask) err
 
 	// Ensure the task has meta references
 	t := task.(*copySegmentTask)
+	t.copyMeta = m
 	t.meta = m.meta
 	t.snapshotMeta = m.snapshotMeta
 
@@ -444,6 +542,32 @@ func (m *copySegmentMeta) GetTask(ctx context.Context, taskID int64) CopySegment
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.tasks.get(taskID)
+}
+
+// GetTasksByJobID retrieves all tasks belonging to a specific job using secondary index.
+//
+// This method provides O(M) lookup where M is the number of tasks for this job,
+// compared to O(N) for GetTaskBy with filter where N is total number of tasks.
+//
+// Thread safety: Protected by read lock
+// Returns: Tasks for the job, empty slice if no tasks found
+func (m *copySegmentMeta) GetTasksByJobID(ctx context.Context, jobID int64) []CopySegmentTask {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.tasks.getByJobID(jobID)
+}
+
+// GetTasksByCollectionID retrieves all tasks belonging to a specific collection using secondary index.
+//
+// This method provides O(M) lookup where M is the number of tasks for this collection,
+// compared to O(N) for GetTaskBy with filter where N is total number of tasks.
+//
+// Thread safety: Protected by read lock
+// Returns: Tasks for the collection, empty slice if no tasks found
+func (m *copySegmentMeta) GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.tasks.getByCollectionID(collectionID)
 }
 
 // GetTaskBy retrieves all tasks matching the provided filters.

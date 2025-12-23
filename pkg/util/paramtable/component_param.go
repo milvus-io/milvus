@@ -4678,6 +4678,7 @@ type dataCoordConfig struct {
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
+	CopySegmentJobTimeout           ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -5710,7 +5711,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 
 	p.CopySegmentCheckInterval = ParamItem{
 		Key:          "dataCoord.copySegmentCheckInterval",
-		Version:      "2.6.6",
+		Version:      "2.6.8",
 		Doc:          "The interval for copy segment job checker to monitor and drive job state transitions, measured in seconds.",
 		DefaultValue: "2",
 		PanicIfEmpty: false,
@@ -5719,12 +5720,21 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 
 	p.CopySegmentTaskRetention = ParamItem{
 		Key:          "dataCoord.copySegmentTaskRetention",
-		Version:      "2.6.6",
+		Version:      "2.6.8",
 		Doc:          "The retention period in seconds for copy segment jobs and tasks in Completed or Failed state.",
 		DefaultValue: "10800",
 		PanicIfEmpty: false,
 	}
 	p.CopySegmentTaskRetention.Init(base.mgr)
+
+	p.CopySegmentJobTimeout = ParamItem{
+		Key:          "dataCoord.copySegmentJobTimeout",
+		Version:      "2.6.8",
+		Doc:          "The timeout in seconds for copy segment jobs. Jobs exceeding this duration will be marked as failed.",
+		DefaultValue: "86400",
+		PanicIfEmpty: false,
+	}
+	p.CopySegmentJobTimeout.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
