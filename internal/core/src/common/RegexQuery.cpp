@@ -60,4 +60,28 @@ translate_pattern_match_to_regex(const std::string& pattern) {
     }
     return r;
 }
+
+std::string
+extract_fixed_prefix_from_pattern(const std::string& pattern) {
+    std::string prefix;
+    prefix.reserve(pattern.size());
+    bool escape_mode = false;
+
+    for (char c : pattern) {
+        if (escape_mode) {
+            prefix += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                escape_mode = true;
+            } else if (c == '%' || c == '_') {
+                break;  // stop at first wildcard
+            } else {
+                prefix += c;
+            }
+        }
+    }
+    return prefix;
+}
+
 }  // namespace milvus
