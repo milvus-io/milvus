@@ -25,6 +25,7 @@
 #include <filesystem>
 #include "storage/FileWriter.h"
 #include "common/CDataType.h"
+#include "common/RegexQuery.h"
 #include "knowhere/log.h"
 #include "index/Meta.h"
 #include "common/Utils.h"
@@ -387,6 +388,29 @@ const TargetBitmap
 StringIndexSort::PrefixMatch(const std::string_view prefix) {
     assert(impl_ != nullptr);
     return impl_->PrefixMatch(prefix, total_num_rows_);
+}
+
+const TargetBitmap
+StringIndexSort::PatternMatch(const std::string& pattern,
+                              proto::plan::OpType op) {
+    assert(impl_ != nullptr);
+
+    if (op == proto::plan::OpType::PrefixMatch) {
+        return PrefixMatch(pattern);
+    }
+
+    // Support Match, PostfixMatch, InnerMatch
+    // All can benefit from unique value deduplication
+    if (op != proto::plan::OpType::Match &&
+        op != proto::plan::OpType::PostfixMatch &&
+        op != proto::plan::OpType::InnerMatch) {
+        ThrowInfo(Unsupported,
+                  "StringIndexSort::PatternMatch only supports Match, "
+                  "PrefixMatch, PostfixMatch, InnerMatch, got op: {}",
+                  static_cast<int>(op));
+    }
+
+    return impl_->PatternMatch(pattern, op, total_num_rows_);
 }
 
 std::optional<std::string>
@@ -822,20 +846,122 @@ StringIndexSortMemoryImpl::PrefixMatch(const std::string_view prefix,
                                        size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
 
-    auto it = std::lower_bound(
-        unique_values_.begin(), unique_values_.end(), std::string(prefix));
+    // Use FindPrefixRange for O(log n) lookup of both start and end
+    auto [start_idx, end_idx] = FindPrefixRange(std::string(prefix));
 
-    size_t idx = std::distance(unique_values_.begin(), it);
-
-    while (idx < unique_values_.size()) {
-        if (!milvus::PrefixMatch(unique_values_[idx], prefix)) {
-            break;
-        }
+    for (size_t idx = start_idx; idx < end_idx; ++idx) {
         const auto& posting_list = posting_lists_[idx];
         for (uint32_t row_id : posting_list) {
             bitset[row_id] = true;
         }
-        ++idx;
+    }
+
+    return bitset;
+}
+
+std::pair<size_t, size_t>
+StringIndexSortMemoryImpl::FindPrefixRange(const std::string& prefix) const {
+    if (prefix.empty()) {
+        return {0, unique_values_.size()};
+    }
+
+    // Binary search for start: first value >= prefix
+    auto start_it =
+        std::lower_bound(unique_values_.begin(), unique_values_.end(), prefix);
+    size_t start_idx = std::distance(unique_values_.begin(), start_it);
+
+    // Compute "next prefix" for end boundary: "abc" -> "abd"
+    // Range is [prefix, next_prefix), all strings starting with prefix
+    std::string next_prefix = prefix;
+    bool has_next = false;
+    // Find rightmost char that can be incremented (not 0xFF)
+    for (int i = next_prefix.size() - 1; i >= 0; --i) {
+        if (static_cast<unsigned char>(next_prefix[i]) < 255) {
+            ++next_prefix[i];
+            next_prefix.resize(i + 1);
+            has_next = true;
+            break;
+        }
+    }
+
+    size_t end_idx;
+    if (has_next) {
+        // Binary search for end: first value >= next_prefix
+        auto end_it = std::lower_bound(
+            unique_values_.begin(), unique_values_.end(), next_prefix);
+        end_idx = std::distance(unique_values_.begin(), end_it);
+    } else {
+        // All chars are 0xFF, no upper bound
+        end_idx = unique_values_.size();
+    }
+
+    return {start_idx, end_idx};
+}
+
+bool
+StringIndexSortMemoryImpl::MatchValue(const std::string& value,
+                                      const std::string& pattern,
+                                      proto::plan::OpType op) const {
+    switch (op) {
+        case proto::plan::OpType::PostfixMatch:
+            // Suffix match: value ends with pattern
+            if (pattern.size() > value.size()) {
+                return false;
+            }
+            return value.compare(value.size() - pattern.size(),
+                                 pattern.size(),
+                                 pattern) == 0;
+        case proto::plan::OpType::InnerMatch:
+            // Contains match: value contains pattern
+            return value.find(pattern) != std::string::npos;
+        default:
+            // For Match op, use regex (handled separately)
+            return false;
+    }
+}
+
+const TargetBitmap
+StringIndexSortMemoryImpl::PatternMatch(const std::string& pattern,
+                                        proto::plan::OpType op,
+                                        size_t total_num_rows) {
+    TargetBitmap bitset(total_num_rows, false);
+
+    // For PostfixMatch and InnerMatch, no prefix optimization possible
+    // Still benefits from unique value deduplication
+    if (op == proto::plan::OpType::PostfixMatch ||
+        op == proto::plan::OpType::InnerMatch) {
+        // Iterate over all unique values
+        for (size_t idx = 0; idx < unique_values_.size(); ++idx) {
+            if (MatchValue(unique_values_[idx], pattern, op)) {
+                const auto& posting_list = posting_lists_[idx];
+                for (uint32_t row_id : posting_list) {
+                    bitset[row_id] = true;
+                }
+            }
+        }
+        return bitset;
+    }
+
+    // For Match op, use prefix optimization + regex
+    std::string prefix = extract_fixed_prefix_from_pattern(pattern);
+
+    // Find the range of unique values to check
+    auto [start_idx, end_idx] = FindPrefixRange(prefix);
+
+    // Build regex matcher
+    PatternMatchTranslator translator;
+    auto regex_pattern = translator(pattern);
+    RegexMatcher matcher(regex_pattern);
+
+    // Iterate over unique values in range (each value checked only once)
+    for (size_t idx = start_idx; idx < end_idx; ++idx) {
+        if (matcher(unique_values_[idx])) {
+            // Match found, set all row IDs in posting list
+            const auto& posting_list = posting_lists_[idx];
+            for (uint32_t row_id : posting_list) {
+                bitset[row_id] = true;
+            }
+        }
     }
 
     return bitset;
@@ -1149,23 +1275,113 @@ StringIndexSortMmapImpl::PrefixMatch(const std::string_view prefix,
                                      size_t total_num_rows) {
     TargetBitmap bitset(total_num_rows, false);
 
-    // Find the first string that is >= prefix
-    size_t idx = LowerBound(prefix);
+    // Use FindPrefixRange for O(log n) lookup of both start and end
+    auto [start_idx, end_idx] = FindPrefixRange(std::string(prefix));
 
-    while (idx < unique_count_) {
+    for (size_t idx = start_idx; idx < end_idx; ++idx) {
         MmapEntry entry = GetEntry(idx);
-        std::string_view entry_sv = entry.get_string_view();
-
-        if (entry_sv.size() < prefix.size() ||
-            entry_sv.substr(0, prefix.size()) != prefix) {
-            break;
-        }
-
-        // Add all row_ids for this matching string
         entry.for_each_row_id(
             [&bitset](uint32_t row_id) { bitset.set(row_id); });
+    }
 
-        ++idx;
+    return bitset;
+}
+
+std::pair<size_t, size_t>
+StringIndexSortMmapImpl::FindPrefixRange(const std::string& prefix) const {
+    if (prefix.empty()) {
+        return {0, unique_count_};
+    }
+
+    // Binary search for start
+    size_t start_idx = LowerBound(prefix);
+
+    // Compute "next prefix" for end boundary: "abc" -> "abd"
+    std::string next_prefix = prefix;
+    bool has_next = false;
+    for (int i = next_prefix.size() - 1; i >= 0; --i) {
+        if (static_cast<unsigned char>(next_prefix[i]) < 255) {
+            ++next_prefix[i];
+            next_prefix.resize(i + 1);
+            has_next = true;
+            break;
+        }
+    }
+
+    size_t end_idx;
+    if (has_next) {
+        end_idx = LowerBound(next_prefix);
+    } else {
+        end_idx = unique_count_;
+    }
+
+    return {start_idx, end_idx};
+}
+
+bool
+StringIndexSortMmapImpl::MatchValue(const std::string& value,
+                                    const std::string& pattern,
+                                    proto::plan::OpType op) const {
+    switch (op) {
+        case proto::plan::OpType::PostfixMatch:
+            // Suffix match: value ends with pattern
+            if (pattern.size() > value.size()) {
+                return false;
+            }
+            return value.compare(value.size() - pattern.size(),
+                                 pattern.size(),
+                                 pattern) == 0;
+        case proto::plan::OpType::InnerMatch:
+            // Contains match: value contains pattern
+            return value.find(pattern) != std::string::npos;
+        default:
+            return false;
+    }
+}
+
+const TargetBitmap
+StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
+                                      proto::plan::OpType op,
+                                      size_t total_num_rows) {
+    TargetBitmap bitset(total_num_rows, false);
+
+    // For PostfixMatch and InnerMatch, no prefix optimization possible
+    // Still benefits from unique value deduplication
+    if (op == proto::plan::OpType::PostfixMatch ||
+        op == proto::plan::OpType::InnerMatch) {
+        for (size_t idx = 0; idx < unique_count_; ++idx) {
+            MmapEntry entry = GetEntry(idx);
+            std::string_view sv = entry.get_string_view();
+
+            if (MatchValue(std::string(sv), pattern, op)) {
+                entry.for_each_row_id(
+                    [&bitset](uint32_t row_id) { bitset.set(row_id); });
+            }
+        }
+        return bitset;
+    }
+
+    // For Match op, use prefix optimization + regex
+    std::string prefix = extract_fixed_prefix_from_pattern(pattern);
+
+    // Find the range of unique values to check
+    auto [start_idx, end_idx] = FindPrefixRange(prefix);
+
+    // Build regex matcher
+    PatternMatchTranslator translator;
+    auto regex_pattern = translator(pattern);
+    RegexMatcher matcher(regex_pattern);
+
+    // Iterate over unique values in range (each value checked only once)
+    for (size_t idx = start_idx; idx < end_idx; ++idx) {
+        MmapEntry entry = GetEntry(idx);
+        std::string_view sv = entry.get_string_view();
+
+        if (matcher(sv)) {
+            // Match found, set all row IDs in posting list
+            entry.for_each_row_id(
+                [&bitset](uint32_t row_id) { bitset.set(row_id); });
+        }
     }
 
     return bitset;
