@@ -608,15 +608,13 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 	for _, field := range st.req.GetSchema().GetFields() {
 		field := field
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if !h.EnableJSONKeyStatsIndex() {
+			continue
+		}
+		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
 
 		eg.Go(func() error {
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if !h.EnableJSONKeyStatsIndex() {
-				return nil
-			}
-
-			log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
-
 			files, err := getInsertFiles(field.GetFieldID())
 			if err != nil {
 				return err
