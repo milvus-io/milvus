@@ -156,7 +156,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span("PhyMatchFilterExpr::Eval", tracer::GetRootSpan());
 
     auto input = context.get_offset_input();
-    AssertInfo(input != nullptr,
+    AssertInfo(input == nullptr,
                "Offset input in match filter expr is not implemented now");
 
     auto schema = segment_->get_schema();
