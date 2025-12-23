@@ -460,6 +460,14 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				Manifest:                  t.manifest,
 			}
 
+			if t.storageVersion == storage.StorageV2 {
+				buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
+					insertBinlogs,
+					t.compactionParams.StorageConfig,
+					collectionID,
+					partitionID,
+					segmentID)
+			}
 			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
 			if err != nil {
 				return err
