@@ -112,15 +112,6 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
                "Can't get metric_type in index_params");
     auto metric_type = info.index_params.at("metric_type");
 
-    std::unique_lock lck(mutex_);
-    AssertInfo(
-        !get_bit(index_ready_bitset_, field_id),
-        "vector index has been exist at " + std::to_string(field_id.get()));
-    LOG_INFO(
-        "Before setting field_bit for field index, fieldID:{}. "
-        "segmentID:{}, ",
-        info.field_id,
-        id_);
     auto& field_meta = schema_->operator[](field_id);
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().VecIndexLoadResource(
@@ -133,8 +124,47 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
             info.num_rows,
             info.dim);
 
+    // Check if we need to reload field data before acquiring the exclusive lock
+    // This happens when the new index doesn't have raw data but field data
+    // was previously dropped (e.g., because the interim index had raw data)
+    bool need_reload_field_data = false;
+    {
+        std::shared_lock lck(mutex_);
+        if (!request.has_raw_data &&
+            // for drop index, field data must be exist, so no need to reload
+            !get_bit(field_data_ready_bitset_, field_id)) {
+            // Only reload if there was a previous index and it had raw data
+            // 1. for new segment loading, no previous index, so no need to reload, leave it to load_field_data_common()
+            // 2. for new index loading, check if the previous index had raw data (must be true), if so, reload field data
+            auto iter = index_has_raw_data_.find(field_id);
+            if (iter != index_has_raw_data_.end() && iter->second) {
+                need_reload_field_data = true;
+            }
+        }
+    }
+
+    // Reload field data first if needed (before acquiring the exclusive lock)
+    if (need_reload_field_data) {
+        LOG_INFO(
+            "Reloading field data for field {} in segment {} because new "
+            "index doesn't have raw data",
+            field_id.get(),
+            id_);
+        reload_field_data(field_id);
+    }
+
+    std::unique_lock lck(mutex_);
+    AssertInfo(
+        !get_bit(index_ready_bitset_, field_id),
+        "vector index has been exist at " + std::to_string(field_id.get()));
+    LOG_INFO(
+        "Before setting field_bit for field index, fieldID:{}. "
+        "segmentID:{}, ",
+        info.field_id,
+        id_);
+
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.rlock()->at(field_id)->ManualEvictCache();
+        drop_field_data_locked(field_id);
     }
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
@@ -155,6 +185,8 @@ void
 ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
+
+    std::unique_lock lck(mutex_);
     auto& field_meta = schema_->operator[](field_id);
 
     auto is_pk = field_id == schema_->get_primary_field_id();
@@ -171,7 +203,6 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         return;
     }
 
-    std::unique_lock lck(mutex_);
     AssertInfo(
         !get_bit(index_ready_bitset_, field_id),
         "scalar index has been exist at " + std::to_string(field_id.get()));
@@ -233,7 +264,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         !is_pk) {
         // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
         // need the pk field again.
-        fields_.rlock()->at(field_id)->ManualEvictCache();
+        drop_field_data_locked(field_id);
     }
     LOG_INFO(
         "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
@@ -907,15 +938,72 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
 }
 
 void
+ChunkedSegmentSealedImpl::drop_field_data_locked(const FieldId field_id) {
+    // NOTE: mutex_ must be already held by caller
+    if (get_bit(field_data_ready_bitset_, field_id)) {
+        // Check if the field is in a multi-field column group.
+        // If so, skip dropping because it shares storage with other fields.
+        auto column = get_column(field_id);
+        if (column && column->IsInMultiFieldColumnGroup()) {
+            LOG_INFO(
+                "Skip dropping field data for field {} in segment {} because "
+                "it is part of a multi-field column group",
+                field_id.get(),
+                id_);
+            return;
+        }
+        fields_.wlock()->erase(field_id);
+        set_bit(field_data_ready_bitset_, field_id, false);
+    }
+}
+
+void
+ChunkedSegmentSealedImpl::reload_field_data(const FieldId field_id) {
+    int64_t column_group_id = field_id.get();
+    for (const auto& [id, info] : field_data_info_.field_infos) {
+        if (info.child_field_ids.empty()) {
+            // Non-column group: key is the field ID itself
+            if (id == field_id.get()) {
+                column_group_id = id;
+                break;
+            }
+        } else {
+            // Column group: check if field_id is in child_field_ids
+            for (const auto& child_id : info.child_field_ids) {
+                if (child_id == field_id.get()) {
+                    column_group_id = id;
+                    break;
+                }
+            }
+        }
+    }
+
+    auto field_info_iter = field_data_info_.field_infos.find(column_group_id);
+    if (field_info_iter != field_data_info_.field_infos.end()) {
+        LoadFieldDataInfo reload_info;
+        reload_info.storage_version = field_data_info_.storage_version;
+        reload_info.load_priority = field_data_info_.load_priority;
+        // warmup policy is actually not used for reloading field data, but we keep it for consistency
+        reload_info.warmup_policy = field_data_info_.warmup_policy;
+        reload_info.field_infos[column_group_id] = field_info_iter->second;
+
+        LoadFieldData(reload_info);
+    } else {
+        LOG_WARN(
+            "Cannot reload field data for field {} in segment {} "
+            "because field info not found in field_data_info_",
+            field_id.get(),
+            id_);
+    }
+}
+
+void
 ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Dropping system field is not supported, field id: {}",
                field_id.get());
     std::unique_lock<std::shared_mutex> lck(mutex_);
-    if (get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.wlock()->erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
-    }
+    drop_field_data_locked(field_id);
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
@@ -930,13 +1018,40 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     auto& field_meta = schema_->operator[](field_id);
     AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
 
-    std::unique_lock lck(mutex_);
-    auto [scalar_indexings, ngram_fields] =
-        lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
-    scalar_indexings->erase(field_id);
-    ngram_fields->erase(field_id);
+    // Check if we need to reload field data
+    bool need_reload_field_data = false;
+    {
+        std::shared_lock lck(mutex_);
+        // If index had raw data and field data was dropped, we need to reload
+        auto iter = index_has_raw_data_.find(field_id);
+        if (iter != index_has_raw_data_.end() && iter->second &&
+            !get_bit(field_data_ready_bitset_, field_id)) {
+            need_reload_field_data = true;
+        }
+    }
 
-    set_bit(index_ready_bitset_, field_id, false);
+    // Reload field data first if needed (before erasing the index)
+    // This ensures we don't end up in a broken state with neither index nor raw data
+    if (need_reload_field_data) {
+        LOG_INFO(
+            "Reloading field data for field {} in segment {} after dropping "
+            "index with raw data",
+            field_id.get(),
+            id_);
+        reload_field_data(field_id);
+    }
+
+    // Erase the index after raw data is loaded successfully
+    {
+        std::unique_lock lck(mutex_);
+        auto [scalar_indexings, ngram_fields] =
+            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+        scalar_indexings->erase(field_id);
+        ngram_fields->erase(field_id);
+
+        set_bit(index_ready_bitset_, field_id, false);
+        index_has_raw_data_.erase(field_id);
+    }
 }
 
 void
@@ -2374,11 +2489,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                field_id.get());
     set_bit(field_data_ready_bitset_, field_id, true);
     update_row_count(num_rows);
-    if (generated_interim_index) {
-        auto column = get_column(field_id);
-        if (column) {
-            column->ManualEvictCache();
-        }
+    // Only drop field data when the interim index has raw data.
+    // If the interim index doesn't have raw data, we need to keep the field data
+    // because the data cannot be retrieved from the index.
+    auto iter = index_has_raw_data_.find(field_id);
+    if (generated_interim_index && iter != index_has_raw_data_.end() &&
+        iter->second) {
+        drop_field_data_locked(field_id);
     }
     if (data_type == DataType::GEOMETRY &&
         segcore_config_.get_enable_geometry_cache()) {

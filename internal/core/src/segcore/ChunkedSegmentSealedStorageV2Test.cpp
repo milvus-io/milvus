@@ -351,3 +351,51 @@ TEST_P(TestChunkSegmentStorageV2, TestCompareExpr) {
         plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(chunk_num * test_data_count, final.count());
 }
+
+// Test DropFieldData behavior based on parquet file structure.
+// In this test setup, the parquet files are organized as:
+//   - paths[0] contains columns {0, 4, 3} = int64, ts, string2 (multi-field column group)
+//   - paths[1] contains column {2} = string1 (single-field group)
+//   - paths[2] contains column {1} = pk (single-field group)
+// When storage_version=2 reads a parquet file with multiple columns, they become
+// a multi-field column group, so DropFieldData should be skipped for those fields.
+TEST_P(TestChunkSegmentStorageV2, TestDropFieldDataWithColumnGroups) {
+    auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    // Verify fields have data initially
+    auto int64_fid = fields.at("int64");
+    auto string1_fid = fields.at("string1");
+    auto string2_fid = fields.at("string2");
+
+    EXPECT_TRUE(segment_impl->HasFieldData(int64_fid))
+        << "int64 field data should be ready";
+    EXPECT_TRUE(segment_impl->HasFieldData(string1_fid))
+        << "string1 field data should be ready";
+    EXPECT_TRUE(segment_impl->HasFieldData(string2_fid))
+        << "string2 field data should be ready";
+
+    // int64 and string2 are in the same parquet file (multi-field column group)
+    // DropFieldData should be SKIPPED for these fields
+    segment_impl->DropFieldData(int64_fid);
+
+    // int64 should still have data because it's in a multi-field column group
+    EXPECT_TRUE(segment_impl->HasFieldData(int64_fid))
+        << "int64 field data should still be ready (multi-field column group)";
+
+    // string2 is in the same group, should also still have data
+    EXPECT_TRUE(segment_impl->HasFieldData(string2_fid))
+        << "string2 field data should still be ready (same column group as int64)";
+
+    // string1 is in its own parquet file (single-field group)
+    // DropFieldData SHOULD work for this field
+    segment_impl->DropFieldData(string1_fid);
+    EXPECT_FALSE(segment_impl->HasFieldData(string1_fid))
+        << "string1 field data should be dropped (single-field column group)";
+
+    // int64 and string2 should still have data
+    EXPECT_TRUE(segment_impl->HasFieldData(int64_fid))
+        << "int64 field data should still be ready";
+    EXPECT_TRUE(segment_impl->HasFieldData(string2_fid))
+        << "string2 field data should still be ready";
+}
