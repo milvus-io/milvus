@@ -44,8 +44,9 @@ struct LoadDiff {
     std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
         binlogs_to_load;
 
-    // Field id to column group index to be loaded
-    std::map<int, std::vector<FieldId>> column_groups_to_load;
+    // list of column group indices and related field ids to load
+    // same index could appear multiple times if same group using different setups
+    std::vector<std::pair<int, std::vector<FieldId>>> column_groups_to_load;
 
     // Indexes that need to be dropped (field_id set)
     std::set<FieldId> indexes_to_drop;
@@ -576,6 +577,17 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] LoadDiff
     ComputeDiff(SegmentLoadInfo& new_info);
+
+    /**
+     * @brief Get the LoadDiff from the current SegmentLoadInfo
+     *
+     * This method produces a LoadDiff that describes what needs to be loaded when 
+     * load with current load info.
+     *
+     * @return LoadDiff containing the differences
+     */
+    [[nodiscard]] LoadDiff
+    GetLoadDiff();
 
     // ==================== Underlying Proto Access ====================
 
