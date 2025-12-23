@@ -13,6 +13,7 @@
 #include "common/QueryInfo.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "SearchOnGrowing.h"
 #include <cstddef>
 #include "knowhere/comp/index_param.h"
@@ -256,8 +257,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             for (int i = 1; i < max_chunk; ++i) {
                 chunk_rows[i] = i * vec_size_per_chunk;
             }
+            bool larger_is_closer = PositivelyRelated(info.metric_type_);
             search_result.AssembleChunkVectorIterators(
-                num_queries, max_chunk, chunk_rows, final_qr.chunk_iterators());
+                num_queries,
+                max_chunk,
+                chunk_rows,
+                final_qr.chunk_iterators(),
+                larger_is_closer);
         } else {
             search_result.distances_ = std::move(final_qr.mutable_distances());
             search_result.seg_offsets_ =
