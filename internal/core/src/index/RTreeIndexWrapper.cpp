@@ -285,5 +285,22 @@ RTreeIndexWrapper::count() const {
     return static_cast<int64_t>(rtree_.size());
 }
 
+int64_t
+RTreeIndexWrapper::ByteSize() const {
+    int64_t total = 0;
+
+    // values_: vector<Value> where Value = std::pair<Box, int64_t>
+    // Box = bg::model::box<Point> = 2 Points = 2 * 2 * sizeof(double) = 32 bytes
+    // Value = Box + int64_t = 32 + 8 = 40 bytes
+    total += values_.capacity() * sizeof(Value);
+
+    // rtree_ internal structure (nodes, pointers, MBRs)
+    // R*-tree with max 16 entries per node has overhead per entry
+    // Estimated ~18 bytes per entry for internal tree structure
+    total += rtree_.size() * 18;
+
+    return total;
+}
+
 // index/leaf capacity setters removed; not applicable for Boost rtree
 }  // namespace milvus::index
