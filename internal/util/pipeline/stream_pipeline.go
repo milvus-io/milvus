@@ -52,7 +52,8 @@ type streamPipeline struct {
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
 
-	lastAccessTime *atomic.Time
+	lastAccessTime          *atomic.Time
+	emptyTimeTickSlowdowner *emptyTimeTickSlowdowner
 }
 
 func (p *streamPipeline) work() {
@@ -67,7 +68,11 @@ func (p *streamPipeline) work() {
 				log.Ctx(context.TODO()).Debug("stream pipeline input closed")
 				return
 			}
+
 			p.lastAccessTime.Store(time.Now())
+			if p.emptyTimeTickSlowdowner.Filter(msg) {
+				continue
+			}
 			log.Ctx(context.TODO()).RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
 			p.pipeline.inputChannel <- msg
 			p.pipeline.process()
@@ -149,6 +154,7 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 	nodeTtInterval time.Duration,
 	enableTtChecker bool,
 	vChannel string,
+	lastestMVCCTimeTickGetter LastestMVCCTimeTickGetter,
 ) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
@@ -156,11 +162,12 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher:     dispatcher,
-		vChannel:       vChannel,
-		closeCh:        make(chan struct{}),
-		closeWg:        sync.WaitGroup{},
-		lastAccessTime: atomic.NewTime(time.Now()),
+		dispatcher:              dispatcher,
+		vChannel:                vChannel,
+		closeCh:                 make(chan struct{}),
+		closeWg:                 sync.WaitGroup{},
+		lastAccessTime:          atomic.NewTime(time.Now()),
+		emptyTimeTickSlowdowner: newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter, vChannel),
 	}
 
 	return pipeline

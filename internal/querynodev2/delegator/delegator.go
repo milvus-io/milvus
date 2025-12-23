@@ -99,6 +99,7 @@ type ShardDelegator interface {
 	TryCleanExcludedSegments(ts uint64)
 
 	// tsafe
+	GetLatestRequiredMVCCTimeTick() uint64
 	UpdateTSafe(ts uint64)
 	GetTSafe() uint64
 
@@ -169,6 +170,11 @@ type shardDelegator struct {
 
 	// streaming data catch-up state
 	catchingUpStreamingData *atomic.Bool
+
+	// latest required mvcc timestamp for the delegator
+	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
+	latestRequiredMVCCTimeTickMu sync.Mutex
+	latestRequiredMVCCTimeTick   uint64
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -705,6 +711,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	}
 
 	// wait tsafe
+	sd.updateLatestRequiredMVCCTimestamp(req.Req.GuaranteeTimestamp)
 	_, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
 	if err != nil {
 		log.Warn("delegator GetStatistics failed to wait tsafe", zap.Error(err))
@@ -926,6 +933,12 @@ func (sd *shardDelegator) speedupGuranteeTS(
 	mvccTS uint64,
 	isIterator bool,
 ) uint64 {
+	// because the mvcc speed up will make the guarantee timestamp smaller.
+	// and the update latest required mvcc timestamp and mvcc speed up are executed concurrently.
+	// so we update the latest required mvcc timestamp first, then the mvcc speed up will not affect the latest required mvcc timestamp.
+	// to make the new incoming mvcc can be seen by the timetick_slowdowner.
+	sd.updateLatestRequiredMVCCTimestamp(guaranteeTS)
+
 	// when 1. streaming service is disable,
 	// 2. consistency level is not strong,
 	// 3. cannot speed iterator, because current client of milvus doesn't support shard level mvcc.
@@ -944,6 +957,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
 	defer sp.End()
 	log := sd.getLogger(ctx)
+
 	// already safe to search
 	latestTSafe := sd.latestTsafe.Load()
 	if latestTSafe >= ts {
@@ -995,6 +1009,24 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 			}
 			return sd.latestTsafe.Load(), nil
 		}
+	}
+}
+
+// GetLatestRequiredMVCCTimeTick returns the latest required mvcc timestamp for the delegator.
+func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
+	sd.latestRequiredMVCCTimeTickMu.Lock()
+	defer sd.latestRequiredMVCCTimeTickMu.Unlock()
+
+	return sd.latestRequiredMVCCTimeTick
+}
+
+// updateLatestRequiredMVCCTimestamp updates the latest required mvcc timestamp for the delegator.
+func (sd *shardDelegator) updateLatestRequiredMVCCTimestamp(ts uint64) {
+	sd.latestRequiredMVCCTimeTickMu.Lock()
+	defer sd.latestRequiredMVCCTimeTickMu.Unlock()
+
+	if ts > sd.latestRequiredMVCCTimeTick {
+		sd.latestRequiredMVCCTimeTick = ts
 	}
 }
 
