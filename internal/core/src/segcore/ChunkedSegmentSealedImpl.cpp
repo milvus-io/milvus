@@ -133,9 +133,9 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
             info.num_rows,
             info.dim);
 
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        fields_.rlock()->at(field_id)->ManualEvictCache();
-    }
+    // if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
+    //     fields_.rlock()->at(field_id)->ManualEvictCache();
+    // }
     if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
@@ -229,12 +229,12 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     index_has_raw_data_[field_id] = request.has_raw_data;
     // release field column if the index contains raw data
     // only release non-primary field when in pk sorted mode
-    if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id) &&
-        !is_pk) {
-        // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
-        // need the pk field again.
-        fields_.rlock()->at(field_id)->ManualEvictCache();
-    }
+    // if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id) &&
+    //     !is_pk) {
+    //     // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
+    //     // need the pk field again.
+    //     fields_.rlock()->at(field_id)->ManualEvictCache();
+    // }
     LOG_INFO(
         "Has load scalar index done, fieldID:{}. segmentID:{}, has_raw_data:{}",
         info.field_id,
@@ -2374,12 +2374,12 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                field_id.get());
     set_bit(field_data_ready_bitset_, field_id, true);
     update_row_count(num_rows);
-    if (generated_interim_index) {
-        auto column = get_column(field_id);
-        if (column) {
-            column->ManualEvictCache();
-        }
-    }
+    // if (generated_interim_index) {
+    //     auto column = get_column(field_id);
+    //     if (column) {
+    //         column->ManualEvictCache();
+    //     }
+    // }
     if (data_type == DataType::GEOMETRY &&
         segcore_config_.get_enable_geometry_cache()) {
         // Construct GeometryCache for the entire field
