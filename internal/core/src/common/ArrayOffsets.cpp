@@ -77,8 +77,8 @@ ArrayOffsetsSealed::RowBitsetToElementBitset(
 }
 
 FixedVector<int32_t>
-ArrayOffsetsSealed::RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
-                                              int64_t row_start) const {
+ArrayOffsetsSealed::RowBitsetToElementOffsets(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
     int64_t row_count = row_bitset.size();
     AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
                "row range out of bounds: row_start={}, row_count={}, "
@@ -87,7 +87,17 @@ ArrayOffsetsSealed::RowBitsetToElementOffsets(const TargetBitmapView& row_bitset
                row_count,
                GetRowCount());
 
+    int64_t selected_rows = row_bitset.count();
     FixedVector<int32_t> element_offsets;
+    if (selected_rows == 0) {
+        return element_offsets;
+    }
+
+    int64_t avg_elem_per_row =
+        static_cast<int64_t>(element_row_ids_.size()) /
+        (static_cast<int64_t>(row_to_element_start_.size()) - 1);
+
+    element_offsets.reserve(selected_rows * avg_elem_per_row);
 
     for (int64_t i = 0; i < row_count; ++i) {
         if (row_bitset[i]) {
@@ -274,7 +284,15 @@ ArrayOffsetsGrowing::RowBitsetToElementOffsets(
                row_count,
                committed_row_count_);
 
+    int64_t selected_rows = row_bitset.count();
     FixedVector<int32_t> element_offsets;
+    if (selected_rows == 0) {
+        return element_offsets;
+    }
+    int64_t avg_elem_per_row =
+        static_cast<int64_t>(element_row_ids_.size()) /
+        (static_cast<int64_t>(row_to_element_start_.size()) - 1);
+    element_offsets.reserve(selected_rows * avg_elem_per_row);
 
     for (int64_t i = 0; i < row_count; ++i) {
         if (row_bitset[i]) {

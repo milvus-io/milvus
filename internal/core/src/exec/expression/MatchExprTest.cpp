@@ -30,16 +30,16 @@ using namespace milvus::segcore;
 TEST(MatchExprTest, MatchAllGrowing) {
     // Step 1: Create schema with struct array sub-fields
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("vec", DataType::VECTOR_FLOAT, 4,
-                                         knowhere::metric::L2);
+    auto vec_fid = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
 
     // Struct array sub-fields: struct_array[sub_str], struct_array[sub_int]
-    auto sub_str_fid = schema->AddDebugArrayField("struct_array[sub_str]",
-                                                  DataType::VARCHAR, false);
-    auto sub_int_fid = schema->AddDebugArrayField("struct_array[sub_int]",
-                                                  DataType::INT32, false);
+    auto sub_str_fid = schema->AddDebugArrayField(
+        "struct_array[sub_str]", DataType::VARCHAR, false);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, false);
 
     size_t N = 1000;
     int array_len = 5;
@@ -57,8 +57,8 @@ TEST(MatchExprTest, MatchAllGrowing) {
     for (auto& v : vec_data) {
         v = vec_dist(rng);
     }
-    auto vec_array = CreateDataArrayFrom(vec_data.data(), nullptr, N,
-                                         schema->operator[](vec_fid));
+    auto vec_array = CreateDataArrayFrom(
+        vec_data.data(), nullptr, N, schema->operator[](vec_fid));
     insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
 
     // Generate id field
@@ -66,8 +66,8 @@ TEST(MatchExprTest, MatchAllGrowing) {
     for (size_t i = 0; i < N; ++i) {
         id_data[i] = i;
     }
-    auto id_array = CreateDataArrayFrom(id_data.data(), nullptr, N,
-                                        schema->operator[](int64_fid));
+    auto id_array = CreateDataArrayFrom(
+        id_data.data(), nullptr, N, schema->operator[](int64_fid));
     insert_data->mutable_fields_data()->AddAllocated(id_array.release());
 
     // Generate struct_array[sub_str]: equal probability "aaa", "bbb", "ccc"
@@ -78,8 +78,8 @@ TEST(MatchExprTest, MatchAllGrowing) {
                 str_choices[str_dist(rng)]);
         }
     }
-    auto sub_str_array = CreateDataArrayFrom(sub_str_data.data(), nullptr, N,
-                                             schema->operator[](sub_str_fid));
+    auto sub_str_array = CreateDataArrayFrom(
+        sub_str_data.data(), nullptr, N, schema->operator[](sub_str_fid));
     insert_data->mutable_fields_data()->AddAllocated(sub_str_array.release());
 
     // Generate struct_array[sub_int]: random 50-150
@@ -89,8 +89,8 @@ TEST(MatchExprTest, MatchAllGrowing) {
             sub_int_data[i].mutable_int_data()->add_data(int_dist(rng));
         }
     }
-    auto sub_int_array = CreateDataArrayFrom(sub_int_data.data(), nullptr, N,
-                                             schema->operator[](sub_int_fid));
+    auto sub_int_array = CreateDataArrayFrom(
+        sub_int_data.data(), nullptr, N, schema->operator[](sub_int_fid));
     insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
 
     insert_data->set_num_rows(N);

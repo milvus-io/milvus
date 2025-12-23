@@ -37,14 +37,12 @@ class PhyMatchFilterExpr : public Expr {
         milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
-        int64_t batch_size,
-        int32_t consistency_level)
+        int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           expr_(expr),
           segment_(segment),
           active_count_(active_count),
-          batch_size_(batch_size),
-          consistency_level_(consistency_level) {
+          batch_size_(batch_size) {
     }
 
     void
@@ -68,31 +66,12 @@ class PhyMatchFilterExpr : public Expr {
 
     bool
     IsSource() const override {
-        return true;  // This is a source expression (queries index)
+        return true;
     }
 
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
-        return std::
-            nullopt;  // Match expressions don't have a single column info
-    }
-
-    inline bool
-    MatchExprHit(int64_t hit_count, int64_t element_count) {
-        switch (expr_->get_match_type()) {
-            case milvus::expr::MatchType::MatchAny:
-                return hit_count > 0;
-            case milvus::expr::MatchType::MatchLeast:
-                return hit_count >= expr_->get_count();
-            case milvus::expr::MatchType::MatchMost:
-                return hit_count <= expr_->get_count();
-            case milvus::expr::MatchType::MatchExact:
-                return hit_count == expr_->get_count();
-            case milvus::expr::MatchType::MatchAll:
-                return hit_count == element_count;
-            default:
-                return false;
-        }
+        return std::nullopt;
     }
 
  private:
@@ -101,7 +80,6 @@ class PhyMatchFilterExpr : public Expr {
     int64_t active_count_;
     int64_t current_pos_{0};
     int64_t batch_size_;
-    int32_t consistency_level_;
 };
 
 }  // namespace exec
