@@ -905,7 +905,7 @@ func createSortCompactionTask(ctx context.Context,
 		ResultSegments:     []int64{},
 		TotalRows:          originSegment.GetNumOfRows(),
 		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            getExpandedSize(expectedSize),
+		MaxSize:            expectedSize,
 		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: targetSegmentID,
 			End:   targetSegmentID + 1,
