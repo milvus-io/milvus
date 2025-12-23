@@ -166,11 +166,11 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
 			localScanner, err := localWAL.Read(ctx, wal.ReadOption{
-				VChannel:           opts.VChannel,
-				DeliverPolicy:      opts.DeliverPolicy,
-				MessageFilter:      opts.DeliverFilters,
-				MesasgeHandler:     opts.MessageHandler,
-				IgnoreStartupDelay: opts.IgnoreStartupDelay,
+				VChannel:               opts.VChannel,
+				DeliverPolicy:          opts.DeliverPolicy,
+				MessageFilter:          opts.DeliverFilters,
+				MesasgeHandler:         opts.MessageHandler,
+				IgnorePauseConsumption: opts.IgnorePauseConsumption,
 			})
 			if err != nil {
 				return nil, err
@@ -187,12 +187,12 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 			return nil, err
 		}
 		remoteScanner, err := hc.newConsumer(ctx, &consumer.ConsumerOptions{
-			Assignment:         assign,
-			VChannel:           opts.VChannel,
-			DeliverPolicy:      opts.DeliverPolicy,
-			DeliverFilters:     opts.DeliverFilters,
-			MessageHandler:     opts.MessageHandler,
-			IgnoreStartupDelay: opts.IgnoreStartupDelay,
+			Assignment:             assign,
+			VChannel:               opts.VChannel,
+			DeliverPolicy:          opts.DeliverPolicy,
+			DeliverFilters:         opts.DeliverFilters,
+			MessageHandler:         opts.MessageHandler,
+			IgnorePauseConsumption: opts.IgnorePauseConsumption,
 		}, handlerService)
 		if err != nil {
 			return nil, err

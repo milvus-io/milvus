@@ -113,12 +113,12 @@ func (rc *resumableConsumerImpl) resumeLoop() {
 			deliverFilters = newDeliverFilters
 		}
 		opts := &handler.ConsumerOptions{
-			PChannel:           rc.opts.PChannel,
-			VChannel:           rc.opts.VChannel,
-			DeliverPolicy:      deliverPolicy,
-			DeliverFilters:     deliverFilters,
-			MessageHandler:     nopCloseMH,
-			IgnoreStartupDelay: rc.opts.IgnoreStartupDelay,
+			PChannel:               rc.opts.PChannel,
+			VChannel:               rc.opts.VChannel,
+			DeliverPolicy:          deliverPolicy,
+			DeliverFilters:         deliverFilters,
+			MessageHandler:         nopCloseMH,
+			IgnorePauseConsumption: rc.opts.IgnorePauseConsumption,
 		}
 
 		// Create a new consumer.

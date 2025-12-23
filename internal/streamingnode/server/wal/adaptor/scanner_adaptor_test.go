@@ -72,15 +72,15 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	assert.NoError(t, s.Error())
 }
 
-func TestWaitUntilStartup(t *testing.T) {
-	configKey := paramtable.Get().StreamingCfg.WALScannerStartupDelay.Key
-	paramtable.Get().Save(configKey, "10s")
+func TestPauseConsumption(t *testing.T) {
+	configKey := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.Key
+	paramtable.Get().Save(configKey, "true")
 	defer paramtable.Get().Reset(configKey)
 
 	scanner := &scannerAdaptorImpl{
 		logger: log.With(),
 		readOption: wal.ReadOption{
-			IgnoreStartupDelay: false,
+			IgnorePauseConsumption: false,
 		},
 		filterFunc:    func(message.ImmutableMessage) bool { return true },
 		reorderBuffer: utility.NewReOrderBuffer(),
@@ -90,27 +90,27 @@ func TestWaitUntilStartup(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	start := time.Now()
 
 	go func() {
-		scanner.waitUntilStartup()
+		scanner.waitUntilStartConsumption()
 		close(done)
 	}()
 
-	// Wait a bit then reset the param to a shorter delay
+	// Wait a bit then set the param to false
 	time.Sleep(50 * time.Millisecond)
-	paramtable.Get().Save(configKey, "10ms")
+
+	paramtable.Get().Save(configKey, "false")
 	// Manually trigger event dispatch since Save() doesn't dispatch events
 	paramtable.GetBaseTable().Manager().OnEvent(&config.Event{
 		Key:         configKey,
-		Value:       "10ms",
+		Value:       "false",
 		EventType:   config.UpdateType,
 		EventSource: "test",
 	})
 
-	<-done
-	elapsed := time.Since(start)
-
-	// Should return after new delay, not the original 10s
-	assert.Less(t, elapsed, 500*time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("wait until start consumption timeout")
+	}
 }

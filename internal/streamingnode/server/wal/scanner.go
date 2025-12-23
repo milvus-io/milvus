@@ -25,8 +25,8 @@ type ReadOption struct {
 	// Otherwise, Chan will panic.
 	// vaild every message will be passed to this handler before being delivered to the consumer.
 
-	// IgnoreStartupDelay is the flag to ignore the startup delay of the scanner.
-	IgnoreStartupDelay bool
+	// IgnorePauseConsumption is the flag to ignore the consumption pause of the scanner.
+	IgnorePauseConsumption bool
 }
 
 // Scanner is the interface for reading records from the wal.

@@ -44,9 +44,9 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		zap.String("startMessageID", startMessageID.String()),
 	)
 	readOption := wal.ReadOption{
-		DeliverPolicy:      options.DeliverPolicyStartFrom(startMessageID),
-		MesasgeHandler:     adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
-		IgnoreStartupDelay: true,
+		DeliverPolicy:          options.DeliverPolicyStartFrom(startMessageID),
+		MesasgeHandler:         adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
+		IgnorePauseConsumption: true,
 	}
 
 	s := &scannerAdaptorImpl{
@@ -207,7 +207,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 
 // consumeEventLoop consumes the message from the message channel and handle it.
 func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMessage) error {
-	s.waitUntilStartup()
+	s.waitUntilStartConsumption()
 	for {
 		var upstream <-chan message.ImmutableMessage
 		if s.pendingQueue.Len() > 16 {
@@ -235,30 +235,35 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 	}
 }
 
-// waitUntilStartup is used to wait until the startup delay is over.
-func (s *scannerAdaptorImpl) waitUntilStartup() {
-	startupDelay := paramtable.Get().StreamingCfg.WALScannerStartupDelay.GetAsDurationByParse()
-	if !s.readOption.IgnoreStartupDelay && startupDelay > 0 {
-		delayTimer := time.NewTimer(startupDelay)
-		defer delayTimer.Stop()
+// waitUntilStartConsumption is used to wait until the consumption is started.
+func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
+	start := time.Now()
+	defer func() {
+		s.metrics.ObservePauseConsumption(time.Since(start))
+	}()
 
-		watchKey := paramtable.Get().StreamingCfg.WALScannerStartupDelay.Key
+	pauseConsumption := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool()
+	if !s.readOption.IgnorePauseConsumption && pauseConsumption {
+		resumeChan := make(chan struct{}, 1)
+		watchKey := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.Key
 		handler := config.NewHandler(fmt.Sprintf("%s-%d", watchKey, consumerCounter.Inc()), func(event *config.Event) {
-			if event.HasUpdated {
-				newStartupDelay := paramtable.Get().StreamingCfg.WALScannerStartupDelay.GetAsDurationByParse()
-				delayTimer.Reset(newStartupDelay)
-				s.logger.Info("reset startup delay", zap.Duration("newDelay", newStartupDelay))
+			pause := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool()
+			if !pause {
+				select {
+				case resumeChan <- struct{}{}:
+				default:
+				}
 			}
 		})
 		paramtable.Get().Watch(watchKey, handler)
 		defer paramtable.Get().Unwatch(watchKey, handler)
 
-		s.logger.Info("wait util startup...", zap.Duration("delay", startupDelay))
+		s.logger.Info("pause consumption...")
 		select {
-		case <-delayTimer.C:
-			s.logger.Info("finished to wait until startup")
+		case <-resumeChan:
+			s.logger.Info("continue to consume messages")
 		case <-s.Context().Done():
-			s.logger.Info("wait until startup is canceled")
+			s.logger.Info("pause consumption is canceled")
 		}
 	}
 }

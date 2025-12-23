@@ -62,8 +62,8 @@ type ConsumerOptions struct {
 	// Handler is the message handler used to handle message after recv from consumer.
 	MessageHandler message.Handler
 
-	// IgnoreStartupDelay is the flag to ignore the startup delay of the consumer.
-	IgnoreStartupDelay bool
+	// IgnorePauseConsumption is the flag to ignore the consumption pause of the consumer.
+	IgnorePauseConsumption bool
 }
 
 // HandlerClient is the interface that wraps streamingpb.StreamingNodeHandlerServiceClient.

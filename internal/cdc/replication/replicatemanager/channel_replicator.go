@@ -130,11 +130,11 @@ func (r *channelReplicator) init() error {
 		}
 		ch := make(adaptor.ChanMessageHandler)
 		scanner := streaming.WAL().Read(r.asyncNotifier.Context(), streaming.ReadOption{
-			PChannel:           r.channel.Value.GetSourceChannelName(),
-			DeliverPolicy:      options.DeliverPolicyStartFrom(cp.MessageID),
-			DeliverFilters:     []options.DeliverFilter{options.DeliverFilterTimeTickGT(cp.TimeTick)},
-			MessageHandler:     ch,
-			IgnoreStartupDelay: true,
+			PChannel:               r.channel.Value.GetSourceChannelName(),
+			DeliverPolicy:          options.DeliverPolicyStartFrom(cp.MessageID),
+			DeliverFilters:         []options.DeliverFilter{options.DeliverFilterTimeTickGT(cp.TimeTick)},
+			MessageHandler:         ch,
+			IgnorePauseConsumption: true,
 		})
 		r.msgScanner = scanner
 		r.msgChan = ch

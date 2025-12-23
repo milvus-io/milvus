@@ -6458,7 +6458,7 @@ if this parameter <= 0, will set it as 10`,
 
 type streamingConfig struct {
 	// scanner
-	WALScannerStartupDelay ParamItem `refreshable:"true"`
+	WALScannerPauseConsumption ParamItem `refreshable:"true"`
 
 	// balancer
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
@@ -6516,24 +6516,25 @@ type streamingConfig struct {
 
 func (p *streamingConfig) init(base *BaseTable) {
 	// scanner
-	p.WALScannerStartupDelay = ParamItem{
-		Key:     "streaming.walScanner.startupDelay",
+	p.WALScannerPauseConsumption = ParamItem{
+		Key:     "streaming.walScanner.pauseConsumption",
 		Version: "2.6.8",
-		Doc: `Startup delay before the scanner begins consuming WAL messages, 0s by default.
-It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration.
+		Doc: `Whether to pause the scanner from consuming WAL messages, false by default.
 
 This parameter can be used as a temporary mitigation when a StreamingNode
-enters a crash loop and fails to execute UpdateReplicateConfigure(Primary-Secondary switchover) due to bugs.
-Delaying scanner consumption helps prevent the crash from being repeatedly triggered during startup.
+enters a crash loop and fails to execute UpdateReplicateConfigure (Primary-Secondary switchover) 
+due to bugs. Pausing scanner consumption prevents the crash from being 
+repeatedly triggered during the node's startup and recovery phase.
 
-A value of "20m" is recommended in such scenarios. After UpdateReplicateConfigure
-completes successfully or the StreamingNode returns to a healthy state, this value should be reset to "0s".
+In such recovery scenarios, set this value to "true". After UpdateReplicateConfigure
+completes successfully or the StreamingNode returns to a healthy state, 
+this value should be set back to "false" to resume normal message processing.
 
 This configuration is applied dynamically and does not require restarting the cluster.`,
-		DefaultValue: "0s",
+		DefaultValue: "false",
 		Export:       false,
 	}
-	p.WALScannerStartupDelay.Init(base.mgr)
+	p.WALScannerPauseConsumption.Init(base.mgr)
 
 	// balancer
 	p.WALBalancerTriggerInterval = ParamItem{

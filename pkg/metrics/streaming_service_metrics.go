@@ -380,6 +380,12 @@ var (
 		Help: "Total of wal scanner on current streaming node",
 	}, WALChannelLabelName, WALScannerModelLabelName)
 
+	WALScannerPauseDurationSeconds = newWALHistogramVec(prometheus.HistogramOpts{
+		Name:    "scanner_pause_duration_seconds",
+		Help:    "Duration of pause consumption of wal scanner",
+		Buckets: secondsBuckets,
+	}, WALChannelLabelName)
+
 	WALScanMessageBytes = newWALHistogramVec(prometheus.HistogramOpts{
 		Name:    "scan_message_bytes",
 		Help:    "Bytes of scanned message from wal",
@@ -546,6 +552,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALWriteAheadBufferEarliestTimeTick)
 	registry.MustRegister(WALWriteAheadBufferLatestTimeTick)
 	registry.MustRegister(WALScannerTotal)
+	registry.MustRegister(WALScannerPauseDurationSeconds)
 	registry.MustRegister(WALScanMessageBytes)
 	registry.MustRegister(WALScanMessageTotal)
 	registry.MustRegister(WALScanPassMessageBytes)
