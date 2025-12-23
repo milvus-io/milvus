@@ -56,13 +56,14 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
+	retryableReader := common.NewRetryableReader(ctx, path, cmReader)
 
 	// Each ColumnReader consumes ReaderProperties.BufferSize memory independently.
 	// Therefore, the bufferSize should be divided by the number of columns
 	// to ensure total memory usage stays within the intended limit.
 	columnReaderBufferSize := bufferSize / len(schema.GetFields())
 
-	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
+	r, err := file.NewParquetReader(retryableReader, file.WithReadProps(&parquet.ReaderProperties{
 		BufferSize:            int64(columnReaderBufferSize),
 		BufferedStreamEnabled: true,
 	}))
@@ -88,7 +89,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	return &reader{
 		ctx:        ctx,
 		cm:         cm,
-		cmr:        cmReader,
+		cmr:        retryableReader,
 		schema:     schema,
 		fileSize:   atomic.NewInt64(0),
 		path:       path,

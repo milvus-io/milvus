@@ -285,6 +285,7 @@ type commonConfig struct {
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
 	StoragePathPrefix         ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts  ParamItem `refreshable:"true"`
 	TTMsgEnabled              ParamItem `refreshable:"true"`
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
@@ -943,6 +944,15 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "",
 	}
 	p.StoragePathPrefix.Init(base.mgr)
+
+	p.StorageReadRetryAttempts = ParamItem{
+		Key:          "common.storage.readRetryAttempts",
+		Version:      "2.6.8",
+		DefaultValue: "10",
+		Doc:          "The number of retry attempts for reading from object storage; only retryable errors will trigger a retry.",
+		Export:       false,
+	}
+	p.StorageReadRetryAttempts.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",
