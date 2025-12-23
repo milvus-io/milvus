@@ -511,7 +511,7 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 
 	p.MaxEtcdTxnNum = ParamItem{
 		Key:          "metastore.maxEtcdTxnNum",
-		Version:      "2.6.3",
+		Version:      "2.5.25",
 		DefaultValue: "64",
 		Doc:          `maximum number of operations in a single etcd transaction`,
 		Export:       true,
