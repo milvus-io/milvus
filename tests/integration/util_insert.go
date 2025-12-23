@@ -252,9 +252,12 @@ func GenerateHashKeys(numRows int) []uint32 {
 // It supports both Int64 and VarChar primary key types.
 // For Int64: uses murmur3 hash (same as typeutil.Hash32Int64)
 // For VarChar: uses crc32 hash (same as typeutil.HashString2Uint32)
-func GenerateChannelBalancedPrimaryKeys(fieldName string, fieldType schemapb.DataType, numRows int, numChannels int) *schemapb.FieldData {
+// startPK specifies where to begin searching for PKs.
+// Returns the FieldData and the next startPK for subsequent calls.
+func GenerateChannelBalancedPrimaryKeys(fieldName string, fieldType schemapb.DataType, numRows int, numChannels int, startPK int64) (*schemapb.FieldData, int64) {
 	switch fieldType {
 	case schemapb.DataType_Int64:
+		pks, nextPK := GenerateBalancedInt64PKs(numRows, numChannels, startPK)
 		return &schemapb.FieldData{
 			Type:      schemapb.DataType_Int64,
 			FieldName: fieldName,
@@ -262,13 +265,14 @@ func GenerateChannelBalancedPrimaryKeys(fieldName string, fieldType schemapb.Dat
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{
 						LongData: &schemapb.LongArray{
-							Data: GenerateBalancedInt64PKs(numRows, numChannels),
+							Data: pks,
 						},
 					},
 				},
 			},
-		}
+		}, nextPK
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		pks, nextIndex := GenerateBalancedVarCharPKs(numRows, numChannels, int(startPK))
 		return &schemapb.FieldData{
 			Type:      schemapb.DataType_VarChar,
 			FieldName: fieldName,
@@ -276,12 +280,12 @@ func GenerateChannelBalancedPrimaryKeys(fieldName string, fieldType schemapb.Dat
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: GenerateBalancedVarCharPKs(numRows, numChannels),
+							Data: pks,
 						},
 					},
 				},
 			},
-		}
+		}, int64(nextIndex)
 	default:
 		panic(fmt.Sprintf("not supported primary key type: %s", fieldType))
 	}
@@ -290,7 +294,9 @@ func GenerateChannelBalancedPrimaryKeys(fieldName string, fieldType schemapb.Dat
 // GenerateBalancedInt64PKs generates int64 primary keys that are evenly distributed across channels.
 // This ensures each channel receives exactly numRows/numChannels items based on PK hash values.
 // The function searches for PKs that hash to each channel to achieve exact distribution.
-func GenerateBalancedInt64PKs(numRows int, numChannels int) []int64 {
+// startPK specifies where to begin searching for PKs.
+// Returns the generated PKs and the next startPK for subsequent calls.
+func GenerateBalancedInt64PKs(numRows int, numChannels int, startPK int64) ([]int64, int64) {
 	if numChannels <= 0 {
 		numChannels = 1
 	}
@@ -311,7 +317,9 @@ func GenerateBalancedInt64PKs(numRows int, numChannels int) []int64 {
 	}
 
 	// Search for PKs that hash to each channel
-	for pk := int64(1); ; pk++ {
+	var lastPK int64
+	for pk := startPK; ; pk++ {
+		lastPK = pk
 		// Calculate which channel this PK would go to
 		hash := hashInt64ForChannel(pk)
 		ch := int(hash % uint32(numChannels))
@@ -339,7 +347,7 @@ func GenerateBalancedInt64PKs(numRows int, numChannels int) []int64 {
 		result = append(result, channelPKs[ch]...)
 	}
 
-	return result
+	return result, lastPK + 1
 }
 
 // hashInt64ForChannel computes the hash value for channel assignment.
@@ -359,7 +367,9 @@ func hashInt64ForChannel(v int64) uint32 {
 // GenerateBalancedVarCharPKs generates varchar primary keys that are evenly distributed across channels.
 // This ensures each channel receives exactly numRows/numChannels items based on PK hash values.
 // The function searches for PKs that hash to each channel to achieve exact distribution.
-func GenerateBalancedVarCharPKs(numRows int, numChannels int) []string {
+// startIndex specifies where to begin searching for PKs (used in "pk_<index>" format).
+// Returns the generated PKs and the next startIndex for subsequent calls.
+func GenerateBalancedVarCharPKs(numRows int, numChannels int, startIndex int) ([]string, int) {
 	if numChannels <= 0 {
 		numChannels = 1
 	}
@@ -380,7 +390,9 @@ func GenerateBalancedVarCharPKs(numRows int, numChannels int) []string {
 	}
 
 	// Search for PKs that hash to each channel
-	for i := 1; ; i++ {
+	var lastIndex int
+	for i := startIndex; ; i++ {
+		lastIndex = i
 		// Generate a unique string PK
 		pk := fmt.Sprintf("pk_%d", i)
 
@@ -411,7 +423,7 @@ func GenerateBalancedVarCharPKs(numRows int, numChannels int) []string {
 		result = append(result, channelPKs[ch]...)
 	}
 
-	return result
+	return result, lastIndex + 1
 }
 
 // hashVarCharForChannel computes the hash value for channel assignment of varchar PKs.

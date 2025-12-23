@@ -748,17 +748,23 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 	// Start a goroutine to continuously insert data and trigger compaction
 	go func() {
 		defer wg.Done()
+		nextStartPK := int64(1)
 		for {
 			select {
 			case <-stopInsertCh:
 				return
 			default:
-				s.InsertAndFlush(ctx, dbName, collName, 2000, dim, &integration.PrimaryKeyConfig{
+				var err error
+				nextStartPK, err = s.InsertAndFlush(ctx, dbName, collName, 2000, dim, &integration.PrimaryKeyConfig{
 					FieldName:   integration.Int64Field,
 					FieldType:   schemapb.DataType_Int64,
 					NumChannels: 1,
+					StartPK:     nextStartPK,
 				})
-				_, err := s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+				if err != nil {
+					return
+				}
+				_, err = s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
 					CollectionName: collName,
 				})
 				s.NoError(err)

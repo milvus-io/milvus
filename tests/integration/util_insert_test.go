@@ -30,21 +30,22 @@ func TestGenerateBalancedInt64PKs(t *testing.T) {
 	t.Run("basic_functionality", func(t *testing.T) {
 		numRows := 100
 		numChannels := 4
-		pks := GenerateBalancedInt64PKs(numRows, numChannels)
+		pks, nextPK := GenerateBalancedInt64PKs(numRows, numChannels, 1)
 
 		assert.Equal(t, numRows, len(pks), "should generate correct number of PKs")
+		assert.Greater(t, nextPK, int64(numRows), "nextPK should be greater than numRows")
 	})
 
 	t.Run("zero_channels_defaults_to_one", func(t *testing.T) {
 		numRows := 10
-		pks := GenerateBalancedInt64PKs(numRows, 0)
+		pks, _ := GenerateBalancedInt64PKs(numRows, 0, 1)
 
 		assert.Equal(t, numRows, len(pks), "should generate correct number of PKs")
 	})
 
 	t.Run("negative_channels_defaults_to_one", func(t *testing.T) {
 		numRows := 10
-		pks := GenerateBalancedInt64PKs(numRows, -5)
+		pks, _ := GenerateBalancedInt64PKs(numRows, -5, 1)
 
 		assert.Equal(t, numRows, len(pks), "should generate correct number of PKs")
 	})
@@ -52,7 +53,7 @@ func TestGenerateBalancedInt64PKs(t *testing.T) {
 	t.Run("balanced_distribution_by_hash", func(t *testing.T) {
 		numRows := 100
 		numChannels := 4
-		pks := GenerateBalancedInt64PKs(numRows, numChannels)
+		pks, _ := GenerateBalancedInt64PKs(numRows, numChannels, 1)
 
 		// Verify distribution by hashing PKs
 		channelCounts := make(map[int]int)
@@ -73,7 +74,7 @@ func TestGenerateBalancedInt64PKs(t *testing.T) {
 	t.Run("remainder_distribution", func(t *testing.T) {
 		numRows := 10
 		numChannels := 3
-		pks := GenerateBalancedInt64PKs(numRows, numChannels)
+		pks, _ := GenerateBalancedInt64PKs(numRows, numChannels, 1)
 
 		channelCounts := make(map[int]int)
 		for _, pk := range pks {
@@ -94,7 +95,7 @@ func TestGenerateBalancedInt64PKs(t *testing.T) {
 	t.Run("unique_pks", func(t *testing.T) {
 		numRows := 100
 		numChannels := 4
-		pks := GenerateBalancedInt64PKs(numRows, numChannels)
+		pks, _ := GenerateBalancedInt64PKs(numRows, numChannels, 1)
 
 		// Verify all PKs are unique
 		seen := make(map[int64]bool)
@@ -107,11 +108,45 @@ func TestGenerateBalancedInt64PKs(t *testing.T) {
 	t.Run("positive_pks", func(t *testing.T) {
 		numRows := 50
 		numChannels := 5
-		pks := GenerateBalancedInt64PKs(numRows, numChannels)
+		pks, _ := GenerateBalancedInt64PKs(numRows, numChannels, 1)
 
 		for _, pk := range pks {
 			assert.Greater(t, pk, int64(0), "PKs should be positive")
 		}
+	})
+
+	t.Run("continuation_no_duplicates", func(t *testing.T) {
+		numRows := 100
+		numChannels := 4
+
+		// First call
+		pks1, nextPK := GenerateBalancedInt64PKs(numRows, numChannels, 1)
+
+		// Second call continues from nextPK
+		pks2, _ := GenerateBalancedInt64PKs(numRows, numChannels, nextPK)
+
+		// Verify no overlap between pks1 and pks2
+		seen := make(map[int64]bool)
+		for _, pk := range pks1 {
+			seen[pk] = true
+		}
+		for _, pk := range pks2 {
+			assert.False(t, seen[pk], "duplicate PK found: %d", pk)
+		}
+	})
+
+	t.Run("custom_start_pk", func(t *testing.T) {
+		numRows := 10
+		numChannels := 2
+		startPK := int64(1000)
+
+		pks, nextPK := GenerateBalancedInt64PKs(numRows, numChannels, startPK)
+
+		// All PKs should be >= startPK
+		for _, pk := range pks {
+			assert.GreaterOrEqual(t, pk, startPK, "PK should be >= startPK")
+		}
+		assert.Greater(t, nextPK, startPK, "nextPK should be > startPK")
 	})
 }
 
@@ -188,10 +223,11 @@ func TestGenerateChannelBalancedPrimaryKeys(t *testing.T) {
 		numChannels := 4
 		fieldName := "test_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels)
+		fieldData, nextPK := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels, 1)
 
 		assert.Equal(t, schemapb.DataType_Int64, fieldData.GetType())
 		assert.Equal(t, fieldName, fieldData.GetFieldName())
+		assert.Greater(t, nextPK, int64(0), "nextPK should be positive")
 
 		pks := fieldData.GetScalars().GetLongData().GetData()
 		assert.Equal(t, numRows, len(pks))
@@ -216,10 +252,11 @@ func TestGenerateChannelBalancedPrimaryKeys(t *testing.T) {
 		numChannels := 4
 		fieldName := "test_varchar_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels)
+		fieldData, nextPK := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels, 1)
 
 		assert.Equal(t, schemapb.DataType_VarChar, fieldData.GetType())
 		assert.Equal(t, fieldName, fieldData.GetFieldName())
+		assert.Greater(t, nextPK, int64(0), "nextPK should be positive")
 
 		pks := fieldData.GetScalars().GetStringData().GetData()
 		assert.Equal(t, numRows, len(pks))
@@ -244,7 +281,7 @@ func TestGenerateChannelBalancedPrimaryKeys(t *testing.T) {
 		numChannels := 2
 		fieldName := "string_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_String, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_String, numRows, numChannels, 1)
 
 		// String type should be treated as VarChar
 		assert.Equal(t, schemapb.DataType_VarChar, fieldData.GetType())
@@ -256,8 +293,31 @@ func TestGenerateChannelBalancedPrimaryKeys(t *testing.T) {
 
 	t.Run("unsupported_type_panics", func(t *testing.T) {
 		assert.Panics(t, func() {
-			GenerateChannelBalancedPrimaryKeys("test", schemapb.DataType_Float, 10, 2)
+			GenerateChannelBalancedPrimaryKeys("test", schemapb.DataType_Float, 10, 2, 1)
 		}, "unsupported type should panic")
+	})
+
+	t.Run("continuation_no_duplicates", func(t *testing.T) {
+		numRows := 100
+		numChannels := 4
+		fieldName := "test_pk"
+
+		// First call
+		fieldData1, nextPK := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels, 1)
+		pks1 := fieldData1.GetScalars().GetLongData().GetData()
+
+		// Second call continues from nextPK
+		fieldData2, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels, nextPK)
+		pks2 := fieldData2.GetScalars().GetLongData().GetData()
+
+		// Verify no overlap
+		seen := make(map[int64]bool)
+		for _, pk := range pks1 {
+			seen[pk] = true
+		}
+		for _, pk := range pks2 {
+			assert.False(t, seen[pk], "duplicate PK found: %d", pk)
+		}
 	})
 }
 
@@ -265,21 +325,22 @@ func TestGenerateBalancedVarCharPKs(t *testing.T) {
 	t.Run("basic_functionality", func(t *testing.T) {
 		numRows := 100
 		numChannels := 4
-		pks := GenerateBalancedVarCharPKs(numRows, numChannels)
+		pks, nextIndex := GenerateBalancedVarCharPKs(numRows, numChannels, 1)
 
 		assert.Equal(t, numRows, len(pks), "should generate correct number of PKs")
+		assert.Greater(t, nextIndex, numRows, "nextIndex should be greater than numRows")
 	})
 
 	t.Run("zero_channels_defaults_to_one", func(t *testing.T) {
 		numRows := 10
-		pks := GenerateBalancedVarCharPKs(numRows, 0)
+		pks, _ := GenerateBalancedVarCharPKs(numRows, 0, 1)
 
 		assert.Equal(t, numRows, len(pks), "should generate correct number of PKs")
 	})
 
 	t.Run("negative_channels_defaults_to_one", func(t *testing.T) {
 		numRows := 10
-		pks := GenerateBalancedVarCharPKs(numRows, -5)
+		pks, _ := GenerateBalancedVarCharPKs(numRows, -5, 1)
 
 		assert.Equal(t, numRows, len(pks), "should generate correct number of PKs")
 	})
@@ -287,7 +348,7 @@ func TestGenerateBalancedVarCharPKs(t *testing.T) {
 	t.Run("balanced_distribution_by_hash", func(t *testing.T) {
 		numRows := 100
 		numChannels := 4
-		pks := GenerateBalancedVarCharPKs(numRows, numChannels)
+		pks, _ := GenerateBalancedVarCharPKs(numRows, numChannels, 1)
 
 		// Verify distribution by hashing PKs
 		channelCounts := make(map[int]int)
@@ -308,7 +369,7 @@ func TestGenerateBalancedVarCharPKs(t *testing.T) {
 	t.Run("remainder_distribution", func(t *testing.T) {
 		numRows := 10
 		numChannels := 3
-		pks := GenerateBalancedVarCharPKs(numRows, numChannels)
+		pks, _ := GenerateBalancedVarCharPKs(numRows, numChannels, 1)
 
 		channelCounts := make(map[int]int)
 		for _, pk := range pks {
@@ -329,7 +390,7 @@ func TestGenerateBalancedVarCharPKs(t *testing.T) {
 	t.Run("unique_pks", func(t *testing.T) {
 		numRows := 100
 		numChannels := 4
-		pks := GenerateBalancedVarCharPKs(numRows, numChannels)
+		pks, _ := GenerateBalancedVarCharPKs(numRows, numChannels, 1)
 
 		// Verify all PKs are unique
 		seen := make(map[string]bool)
@@ -342,10 +403,30 @@ func TestGenerateBalancedVarCharPKs(t *testing.T) {
 	t.Run("non_empty_pks", func(t *testing.T) {
 		numRows := 50
 		numChannels := 5
-		pks := GenerateBalancedVarCharPKs(numRows, numChannels)
+		pks, _ := GenerateBalancedVarCharPKs(numRows, numChannels, 1)
 
 		for _, pk := range pks {
 			assert.NotEmpty(t, pk, "PKs should not be empty")
+		}
+	})
+
+	t.Run("continuation_no_duplicates", func(t *testing.T) {
+		numRows := 100
+		numChannels := 4
+
+		// First call
+		pks1, nextIndex := GenerateBalancedVarCharPKs(numRows, numChannels, 1)
+
+		// Second call continues from nextIndex
+		pks2, _ := GenerateBalancedVarCharPKs(numRows, numChannels, nextIndex)
+
+		// Verify no overlap between pks1 and pks2
+		seen := make(map[string]bool)
+		for _, pk := range pks1 {
+			seen[pk] = true
+		}
+		for _, pk := range pks2 {
+			assert.False(t, seen[pk], "duplicate PK found: %s", pk)
 		}
 	})
 }
@@ -436,7 +517,7 @@ func TestHashPK2ChannelsIntegration(t *testing.T) {
 		fieldName := "test_pk"
 
 		// Generate balanced PKs
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels, 1)
 		pks := fieldData.GetScalars().GetLongData().GetData()
 
 		// Create schemapb.IDs for HashPK2Channels
@@ -476,7 +557,7 @@ func TestHashPK2ChannelsIntegration(t *testing.T) {
 		numChannels := 3
 		fieldName := "test_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels, 1)
 		pks := fieldData.GetScalars().GetLongData().GetData()
 
 		ids := &schemapb.IDs{
@@ -511,7 +592,7 @@ func TestHashPK2ChannelsIntegration(t *testing.T) {
 		numChannels := 4
 		fieldName := "test_varchar_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels, 1)
 		pks := fieldData.GetScalars().GetStringData().GetData()
 
 		ids := &schemapb.IDs{
@@ -546,7 +627,7 @@ func TestHashPK2ChannelsIntegration(t *testing.T) {
 		numChannels := 3
 		fieldName := "test_varchar_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels, 1)
 		pks := fieldData.GetScalars().GetStringData().GetData()
 
 		ids := &schemapb.IDs{
@@ -580,7 +661,7 @@ func TestHashPK2ChannelsIntegration(t *testing.T) {
 		numChannels := 8
 		fieldName := "test_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_Int64, numRows, numChannels, 1)
 		pks := fieldData.GetScalars().GetLongData().GetData()
 
 		ids := &schemapb.IDs{
@@ -616,7 +697,7 @@ func TestHashPK2ChannelsIntegration(t *testing.T) {
 		numChannels := 8
 		fieldName := "test_varchar_pk"
 
-		fieldData := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels)
+		fieldData, _ := GenerateChannelBalancedPrimaryKeys(fieldName, schemapb.DataType_VarChar, numRows, numChannels, 1)
 		pks := fieldData.GetScalars().GetStringData().GetData()
 
 		ids := &schemapb.IDs{
