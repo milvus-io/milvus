@@ -318,18 +318,18 @@ func GenerateBalancedInt64PKs(numRows int, numChannels int) []int64 {
 
 		if len(channelPKs[ch]) < targetCounts[ch] {
 			channelPKs[ch] = append(channelPKs[ch], pk)
-		}
 
-		// Check if all channels have enough PKs
-		done := true
-		for ch := 0; ch < numChannels; ch++ {
-			if len(channelPKs[ch]) < targetCounts[ch] {
-				done = false
+			// Check if all channels have enough PKs
+			done := true
+			for ch := 0; ch < numChannels; ch++ {
+				if len(channelPKs[ch]) < targetCounts[ch] {
+					done = false
+					break
+				}
+			}
+			if done {
 				break
 			}
-		}
-		if done {
-			break
 		}
 	}
 
@@ -390,18 +390,18 @@ func GenerateBalancedVarCharPKs(numRows int, numChannels int) []string {
 
 		if len(channelPKs[ch]) < targetCounts[ch] {
 			channelPKs[ch] = append(channelPKs[ch], pk)
-		}
 
-		// Check if all channels have enough PKs
-		done := true
-		for ch := 0; ch < numChannels; ch++ {
-			if len(channelPKs[ch]) < targetCounts[ch] {
-				done = false
+			// Check if all channels have enough PKs
+			done := true
+			for ch := 0; ch < numChannels; ch++ {
+				if len(channelPKs[ch]) < targetCounts[ch] {
+					done = false
+					break
+				}
+			}
+			if done {
 				break
 			}
-		}
-		if done {
-			break
 		}
 	}
 
