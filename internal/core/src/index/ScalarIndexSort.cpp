@@ -100,6 +100,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     is_built_ = true;
 
     setup_data_pointers();
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -143,6 +144,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
     is_built_ = true;
 
     setup_data_pointers();
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -281,6 +283,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     }
 
     is_built_ = true;
+    ComputeByteSize();
 
     LOG_INFO("load ScalarIndexSort done, field_id: {}, is_mmap:{}",
              field_id_,

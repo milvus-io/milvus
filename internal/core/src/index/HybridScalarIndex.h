@@ -153,6 +153,16 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->Size();
     }
 
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
+        if (internal_index_) {
+            total += internal_index_->ByteSize();
+        }
+        this->cached_byte_size_ = total;
+    }
+
     const bool
     HasRawData() const override {
         if (field_type_ == proto::schema::DataType::Array) {
