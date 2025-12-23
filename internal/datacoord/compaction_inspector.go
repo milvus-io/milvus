@@ -309,11 +309,7 @@ func (c *compactionInspector) loadMeta() {
 	triggers := c.meta.GetCompactionTasks(context.TODO())
 	for _, tasks := range triggers {
 		for _, task := range tasks {
-			state := task.GetState()
-			if state == datapb.CompactionTaskState_completed ||
-				state == datapb.CompactionTaskState_cleaned ||
-				state == datapb.CompactionTaskState_timeout ||
-				state == datapb.CompactionTaskState_unknown {
+			if isCompactionTaskFinished(task) {
 				log.Info("compactionInspector loadMeta abandon compactionTask",
 					zap.Int64("planID", task.GetPlanID()),
 					zap.String("type", task.GetType().String()),
