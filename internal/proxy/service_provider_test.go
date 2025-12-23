@@ -76,8 +76,8 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		collID:  collectionID,
-		schema:  newSchemaInfo(schema),
+		collID:    collectionID,
+		schema:    newSchemaInfo(schema),
 		shardsNum: common.DefaultShardsNum,
 	}, nil)
 	globalMetaCache = mockCache
