@@ -1,8 +1,6 @@
 package metricsutil
 
 import (
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -24,9 +22,9 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 	catchupLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelCatchup
 	tailingLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelTailing
 	return &ScanMetrics{
-		constLabel:           constLabel,
-		scannerTotal:         metrics.WALScannerTotal.MustCurryWith(constLabel),
-		scannerPauseDuration: metrics.WALScannerPauseDurationSeconds.With(constLabel),
+		constLabel:    constLabel,
+		scannerTotal:  metrics.WALScannerTotal.MustCurryWith(constLabel),
+		scannerPaused: metrics.WALScannerPauseConsumption.With(constLabel),
 		tailing: underlyingScannerMetrics{
 			messageBytes:           metrics.WALScanMessageBytes.With(tailingLabel),
 			passMessageBytes:       metrics.WALScanPassMessageBytes.With(tailingLabel),
@@ -49,15 +47,15 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 }
 
 type ScanMetrics struct {
-	constLabel           prometheus.Labels
-	scannerTotal         *prometheus.GaugeVec
-	scannerPauseDuration prometheus.Observer
-	catchup              underlyingScannerMetrics
-	tailing              underlyingScannerMetrics
-	txnTotal             *prometheus.CounterVec
-	timeTickBufSize      prometheus.Gauge
-	txnBufSize           prometheus.Gauge
-	pendingQueueSize     prometheus.Gauge
+	constLabel       prometheus.Labels
+	scannerTotal     *prometheus.GaugeVec
+	scannerPaused    prometheus.Gauge
+	catchup          underlyingScannerMetrics
+	tailing          underlyingScannerMetrics
+	txnTotal         *prometheus.CounterVec
+	timeTickBufSize  prometheus.Gauge
+	txnBufSize       prometheus.Gauge
+	pendingQueueSize prometheus.Gauge
 }
 
 type underlyingScannerMetrics struct {
@@ -103,7 +101,7 @@ func (m *ScanMetrics) NewScannerMetrics() *ScannerMetrics {
 // Close closes the metrics.
 func (m *ScanMetrics) Close() {
 	metrics.WALScannerTotal.DeletePartialMatch(m.constLabel)
-	metrics.WALScannerPauseDurationSeconds.DeletePartialMatch(m.constLabel)
+	metrics.WALScannerPauseConsumption.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanPassMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageTotal.DeletePartialMatch(m.constLabel)
@@ -130,9 +128,14 @@ func (m *ScannerMetrics) SwitchModel(s string) {
 	m.scannerTotal.WithLabelValues(m.scannerModel).Inc()
 }
 
-// ObservePauseConsumption observes the pause consumption.
-func (m *ScannerMetrics) ObservePauseConsumption(duration time.Duration) {
-	m.scannerPauseDuration.Observe(duration.Seconds())
+// PauseConsumption sets the pause consumption.
+func (m *ScannerMetrics) PauseConsumption() {
+	m.scannerPaused.Set(1)
+}
+
+// ResumeConsumption resumes the scanner consumption.
+func (m *ScannerMetrics) ResumeConsumption() {
+	m.scannerPaused.Set(0)
 }
 
 // ObserveMessage observes the message.

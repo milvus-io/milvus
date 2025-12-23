@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -237,10 +236,8 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 
 // waitUntilStartConsumption is used to wait until the consumption is started.
 func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
-	start := time.Now()
-	defer func() {
-		s.metrics.ObservePauseConsumption(time.Since(start))
-	}()
+	s.metrics.PauseConsumption()
+	defer s.metrics.ResumeConsumption()
 
 	pauseConsumption := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool()
 	if !s.readOption.IgnorePauseConsumption && pauseConsumption {
