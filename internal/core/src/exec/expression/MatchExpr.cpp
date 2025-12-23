@@ -172,9 +172,9 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                             TargetBitmap(row_count, true));
 
     auto col_vec = std::dynamic_pointer_cast<ColumnVector>(result);
-    auto col_vec_size = col_vec->size();
     AssertInfo(col_vec != nullptr, "Result should be ColumnVector");
     AssertInfo(col_vec->IsBitmap(), "Result should be bitmap");
+    auto col_vec_size = col_vec->size();
     TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec_size);
 
     auto [total_elements, _] = array_offsets->ElementIDRangeOfRow(row_count);
