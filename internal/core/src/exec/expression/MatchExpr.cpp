@@ -110,7 +110,7 @@ ProcessMatchRows(int64_t row_count,
         if constexpr (match_type == MatchType::MatchAny) {
             is_match = hit_count > 0;
         } else if constexpr (match_type == MatchType::MatchAll) {
-            is_match = hit_count == element_count;
+            is_match = element_count > 0 && hit_count == element_count;
         } else if constexpr (match_type == MatchType::MatchLeast) {
             is_match = hit_count >= threshold;
         } else if constexpr (match_type == MatchType::MatchMost) {
