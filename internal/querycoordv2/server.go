@@ -319,7 +319,7 @@ func (s *Server) initQueryCoord() error {
 	s.proxyClientManager = proxyutil.NewProxyClientManager(proxyutil.DefaultProxyCreator)
 	s.proxyWatcher = proxyutil.NewProxyWatcher(
 		s.etcdCli,
-		s.proxyClientManager.AddProxyClients,
+		s.proxyClientManager.SetProxyClients,
 	)
 	s.proxyWatcher.AddSessionFunc(s.proxyClientManager.AddProxyClient)
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
