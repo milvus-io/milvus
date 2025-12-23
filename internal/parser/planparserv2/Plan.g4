@@ -20,6 +20,11 @@ expr:
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
+	| MATCH_ALL'(' Identifier ',' expr ')'                                                                      # MatchAll
+	| MATCH_ANY'(' Identifier ',' expr ')'                                                                      # MatchAny
+	| MATCH_LEAST'(' Identifier ',' expr ',' IntegerConstant ')'                                                # MatchLeast
+	| MATCH_MOST'(' Identifier ',' expr ',' IntegerConstant ')'                                                 # MatchMost
+	| MATCH_EXACT'(' Identifier ',' expr ',' IntegerConstant ')'                                                # MatchExact
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -80,6 +85,11 @@ EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
+MATCH_ALL: 'match_all' | 'MATCH_ALL';
+MATCH_ANY: 'match_any' | 'MATCH_ANY';
+MATCH_LEAST: 'match_least' | 'MATCH_LEAST';
+MATCH_MOST: 'match_most' | 'MATCH_MOST';
+MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';

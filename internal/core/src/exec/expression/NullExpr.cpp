@@ -31,7 +31,11 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                  static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
-    switch (expr_->column_.data_type_) {
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecVisitorImpl<bool>(input);
             break;
