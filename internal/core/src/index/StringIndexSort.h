@@ -123,6 +123,11 @@ class StringIndexSort : public StringIndex {
     int64_t
     Size() override;
 
+    // Computes and caches the total memory usage in bytes.
+    // For mmap mode, this includes both memory-resident structures and mmap size.
+    void
+    ComputeByteSize() override;
+
  protected:
     int64_t
     CalculateTotalSize() const;
@@ -199,6 +204,10 @@ class StringIndexSortImpl {
 
     virtual int64_t
     Size() = 0;
+
+    // Returns the memory usage in bytes for this impl
+    virtual int64_t
+    ByteSize() const = 0;
 };
 
 class StringIndexSortMemoryImpl : public StringIndexSortImpl {
@@ -272,6 +281,9 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
 
     int64_t
     Size() override;
+
+    int64_t
+    ByteSize() const override;
 
  private:
     // Helper method for binary search
@@ -386,6 +398,9 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
 
     int64_t
     Size() override;
+
+    int64_t
+    ByteSize() const override;
 
  private:
     // Binary search for a value
