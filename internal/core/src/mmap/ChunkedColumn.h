@@ -128,11 +128,6 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     virtual ~ChunkedColumnBase() = default;
 
-    void
-    ManualEvictCache() const override {
-        slot_->ManualEvictAll();
-    }
-
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
         auto ca = SemiInlineGet(slot_->PinCells(op_ctx, {chunk_id}));
