@@ -19,7 +19,7 @@ func TestLevelZeroSegmentsViewSuite(t *testing.T) {
 
 type LevelZeroSegmentsViewSuite struct {
 	suite.Suite
-	v *LevelZeroSegmentsView
+	v *LevelZeroCompactionView
 }
 
 func genTestL0SegmentView(ID UniqueID, label *CompactionGroupLabel, posTime Timestamp) *SegmentView {
@@ -44,43 +44,17 @@ func (s *LevelZeroSegmentsViewSuite) SetupTest() {
 		genTestL0SegmentView(102, label, 10000),
 	}
 
-	targetView := &LevelZeroSegmentsView{
-		label:                     label,
-		segments:                  segments,
-		earliestGrowingSegmentPos: &msgpb.MsgPosition{Timestamp: 10000},
-		triggerID:                 10000,
+	targetView := &LevelZeroCompactionView{
+		label:           label,
+		l0Segments:      segments,
+		latestDeletePos: &msgpb.MsgPosition{Timestamp: 10000},
+		triggerID:       10000,
 	}
 
 	s.True(label.Equal(targetView.GetGroupLabel()))
 	log.Info("LevelZeroSegmentsView", zap.String("view", targetView.String()))
 
 	s.v = targetView
-}
-
-func (s *LevelZeroSegmentsViewSuite) TestEqual() {
-	label := s.v.GetGroupLabel()
-
-	tests := []struct {
-		description string
-
-		input  []*SegmentView
-		output bool
-	}{
-		{"Different segment numbers", []*SegmentView{genTestL0SegmentView(100, label, 10000)}, false},
-		{"Same number, diff segmentIDs", []*SegmentView{
-			genTestL0SegmentView(100, label, 10000),
-			genTestL0SegmentView(101, label, 10000),
-			genTestL0SegmentView(200, label, 10000),
-		}, false},
-		{"Same", s.v.GetSegmentsView(), true},
-	}
-
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			got := s.v.Equal(test.input)
-			s.Equal(test.output, got)
-		})
-	}
 }
 
 func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
@@ -92,7 +66,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 		genTestL0SegmentView(103, label, 40000),
 	}
 
-	s.v.segments = views
+	s.v.l0Segments = views
 	tests := []struct {
 		description string
 
@@ -102,13 +76,6 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 
 		expectedSegs []UniqueID
 	}{
-		{
-			"No valid segments by earliest growing segment pos",
-			64,
-			20,
-			10000,
-			nil,
-		},
 		{
 			"Not qualified",
 			1,
@@ -121,14 +88,14 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			8 * 1024 * 1024,
 			1,
 			30000,
-			[]UniqueID{100, 101},
+			[]UniqueID{100, 101, 102, 103},
 		},
 		{
 			"Trigger by > TriggerDeltaCount",
 			1,
 			10,
 			30000,
-			[]UniqueID{100, 101},
+			[]UniqueID{100, 101, 102, 103},
 		},
 		{
 			"Trigger by > maxDeltaSize",
@@ -148,7 +115,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			s.v.earliestGrowingSegmentPos.Timestamp = test.prepEarliestT
+			s.v.latestDeletePos.Timestamp = test.prepEarliestT
 			for _, view := range s.v.GetSegmentsView() {
 				if view.dmlPos.Timestamp < test.prepEarliestT {
 					view.DeltalogCount = test.prepCountEach
@@ -162,7 +129,7 @@ func (s *LevelZeroSegmentsViewSuite) TestTrigger() {
 			if len(test.expectedSegs) == 0 {
 				s.Nil(gotView)
 			} else {
-				levelZeroView, ok := gotView.(*LevelZeroSegmentsView)
+				levelZeroView, ok := gotView.(*LevelZeroCompactionView)
 				s.True(ok)
 				s.NotNil(levelZeroView)
 
