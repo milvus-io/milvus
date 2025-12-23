@@ -117,6 +117,9 @@ func getRoleFromEnvKey(key string) (string, string, bool) {
 	if role == "" {
 		return "", labelWithRole, true
 	}
+	if len(splits) <= 1 {
+		return "", "", false
+	}
 	// else, it's a selected role label, only can be seen in the selected role.
 	return role, strings.Join(splits[1:], "_"), true
 }
