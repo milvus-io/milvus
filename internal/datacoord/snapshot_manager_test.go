@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -756,7 +757,7 @@ func TestSnapshotManager_CalculateProgress(t *testing.T) {
 		{"0% progress", 10, 0, 0},
 		{"50% progress", 10, 5, 50},
 		{"100% progress", 10, 10, 100},
-		{"zero total", 0, 0, 0},
+		{"zero total", 0, 0, 100}, // No segments to copy means 100% complete
 		{"partial progress", 3, 1, 33},
 	}
 
@@ -952,259 +953,9 @@ func TestSnapshotManager_BuildChannelMapping_GetChannelsError(t *testing.T) {
 	assert.Equal(t, expectedErr, err)
 }
 
-func TestSnapshotManager_BuildChannelMapping_PChannelNotFoundInTarget(t *testing.T) {
-	ctx := context.Background()
-
-	// Snapshot has vchannels on pchannel dml_0 and dml_1
-	// But target only has pchannel dml_0 (dml_1 is missing)
-	snapshotData := &SnapshotData{
-		Collection: &datapb.CollectionDescription{
-			VirtualChannelNames: []string{"dml_0_100v0", "dml_1_100v1"},
-		},
-		Segments: []*datapb.SegmentDescription{
-			{SegmentId: 1, ChannelName: "dml_0_100v0"},
-			{SegmentId: 2, ChannelName: "dml_1_100v1"},
-		},
-	}
-
-	// Target has 2 vchannels but on different pchannels (dml_0 and dml_2)
-	getChannelsFunc := func(ctx context.Context, collectionID int64) ([]RWChannel, error) {
-		return []RWChannel{
-			&channelMeta{Name: "dml_0_200v0"},
-			&channelMeta{Name: "dml_2_200v1"}, // Different pchannel - dml_2 instead of dml_1
-		}, nil
-	}
-
-	sm := &snapshotManager{
-		getChannelsByCollectionID: getChannelsFunc,
-	}
-
-	// Execute
-	mapping, err := sm.buildChannelMapping(ctx, snapshotData, 200)
-
-	// Verify - should fail because dml_1 pchannel not found in target
-	assert.Error(t, err)
-	assert.Nil(t, mapping)
-	assert.Contains(t, err.Error(), "pchannel not found in target collection")
-}
-
-// --- Test BuildPartitionMapping ---
-
-func TestSnapshotManager_BuildPartitionMapping_Success(t *testing.T) {
-	ctx := context.Background()
-
-	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			PartitionIds: []int64{1, 2, 3},
-		},
-	}
-
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, int64(100)).Return([]int64{101, 102, 103}, nil).Once()
-
-	sm := &snapshotManager{
-		broker: mockBroker,
-	}
-
-	// Execute
-	mapping, err := sm.buildPartitionMapping(ctx, snapshotData, 100)
-
-	// Verify
-	assert.NoError(t, err)
-	assert.Len(t, mapping, 3)
-	// Sorted mapping: 1->101, 2->102, 3->103
-	assert.Equal(t, int64(101), mapping[1])
-	assert.Equal(t, int64(102), mapping[2])
-	assert.Equal(t, int64(103), mapping[3])
-}
-
-func TestSnapshotManager_BuildPartitionMapping_CountMismatch(t *testing.T) {
-	ctx := context.Background()
-
-	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			PartitionIds: []int64{1, 2, 3},
-		},
-	}
-
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, int64(100)).Return([]int64{101, 102}, nil).Once()
-
-	sm := &snapshotManager{
-		broker: mockBroker,
-	}
-
-	// Execute
-	mapping, err := sm.buildPartitionMapping(ctx, snapshotData, 100)
-
-	// Verify
-	assert.Error(t, err)
-	assert.Nil(t, mapping)
-	assert.Contains(t, err.Error(), "partition count mismatch")
-}
-
-func TestSnapshotManager_BuildPartitionMapping_BrokerError(t *testing.T) {
-	ctx := context.Background()
-
-	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			PartitionIds: []int64{1, 2, 3},
-		},
-	}
-
-	expectedErr := errors.New("broker error")
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, int64(100)).Return(nil, expectedErr).Once()
-
-	sm := &snapshotManager{
-		broker: mockBroker,
-	}
-
-	// Execute
-	mapping, err := sm.buildPartitionMapping(ctx, snapshotData, 100)
-
-	// Verify
-	assert.Error(t, err)
-	assert.Nil(t, mapping)
-	assert.Equal(t, expectedErr, err)
-}
-
 // --- Test RestoreSnapshot ---
-
-func TestSnapshotManager_RestoreSnapshot_Success(t *testing.T) {
-	ctx := context.Background()
-
-	// Setup mocks
-	mockAllocator := allocator.NewMockAllocator(t)
-	mockBroker := broker.NewMockBroker(t)
-
-	jobID := int64(5001)
-
-	// Mock ReadSnapshotData for restore
-	// Use vchannel names that map to pchannels: ch1, ch2
-	// Format: {pchannel}_{collectionID}v{index}
-	snapshotData := &SnapshotData{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Id:           1001,
-			Name:         "test_snapshot",
-			CollectionId: 100,
-			PartitionIds: []int64{1, 2},
-		},
-		Collection: &datapb.CollectionDescription{
-			VirtualChannelNames: []string{"ch1_100v0", "ch2_100v1"},
-		},
-		Segments: []*datapb.SegmentDescription{
-			{SegmentId: 1, ChannelName: "ch1_100v0", PartitionId: 1},
-			{SegmentId: 2, ChannelName: "ch2_100v1", PartitionId: 2},
-		},
-	}
-
-	mockReadSnapshotData := mockey.Mock((*snapshotMeta).ReadSnapshotData).To(func(sm *snapshotMeta, ctx context.Context, name string, includeSegments bool) (*SnapshotData, error) {
-		assert.True(t, includeSegments)
-		return snapshotData, nil
-	}).Build()
-	defer mockReadSnapshotData.UnPatch()
-
-	// Mock getChannelsByCollectionID
-	// Target vchannels use same pchannels (ch1, ch2) but different collectionID (200)
-	getChannelsFunc := func(ctx context.Context, collectionID int64) ([]RWChannel, error) {
-		return []RWChannel{
-			&channelMeta{Name: "ch1_200v0"},
-			&channelMeta{Name: "ch2_200v1"},
-		}, nil
-	}
-
-	// Mock broker for partition mapping
-	mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, int64(200)).Return([]int64{101, 102}, nil).Once()
-
-	// Mock copySegmentMeta.AddJob - should use provided jobID
-	mockAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(func(csm *copySegmentMeta, ctx context.Context, job CopySegmentJob) error {
-		assert.Equal(t, jobID, job.GetJobId())
-		return nil
-	}).Build()
-	defer mockAddJob.UnPatch()
-
-	// Mock meta.GetSegment - return valid segment info for source segments
-	mockGetSegment := mockey.Mock((*meta).GetSegment).To(func(m *meta, ctx context.Context, segmentID int64) *SegmentInfo {
-		return &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID: segmentID,
-			},
-		}
-	}).Build()
-	defer mockGetSegment.UnPatch()
-
-	// Mock meta.AddSegment - for pre-registering target segments
-	mockAddSegment := mockey.Mock((*meta).AddSegment).To(func(m *meta, ctx context.Context, segment *SegmentInfo) error {
-		return nil
-	}).Build()
-	defer mockAddSegment.UnPatch()
-
-	// Mock allocator for segment IDs
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(10000), int64(10002), nil).Maybe()
-
-	sm := &snapshotManager{
-		meta:                      &meta{},
-		snapshotMeta:              &snapshotMeta{},
-		copySegmentMeta:           &copySegmentMeta{},
-		allocator:                 mockAllocator,
-		broker:                    mockBroker,
-		getChannelsByCollectionID: getChannelsFunc,
-	}
-
-	// Execute - provide a pre-allocated jobID
-	err := sm.RestoreSnapshot(ctx, "test_snapshot", 200, jobID)
-
-	// Verify
-	assert.NoError(t, err)
-}
-
-func TestSnapshotManager_RestoreSnapshot_ReadSnapshotDataError(t *testing.T) {
-	ctx := context.Background()
-
-	expectedErr := errors.New("read snapshot data error")
-	mockReadSnapshotData := mockey.Mock((*snapshotMeta).ReadSnapshotData).To(func(sm *snapshotMeta, ctx context.Context, name string, includeSegments bool) (*SnapshotData, error) {
-		return nil, expectedErr
-	}).Build()
-	defer mockReadSnapshotData.UnPatch()
-
-	sm := &snapshotManager{
-		snapshotMeta: &snapshotMeta{},
-	}
-
-	// Execute
-	err := sm.RestoreSnapshot(ctx, "test_snapshot", 200, 5001)
-
-	// Verify
-	assert.Error(t, err)
-	assert.Equal(t, expectedErr, err)
-}
-
-func TestSnapshotManager_RestoreSnapshot_InvalidJobID_Zero(t *testing.T) {
-	ctx := context.Background()
-
-	sm := &snapshotManager{}
-
-	// Execute with jobID = 0
-	err := sm.RestoreSnapshot(ctx, "test_snapshot", 200, 0)
-
-	// Verify
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
-}
-
-func TestSnapshotManager_RestoreSnapshot_InvalidJobID_Negative(t *testing.T) {
-	ctx := context.Background()
-
-	sm := &snapshotManager{}
-
-	// Execute with jobID = -1
-	err := sm.RestoreSnapshot(ctx, "test_snapshot", 200, -1)
-
-	// Verify
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrParameterInvalid))
-}
+// TODO: Add tests for new DataCoord-driven RestoreSnapshot flow
+// The new flow requires mocking: CreateCollection, CreatePartition, ShowCollections, etc.
 
 // --- Test NewSnapshotManager ---
 
@@ -1227,4 +978,417 @@ func TestNewSnapshotManager(t *testing.T) {
 	)
 
 	assert.NotNil(t, sm)
+}
+
+// --- Test ReadSnapshotData ---
+
+func TestSnapshotManager_ReadSnapshotData_Success(t *testing.T) {
+	ctx := context.Background()
+
+	expectedData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1001,
+			Name: "test_snapshot",
+		},
+	}
+
+	// Mock snapshotMeta.ReadSnapshotData
+	mockRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).To(func(
+		sm *snapshotMeta,
+		ctx context.Context,
+		snapshotName string,
+		includeSegments bool,
+	) (*SnapshotData, error) {
+		assert.Equal(t, "test_snapshot", snapshotName)
+		assert.True(t, includeSegments)
+		return expectedData, nil
+	}).Build()
+	defer mockRead.UnPatch()
+
+	sm := &snapshotManager{
+		snapshotMeta: &snapshotMeta{},
+	}
+
+	result, err := sm.ReadSnapshotData(ctx, "test_snapshot")
+
+	assert.NoError(t, err)
+	assert.Equal(t, expectedData, result)
+}
+
+func TestSnapshotManager_ReadSnapshotData_NotFound(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("snapshot not found")
+
+	// Mock snapshotMeta.ReadSnapshotData to return error
+	mockRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).To(func(
+		sm *snapshotMeta,
+		ctx context.Context,
+		snapshotName string,
+		includeSegments bool,
+	) (*SnapshotData, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mockRead.UnPatch()
+
+	sm := &snapshotManager{
+		snapshotMeta: &snapshotMeta{},
+	}
+
+	result, err := sm.ReadSnapshotData(ctx, "nonexistent")
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, expectedErr, err)
+}
+
+// --- Test RestoreData ---
+
+func TestSnapshotManager_RestoreData_Success(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1001,
+			Name: "test_snapshot",
+		},
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{"_default": 1},
+		},
+		Segments: []*datapb.SegmentDescription{},
+	}
+
+	// Mock copySegmentMeta.GetJob to return nil (job doesn't exist)
+	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
+		cm *copySegmentMeta,
+		ctx context.Context,
+		jobID int64,
+	) CopySegmentJob {
+		return nil
+	}).Build()
+	defer mockGetJob.UnPatch()
+
+	// Mock buildPartitionMapping
+	mockBuildPartition := mockey.Mock((*snapshotManager).buildPartitionMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		collectionID int64,
+	) (map[int64]int64, error) {
+		return map[int64]int64{1: 10}, nil
+	}).Build()
+	defer mockBuildPartition.UnPatch()
+
+	// Mock buildChannelMapping
+	mockBuildChannel := mockey.Mock((*snapshotManager).buildChannelMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		targetCollectionID int64,
+	) (map[string]string, error) {
+		return map[string]string{"ch1": "ch2"}, nil
+	}).Build()
+	defer mockBuildChannel.UnPatch()
+
+	// Mock createRestoreJob
+	mockCreateJob := mockey.Mock((*snapshotManager).createRestoreJob).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		collectionID int64,
+		channelMapping map[string]string,
+		partitionMapping map[int64]int64,
+		snapshotData *SnapshotData,
+		jobID int64,
+	) error {
+		assert.Equal(t, int64(200), collectionID)
+		assert.Equal(t, int64(12345), jobID)
+		return nil
+	}).Build()
+	defer mockCreateJob.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), jobID)
+}
+
+func TestSnapshotManager_RestoreData_Idempotent(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1001,
+			Name: "test_snapshot",
+		},
+	}
+
+	// Mock copySegmentMeta.GetJob to return existing job (idempotency case)
+	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
+		cm *copySegmentMeta,
+		ctx context.Context,
+		jobID int64,
+	) CopySegmentJob {
+		// Return a non-nil job to indicate it already exists
+		return &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId: jobID,
+			},
+		}
+	}).Build()
+	defer mockGetJob.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	// Should return immediately without creating a new job
+	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(12345), jobID)
+}
+
+func TestSnapshotManager_RestoreData_PartitionMappingError(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1001,
+			Name: "test_snapshot",
+		},
+	}
+
+	expectedErr := errors.New("partition mapping error")
+
+	// Mock copySegmentMeta.GetJob to return nil
+	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
+		cm *copySegmentMeta,
+		ctx context.Context,
+		jobID int64,
+	) CopySegmentJob {
+		return nil
+	}).Build()
+	defer mockGetJob.UnPatch()
+
+	// Mock buildPartitionMapping to return error
+	mockBuildPartition := mockey.Mock((*snapshotManager).buildPartitionMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		collectionID int64,
+	) (map[int64]int64, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mockBuildPartition.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "partition mapping failed")
+}
+
+func TestSnapshotManager_RestoreData_ChannelMappingError(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1001,
+			Name: "test_snapshot",
+		},
+	}
+
+	expectedErr := errors.New("channel mapping error")
+
+	// Mock copySegmentMeta.GetJob to return nil
+	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
+		cm *copySegmentMeta,
+		ctx context.Context,
+		jobID int64,
+	) CopySegmentJob {
+		return nil
+	}).Build()
+	defer mockGetJob.UnPatch()
+
+	// Mock buildPartitionMapping
+	mockBuildPartition := mockey.Mock((*snapshotManager).buildPartitionMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		collectionID int64,
+	) (map[int64]int64, error) {
+		return map[int64]int64{1: 10}, nil
+	}).Build()
+	defer mockBuildPartition.UnPatch()
+
+	// Mock buildChannelMapping to return error
+	mockBuildChannel := mockey.Mock((*snapshotManager).buildChannelMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		targetCollectionID int64,
+	) (map[string]string, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mockBuildChannel.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "channel mapping failed")
+}
+
+func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1001,
+			Name: "test_snapshot",
+		},
+	}
+
+	expectedErr := errors.New("create job error")
+
+	// Mock copySegmentMeta.GetJob to return nil
+	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
+		cm *copySegmentMeta,
+		ctx context.Context,
+		jobID int64,
+	) CopySegmentJob {
+		return nil
+	}).Build()
+	defer mockGetJob.UnPatch()
+
+	// Mock buildPartitionMapping
+	mockBuildPartition := mockey.Mock((*snapshotManager).buildPartitionMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		collectionID int64,
+	) (map[int64]int64, error) {
+		return map[int64]int64{1: 10}, nil
+	}).Build()
+	defer mockBuildPartition.UnPatch()
+
+	// Mock buildChannelMapping
+	mockBuildChannel := mockey.Mock((*snapshotManager).buildChannelMapping).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		snapshotData *SnapshotData,
+		targetCollectionID int64,
+	) (map[string]string, error) {
+		return map[string]string{"ch1": "ch2"}, nil
+	}).Build()
+	defer mockBuildChannel.UnPatch()
+
+	// Mock createRestoreJob to return error
+	mockCreateJob := mockey.Mock((*snapshotManager).createRestoreJob).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		collectionID int64,
+		channelMapping map[string]string,
+		partitionMapping map[int64]int64,
+		snapshotData *SnapshotData,
+		jobID int64,
+	) error {
+		return expectedErr
+	}).Build()
+	defer mockCreateJob.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "restore job creation failed")
+}
+
+// --- Test buildPartitionMapping ---
+
+func TestSnapshotManager_BuildPartitionMapping_Success(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{
+				"_default": 1,
+				"part1":    2,
+				"part2":    3,
+			},
+		},
+	}
+
+	// Mock broker.ShowPartitions
+	mockShowPartitions := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		collectionID int64,
+	) (*milvuspb.ShowPartitionsResponse, error) {
+		return &milvuspb.ShowPartitionsResponse{
+			PartitionNames: []string{"_default", "part1", "part2"},
+			PartitionIDs:   []int64{10, 20, 30},
+		}, nil
+	}).Build()
+	defer mockShowPartitions.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	result, err := sm.buildPartitionMapping(ctx, snapshotData, 200)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, int64(10), result[1]) // _default: 1 -> 10
+	assert.Equal(t, int64(20), result[2]) // part1: 2 -> 20
+	assert.Equal(t, int64(30), result[3]) // part2: 3 -> 30
+}
+
+func TestSnapshotManager_BuildPartitionMapping_ShowPartitionsError(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{"_default": 1},
+		},
+	}
+
+	expectedErr := errors.New("show partitions error")
+
+	// Mock broker.ShowPartitions to return error
+	mockShowPartitions := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(func(
+		b *broker.MockBroker,
+		ctx context.Context,
+		collectionID int64,
+	) (*milvuspb.ShowPartitionsResponse, error) {
+		return nil, expectedErr
+	}).Build()
+	defer mockShowPartitions.UnPatch()
+
+	sm := &snapshotManager{
+		broker: broker.NewMockBroker(t),
+	}
+
+	result, err := sm.buildPartitionMapping(ctx, snapshotData, 200)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, expectedErr, err)
 }

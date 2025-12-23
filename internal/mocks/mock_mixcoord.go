@@ -7661,70 +7661,11 @@ func (_c *MixCoord_RestoreRBAC_Call) RunAndReturn(run func(context.Context, *mil
 }
 
 // RestoreSnapshot provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) RestoreSnapshot(_a0 context.Context, _a1 *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+func (_m *MixCoord) RestoreSnapshot(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RestoreSnapshot")
-	}
-
-	var r0 *milvuspb.RestoreSnapshotResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RestoreSnapshotRequest) *milvuspb.RestoreSnapshotResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.RestoreSnapshotResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RestoreSnapshotRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MixCoord_RestoreSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshot'
-type MixCoord_RestoreSnapshot_Call struct {
-	*mock.Call
-}
-
-// RestoreSnapshot is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.RestoreSnapshotRequest
-func (_e *MixCoord_Expecter) RestoreSnapshot(_a0 interface{}, _a1 interface{}) *MixCoord_RestoreSnapshot_Call {
-	return &MixCoord_RestoreSnapshot_Call{Call: _e.mock.On("RestoreSnapshot", _a0, _a1)}
-}
-
-func (_c *MixCoord_RestoreSnapshot_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RestoreSnapshotRequest)) *MixCoord_RestoreSnapshot_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.RestoreSnapshotRequest))
-	})
-	return _c
-}
-
-func (_c *MixCoord_RestoreSnapshot_Call) Return(_a0 *milvuspb.RestoreSnapshotResponse, _a1 error) *MixCoord_RestoreSnapshot_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MixCoord_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error)) *MixCoord_RestoreSnapshot_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RestoreSnapshotData provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) RestoreSnapshotData(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RestoreSnapshotData")
 	}
 
 	var r0 *datapb.RestoreSnapshotResponse
@@ -7749,31 +7690,31 @@ func (_m *MixCoord) RestoreSnapshotData(_a0 context.Context, _a1 *datapb.Restore
 	return r0, r1
 }
 
-// MixCoord_RestoreSnapshotData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshotData'
-type MixCoord_RestoreSnapshotData_Call struct {
+// MixCoord_RestoreSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshot'
+type MixCoord_RestoreSnapshot_Call struct {
 	*mock.Call
 }
 
-// RestoreSnapshotData is a helper method to define mock.On call
+// RestoreSnapshot is a helper method to define mock.On call
 //   - _a0 context.Context
 //   - _a1 *datapb.RestoreSnapshotRequest
-func (_e *MixCoord_Expecter) RestoreSnapshotData(_a0 interface{}, _a1 interface{}) *MixCoord_RestoreSnapshotData_Call {
-	return &MixCoord_RestoreSnapshotData_Call{Call: _e.mock.On("RestoreSnapshotData", _a0, _a1)}
+func (_e *MixCoord_Expecter) RestoreSnapshot(_a0 interface{}, _a1 interface{}) *MixCoord_RestoreSnapshot_Call {
+	return &MixCoord_RestoreSnapshot_Call{Call: _e.mock.On("RestoreSnapshot", _a0, _a1)}
 }
 
-func (_c *MixCoord_RestoreSnapshotData_Call) Run(run func(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest)) *MixCoord_RestoreSnapshotData_Call {
+func (_c *MixCoord_RestoreSnapshot_Call) Run(run func(_a0 context.Context, _a1 *datapb.RestoreSnapshotRequest)) *MixCoord_RestoreSnapshot_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*datapb.RestoreSnapshotRequest))
 	})
 	return _c
 }
 
-func (_c *MixCoord_RestoreSnapshotData_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MixCoord_RestoreSnapshotData_Call {
+func (_c *MixCoord_RestoreSnapshot_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MixCoord_RestoreSnapshot_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MixCoord_RestoreSnapshotData_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error)) *MixCoord_RestoreSnapshotData_Call {
+func (_c *MixCoord_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error)) *MixCoord_RestoreSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

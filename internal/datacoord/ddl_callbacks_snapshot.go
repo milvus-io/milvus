@@ -18,10 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -59,5 +62,58 @@ func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result mes
 	}
 
 	log.Info("snapshot dropped successfully via DDL callback")
+	return nil
+}
+
+// restoreSnapshotV2AckCallback handles the callback for RestoreSnapshot DDL message.
+// It creates copy segment jobs for data restoration.
+// NOTE: RestoreIndexes is now called synchronously in services.go before broadcast.
+// NOTE: jobID is pre-allocated in RestoreSnapshot and passed via WAL message for idempotency.
+func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
+	header := result.Message.Header()
+	log := log.Ctx(ctx).With(
+		zap.String("snapshotName", header.SnapshotName),
+		zap.Int64("collectionID", header.CollectionId),
+		zap.Int64("jobID", header.JobId),
+	)
+	log.Info("restoreSnapshotV2AckCallback received")
+
+	// Read snapshot data
+	snapshotData, err := s.snapshotManager.ReadSnapshotData(ctx, header.SnapshotName)
+	if err != nil {
+		log.Error("failed to read snapshot data", zap.Error(err))
+		return err
+	}
+
+	// Restore data (create copy segment job)
+	// Use the pre-allocated jobID from the WAL message for idempotency
+	jobID, err := s.snapshotManager.RestoreData(ctx, snapshotData, header.CollectionId, header.JobId)
+	if err != nil {
+		log.Error("failed to restore data", zap.Error(err))
+		return err
+	}
+
+	// Wait for restore to complete, checking for both success and failure states
+	for {
+		state, err := s.snapshotManager.GetRestoreState(ctx, jobID)
+		if err != nil {
+			log.Error("failed to get restore state", zap.Error(err))
+			return err
+		}
+		log.Info("restore snapshot state", zap.Any("state", state))
+
+		// Check for failure state to avoid infinite loop
+		if state.GetState() == datapb.RestoreSnapshotState_RestoreSnapshotFailed {
+			log.Error("restore snapshot failed", zap.String("reason", state.GetReason()))
+			return fmt.Errorf("restore snapshot failed: %s", state.GetReason())
+		}
+
+		if state.GetProgress() == 100 || state.GetState() == datapb.RestoreSnapshotState_RestoreSnapshotCompleted {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	log.Info("restore snapshot callback completed", zap.Int64("jobID", jobID))
 	return nil
 }

@@ -24,6 +24,160 @@ func (_m *MockBroker) EXPECT() *MockBroker_Expecter {
 	return &MockBroker_Expecter{mock: &_m.Mock}
 }
 
+// CreateCollection provides a mock function with given fields: ctx, req
+func (_m *MockBroker) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateCollectionRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_CreateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateCollection'
+type MockBroker_CreateCollection_Call struct {
+	*mock.Call
+}
+
+// CreateCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.CreateCollectionRequest
+func (_e *MockBroker_Expecter) CreateCollection(ctx interface{}, req interface{}) *MockBroker_CreateCollection_Call {
+	return &MockBroker_CreateCollection_Call{Call: _e.mock.On("CreateCollection", ctx, req)}
+}
+
+func (_c *MockBroker_CreateCollection_Call) Run(run func(ctx context.Context, req *milvuspb.CreateCollectionRequest)) *MockBroker_CreateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockBroker_CreateCollection_Call) Return(_a0 error) *MockBroker_CreateCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_CreateCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateCollectionRequest) error) *MockBroker_CreateCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreatePartition provides a mock function with given fields: ctx, req
+func (_m *MockBroker) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePartition")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreatePartitionRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_CreatePartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePartition'
+type MockBroker_CreatePartition_Call struct {
+	*mock.Call
+}
+
+// CreatePartition is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *milvuspb.CreatePartitionRequest
+func (_e *MockBroker_Expecter) CreatePartition(ctx interface{}, req interface{}) *MockBroker_CreatePartition_Call {
+	return &MockBroker_CreatePartition_Call{Call: _e.mock.On("CreatePartition", ctx, req)}
+}
+
+func (_c *MockBroker_CreatePartition_Call) Run(run func(ctx context.Context, req *milvuspb.CreatePartitionRequest)) *MockBroker_CreatePartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreatePartitionRequest))
+	})
+	return _c
+}
+
+func (_c *MockBroker_CreatePartition_Call) Return(_a0 error) *MockBroker_CreatePartition_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_CreatePartition_Call) RunAndReturn(run func(context.Context, *milvuspb.CreatePartitionRequest) error) *MockBroker_CreatePartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DescribeCollectionByName provides a mock function with given fields: ctx, dbName, collectionName
+func (_m *MockBroker) DescribeCollectionByName(ctx context.Context, dbName string, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+	ret := _m.Called(ctx, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeCollectionByName")
+	}
+
+	var r0 *milvuspb.DescribeCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*milvuspb.DescribeCollectionResponse, error)); ok {
+		return rf(ctx, dbName, collectionName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *milvuspb.DescribeCollectionResponse); ok {
+		r0 = rf(ctx, dbName, collectionName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, dbName, collectionName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroker_DescribeCollectionByName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeCollectionByName'
+type MockBroker_DescribeCollectionByName_Call struct {
+	*mock.Call
+}
+
+// DescribeCollectionByName is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+func (_e *MockBroker_Expecter) DescribeCollectionByName(ctx interface{}, dbName interface{}, collectionName interface{}) *MockBroker_DescribeCollectionByName_Call {
+	return &MockBroker_DescribeCollectionByName_Call{Call: _e.mock.On("DescribeCollectionByName", ctx, dbName, collectionName)}
+}
+
+func (_c *MockBroker_DescribeCollectionByName_Call) Run(run func(ctx context.Context, dbName string, collectionName string)) *MockBroker_DescribeCollectionByName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockBroker_DescribeCollectionByName_Call) Return(_a0 *milvuspb.DescribeCollectionResponse, _a1 error) *MockBroker_DescribeCollectionByName_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroker_DescribeCollectionByName_Call) RunAndReturn(run func(context.Context, string, string) (*milvuspb.DescribeCollectionResponse, error)) *MockBroker_DescribeCollectionByName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeCollectionInternal provides a mock function with given fields: ctx, collectionID
 func (_m *MockBroker) DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 	ret := _m.Called(ctx, collectionID)
@@ -79,6 +233,54 @@ func (_c *MockBroker_DescribeCollectionInternal_Call) Return(_a0 *milvuspb.Descr
 }
 
 func (_c *MockBroker_DescribeCollectionInternal_Call) RunAndReturn(run func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error)) *MockBroker_DescribeCollectionInternal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropCollection provides a mock function with given fields: ctx, dbName, collectionName
+func (_m *MockBroker) DropCollection(ctx context.Context, dbName string, collectionName string) error {
+	ret := _m.Called(ctx, dbName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, dbName, collectionName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBroker_DropCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCollection'
+type MockBroker_DropCollection_Call struct {
+	*mock.Call
+}
+
+// DropCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
+func (_e *MockBroker_Expecter) DropCollection(ctx interface{}, dbName interface{}, collectionName interface{}) *MockBroker_DropCollection_Call {
+	return &MockBroker_DropCollection_Call{Call: _e.mock.On("DropCollection", ctx, dbName, collectionName)}
+}
+
+func (_c *MockBroker_DropCollection_Call) Run(run func(ctx context.Context, dbName string, collectionName string)) *MockBroker_DropCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockBroker_DropCollection_Call) Return(_a0 error) *MockBroker_DropCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroker_DropCollection_Call) RunAndReturn(run func(context.Context, string, string) error) *MockBroker_DropCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

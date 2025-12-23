@@ -57,7 +57,7 @@ require (
 require (
 	cloud.google.com/go/storage v1.50.0
 	github.com/antlr4-go/antlr/v4 v4.13.1
-	github.com/apache/arrow/go/v17 v17.0.0-00010101000000-000000000000
+	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/apache/pulsar-client-go v0.17.0
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.9

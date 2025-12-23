@@ -292,7 +292,7 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobId()))
 
 	// Step 1: Check if tasks already created (idempotent operation)
-	tasks := c.copyMeta.GetTaskBy(c.ctx, WithCopyTaskJob(job.GetJobId()))
+	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	if len(tasks) > 0 {
 		return
 	}
@@ -404,7 +404,7 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobId()))
 
 	// Step 1: Fetch all tasks for this job
-	tasks := c.copyMeta.GetTaskBy(c.ctx, WithCopyTaskJob(job.GetJobId()))
+	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	totalTasks := len(tasks)
 	completedTasks := 0
 	failedTasks := 0
@@ -495,7 +495,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	log := log.With(zap.Int64("jobID", job.GetJobId()))
 
 	// Step 1: Collect all target segment IDs from task ID mappings
-	tasks := c.copyMeta.GetTaskBy(c.ctx, WithCopyTaskJob(job.GetJobId()))
+	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	targetSegmentIDs := make([]int64, 0)
 	for _, task := range tasks {
 		for _, mapping := range task.GetIdMappings() {
@@ -564,8 +564,11 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobId()))
 
 	// Find all Pending/InProgress tasks
-	tasks := c.copyMeta.GetTaskBy(c.ctx, WithCopyTaskJob(job.GetJobId()),
-		WithCopyTaskStates(datapb.CopySegmentTaskState_CopySegmentTaskPending, datapb.CopySegmentTaskState_CopySegmentTaskInProgress))
+	allTasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
+	tasks := lo.Filter(allTasks, func(t CopySegmentTask, _ int) bool {
+		return t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending ||
+			t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress
+	})
 
 	if len(tasks) == 0 {
 		return
@@ -593,20 +596,32 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 
 // tryTimeoutJob checks if job has exceeded timeout and marks it as failed.
 //
-// This is called for jobs in all states to enforce timeout limits.
+// Only applies to non-terminal jobs (Pending/Executing).
 // Timeout prevents jobs from running indefinitely due to stuck tasks.
 //
 // Timeout is set when job is created based on configuration.
 func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
-	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
-	if time.Now().After(timeoutTime) {
-		log.Warn("copy segment job timeout",
-			zap.Int64("jobID", job.GetJobId()),
-			zap.Time("timeoutTime", timeoutTime))
-		c.copyMeta.UpdateJob(c.ctx, job.GetJobId(),
-			UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-			UpdateCopyJobReason("timeout"))
+	// Only apply timeout to non-terminal jobs
+	switch job.GetState() {
+	case datapb.CopySegmentJobState_CopySegmentJobPending,
+		datapb.CopySegmentJobState_CopySegmentJobExecuting:
+		// Continue to check timeout
+	default:
+		// Skip timeout check for terminal states (Completed/Failed)
+		return
 	}
+
+	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
+	if job.GetTimeoutTs() == 0 || time.Now().Before(timeoutTime) {
+		return
+	}
+
+	log.Warn("copy segment job timeout",
+		zap.Int64("jobID", job.GetJobId()),
+		zap.Time("timeoutTime", timeoutTime))
+	c.copyMeta.UpdateJob(c.ctx, job.GetJobId(),
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("timeout"))
 }
 
 // checkGC performs garbage collection for completed/failed jobs.
@@ -644,7 +659,7 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 		log.Info("copy segment job has reached GC retention",
 			zap.Time("cleanupTime", cleanupTime), zap.Duration("GCRetention", GCRetention))
 
-		tasks := c.copyMeta.GetTaskBy(c.ctx, WithCopyTaskJob(job.GetJobId()))
+		tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 		shouldRemoveJob := true
 
 		for _, task := range tasks {

@@ -71,6 +71,8 @@ const (
 	RoleConfigObjectName = "object_name"
 	RoleConfigDBName     = "db_name"
 	RoleConfigPrivilege  = "privilege"
+
+	PreserveFieldIdsKey = "preserve_field_ids"
 )
 
 var (

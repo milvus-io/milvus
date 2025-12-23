@@ -513,8 +513,8 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 		mixCoord: mockMixCoord,
 	}
 
-	// Mock RestoreSnapshot - now proxy simply delegates to RootCoord
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&milvuspb.RestoreSnapshotResponse{
+	// Mock RestoreSnapshot - proxy directly calls DataCoord
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
 		Status: merr.Success(),
 		JobId:  1,
 	}, nil).Build()
@@ -528,7 +528,7 @@ func TestRestoreSnapshotTask_Execute_Success(t *testing.T) {
 	assert.Equal(t, int64(1), task.result.GetJobId())
 }
 
-func TestRestoreSnapshotTask_Execute_RootCoordError(t *testing.T) {
+func TestRestoreSnapshotTask_Execute_DataCoordError(t *testing.T) {
 	mockMixCoord := NewMixCoordMock()
 	task := &restoreSnapshotTask{
 		req: &milvuspb.RestoreSnapshotRequest{
@@ -539,7 +539,7 @@ func TestRestoreSnapshotTask_Execute_RootCoordError(t *testing.T) {
 	}
 
 	// Mock RestoreSnapshot to return RPC error
-	expectedError := errors.New("rootcoord restore snapshot failed")
+	expectedError := errors.New("datacoord restore snapshot failed")
 	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(nil, expectedError).Build()
 	defer mockRestoreSnapshot.UnPatch()
 
@@ -548,7 +548,7 @@ func TestRestoreSnapshotTask_Execute_RootCoordError(t *testing.T) {
 	assert.Error(t, err)
 	assert.NotNil(t, task.result)
 	assert.False(t, merr.Ok(task.result.GetStatus()))
-	assert.Contains(t, err.Error(), "rootcoord restore snapshot failed")
+	assert.Contains(t, err.Error(), "datacoord restore snapshot failed")
 }
 
 func TestRestoreSnapshotTask_Execute_StatusError(t *testing.T) {
@@ -562,7 +562,7 @@ func TestRestoreSnapshotTask_Execute_StatusError(t *testing.T) {
 	}
 
 	// Mock RestoreSnapshot to return error status
-	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&milvuspb.RestoreSnapshotResponse{
+	mockRestoreSnapshot := mockey.Mock((*MixCoordMock).RestoreSnapshot).Return(&datapb.RestoreSnapshotResponse{
 		Status: merr.Status(merr.WrapErrCollectionNotFound("test_collection")),
 	}, nil).Build()
 	defer mockRestoreSnapshot.UnPatch()

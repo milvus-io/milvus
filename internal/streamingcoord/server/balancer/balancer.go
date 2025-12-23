@@ -38,10 +38,6 @@ type Balancer interface {
 	// AllocVirtualChannels allocates virtual channels for a collection.
 	AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error)
 
-	// AllocVirtualChannelsWithPChannels allocates virtual channels on specified pchannels.
-	// Used by snapshot restore to preserve pchannel mapping from the source collection.
-	AllocVirtualChannelsWithPChannels(ctx context.Context, collectionID int64, pchannels []string) ([]string, error)
-
 	// UpdateBalancePolicy update the balance policy.
 	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)
 

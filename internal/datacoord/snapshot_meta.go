@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -24,12 +26,13 @@ import (
 //
 // ARCHITECTURE:
 // - snapshotMeta: Central metadata manager coordinating catalog persistence and S3 storage
-// - SnapshotDataInfo: In-memory cache of snapshot metadata with fast segment/index lookup
+// - snapshotID2Info: In-memory cache of snapshot metadata from etcd (immediately available)
+// - snapshotID2RefIndex: Segment/index references from S3 (async loaded with blocking access)
 // - Catalog: Persistent storage of snapshot metadata in etcd/KV store
 // - Reader/Writer: S3 operations for reading/writing complete snapshot data
 //
 // METADATA ORGANIZATION:
-// - Memory: snapshotID -> SnapshotDataInfo (with segment/index ID sets for fast lookup)
+// - Memory: Two maps - snapshotID2Info (etcd data) and snapshotID2RefIndex (S3 data)
 // - Catalog (etcd): Collection snapshots metadata (name, ID, collection, partitions, S3 location)
 // - S3: Complete snapshot data (segments, indexes, schema) at S3Location path
 //
@@ -50,18 +53,55 @@ import (
 // - Catalog operations are atomic via etcd transactions
 // - S3 operations use unique paths (collection_id/snapshot_id) to prevent conflicts
 
-// SnapshotDataInfo holds cached snapshot metadata with precomputed ID sets for fast lookup.
+// SnapshotRefIndex holds segment and index IDs loaded from S3.
+// Loading state is managed globally by snapshotMeta.refIndexLoadDone.
 //
-// This structure is used in the in-memory cache to enable efficient queries like:
-//   - Which snapshots contain segment X?
-//   - Which snapshots reference index Y?
-//
-// The ID sets are populated during snapshot creation and reload, avoiding the need
-// to scan segment/index lists on every query.
-type SnapshotDataInfo struct {
-	snapshotInfo *datapb.SnapshotInfo // Basic snapshot metadata (name, ID, collection, partitions, S3 location)
-	SegmentIDs   typeutil.UniqueSet   // Set of all segment IDs in this snapshot (for fast lookup)
-	IndexIDs     typeutil.UniqueSet   // Set of all index IDs in this snapshot (for fast lookup)
+// CONCURRENCY: Protected by RWMutex since SetLoaded (async loader) and
+// ContainsSegment/ContainsIndex (GC) may run concurrently.
+type SnapshotRefIndex struct {
+	mu         sync.RWMutex
+	segmentIDs typeutil.UniqueSet
+	indexIDs   typeutil.UniqueSet
+}
+
+// NewSnapshotRefIndex creates a new empty SnapshotRefIndex.
+// Used during reload when data needs to be loaded from S3 asynchronously.
+func NewSnapshotRefIndex() *SnapshotRefIndex {
+	return &SnapshotRefIndex{}
+}
+
+// NewLoadedSnapshotRefIndex creates a SnapshotRefIndex with pre-loaded data.
+// Used for newly created snapshots where data is already available.
+func NewLoadedSnapshotRefIndex(segmentIDs, indexIDs []int64) *SnapshotRefIndex {
+	return &SnapshotRefIndex{
+		segmentIDs: typeutil.NewUniqueSet(segmentIDs...),
+		indexIDs:   typeutil.NewUniqueSet(indexIDs...),
+	}
+}
+
+// SetLoaded sets the segment and index IDs.
+// This is called by the async loader after reading data from S3.
+func (r *SnapshotRefIndex) SetLoaded(segmentIDs, indexIDs []int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.segmentIDs = typeutil.NewUniqueSet(segmentIDs...)
+	r.indexIDs = typeutil.NewUniqueSet(indexIDs...)
+}
+
+// ContainsSegment checks if segment exists.
+// Used by GC to check if a segment is referenced by this snapshot.
+func (r *SnapshotRefIndex) ContainsSegment(segmentID UniqueID) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.segmentIDs != nil && r.segmentIDs.Contain(segmentID)
+}
+
+// ContainsIndex checks if index exists.
+// Used by GC to check if an index is referenced by this snapshot.
+func (r *SnapshotRefIndex) ContainsIndex(indexID UniqueID) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.indexIDs != nil && r.indexIDs.Contain(indexID)
 }
 
 // snapshotMeta manages snapshot metadata both in memory and persistent storage.
@@ -70,13 +110,31 @@ type SnapshotDataInfo struct {
 //   - In-memory cache for fast lookup and reference tracking
 //   - Catalog persistence for durability across restarts
 //   - S3 reader/writer for complete snapshot data
+//
+// Data is split into two separate maps:
+//   - snapshotID2Info: snapshot metadata from etcd (immediately available)
+//   - snapshotID2RefIndex: segment/index references from S3 (async loaded)
 type snapshotMeta struct {
 	catalog metastore.DataCoordCatalog // Persistent storage in etcd/KV store for snapshot metadata
 
-	// In-memory cache: snapshot ID -> snapshot reference info
-	// Enables fast lookup and reference tracking (which snapshots contain a given segment/index)
-	// Thread-safe for concurrent access
-	snapshotID2DataInfo *typeutil.ConcurrentMap[UniqueID, *SnapshotDataInfo]
+	// Primary indexes: snapshot ID -> data
+	// Split into two maps for different data sources and availability
+	snapshotID2Info     *typeutil.ConcurrentMap[UniqueID, *datapb.SnapshotInfo] // From etcd, immediately available
+	snapshotID2RefIndex *typeutil.ConcurrentMap[UniqueID, *SnapshotRefIndex]    // From S3, async loaded
+
+	// Secondary indexes for O(1) lookup performance
+	// snapshotName2ID: snapshot name -> snapshot ID mapping for fast name-based queries
+	snapshotName2ID *typeutil.ConcurrentMap[string, UniqueID]
+	// collectionID2Snapshots: collection ID -> set of snapshot IDs for fast collection-based listing
+	collectionID2Snapshots *typeutil.ConcurrentMap[UniqueID, typeutil.UniqueSet]
+	// collectionIndexMu protects read-modify-write operations on collectionID2Snapshots
+	// since UniqueSet (map) is not thread-safe for concurrent modifications.
+	// Uses RWMutex to allow concurrent reads (ListSnapshots) while blocking writes.
+	collectionIndexMu sync.RWMutex
+
+	// Global loading state for all RefIndexes from S3
+	// Closed when all RefIndexes are loaded, used by GC to skip if not loaded
+	refIndexLoadDone chan struct{}
 
 	reader *SnapshotReader // Reads complete snapshot data from S3
 	writer *SnapshotWriter // Writes complete snapshot data to S3
@@ -102,13 +160,18 @@ type snapshotMeta struct {
 //   - error: Error if catalog reload or S3 verification fails
 func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*snapshotMeta, error) {
 	sm := &snapshotMeta{
-		catalog:             catalog,
-		snapshotID2DataInfo: typeutil.NewConcurrentMap[UniqueID, *SnapshotDataInfo](),
-		reader:              NewSnapshotReader(chunkManager),
-		writer:              NewSnapshotWriter(chunkManager),
+		catalog:                catalog,
+		snapshotID2Info:        typeutil.NewConcurrentMap[UniqueID, *datapb.SnapshotInfo](),
+		snapshotID2RefIndex:    typeutil.NewConcurrentMap[UniqueID, *SnapshotRefIndex](),
+		snapshotName2ID:        typeutil.NewConcurrentMap[string, UniqueID](),
+		collectionID2Snapshots: typeutil.NewConcurrentMap[UniqueID, typeutil.UniqueSet](),
+		refIndexLoadDone:       make(chan struct{}),
+		reader:                 NewSnapshotReader(chunkManager),
+		writer:                 NewSnapshotWriter(chunkManager),
 	}
 
 	// Reload all snapshots from catalog to populate in-memory cache
+	// Note: reload() returns immediately, S3 data is loaded asynchronously in background
 	if err := sm.reload(ctx); err != nil {
 		log.Error("failed to reload snapshot meta from kv", zap.Error(err))
 		return nil, err
@@ -117,28 +180,27 @@ func newSnapshotMeta(ctx context.Context, catalog metastore.DataCoordCatalog, ch
 	return sm, nil
 }
 
-// reload rebuilds the in-memory cache from catalog and S3 during DataCoord startup.
+// reload rebuilds the in-memory cache from catalog during DataCoord startup.
 //
 // This function is critical for recovering snapshot state after DataCoord restarts.
-// It reads snapshot metadata from catalog (etcd) and builds the in-memory cache
-// with segment/index ID sets for fast lookup.
+// It reads snapshot metadata from catalog (etcd) and builds the in-memory cache placeholders.
+// The actual segment/index ID sets are loaded asynchronously from S3 in the background.
 //
 // Process flow:
 //  1. List all snapshots from catalog (persistent storage)
-//  2. For each snapshot:
-//     a. Read complete snapshot data from S3 to get segment/index lists
-//     b. Extract segment IDs and index IDs
-//     c. Build SnapshotDataInfo with ID sets for fast lookup
-//     d. Insert into in-memory cache
+//  2. For each committed snapshot:
+//     a. Insert placeholder into in-memory cache (without S3 data)
+//     b. Build secondary indexes
+//  3. Start background goroutine to load S3 data asynchronously
 //
-// Note: We must read from S3 to get the complete segment/index lists for building
-// the reference tracking sets. The catalog only stores basic metadata (name, ID, S3 location).
+// This design allows reload() to return quickly without waiting for S3 I/O,
+// significantly improving DataCoord startup time when there are many snapshots.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
 //
 // Returns:
-//   - error: Error if catalog list fails or any S3 read fails
+//   - error: Error if catalog list fails
 func (sm *snapshotMeta) reload(ctx context.Context) error {
 	// Step 1: List all snapshots from catalog
 	snapshots, err := sm.catalog.ListSnapshots(ctx)
@@ -147,67 +209,102 @@ func (sm *snapshotMeta) reload(ctx context.Context) error {
 		return err
 	}
 
-	// Step 2: Filter out PENDING snapshots - they will be cleaned up by GC
+	// Step 2: Filter committed snapshots and insert into maps
 	committedSnapshots := make([]*datapb.SnapshotInfo, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		if snapshot.GetState() == datapb.SnapshotState_SnapshotStatePending {
-			log.Warn("skipping pending snapshot during reload, will be cleaned by GC",
+		if snapshot.GetState() == datapb.SnapshotState_SnapshotStatePending ||
+			snapshot.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
+			log.Warn("skipping snapshot during reload, will be cleaned by GC",
 				zap.String("name", snapshot.GetName()),
-				zap.Int64("id", snapshot.GetId()))
+				zap.Int64("id", snapshot.GetId()),
+				zap.String("state", snapshot.GetState().String()))
 			continue
 		}
+
+		// Insert snapshot info (immediately available from etcd)
+		sm.snapshotID2Info.Insert(snapshot.GetId(), snapshot)
+
+		// Create pending RefIndex (will be loaded from S3 asynchronously)
+		refIndex := NewSnapshotRefIndex()
+		sm.snapshotID2RefIndex.Insert(snapshot.GetId(), refIndex)
+
+		// Build secondary indexes for O(1) lookup
+		sm.addToSecondaryIndexes(snapshot)
 		committedSnapshots = append(committedSnapshots, snapshot)
+
+		log.Info("loaded snapshot metadata from catalog (async mode)",
+			zap.String("name", snapshot.GetName()),
+			zap.Int64("id", snapshot.GetId()))
 	}
 
-	// Step 3: For each committed snapshot, read from S3 and build in-memory cache concurrently
-	if len(committedSnapshots) == 0 {
-		return nil
+	// Step 3: Start async loading in background goroutine using conc pool
+	if len(committedSnapshots) > 0 {
+		go sm.asyncLoadRefIndexes(ctx, committedSnapshots)
+	} else {
+		// No snapshots to load, mark as loaded immediately
+		close(sm.refIndexLoadDone)
 	}
 
-	// Create concurrent pool for loading snapshots to improve recovery performance
+	return nil
+}
+
+// asyncLoadRefIndexes loads SegmentIDs and IndexIDs from S3 in background using conc pool.
+// This is called after reload() to populate RefIndex data asynchronously.
+// After all snapshots are loaded, it closes refIndexLoadDone to signal GC that it's safe to query.
+func (sm *snapshotMeta) asyncLoadRefIndexes(ctx context.Context, snapshots []*datapb.SnapshotInfo) {
+	log.Info("starting async loading of snapshot IDs from S3", zap.Int("count", len(snapshots)))
+
+	// Use concurrent pool for parallel loading
 	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	defer pool.Release()
 
-	futures := make([]*conc.Future[any], 0, len(committedSnapshots))
-	for _, snapshot := range committedSnapshots {
+	futures := make([]*conc.Future[any], 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		snapshotCopy := snapshot // Capture for closure
 		future := pool.Submit(func() (any, error) {
-			log.Info("reload snapshot from catalog",
-				zap.String("name", snapshot.GetName()),
-				zap.Int64("id", snapshot.GetId()),
-				zap.String("s3_location", snapshot.GetS3Location()))
-
-			// Fast path: Read metadata.json directly from S3 using stored location
-			// (includeSegments=false avoids parsing heavy Avro manifest files)
-			// Note: During reload, memory cache is empty, so we read directly from S3
-			snapshotData, err := sm.reader.ReadSnapshot(ctx, snapshot.GetS3Location(), false)
-			if err != nil {
-				log.Error("failed to read snapshot metadata from s3", zap.Error(err))
-				return nil, err
+			// Get refIndex from cache
+			refIndex, exists := sm.snapshotID2RefIndex.Get(snapshotCopy.GetId())
+			if !exists {
+				return nil, nil // Snapshot may have been deleted
 			}
 
-			// Merge S3 location from catalog into snapshot data
-			snapshotData.SnapshotInfo.S3Location = snapshot.GetS3Location()
+			// Load from S3 with retry for transient failures
+			var snapshotData *SnapshotData
+			err := retry.Do(ctx, func() error {
+				var readErr error
+				snapshotData, readErr = sm.reader.ReadSnapshot(ctx, snapshotCopy.GetS3Location(), false)
+				return readErr
+			}, retry.Attempts(3), retry.Sleep(time.Second))
+			if err != nil {
+				log.Error("async load failed for snapshot after retries",
+					zap.String("name", snapshotCopy.GetName()),
+					zap.Int64("id", snapshotCopy.GetId()),
+					zap.Error(err))
+				// Set empty data as fallback
+				refIndex.SetLoaded(nil, nil)
+				return nil, nil
+			}
 
-			// Insert into in-memory cache with precomputed ID sets
-			// snapshotID2DataInfo is a thread-safe ConcurrentMap
-			sm.snapshotID2DataInfo.Insert(snapshot.GetId(), &SnapshotDataInfo{
-				snapshotInfo: snapshotData.SnapshotInfo,
-				SegmentIDs:   typeutil.NewUniqueSet(snapshotData.SegmentIDs...),
-				IndexIDs:     typeutil.NewUniqueSet(snapshotData.IndexIDs...),
-			})
+			// Set refIndex data
+			refIndex.SetLoaded(snapshotData.SegmentIDs, snapshotData.IndexIDs)
+
+			log.Info("async loaded snapshot IDs from S3",
+				zap.String("name", snapshotCopy.GetName()),
+				zap.Int64("id", snapshotCopy.GetId()),
+				zap.Int("segmentCount", len(snapshotData.SegmentIDs)),
+				zap.Int("indexCount", len(snapshotData.IndexIDs)))
 
 			return nil, nil
 		})
 		futures = append(futures, future)
 	}
 
-	// Wait for all loading tasks to complete
-	err = conc.AwaitAll(futures...)
-	if err != nil {
-		return err
-	}
+	// Wait for all loading tasks
+	_ = conc.AwaitAll(futures...)
 
-	return nil
+	// Close global loadDone to signal all RefIndexes are loaded
+	close(sm.refIndexLoadDone)
+	log.Info("async loading of all snapshots completed", zap.Int("count", len(snapshots)))
 }
 
 // SaveSnapshot persists a new snapshot to both S3 and catalog using 2PC (Two-Phase Commit).
@@ -276,18 +373,21 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 	// Step 4: Phase 2 (Commit) - Update catalog to COMMITTED state
 	snapshot.SnapshotInfo.State = datapb.SnapshotState_SnapshotStateCommitted
 
-	// Insert into in-memory cache with precomputed ID sets
-	sm.snapshotID2DataInfo.Insert(snapshot.SnapshotInfo.GetId(), &SnapshotDataInfo{
-		snapshotInfo: snapshot.SnapshotInfo,
-		SegmentIDs:   typeutil.NewUniqueSet(segmentIDs...),
-		IndexIDs:     typeutil.NewUniqueSet(indexIDs...),
-	})
+	// Insert into in-memory cache (two maps)
+	sm.snapshotID2Info.Insert(snapshot.SnapshotInfo.GetId(), snapshot.SnapshotInfo)
+	sm.snapshotID2RefIndex.Insert(snapshot.SnapshotInfo.GetId(),
+		NewLoadedSnapshotRefIndex(segmentIDs, indexIDs))
+
+	// Build secondary indexes for O(1) lookup
+	sm.addToSecondaryIndexes(snapshot.SnapshotInfo)
 
 	// Update catalog with COMMITTED state
 	if err := sm.catalog.SaveSnapshot(ctx, snapshot.SnapshotInfo); err != nil {
 		// Phase 2 failed, but S3 data is written. GC will eventually cleanup.
-		// Remove from memory cache since commit failed
-		sm.snapshotID2DataInfo.Remove(snapshot.SnapshotInfo.GetId())
+		// Remove from memory cache and secondary indexes since commit failed
+		sm.snapshotID2Info.Remove(snapshot.SnapshotInfo.GetId())
+		sm.snapshotID2RefIndex.Remove(snapshot.SnapshotInfo.GetId())
+		sm.removeFromSecondaryIndexes(snapshot.SnapshotInfo)
 		log.Error("failed to update snapshot to committed state, pending record left for GC cleanup",
 			zap.Error(err))
 		return fmt.Errorf("failed to update snapshot to committed state: %w", err)
@@ -303,26 +403,22 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *SnapshotData
 
 // DropSnapshot removes a snapshot from memory, catalog, and S3.
 //
-// This completely deletes a snapshot and all its associated data. The operation
-// removes data in reverse order of SaveSnapshot to maintain consistency.
+// This implements a two-phase delete to prevent orphaned S3 files:
+//  1. Mark snapshot as Deleting in catalog (persistent, survives restart)
+//  2. Remove from in-memory cache (user immediately sees deletion)
+//  3. Delete S3 data (may fail, GC will retry)
+//  4. Delete catalog record (final cleanup)
 //
-// Process flow:
-//  1. Lookup snapshot by name in memory cache
-//  2. Remove from in-memory cache (fast, prevents new references)
-//  3. Delete metadata from catalog (persistent storage)
-//  4. Delete snapshot data from S3 (complete data including segments/indexes)
-//
-// Error handling:
-//   - If catalog delete fails, in-memory state is inconsistent but will be fixed on restart
-//   - If S3 delete fails, orphaned data remains but won't be referenced
-//   - Both failures are logged but don't prevent operation completion
+// If S3 deletion fails, the function returns success. The snapshot is already
+// invisible to users (removed from memory), and GC will clean up the S3 data
+// by finding snapshots in Deleting state.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control
 //   - snapshotName: Unique name of the snapshot to delete
 //
 // Returns:
-//   - error: Error if snapshot not found, catalog delete fails, or S3 delete fails
+//   - error: Error if snapshot not found or catalog update fails
 func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) error {
 	log := log.Ctx(ctx).With(zap.String("snapshotName", snapshotName))
 
@@ -333,23 +429,40 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 		return err
 	}
 
-	// Step 2: Remove from in-memory cache first (prevents new references)
-	sm.snapshotID2DataInfo.Remove(snapshot.GetId())
-
-	// Step 3: Delete metadata from catalog (persistent storage)
-	err = sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId())
-	if err != nil {
-		log.Error("failed to drop snapshot from catalog", zap.Error(err))
+	// Step 2: Mark as Deleting in catalog (two-phase delete - first phase)
+	// This ensures the snapshot can be cleaned up by GC if S3 deletion fails
+	snapshot.State = datapb.SnapshotState_SnapshotStateDeleting
+	if err := sm.catalog.SaveSnapshot(ctx, snapshot); err != nil {
+		log.Error("failed to mark snapshot as deleting", zap.Error(err))
 		return err
 	}
 
-	// Step 4: Delete complete snapshot data from S3 using stored metadata path
-	err = sm.writer.Drop(ctx, snapshot.GetS3Location())
-	if err != nil {
-		log.Error("failed to drop snapshot from s3", zap.Error(err))
-		return err
+	// Step 3: Remove from in-memory cache and secondary indexes (user immediately sees deletion)
+	sm.snapshotID2Info.Remove(snapshot.GetId())
+	sm.snapshotID2RefIndex.Remove(snapshot.GetId())
+	sm.removeFromSecondaryIndexes(snapshot)
+
+	// Step 4: Delete S3 data (may fail, GC will retry)
+	if err := sm.writer.Drop(ctx, snapshot.GetS3Location()); err != nil {
+		log.Warn("S3 delete failed, will be cleaned by GC",
+			zap.Int64("snapshotID", snapshot.GetId()),
+			zap.Error(err))
+		// Return success - snapshot is already invisible to users
+		// GC will clean up S3 data by finding Deleting state snapshots
+		return nil
 	}
 
+	// Step 5: Delete catalog record (final cleanup)
+	if err := sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId()); err != nil {
+		log.Warn("failed to drop snapshot from catalog after S3 cleanup",
+			zap.Int64("snapshotID", snapshot.GetId()),
+			zap.Error(err))
+		// Return success - S3 data is already deleted
+		// GC will clean up catalog record
+		return nil
+	}
+
+	log.Info("snapshot deleted successfully", zap.Int64("snapshotID", snapshot.GetId()))
 	return nil
 }
 
@@ -358,12 +471,12 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 // This provides fast snapshot listing by querying the in-memory cache without
 // accessing catalog or S3. Supports flexible filtering:
 //   - collectionID <= 0: List all collections
-//   - collectionID > 0: List only this collection
+//   - collectionID > 0: List only this collection (uses O(M) index lookup where M=snapshots in collection)
 //   - partitionID <= 0: List all partitions in the collection
 //   - partitionID > 0: List only snapshots containing this partition
 //
-// The function scans all snapshots in memory and applies filter criteria.
-// This is efficient because the cache is typically small (hundreds of snapshots).
+// When collectionID is specified, uses the collectionID2Snapshots index for
+// efficient lookup instead of scanning all snapshots.
 //
 // Parameters:
 //   - ctx: Context for cancellation (currently unused but reserved for future)
@@ -376,18 +489,40 @@ func (sm *snapshotMeta) DropSnapshot(ctx context.Context, snapshotName string) e
 func (sm *snapshotMeta) ListSnapshots(ctx context.Context, collectionID int64, partitionID int64) ([]string, error) {
 	ret := make([]string, 0)
 
-	// Scan in-memory cache and apply filters
-	sm.snapshotID2DataInfo.Range(func(key UniqueID, value *SnapshotDataInfo) bool {
-		snapshotInfo := value.snapshotInfo
+	// If collectionID is specified, use index for O(M) lookup instead of O(N)
+	if collectionID > 0 {
+		// Acquire read lock to protect UniqueSet iteration from concurrent modifications
+		sm.collectionIndexMu.RLock()
+		snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+		if !ok {
+			sm.collectionIndexMu.RUnlock()
+			return ret, nil // No snapshots for this collection
+		}
 
-		// Check collection filter
-		collectionMatch := snapshotInfo.GetCollectionId() == collectionID || collectionID <= 0
+		// Iterate only snapshots in this collection
+		snapshotIDs.Range(func(snapshotID int64) bool {
+			info, ok := sm.snapshotID2Info.Get(snapshotID)
+			if !ok {
+				return true // Continue iteration (index inconsistency, skip)
+			}
 
+			// Check partition filter
+			if partitionID <= 0 || slices.Contains(info.GetPartitionIds(), partitionID) {
+				ret = append(ret, info.GetName())
+			}
+			return true
+		})
+		sm.collectionIndexMu.RUnlock()
+		return ret, nil
+	}
+
+	// No collectionID filter: scan all snapshots
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
 		// Check partition filter (snapshot contains this partition)
-		partitionMatch := partitionID <= 0 || slices.Contains(snapshotInfo.GetPartitionIds(), partitionID)
+		partitionMatch := partitionID <= 0 || slices.Contains(info.GetPartitionIds(), partitionID)
 
-		if collectionMatch && partitionMatch {
-			ret = append(ret, snapshotInfo.GetName())
+		if partitionMatch {
+			ret = append(ret, info.GetName())
 		}
 		return true // Continue iteration
 	})
@@ -473,8 +608,7 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName strin
 
 // getSnapshotByName is an internal helper that looks up snapshot metadata by name.
 //
-// This scans the in-memory cache to find a snapshot with matching name.
-// The scan is typically fast because the cache is small (hundreds of snapshots).
+// This uses the snapshotName2ID index for O(1) lookup instead of scanning.
 //
 // Parameters:
 //   - ctx: Context for cancellation (currently unused but reserved for future)
@@ -484,21 +618,21 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, snapshotName strin
 //   - *datapb.SnapshotInfo: Snapshot metadata if found
 //   - error: Error if snapshot not found
 func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, snapshotName string) (*datapb.SnapshotInfo, error) {
-	var ret *datapb.SnapshotInfo
-
-	// Scan in-memory cache for matching name
-	sm.snapshotID2DataInfo.Range(func(key UniqueID, value *SnapshotDataInfo) bool {
-		if value.snapshotInfo.GetName() == snapshotName {
-			ret = value.snapshotInfo
-			return false // Stop iteration
-		}
-		return true // Continue iteration
-	})
-
-	if ret == nil {
+	// O(1) lookup using name index
+	snapshotID, ok := sm.snapshotName2ID.Get(snapshotName)
+	if !ok {
 		return nil, fmt.Errorf("snapshot %s not found", snapshotName)
 	}
-	return ret, nil
+
+	// O(1) lookup from primary index
+	info, ok := sm.snapshotID2Info.Get(snapshotID)
+	if !ok {
+		// Index inconsistency: clean up orphan name index entry
+		sm.snapshotName2ID.Remove(snapshotName)
+		return nil, fmt.Errorf("snapshot %s not found", snapshotName)
+	}
+
+	return info, nil
 }
 
 // GetSnapshotBySegment returns all snapshot IDs that reference a given segment.
@@ -506,8 +640,12 @@ func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, snapshotName stri
 // This is used for garbage collection safety: before deleting a segment, check if
 // any snapshots reference it. If snapshots exist, the segment cannot be deleted.
 //
-// The lookup is O(N) where N is the number of snapshots, but uses the precomputed
-// SegmentIDs sets in SnapshotDataInfo for fast membership testing (O(1) per snapshot).
+// IMPORTANT: Caller should check IsRefIndexLoaded() first. If RefIndexes are not
+// loaded, results may be incomplete (returns empty for snapshots whose data is
+// not available), which could lead to unsafe deletions.
+//
+// The lookup is O(N) where N is the number of snapshots. Each ContainsSegment()
+// call is non-blocking and returns false if data is not yet loaded.
 //
 // Parameters:
 //   - ctx: Context for cancellation (currently unused but reserved for future)
@@ -520,9 +658,19 @@ func (sm *snapshotMeta) GetSnapshotBySegment(ctx context.Context, collectionID, 
 	snapshotIDs := make([]UniqueID, 0)
 
 	// Scan snapshots and check if segment is in the precomputed ID set
-	sm.snapshotID2DataInfo.Range(func(key UniqueID, value *SnapshotDataInfo) bool {
-		if value.snapshotInfo.GetCollectionId() == collectionID && value.SegmentIDs.Contain(segmentID) {
-			snapshotIDs = append(snapshotIDs, key)
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetCollectionId() != collectionID {
+			return true // Skip, different collection
+		}
+
+		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
+		if !exists {
+			return true // RefIndex not found (should not happen)
+		}
+
+		// ContainsSegment is non-blocking and returns false if data is not yet loaded
+		if refIndex.ContainsSegment(segmentID) {
+			snapshotIDs = append(snapshotIDs, id)
 		}
 		return true // Continue iteration
 	})
@@ -535,8 +683,12 @@ func (sm *snapshotMeta) GetSnapshotBySegment(ctx context.Context, collectionID, 
 // This is used for garbage collection safety: before deleting an index, check if
 // any snapshots reference it. If snapshots exist, the index cannot be deleted.
 //
-// The lookup is O(N) where N is the number of snapshots, but uses the precomputed
-// IndexIDs sets in SnapshotDataInfo for fast membership testing (O(1) per snapshot).
+// IMPORTANT: Caller should check IsRefIndexLoaded() first. If RefIndexes are not
+// loaded, results may be incomplete (returns empty for snapshots whose data is
+// not available), which could lead to unsafe deletions.
+//
+// The lookup is O(N) where N is the number of snapshots. Each ContainsIndex()
+// call is non-blocking and returns false if data is not yet loaded.
 //
 // Parameters:
 //   - ctx: Context for cancellation (currently unused but reserved for future)
@@ -549,9 +701,19 @@ func (sm *snapshotMeta) GetSnapshotByIndex(ctx context.Context, collectionID, in
 	snapshotIDs := make([]UniqueID, 0)
 
 	// Scan snapshots and check if index is in the precomputed ID set
-	sm.snapshotID2DataInfo.Range(func(key UniqueID, value *SnapshotDataInfo) bool {
-		if value.snapshotInfo.GetCollectionId() == collectionID && value.IndexIDs.Contain(indexID) {
-			snapshotIDs = append(snapshotIDs, key)
+	sm.snapshotID2Info.Range(func(id UniqueID, info *datapb.SnapshotInfo) bool {
+		if info.GetCollectionId() != collectionID {
+			return true // Skip, different collection
+		}
+
+		refIndex, exists := sm.snapshotID2RefIndex.Get(id)
+		if !exists {
+			return true // RefIndex not found (should not happen)
+		}
+
+		// ContainsIndex is non-blocking and returns false if data is not yet loaded
+		if refIndex.ContainsIndex(indexID) {
+			snapshotIDs = append(snapshotIDs, id)
 		}
 		return true // Continue iteration
 	})
@@ -608,4 +770,100 @@ func (sm *snapshotMeta) GetPendingSnapshots(ctx context.Context, pendingTimeout 
 //   - error: Error if catalog delete fails
 func (sm *snapshotMeta) CleanupPendingSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
 	return sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId())
+}
+
+// GetDeletingSnapshots returns all snapshots in DELETING state.
+//
+// These are snapshots that were marked for deletion but the S3 cleanup
+// was not completed (e.g., due to network failure or process crash).
+// GC should clean up these snapshots by deleting S3 data and catalog records.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control
+//
+// Returns:
+//   - []*datapb.SnapshotInfo: List of snapshots in DELETING state
+//   - error: Error if catalog query fails
+func (sm *snapshotMeta) GetDeletingSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+	snapshots, err := sm.catalog.ListSnapshots(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list snapshots from catalog: %w", err)
+	}
+
+	deletingSnapshots := make([]*datapb.SnapshotInfo, 0)
+	for _, snapshot := range snapshots {
+		if snapshot.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
+			deletingSnapshots = append(deletingSnapshots, snapshot)
+		}
+	}
+
+	return deletingSnapshots, nil
+}
+
+// CleanupDeletingSnapshot removes a deleting snapshot from catalog.
+// This is called by GC after S3 files have been cleaned up.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control
+//   - snapshot: The deleting snapshot to remove from catalog
+//
+// Returns:
+//   - error: Error if catalog delete fails
+func (sm *snapshotMeta) CleanupDeletingSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+	return sm.catalog.DropSnapshot(ctx, snapshot.GetCollectionId(), snapshot.GetId())
+}
+
+// addToSecondaryIndexes adds a snapshot to the secondary indexes (name and collection).
+// This should be called after inserting into the primary indexes (snapshotID2Info and snapshotID2RefIndex).
+func (sm *snapshotMeta) addToSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo) {
+	// Add to name index (thread-safe via ConcurrentMap)
+	sm.snapshotName2ID.Insert(snapshotInfo.GetName(), snapshotInfo.GetId())
+
+	// Add to collection index (requires lock since UniqueSet is not thread-safe)
+	sm.collectionIndexMu.Lock()
+	defer sm.collectionIndexMu.Unlock()
+
+	collectionID := snapshotInfo.GetCollectionId()
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	if !ok {
+		snapshotIDs = typeutil.NewUniqueSet()
+	}
+	snapshotIDs.Insert(snapshotInfo.GetId())
+	sm.collectionID2Snapshots.Insert(collectionID, snapshotIDs)
+}
+
+// removeFromSecondaryIndexes removes a snapshot from the secondary indexes (name and collection).
+// This should be called when removing from the primary indexes (snapshotID2Info and snapshotID2RefIndex).
+func (sm *snapshotMeta) removeFromSecondaryIndexes(snapshotInfo *datapb.SnapshotInfo) {
+	// Remove from name index (thread-safe via ConcurrentMap)
+	sm.snapshotName2ID.Remove(snapshotInfo.GetName())
+
+	// Remove from collection index (requires lock since UniqueSet is not thread-safe)
+	sm.collectionIndexMu.Lock()
+	defer sm.collectionIndexMu.Unlock()
+
+	collectionID := snapshotInfo.GetCollectionId()
+	snapshotIDs, ok := sm.collectionID2Snapshots.Get(collectionID)
+	if !ok {
+		return
+	}
+	snapshotIDs.Remove(snapshotInfo.GetId())
+	// Clean up empty collection entry or update the map
+	if snapshotIDs.Len() == 0 {
+		sm.collectionID2Snapshots.Remove(collectionID)
+	} else {
+		sm.collectionID2Snapshots.Insert(collectionID, snapshotIDs)
+	}
+}
+
+// IsRefIndexLoaded returns true if all RefIndexes have been loaded from S3.
+// Used by GC to check if it's safe to query snapshot references.
+// If not loaded, GC should skip snapshot reference checks and try again in the next cycle.
+func (sm *snapshotMeta) IsRefIndexLoaded() bool {
+	select {
+	case <-sm.refIndexLoadDone:
+		return true
+	default:
+		return false
+	}
 }

@@ -625,6 +625,151 @@ func (s *CopySegmentMetaSuite) TestGetTaskBy() {
 	s.Equal(int64(1001), filtered[0].GetTaskId())
 }
 
+func (s *CopySegmentMetaSuite) TestGetTasksByJobID() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+
+	// Create tasks for different jobs
+	tasks := []struct {
+		taskID       int64
+		jobID        int64
+		collectionID int64
+	}{
+		{taskID: 1001, jobID: 100, collectionID: 1},
+		{taskID: 1002, jobID: 100, collectionID: 1},
+		{taskID: 1003, jobID: 200, collectionID: 2},
+	}
+
+	for _, t := range tasks {
+		task := &copySegmentTask{
+			copyMeta: s.copyMeta,
+			tr:       timerecord.NewTimeRecorder("task"),
+			times:    taskcommon.NewTimes(),
+		}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId:       t.taskID,
+			JobId:        t.jobID,
+			CollectionId: t.collectionID,
+		})
+		s.copyMeta.AddTask(context.TODO(), task)
+	}
+
+	// GetTasksByJobID should return tasks for job 100
+	result := s.copyMeta.GetTasksByJobID(context.TODO(), 100)
+	s.Len(result, 2)
+	taskIDs := make([]int64, 0)
+	for _, t := range result {
+		taskIDs = append(taskIDs, t.GetTaskId())
+	}
+	s.ElementsMatch([]int64{1001, 1002}, taskIDs)
+
+	// GetTasksByJobID should return tasks for job 200
+	result = s.copyMeta.GetTasksByJobID(context.TODO(), 200)
+	s.Len(result, 1)
+	s.Equal(int64(1003), result[0].GetTaskId())
+
+	// GetTasksByJobID should return empty for non-existent job
+	result = s.copyMeta.GetTasksByJobID(context.TODO(), 999)
+	s.Len(result, 0)
+}
+
+func (s *CopySegmentMetaSuite) TestGetTasksByCollectionID() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(3)
+
+	// Create tasks for different collections
+	tasks := []struct {
+		taskID       int64
+		jobID        int64
+		collectionID int64
+	}{
+		{taskID: 1001, jobID: 100, collectionID: 1},
+		{taskID: 1002, jobID: 100, collectionID: 1},
+		{taskID: 1003, jobID: 200, collectionID: 2},
+	}
+
+	for _, t := range tasks {
+		task := &copySegmentTask{
+			copyMeta: s.copyMeta,
+			tr:       timerecord.NewTimeRecorder("task"),
+			times:    taskcommon.NewTimes(),
+		}
+		task.task.Store(&datapb.CopySegmentTask{
+			TaskId:       t.taskID,
+			JobId:        t.jobID,
+			CollectionId: t.collectionID,
+		})
+		s.copyMeta.AddTask(context.TODO(), task)
+	}
+
+	// GetTasksByCollectionID should return tasks for collection 1
+	result := s.copyMeta.GetTasksByCollectionID(context.TODO(), 1)
+	s.Len(result, 2)
+	taskIDs := make([]int64, 0)
+	for _, t := range result {
+		taskIDs = append(taskIDs, t.GetTaskId())
+	}
+	s.ElementsMatch([]int64{1001, 1002}, taskIDs)
+
+	// GetTasksByCollectionID should return tasks for collection 2
+	result = s.copyMeta.GetTasksByCollectionID(context.TODO(), 2)
+	s.Len(result, 1)
+	s.Equal(int64(1003), result[0].GetTaskId())
+
+	// GetTasksByCollectionID should return empty for non-existent collection
+	result = s.copyMeta.GetTasksByCollectionID(context.TODO(), 999)
+	s.Len(result, 0)
+}
+
+func (s *CopySegmentMetaSuite) TestSecondaryIndexCleanup() {
+	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	// Add tasks
+	task1 := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task1.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		JobId:        100,
+		CollectionId: 1,
+	})
+
+	task2 := &copySegmentTask{
+		copyMeta: s.copyMeta,
+		tr:       timerecord.NewTimeRecorder("task"),
+		times:    taskcommon.NewTimes(),
+	}
+	task2.task.Store(&datapb.CopySegmentTask{
+		TaskId:       1002,
+		JobId:        100,
+		CollectionId: 1,
+	})
+
+	s.copyMeta.AddTask(context.TODO(), task1)
+	s.copyMeta.AddTask(context.TODO(), task2)
+
+	// Both tasks exist in indexes
+	s.Len(s.copyMeta.GetTasksByJobID(context.TODO(), 100), 2)
+	s.Len(s.copyMeta.GetTasksByCollectionID(context.TODO(), 1), 2)
+
+	// Remove first task
+	err := s.copyMeta.RemoveTask(context.TODO(), 1001)
+	s.NoError(err)
+
+	// Index should be updated
+	s.Len(s.copyMeta.GetTasksByJobID(context.TODO(), 100), 1)
+	s.Len(s.copyMeta.GetTasksByCollectionID(context.TODO(), 1), 1)
+
+	// Remove second task
+	err = s.copyMeta.RemoveTask(context.TODO(), 1002)
+	s.NoError(err)
+
+	// Index should be empty
+	s.Len(s.copyMeta.GetTasksByJobID(context.TODO(), 100), 0)
+	s.Len(s.copyMeta.GetTasksByCollectionID(context.TODO(), 1), 0)
+}
+
 func (s *CopySegmentMetaSuite) TestRemoveTask_Success() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().DropCopySegmentTask(mock.Anything, int64(1001)).Return(nil)

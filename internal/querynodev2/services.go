@@ -335,46 +335,11 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	var position *msgpb.MsgPosition
-	deleteCheckpoint := channel.GetDeleteCheckpoint()
-	channelCheckpoint := channel.GetSeekPosition()
-	if deleteCheckpoint == nil {
-		// for compatibility with old version coord, which doesn't have delete checkpoint in VchannelInfo
-		log.Info("no delete checkpoint found, use seek position to seek",
-			zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
-		)
-		position = &msgpb.MsgPosition{
-			ChannelName: channelCheckpoint.GetChannelName(),
-			MsgID:       channelCheckpoint.GetMsgID(),
-			Timestamp:   channelCheckpoint.GetTimestamp(),
-		}
-	} else {
-		if channelCheckpoint.GetTimestamp() > deleteCheckpoint.GetTimestamp() {
-			msg := "channel seek position is greater than delete checkpoint, use delete checkpoint to seek"
-			log.Info(msg,
-				zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
-				zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(deleteCheckpoint.GetTimestamp())),
-			)
-			position = &msgpb.MsgPosition{
-				ChannelName: deleteCheckpoint.GetChannelName(),
-				MsgID:       deleteCheckpoint.GetMsgID(),
-				Timestamp:   deleteCheckpoint.GetTimestamp(),
-			}
-		} else {
-			msg := "channel seek position is smaller than delete checkpoint, use seek position to seek"
-			log.Info(msg,
-				zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
-				zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(deleteCheckpoint.GetTimestamp())),
-			)
-			position = &msgpb.MsgPosition{
-				ChannelName: channelCheckpoint.GetChannelName(),
-				MsgID:       channelCheckpoint.GetMsgID(),
-				Timestamp:   channelCheckpoint.GetTimestamp(),
-			}
-		}
-	}
-
-	err = pipeline.ConsumeMsgStream(ctx, position)
+	log.Info("use channel seek position to seek",
+		zap.Time("seekPosition", tsoutil.PhysicalTime(channel.GetSeekPosition().GetTimestamp())),
+		zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(channel.GetDeleteCheckpoint().GetTimestamp())),
+	)
+	err = pipeline.ConsumeMsgStream(ctx, channel.GetSeekPosition())
 	if err != nil {
 		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")
 		log.Warn(err.Error(),

@@ -86,7 +86,6 @@ const (
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
 	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
-	RootCoord_RestoreSnapshot_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/RestoreSnapshot"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -218,8 +217,6 @@ type RootCoordClient interface {
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
 	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
-	// Snapshot restore orchestration - coordinates CreateCollection, CreatePartition, and data restore
-	RestoreSnapshot(ctx context.Context, in *milvuspb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*milvuspb.RestoreSnapshotResponse, error)
 }
 
 type rootCoordClient struct {
@@ -797,15 +794,6 @@ func (c *rootCoordClient) BackupEzk(ctx context.Context, in *internalpb.BackupEz
 	return out, nil
 }
 
-func (c *rootCoordClient) RestoreSnapshot(ctx context.Context, in *milvuspb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*milvuspb.RestoreSnapshotResponse, error) {
-	out := new(milvuspb.RestoreSnapshotResponse)
-	err := c.cc.Invoke(ctx, RootCoord_RestoreSnapshot_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // RootCoordServer is the server API for RootCoord service.
 // All implementations should embed UnimplementedRootCoordServer
 // for forward compatibility
@@ -935,8 +923,6 @@ type RootCoordServer interface {
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
 	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
-	// Snapshot restore orchestration - coordinates CreateCollection, CreatePartition, and data restore
-	RestoreSnapshot(context.Context, *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1131,9 +1117,6 @@ func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb
 }
 func (UnimplementedRootCoordServer) BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackupEzk not implemented")
-}
-func (UnimplementedRootCoordServer) RestoreSnapshot(context.Context, *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RestoreSnapshot not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2281,24 +2264,6 @@ func _RootCoord_BackupEzk_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _RootCoord_RestoreSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.RestoreSnapshotRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(RootCoordServer).RestoreSnapshot(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: RootCoord_RestoreSnapshot_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RootCoordServer).RestoreSnapshot(ctx, req.(*milvuspb.RestoreSnapshotRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // RootCoord_ServiceDesc is the grpc.ServiceDesc for RootCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2557,10 +2522,6 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BackupEzk",
 			Handler:    _RootCoord_BackupEzk_Handler,
-		},
-		{
-			MethodName: "RestoreSnapshot",
-			Handler:    _RootCoord_RestoreSnapshot_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

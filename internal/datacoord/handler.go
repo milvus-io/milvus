@@ -22,7 +22,6 @@ import (
 	"math"
 	"path"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -623,6 +622,10 @@ func (h *ServerHandler) GetSnapshotTs(ctx context.Context, collectionID UniqueID
 			minTs = seekPosition.Timestamp
 		}
 	}
+	// Check if no valid seek position was found
+	if minTs == math.MaxUint64 {
+		return 0, merr.WrapErrServiceInternal("no valid channel seek position for snapshot")
+	}
 	return minTs, nil
 }
 
@@ -693,23 +696,9 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 	partitionIDs := showPartitionResp.GetPartitionIDs()
 	partitionNames := showPartitionResp.GetPartitionNames()
 
-	hasPartitionKey := typeutil.HasPartitionKey(resp.GetSchema())
-
-	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
-	userCreatedPartitions := make(map[int64]string)
-	if !hasPartitionKey {
-		for idx, partitionID := range partitionIDs {
-			partitionName := partitionNames[idx]
-			if partitionName == defaultPartitionName {
-				continue
-			}
-
-			parts := strings.Split(partitionName, "_")
-			if len(parts) == 2 && parts[0] == defaultPartitionName {
-				continue
-			}
-			userCreatedPartitions[partitionID] = partitionNames[idx]
-		}
+	partitionMapping := make(map[string]int64)
+	for idx, name := range partitionNames {
+		partitionMapping[name] = partitionIDs[idx]
 	}
 
 	// generate snapshot ts with current partition ids
@@ -814,11 +803,11 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) 
 			CreateTs:     int64(snapshotTs),
 		},
 		Collection: &datapb.CollectionDescription{
-			Schema:                schema,
-			NumShards:             int64(resp.GetShardsNum()),
-			NumPartitions:         int64(resp.GetNumPartitions()),
-			UserCreatedPartitions: userCreatedPartitions,
-			VirtualChannelNames:   resp.GetVirtualChannelNames(),
+			Schema:              schema,
+			NumShards:           int64(resp.GetShardsNum()),
+			NumPartitions:       int64(resp.GetNumPartitions()),
+			Partitions:          partitionMapping,
+			VirtualChannelNames: resp.GetVirtualChannelNames(),
 		},
 		Indexes:  indexInfos,
 		Segments: segDescList,
@@ -883,7 +872,10 @@ func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID 
 		for _, child := range children {
 			clonedChild := child.Clone()
 			// child segment should decompress binlog path
-			binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
+			if err := binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs()); err != nil {
+				log.Warn("failed to decompress delta binlog", zap.Int64("segmentID", clonedChild.GetID()), zap.Error(err))
+				return nil, err
+			}
 			allDeltaLogs = append(allDeltaLogs, clonedChild.GetDeltalogs()...)
 			allChildrenDeltas, err := getChildrenDelta(child.GetID())
 			if err != nil {

@@ -28,6 +28,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/hamba/avro/v2"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -279,7 +280,7 @@ func TestSnapshotWriter_Drop_Success(t *testing.T) {
 	writer := NewSnapshotWriter(cm)
 
 	// Mock metadata file content
-	metadata := &SnapshotMetadata{
+	metadata := &datapb.SnapshotMetadata{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:       1,
 			CreateTs: 1234567890,
@@ -293,7 +294,8 @@ func TestSnapshotWriter_Drop_Success(t *testing.T) {
 		Indexes:      []*indexpb.IndexInfo{},
 		ManifestList: []string{"manifest1.avro"},
 	}
-	metadataJSON, _ := json.Marshal(metadata)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	metadataJSON, _ := opts.Marshal(metadata)
 
 	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
 
@@ -355,7 +357,7 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := NewSnapshotReader(cm)
 
-	metadata := &SnapshotMetadata{
+	metadata := &datapb.SnapshotMetadata{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:       1,
 			CreateTs: 1234567890,
@@ -369,33 +371,32 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 		Indexes:      []*indexpb.IndexInfo{},
 		ManifestList: []string{"manifest1.avro"},
 	}
-	metadataJSON, _ := json.Marshal(metadata)
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	metadataJSON, _ := marshalOpts.Marshal(metadata)
 
-	// Generate valid manifest entries with all required fields
-	manifestEntries := []ManifestEntry{
-		{
-			SegmentID:         1001,
-			PartitionID:       1,
-			SegmentLevel:      1,
-			ChannelName:       "test_channel",
-			NumOfRows:         100,
-			BinlogFiles:       []AvroFieldBinlog{},
-			DeltalogFiles:     []AvroFieldBinlog{},
-			StatslogFiles:     []AvroFieldBinlog{},
-			Bm25StatslogFiles: []AvroFieldBinlog{},
-			TextIndexFiles:    []AvroTextIndexEntry{},
-			JsonKeyIndexFiles: []AvroJsonKeyIndexEntry{},
-			IndexFiles:        []AvroIndexFilePathInfo{},
-			StartPosition:     &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
-			DmlPosition:       &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
-			StorageVersion:    0,
-			IsSorted:          false,
-		},
+	// Generate valid manifest entry with all required fields (single record per file)
+	manifestEntry := ManifestEntry{
+		SegmentID:         1001,
+		PartitionID:       1,
+		SegmentLevel:      1,
+		ChannelName:       "test_channel",
+		NumOfRows:         100,
+		BinlogFiles:       []AvroFieldBinlog{},
+		DeltalogFiles:     []AvroFieldBinlog{},
+		StatslogFiles:     []AvroFieldBinlog{},
+		Bm25StatslogFiles: []AvroFieldBinlog{},
+		TextIndexFiles:    []AvroTextIndexEntry{},
+		JsonKeyIndexFiles: []AvroJsonKeyIndexEntry{},
+		IndexFiles:        []AvroIndexFilePathInfo{},
+		StartPosition:     &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
+		DmlPosition:       &AvroMsgPosition{ChannelName: "", MsgID: []byte{}, MsgGroup: "", Timestamp: 0},
+		StorageVersion:    0,
+		IsSorted:          false,
 	}
 
-	// Pre-generate valid Avro data for manifest using the real schema
+	// Pre-generate valid Avro data for manifest using the real schema (single record)
 	manifestSchema, _ := getManifestSchema()
-	validManifestData, _ := avro.Marshal(manifestSchema, manifestEntries)
+	validManifestData, _ := avro.Marshal(manifestSchema, manifestEntry)
 
 	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
 
@@ -460,7 +461,7 @@ func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := NewSnapshotReader(cm)
 
-	metadata1 := &SnapshotMetadata{
+	metadata1 := &datapb.SnapshotMetadata{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:          1,
 			CreateTs:    1234567890,
@@ -471,9 +472,10 @@ func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
 		Indexes:      []*indexpb.IndexInfo{},
 		ManifestList: []string{},
 	}
-	metadata1JSON, _ := json.Marshal(metadata1)
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	metadata1JSON, _ := marshalOpts.Marshal(metadata1)
 
-	metadata2 := &SnapshotMetadata{
+	metadata2 := &datapb.SnapshotMetadata{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:          2,
 			CreateTs:    1234567900,
@@ -484,7 +486,7 @@ func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
 		Indexes:      []*indexpb.IndexInfo{},
 		ManifestList: []string{},
 	}
-	metadata2JSON, _ := json.Marshal(metadata2)
+	metadata2JSON, _ := marshalOpts.Marshal(metadata2)
 
 	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
 		[]string{
@@ -897,11 +899,11 @@ func TestSnapshotWriter_Save_WithStorageV2Manifest(t *testing.T) {
 	metadata, err := reader.readMetadataFile(context.Background(), metadataPath)
 	assert.NoError(t, err)
 	assert.NotNil(t, metadata)
-	assert.Len(t, metadata.StorageV2ManifestList, 1)
+	assert.Len(t, metadata.GetStoragev2ManifestList(), 1)
 
 	// Verify the manifest list content
-	assert.Equal(t, int64(1001), metadata.StorageV2ManifestList[0].SegmentID)
-	assert.Equal(t, "s3://bucket/collection/partition/segment1/manifest.json", metadata.StorageV2ManifestList[0].Manifest)
+	assert.Equal(t, int64(1001), metadata.GetStoragev2ManifestList()[0].GetSegmentId())
+	assert.Equal(t, "s3://bucket/collection/partition/segment1/manifest.json", metadata.GetStoragev2ManifestList()[0].GetManifest())
 }
 
 func TestSnapshotReader_ReadSnapshot_WithStorageV2Manifest(t *testing.T) {
@@ -956,5 +958,199 @@ func TestSnapshotWriter_Save_EmptyManifestPath(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, metadata)
 	// StorageV2ManifestList should be empty since no segment has manifest_path
-	assert.Len(t, metadata.StorageV2ManifestList, 0)
+	assert.Len(t, metadata.GetStoragev2ManifestList(), 0)
+}
+
+// =========================== Format Version Tests ===========================
+
+func TestValidateFormatVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		version     int
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "version_0_legacy",
+			version: 0,
+			wantErr: false,
+		},
+		{
+			name:    "version_1_current",
+			version: 1,
+			wantErr: false,
+		},
+		{
+			name:        "version_2_future",
+			version:     2,
+			wantErr:     true,
+			errContains: "too new",
+		},
+		{
+			name:        "version_100_future",
+			version:     100,
+			wantErr:     true,
+			errContains: "too new",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFormatVersion(tt.version)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestGetManifestSchemaByVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		version     int
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "version_0_legacy",
+			version: 0,
+			wantErr: false,
+		},
+		{
+			name:    "version_1_current",
+			version: 1,
+			wantErr: false,
+		},
+		{
+			name:        "version_2_unsupported",
+			version:     2,
+			wantErr:     true,
+			errContains: "unsupported manifest schema version",
+		},
+		{
+			name:        "version_99_unsupported",
+			version:     99,
+			wantErr:     true,
+			errContains: "unsupported manifest schema version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema, err := getManifestSchemaByVersion(tt.version)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+				assert.Nil(t, schema)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, schema)
+			}
+		})
+	}
+}
+
+func TestSnapshotMetadata_FormatVersion(t *testing.T) {
+	// Test that FormatVersion is correctly serialized/deserialized
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: int32(SnapshotFormatVersion),
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1,
+			Name: "test",
+		},
+		Collection:   &datapb.CollectionDescription{},
+		Indexes:      []*indexpb.IndexInfo{},
+		ManifestList: []string{},
+	}
+
+	// Serialize to JSON using protojson
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := marshalOpts.Marshal(metadata)
+	assert.NoError(t, err)
+
+	// Verify JSON contains format_version field (protojson uses snake_case with UseProtoNames)
+	assert.Contains(t, string(data), `"format_version":`)
+
+	// Deserialize back
+	restored := &datapb.SnapshotMetadata{}
+	unmarshalOpts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	err = unmarshalOpts.Unmarshal(data, restored)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(SnapshotFormatVersion), restored.GetFormatVersion())
+}
+
+func TestSnapshotReader_ReadSnapshot_LegacyVersion(t *testing.T) {
+	// Test reading legacy snapshot without FormatVersion field (version 0)
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	// Create legacy metadata without FormatVersion (simulating old snapshots)
+	// Note: protojson supports snake_case (proto names) and camelCase (JSON names)
+	// We use snake_case here to simulate a snapshot created with protojson defaults
+	legacyMetadata := map[string]interface{}{
+		"snapshot_info": map[string]interface{}{
+			"id":   1,
+			"name": "legacy_snapshot",
+		},
+		"collection":    map[string]interface{}{},
+		"indexes":       []interface{}{},
+		"manifest_list": []string{},
+		// Note: No "format_version" field - this is the legacy case (version 0)
+	}
+	metadataJSON, _ := json.Marshal(legacyMetadata)
+
+	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
+
+	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
+		if filePath == metadataFilePath {
+			return metadataJSON, nil
+		}
+		return nil, fmt.Errorf("unexpected file path: %s", filePath)
+	}).Build()
+	defer mockRead.UnPatch()
+
+	// Reading legacy snapshot without manifest should succeed
+	// withSegments=false to avoid needing manifest files
+	snapshot, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
+	assert.NoError(t, err) // Should succeed with version 0 (legacy)
+	assert.NotNil(t, snapshot)
+	assert.Equal(t, "legacy_snapshot", snapshot.SnapshotInfo.GetName())
+}
+
+func TestSnapshotReader_ReadSnapshot_FutureVersion(t *testing.T) {
+	// Test that reading a snapshot with future version fails
+	tempDir := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
+	reader := NewSnapshotReader(cm)
+
+	futureMetadata := &datapb.SnapshotMetadata{
+		FormatVersion: 999, // Future version
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:   1,
+			Name: "future_snapshot",
+		},
+		Collection:   &datapb.CollectionDescription{},
+		Indexes:      []*indexpb.IndexInfo{},
+		ManifestList: []string{},
+	}
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	metadataJSON, _ := marshalOpts.Marshal(futureMetadata)
+
+	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
+
+	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
+		if filePath == metadataFilePath {
+			return metadataJSON, nil
+		}
+		return nil, fmt.Errorf("unexpected file path: %s", filePath)
+	}).Build()
+	defer mockRead.UnPatch()
+
+	_, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too new")
 }

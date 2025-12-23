@@ -23,9 +23,11 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
@@ -641,4 +643,245 @@ func (s *BrokerSuite) TestShowPartitions_EmptyResult() {
 
 func TestBrokerSuite(t *testing.T) {
 	suite.Run(t, new(BrokerSuite))
+}
+
+// --- Tests using mockey for DropCollection, CreateCollection, CreatePartition ---
+
+func TestDropCollection_Success(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DropCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+			assert.Equal(t, "test_db", req.GetDbName())
+			assert.Equal(t, "test_collection", req.GetCollectionName())
+			assert.NotNil(t, req.GetBase())
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.DropCollection(ctx, "test_db", "test_collection")
+
+	assert.NoError(t, err)
+}
+
+func TestDropCollection_RPCError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.DropCollection(ctx, "test_db", "test_collection")
+
+	assert.Error(t, err)
+}
+
+func TestDropCollection_StatusError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DropCollection(mock.Anything, mock.Anything).Return(
+		merr.Status(merr.WrapErrCollectionNotFound("test_collection")), nil)
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.DropCollection(ctx, "test_db", "test_collection")
+
+	assert.Error(t, err)
+}
+
+func TestCreateCollection_Success(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreateCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+			assert.Equal(t, "test_db", req.GetDbName())
+			assert.Equal(t, "test_collection", req.GetCollectionName())
+			assert.NotNil(t, req.GetBase())
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	})
+
+	assert.NoError(t, err)
+}
+
+func TestCreateCollection_RPCError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	})
+
+	assert.Error(t, err)
+}
+
+func TestCreateCollection_StatusError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(
+		merr.Status(errors.New("collection already exists")), nil)
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	})
+
+	assert.Error(t, err)
+}
+
+func TestCreateCollection_WithExistingBase(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreateCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+			// Base should be preserved if already set
+			assert.NotNil(t, req.GetBase())
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	})
+
+	assert.NoError(t, err)
+}
+
+func TestCreatePartition_Success(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreatePartition(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+			assert.Equal(t, "test_db", req.GetDbName())
+			assert.Equal(t, "test_collection", req.GetCollectionName())
+			assert.Equal(t, "test_partition", req.GetPartitionName())
+			assert.NotNil(t, req.GetBase())
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		PartitionName:  "test_partition",
+	})
+
+	assert.NoError(t, err)
+}
+
+func TestCreatePartition_RPCError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		PartitionName:  "test_partition",
+	})
+
+	assert.Error(t, err)
+}
+
+func TestCreatePartition_StatusError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreatePartition(mock.Anything, mock.Anything).Return(
+		merr.Status(errors.New("partition already exists")), nil)
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		PartitionName:  "test_partition",
+	})
+
+	assert.Error(t, err)
+}
+
+func TestDescribeCollectionByName_Success(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			assert.Equal(t, "test_db", req.GetDbName())
+			assert.Equal(t, "test_collection", req.GetCollectionName())
+			return &milvuspb.DescribeCollectionResponse{
+				Status:         merr.Success(),
+				CollectionID:   1001,
+				CollectionName: "test_collection",
+				DbName:         "test_db",
+			}, nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeCollectionByName(ctx, "test_db", "test_collection")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, int64(1001), resp.GetCollectionID())
+	assert.Equal(t, "test_collection", resp.GetCollectionName())
+}
+
+func TestDescribeCollectionByName_RPCError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeCollectionByName(ctx, "test_db", "test_collection")
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestDescribeCollectionByName_StatusError(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(
+		&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound("test_collection")),
+		}, nil)
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	resp, err := broker.DescribeCollectionByName(ctx, "test_db", "test_collection")
+
+	assert.Error(t, err)
+	assert.Nil(t, resp)
 }

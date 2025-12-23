@@ -991,14 +991,10 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 	return s.mixCoord.ListSnapshots(ctx, req)
 }
 
-// RestoreSnapshot is the RootCoord API for restoring a snapshot (orchestrates the entire restore process)
-func (s *Server) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSnapshotRequest) (*milvuspb.RestoreSnapshotResponse, error) {
+// RestoreSnapshot is the DataCoord API for restoring snapshot.
+// DataCoord creates collection/partitions via RootCoord, then creates copy segment jobs.
+func (s *Server) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
 	return s.mixCoord.RestoreSnapshot(ctx, req)
-}
-
-// RestoreSnapshotData is the DataCoord API for restoring snapshot data
-func (s *Server) RestoreSnapshotData(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
-	return s.mixCoord.RestoreSnapshotData(ctx, req)
 }
 
 func (s *Server) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {

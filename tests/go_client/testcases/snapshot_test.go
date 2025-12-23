@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -162,28 +161,8 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	restoreJobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
-
-	// Wait for a while to ensure restore is completed
-	for {
-		client.NewGetRestoreSnapshotStateOption(restoreJobID)
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobID))
-		common.CheckErr(t, err, true)
-		log.Info("restore snapshot state", zap.Any("state", state))
-		if state.Progress == 100 {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Verify restored collection exists
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
@@ -316,28 +295,8 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	restoreJobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
-
-	// Wait for a while to ensure restore is completed
-	for {
-		client.NewGetRestoreSnapshotStateOption(restoreJobID)
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobID))
-		common.CheckErr(t, err, true)
-		log.Info("restore snapshot state", zap.Any("state", state))
-		if state.Progress == 100 {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Verify restored collection exists
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
@@ -524,28 +483,8 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	// Step 6: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	restoreJobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
-
-	// Wait for restore to complete
-	for {
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobID))
-		common.CheckErr(t, err, true)
-		log.Info("Restore snapshot state", zap.Any("state", state))
-
-		if state.Progress == 100 {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Verify restored collection exists
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
@@ -695,28 +634,8 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	// Step 8: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	restoreJobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
-
-	// Wait for restore to complete
-	for {
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobID))
-		common.CheckErr(t, err, true)
-		log.Info("Restore snapshot state", zap.Any("state", state))
-
-		if state.Progress == 100 {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Step 9: Verify restored collection exists
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
@@ -1016,28 +935,8 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	log.Info("Restoring snapshot", zap.String("target_collection", restoredCollName))
-	restoreJobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
 	common.CheckErr(t, err, true)
-
-	// Wait for restore to complete
-	for {
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobID))
-		common.CheckErr(t, err, true)
-		log.Info("Restore snapshot state", zap.Any("state", state))
-
-		if state.Progress == 100 {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Step 9: Verify restored collection exists
 	has, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollName))
@@ -1165,24 +1064,8 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	restoredCollNameV1 := fmt.Sprintf("restored_v1_%s", collName)
 	restoreOptV1 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV1)
 	log.Info("Restoring snapshot after partition drop", zap.String("target", restoredCollNameV1))
-	restoreJobIDV1, err := mc.RestoreSnapshot(ctx, restoreOptV1)
+	_, err = mc.RestoreSnapshot(ctx, restoreOptV1)
 	common.CheckErr(t, err, true)
-
-	// Wait for restore to complete
-	for {
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobIDV1))
-		common.CheckErr(t, err, true)
-		log.Info("Restore snapshot state", zap.Any("state", state))
-
-		if state.Progress == 100 || state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed after dropping partition, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Verify restored collection v1 exists
 	hasV1, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollNameV1))
@@ -1239,24 +1122,8 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	restoredCollNameV2 := fmt.Sprintf("restored_v2_%s", collName)
 	restoreOptV2 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV2)
 	log.Info("Restoring snapshot after collection drop", zap.String("target", restoredCollNameV2))
-	restoreJobIDV2, err := mc.RestoreSnapshot(ctx, restoreOptV2)
+	_, err = mc.RestoreSnapshot(ctx, restoreOptV2)
 	common.CheckErr(t, err, true)
-
-	// Wait for restore to complete
-	for {
-		state, err := mc.GetRestoreSnapshotState(ctx, client.NewGetRestoreSnapshotStateOption(restoreJobIDV2))
-		common.CheckErr(t, err, true)
-		log.Info("Restore snapshot state", zap.Any("state", state))
-
-		if state.Progress == 100 || state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-
-		if state.GetState() == milvuspb.RestoreSnapshotState_RestoreSnapshotFailed {
-			t.Fatalf("restore snapshot failed after dropping collection, reason: %s", state.GetReason())
-		}
-		time.Sleep(1 * time.Second)
-	}
 
 	// Verify restored collection v2 exists
 	hasV2, err := mc.HasCollection(ctx, client.NewHasCollectionOption(restoredCollNameV2))
