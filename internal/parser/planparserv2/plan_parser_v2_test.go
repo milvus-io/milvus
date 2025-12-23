@@ -2620,6 +2620,52 @@ func TestExpr_Match(t *testing.T) {
 		assertValidExpr(t, helper, expr)
 	}
 
+	// Test proto structure assertions
+	t.Run("MatchAll_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ALL(struct_array, $[sub_int] > 1)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchAll, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchAny_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_str] == "aaa")`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchAny, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchLeast_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, 3)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchLeast, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(3), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchMost_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_MOST(struct_array, $[sub_str] == "aaa", 5)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchMost, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(5), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchExact_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_EXACT(struct_array, $[sub_int] == 100, 2)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchExact, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(2), expr.GetMatchExpr().GetCount())
+	})
+
 	// Invalid expressions
 	invalidExprs := []string{
 		// Nested match expressions not allowed
