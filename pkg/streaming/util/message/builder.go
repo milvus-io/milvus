@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -92,6 +93,12 @@ func MilvusMessageToImmutableMessage(im *commonpb.ImmutableMessage) ImmutableMes
 	messageID := MustUnmarshalMessageID(im.GetId())
 	msg := NewImmutableMesasge(messageID, im.GetPayload(), im.GetProperties())
 	return msg
+}
+
+func MilvusMessagesToImmutableMessages(ims []*commonpb.ImmutableMessage) []ImmutableMessage {
+	return lo.Map(ims, func(im *commonpb.ImmutableMessage, _ int) ImmutableMessage {
+		return MilvusMessageToImmutableMessage(im)
+	})
 }
 
 func ImmutableMessageToMilvusMessage(walName string, im ImmutableMessage) *commonpb.ImmutableMessage {
