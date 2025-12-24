@@ -2662,7 +2662,14 @@ ChunkedSegmentSealedImpl::Reopen(
 
     // compute load diff
     auto diff = current.ComputeDiff(new_seg_load_info);
+    ApplyLoadDiff(new_seg_load_info, diff);
 
+    LOG_INFO("Reopen segment {} done", id_);
+}
+
+void
+ChunkedSegmentSealedImpl::ApplyLoadDiff(SegmentLoadInfo& segment_load_info,
+                                        LoadDiff& diff) {
     milvus::tracer::TraceContext trace_ctx;
     if (!diff.indexes_to_load.empty()) {
         LoadBatchIndexes(trace_ctx, diff.indexes_to_load, op_ctx);
@@ -2680,10 +2687,11 @@ ChunkedSegmentSealedImpl::Reopen(
         auto properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
-        LoadColumnGroups(new_seg_load_info.GetColumnGroups(),
-                         properties,
-                         diff.column_groups_to_load,
-                         op_ctx);
+        auto column_groups = segment_load_info.GetColumnGroups();
+        auto arrow_schema = schema_->ConvertToArrowSchema();
+        reader_ = milvus_storage::api::Reader::create(
+            column_groups, arrow_schema, nullptr, *properties);
+        LoadColumnGroups(column_groups, properties, diff.column_groups_to_load);
     }
 
     // load field binlog
@@ -2697,8 +2705,6 @@ ChunkedSegmentSealedImpl::Reopen(
             DropFieldData(field_id);
         }
     }
-
-    LOG_INFO("Reopen segment {} done", id_);
 }
 
 void
@@ -2863,7 +2869,7 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path,
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
 
-    std::map<int, std::vector<FieldId>> cg_field_ids_map;
+    std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids;
     for (int i = 0; i < column_groups->size(); ++i) {
         auto column_group = column_groups->get_column_group(i);
         std::vector<FieldId> milvus_field_ids;
@@ -2871,27 +2877,30 @@ ChunkedSegmentSealedImpl::LoadManifest(const std::string& manifest_path,
             auto field_id = std::stoll(column);
             milvus_field_ids.emplace_back(field_id);
         }
-        cg_field_ids_map[i] = milvus_field_ids;
+        cg_field_ids.emplace_back(i, std::move(milvus_field_ids));
     }
 
+<<<<<<< HEAD
     LoadColumnGroups(column_groups, properties, cg_field_ids_map, op_ctx);
+=======
+    LoadColumnGroups(column_groups, properties, cg_field_ids);
+>>>>>>> 48f8b3b585 (enhance: Unify segment Load and Reopen through diff-based loading (#46536))
 }
 
 void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
-    std::map<int, std::vector<FieldId>>& cg_field_ids_map,
+    std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     milvus::OpContext* op_ctx) {
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::LOW);
     std::vector<std::future<void>> load_group_futures;
-    for (const auto& kv : cg_field_ids_map) {
-        auto cg_index = kv.first;
-        const auto& field_ids = kv.second;
-        auto future = pool.Submit(
-            [this, column_groups, properties, cg_index, field_ids, op_ctx] {
-                LoadColumnGroup(
-                    column_groups, properties, cg_index, field_ids, op_ctx);
+    for (const auto& pair : cg_field_ids) {
+        auto cg_index = pair.first;
+        const auto& field_ids = pair.second;
+        auto future =
+            pool.Submit([this, column_groups, properties, cg_index, field_ids] {
+                LoadColumnGroup(column_groups, properties, cg_index, field_ids);
             });
         load_group_futures.emplace_back(std::move(future));
     }
@@ -3295,62 +3304,8 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     auto num_rows = segment_load_info_.GetNumOfRows();
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
-    // Step 1: Separate indexed and non-indexed fields
-    std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>
-        field_id_to_index_info;
-    std::set<FieldId> indexed_fields;
-
-    for (int i = 0; i < segment_load_info_.GetIndexInfoCount(); i++) {
-        const auto& index_info = segment_load_info_.GetIndexInfo(i);
-        if (index_info.index_file_paths_size() == 0) {
-            continue;
-        }
-        auto field_id = FieldId(index_info.fieldid());
-        field_id_to_index_info[field_id].push_back(&index_info);
-        indexed_fields.insert(field_id);
-    }
-
-    // Step 2: Load indexes in parallel using thread pool
-    LoadBatchIndexes(trace_ctx, field_id_to_index_info, op_ctx);
-
-    LOG_INFO("Finished loading {} indexes for segment {}",
-             field_id_to_index_info.size(),
-             id_);
-
-    // Step 3.a: Load with manifest
-    auto manifest_path = segment_load_info_.GetManifestPath();
-    if (manifest_path != "") {
-        LoadManifest(manifest_path, op_ctx);
-        return;
-    }
-
-    // Step 3.b: Load with field binlog
-    std::vector<std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>
-        field_binlog_to_load;
-    for (int i = 0; i < segment_load_info_.GetBinlogPathCount(); i++) {
-        LoadFieldDataInfo load_field_data_info;
-        load_field_data_info.storage_version =
-            segment_load_info_.GetStorageVersion();
-
-        const auto& field_binlog = segment_load_info_.GetBinlogPath(i);
-
-        std::vector<FieldId> field_ids;
-        // when child fields specified, field id is group id, child field ids are actual id values here
-        if (field_binlog.child_fields_size() > 0) {
-            field_ids.reserve(field_binlog.child_fields_size());
-            for (auto field_id : field_binlog.child_fields()) {
-                field_ids.emplace_back(field_id);
-            }
-        } else {
-            field_ids.emplace_back(field_binlog.fieldid());
-        }
-
-        field_binlog_to_load.emplace_back(field_ids, field_binlog);
-    }
-
-    if (!field_binlog_to_load.empty()) {
-        LoadBatchFieldData(trace_ctx, field_binlog_to_load, op_ctx);
-    }
+    auto diff = segment_load_info_.GetLoadDiff();
+    ApplyLoadDiff(segment_load_info_, diff);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
 }

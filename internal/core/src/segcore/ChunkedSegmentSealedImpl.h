@@ -979,7 +979,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::map<int, std::vector<FieldId>>& cg_field_ids_map,
+        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
         milvus::OpContext* op_ctx = nullptr);
 
     /**
@@ -999,6 +999,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t index,
         const std::vector<FieldId>& milvus_field_ids,
         milvus::OpContext* op_ctx = nullptr);
+
+    /**
+     * @brief Apply load differences to update segment load information
+     *
+     * This method processes the differences between current and new load states,
+     * updating the segment's loaded fields and indexes accordingly. It handles
+     * incremental updates during segment reopen operations.
+     *
+     * @param segment_load_info The segment load information to be updated
+     * @param load_diff The differences to apply, containing fields and indexes to add/remove
+     */
+    void
+    ApplyLoadDiff(SegmentLoadInfo& segment_load_info, LoadDiff& load_diff);
 
     void
     load_field_data_common(
