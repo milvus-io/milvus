@@ -260,14 +260,14 @@ func TestPayloadWriter_Failed(t *testing.T) {
 		err = w.FinishPayloadWriter()
 		require.NoError(t, err)
 
-		err = w.AddBinaryVectorToPayload(data, 8)
+		err = w.AddBinaryVectorToPayload(data, 8, nil)
 		require.Error(t, err)
 
 		w, err = NewPayloadWriter(schemapb.DataType_Int64)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddBinaryVectorToPayload(data, 8)
+		err = w.AddBinaryVectorToPayload(data, 8, nil)
 		require.Error(t, err)
 	})
 

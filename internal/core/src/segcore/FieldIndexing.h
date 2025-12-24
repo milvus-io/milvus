@@ -434,93 +434,19 @@ class IndexingRecord {
         assert(offset_id == schema_.size());
     }
 
-    // concurrent, reentrant
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const DataArray* stream_data,
-                   const InsertRecord<false>& record) {
-        if (!is_in(fieldId)) {
-            return;
-        }
-        auto& indexing = field_indexings_.at(fieldId);
-        auto type = indexing->get_data_type();
-        auto field_raw_data = record.get_data_base(fieldId);
-        if (type == DataType::VECTOR_FLOAT &&
-            reserved_offset + size >= indexing->get_build_threshold()) {
-            indexing->AppendSegmentIndexDense(
-                reserved_offset,
-                size,
-                field_raw_data,
-                stream_data->vectors().float_vector().data().data());
-        } else if (type == DataType::VECTOR_FLOAT16 &&
-                   reserved_offset + size >= indexing->get_build_threshold()) {
-            indexing->AppendSegmentIndexDense(
-                reserved_offset,
-                size,
-                field_raw_data,
-                stream_data->vectors().float16_vector().data());
-        } else if (type == DataType::VECTOR_BFLOAT16 &&
-                   reserved_offset + size >= indexing->get_build_threshold()) {
-            indexing->AppendSegmentIndexDense(
-                reserved_offset,
-                size,
-                field_raw_data,
-                stream_data->vectors().bfloat16_vector().data());
-        } else if (type == DataType::VECTOR_SPARSE_U32_F32) {
-            auto data = SparseBytesToRows(
-                stream_data->vectors().sparse_float_vector().contents());
-            indexing->AppendSegmentIndexSparse(
-                reserved_offset,
-                size,
-                stream_data->vectors().sparse_float_vector().dim(),
-                field_raw_data,
-                data.get());
-        } else if (type == DataType::GEOMETRY) {
-            // For geometry fields, append data incrementally to RTree index
-            indexing->AppendSegmentIndex(
-                reserved_offset, size, field_raw_data, stream_data);
-        }
-    }
+                   const InsertRecord<false>& record);
 
-    // concurrent, reentrant
     void
     AppendingIndex(int64_t reserved_offset,
                    int64_t size,
                    FieldId fieldId,
                    const FieldDataPtr data,
-                   const InsertRecord<false>& record) {
-        if (!is_in(fieldId)) {
-            return;
-        }
-        auto& indexing = field_indexings_.at(fieldId);
-        auto type = indexing->get_data_type();
-        const void* p = data->Data();
-
-        if ((type == DataType::VECTOR_FLOAT ||
-             type == DataType::VECTOR_FLOAT16 ||
-             type == DataType::VECTOR_BFLOAT16) &&
-            reserved_offset + size >= indexing->get_build_threshold()) {
-            auto vec_base = record.get_data_base(fieldId);
-            indexing->AppendSegmentIndexDense(
-                reserved_offset, size, vec_base, data->Data());
-        } else if (type == DataType::VECTOR_SPARSE_U32_F32) {
-            auto vec_base = record.get_data_base(fieldId);
-            indexing->AppendSegmentIndexSparse(
-                reserved_offset,
-                size,
-                std::dynamic_pointer_cast<const FieldData<SparseFloatVector>>(
-                    data)
-                    ->Dim(),
-                vec_base,
-                p);
-        } else if (type == DataType::GEOMETRY) {
-            // For geometry fields, append data incrementally to RTree index
-            auto vec_base = record.get_data_base(fieldId);
-            indexing->AppendSegmentIndex(reserved_offset, size, vec_base, data);
-        }
-    }
+                   const InsertRecord<false>& record);
 
     // for sparse float vector:
     //   * element_size is not used
