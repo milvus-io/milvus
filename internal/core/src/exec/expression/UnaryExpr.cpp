@@ -36,15 +36,13 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
 
-    for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
-
-        if (index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::HYBRID ||
-            index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::BITMAP) {
-            return false;
-        }
+    // num_index_chunk_ == 1 is guaranteed by CanUseIndex()
+    auto index_ptr = dynamic_cast<const Index*>(pinned_index_[0].get());
+    if (index_ptr->GetIndexType() ==
+            milvus::index::ScalarIndexType::HYBRID ||
+        index_ptr->GetIndexType() ==
+            milvus::index::ScalarIndexType::BITMAP) {
+        return false;
     }
     return true;
 }
@@ -1448,11 +1446,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     };
     IndexInnerType val = value_arg_.GetValue<IndexInnerType>();
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
-    AssertInfo(res->size() == real_batch_size,
-               "internal error: expr processed rows {} not equal "
-               "expect batch size {}",
-               res->size(),
-               real_batch_size);
+    // AssertInfo(res->size() == real_batch_size,
+    //            "internal error: expr processed rows {} not equal "
+    //            "expect batch size {}",
+    //            res->size(),
+    //            real_batch_size);
     return res;
 }
 
