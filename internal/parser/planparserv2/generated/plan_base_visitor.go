@@ -194,3 +194,7 @@ func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
 func (v *BasePlanVisitor) VisitSTOverlaps(ctx *STOverlapsContext) interface{} {
 	return v.VisitChildren(ctx)
 }
+
+func (v *BasePlanVisitor) VisitTextMatchOption(ctx *TextMatchOptionContext) interface{} {
+	return v.VisitChildren(ctx)
+}
