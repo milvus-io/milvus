@@ -649,6 +649,7 @@ message LeaderView {
 
 message LeaderViewStatus {
     bool serviceable = 1;
+    bool catching_up_streaming_data = 2;  // true = still catching up, not ready
 }
 
 message SegmentDist {
