@@ -87,6 +87,7 @@ func TestPauseConsumption(t *testing.T) {
 		pendingQueue:  utility.NewPendingQueue(),
 		cleanup:       func() {},
 		ScannerHelper: helper.NewScannerHelper("test"),
+		metrics:       metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics(),
 	}
 
 	done := make(chan struct{})
