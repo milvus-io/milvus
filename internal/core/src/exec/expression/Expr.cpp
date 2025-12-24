@@ -470,6 +470,8 @@ SetNamespaceSkipIndex(std::shared_ptr<PhyConjunctFilterExpr> conjunct_expr,
     if (!namespace_expr) {
         return;
     }
+    AssertInfo(conjunct_expr->IsAnd(),
+               "namespace skip index only support and expr");
     auto namespace_field_meta = schema[namespace_field_id.value()];
     auto* skip_index_ptr =
         &context->get_query_context()->get_segment()->GetSkipIndex();
@@ -482,7 +484,7 @@ SetNamespaceSkipIndex(std::shared_ptr<PhyConjunctFilterExpr> conjunct_expr,
             return skip_index_ptr->CanSkipUnaryRange<int64_t>(
                 ns_field_id, chunk_id, proto::plan::OpType::Equal, ns_value);
         };
-        namespace_expr->SetNamespaceSkipFunc(skip_namespace_func);
+        conjunct_expr->SetNamespaceSkipFunc(skip_namespace_func);
     } else {
         const auto ns_field_id = namespace_field_id.value();
         const std::string ns_value =
@@ -492,7 +494,7 @@ SetNamespaceSkipIndex(std::shared_ptr<PhyConjunctFilterExpr> conjunct_expr,
             return skip_index_ptr->CanSkipUnaryRange<std::string>(
                 ns_field_id, chunk_id, proto::plan::OpType::Equal, ns_value);
         };
-        namespace_expr->SetNamespaceSkipFunc(skip_namespace_func);
+        conjunct_expr->SetNamespaceSkipFunc(skip_namespace_func);
     }
 }
 

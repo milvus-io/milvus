@@ -1039,15 +1039,15 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		}
 
 		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-			ID:            segment.ID,
-			PartitionID:   segment.PartitionID,
-			CollectionID:  segment.CollectionID,
-			InsertChannel: segment.InsertChannel,
-			NumOfRows:     rowCount,
-			Level:         segment.GetLevel(),
-			IsSorted:      segment.GetIsSorted(),
+			ID:                   segment.ID,
+			PartitionID:          segment.PartitionID,
+			CollectionID:         segment.CollectionID,
+			InsertChannel:        segment.InsertChannel,
+			NumOfRows:            rowCount,
+			Level:                segment.GetLevel(),
+			IsSorted:             segment.GetIsSorted(),
 			IsPartitionKeySorted: segment.GetIsPartitionKeySorted(),
-			ManifestPath:  segment.GetManifestPath(),
+			ManifestPath:         segment.GetManifestPath(),
 		})
 	}
 

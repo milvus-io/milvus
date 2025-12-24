@@ -395,17 +395,18 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
-			SegmentID:           segID,
-			CollectionID:        segInfo.GetCollectionID(),
-			PartitionID:         segInfo.GetPartitionID(),
-			Level:               segInfo.GetLevel(),
-			InsertChannel:       segInfo.GetInsertChannel(),
-			FieldBinlogs:        segInfo.GetBinlogs(),
-			Field2StatslogPaths: segInfo.GetStatslogs(),
-			Deltalogs:           segInfo.GetDeltalogs(),
-			IsSorted:            segInfo.GetIsSorted(),
-			StorageVersion:      segInfo.GetStorageVersion(),
-			Manifest:            segInfo.GetManifestPath(),
+			SegmentID:            segID,
+			CollectionID:         segInfo.GetCollectionID(),
+			PartitionID:          segInfo.GetPartitionID(),
+			Level:                segInfo.GetLevel(),
+			InsertChannel:        segInfo.GetInsertChannel(),
+			FieldBinlogs:         segInfo.GetBinlogs(),
+			Field2StatslogPaths:  segInfo.GetStatslogs(),
+			Deltalogs:            segInfo.GetDeltalogs(),
+			IsSorted:             segInfo.GetIsSorted(),
+			IsPartitionKeySorted: segInfo.GetIsPartitionKeySorted(),
+			StorageVersion:       segInfo.GetStorageVersion(),
+			Manifest:             segInfo.GetManifestPath(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 		segments = append(segments, segInfo)
