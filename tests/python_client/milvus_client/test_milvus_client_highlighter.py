@@ -729,7 +729,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                                fragment_offset=0, 
                                fragment_size = 10,
                                num_of_fragments=1,
-                               queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
+                               highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
 
         expected = [[f"{pre_tags[0]}water{post_tags[0]}."],
@@ -764,7 +764,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         
         highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"], 
                                     highlight_search_text = False, 
-                                    queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+                                    highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
 
         new_search_params = {"metric_type": "COSINE"}
 
@@ -789,7 +789,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         expected = ['{water}! Like, full of {water>!']
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}", ">"], 
                                     highlight_search_text = False, 
-                                    queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+                                    highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
 
         results = client.search(
             collection_name,
@@ -810,7 +810,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                                     highlight_search_text = False, 
                                     fragment_size = 1,
                                     num_of_fragments=10,
-                                    queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+                                    highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
 
         results = client.search(
             collection_name,
@@ -829,7 +829,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         expected = []
         highlight = LexicalHighlighter(pre_tags=["{"], post_tags=["}"], 
                                     highlight_search_text = False, 
-                                    queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "nonexistent"}])
+                                    highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "nonexistent"}])
         vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 1", output_fields=[default_vector_field_name])[0][default_vector_field_name]
         results = client.search(
             collection_name,
@@ -992,7 +992,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                                fragment_offset=0, 
                                fragment_size = 10,
                                num_of_fragments=1,
-                               queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
+                               highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
         search_params = {"metric_type": "COSINE"}
         vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[default_vector_field_name])[0][default_vector_field_name]
 
@@ -1028,7 +1028,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
                                fragment_offset=0, 
                                fragment_size = 10,
                                num_of_fragments=1,
-                               queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
+                               highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "seat"}])
         search_params = {"params": {"nlist": 128}, "metric_type": "BM25"}
         vector = client.query(collection_name, filter=f"{default_primary_key_field_name} == 2", output_fields=[default_vector_field_name])[0][default_vector_field_name]
   
@@ -1077,7 +1077,7 @@ class TestMilvusClientHighlighter(TestMilvusClientV2Base):
         
         highlight = LexicalHighlighter(pre_tags=["{", "<"], post_tags=["}", ">"], 
                                     highlight_search_text = True, 
-                                    queries=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
+                                    highlight_query=[{"type": "TextMatch", "field": default_text_field_name_no_BM25, "text": "water"}])
 
         new_search_params = {"metric_type": "COSINE"}
 
