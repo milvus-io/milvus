@@ -4183,16 +4183,12 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	logger.Debug(rpcEnqueued(method),
-		zap.Uint64("BeginTs", ft.BeginTs()),
-		zap.Uint64("EndTs", ft.EndTs()))
+	logger.Debug(rpcEnqueued(method))
 
 	if err := ft.WaitToFinish(); err != nil {
 		logger.Warn(
 			rpcFailedToWaitToFinish(method),
-			zap.Error(err),
-			zap.Uint64("BeginTs", ft.BeginTs()),
-			zap.Uint64("EndTs", ft.EndTs()))
+			zap.Error(err))
 
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4868,7 +4864,10 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 func (node *Proxy) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushAllState")
 	defer sp.End()
-	log := log.Ctx(ctx).With(zap.Any("FlushAllTss", req.GetFlushAllTss()))
+	log := log.Ctx(ctx).With(
+		zap.Any("FlushAllTss", req.GetFlushAllTss()),
+		zap.Uint64("FlushAllTs", req.GetFlushAllTs()), // for compatibility
+	)
 	log.Debug("receive GetFlushAllState request")
 
 	var err error

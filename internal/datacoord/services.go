@@ -1550,33 +1550,65 @@ OUTER:
 				return resp, nil
 			}
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
-				channelCP := s.meta.GetChannelCheckpoint(channel)
-				pchannel := funcutil.ToPhysicalChannel(channel)
-				flushAllTs, ok := req.GetFlushAllTss()[pchannel]
-				if !ok || flushAllTs == 0 {
-					log.Warn("FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
-					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel))
-					return resp, nil
-				}
-				if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-					allFlushed = false
-					log.RatedInfo(10, "channel unflushed",
-						zap.String("vchannel", channel),
-						zap.Uint64("flushAllTs", flushAllTs),
-						zap.Uint64("channelCP", channelCP.GetTimestamp()),
-					)
-					break OUTER
+				if req.GetFlushAllTs() != 0 {
+					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
+					if !s.verifyFlushAllStateByLegacyFlushAllTs(log, channel, req.GetFlushAllTs()) {
+						allFlushed = false
+						break OUTER
+					}
+				} else {
+					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(log, channel, req.GetFlushAllTss())
+					if err != nil {
+						resp.Status = merr.Status(err)
+						return resp, nil
+					}
+					if !ok {
+						allFlushed = false
+						break OUTER
+					}
 				}
 			}
 		}
 	}
 
 	if allFlushed {
-		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()))
+		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()), zap.Uint64("FlushAllTs", req.GetFlushAllTs()))
 	}
 
 	resp.Flushed = allFlushed
 	return resp, nil
+}
+
+func (s *Server) verifyFlushAllStateByChannelFlushAllTs(logger *log.MLogger, channel string, flushAllTss map[string]uint64) (bool, error) {
+	channelCP := s.meta.GetChannelCheckpoint(channel)
+	pchannel := funcutil.ToPhysicalChannel(channel)
+	flushAllTs, ok := flushAllTss[pchannel]
+	if !ok || flushAllTs == 0 {
+		logger.Warn("FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
+		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
+	}
+	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+		logger.RatedInfo(10, "channel unflushed",
+			zap.String("vchannel", channel),
+			zap.Uint64("flushAllTs", flushAllTs),
+			zap.Uint64("channelCP", channelCP.GetTimestamp()),
+		)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(logger *log.MLogger, channel string, flushAllTs uint64) bool {
+	channelCP := s.meta.GetChannelCheckpoint(channel)
+	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+		logger.RatedInfo(10, "channel unflushed",
+			zap.String("vchannel", channel),
+			zap.Uint64("flushAllTs", flushAllTs),
+			zap.Uint64("channelCP", channelCP.GetTimestamp()),
+		)
+		return false
+	}
+	return true
 }
 
 // Deprecated
