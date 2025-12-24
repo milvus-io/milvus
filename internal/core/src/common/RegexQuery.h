@@ -15,12 +15,21 @@
 #include <regex>
 #include <boost/regex.hpp>
 #include <utility>
+#include <fnmatch.h>
 
 #include "common/EasyAssert.h"
 
 namespace milvus {
 bool
 is_special(char c);
+
+// Check if the pattern is simple (only contains % and _ wildcards, no escape sequences)
+bool
+is_simple_pattern(const std::string& pattern);
+
+// Translate SQL LIKE pattern (% and _) to fnmatch pattern (* and ?)
+std::string
+translate_pattern_match_to_fnmatch(const std::string& pattern);
 
 std::string
 translate_pattern_match_to_regex(const std::string& pattern);
@@ -47,11 +56,30 @@ struct RegexMatcher {
         return false;
     }
 
-    explicit RegexMatcher(const std::string& pattern) {
-        r_ = boost::regex(pattern);
+    // Constructor that accepts an already-translated regex pattern
+    explicit RegexMatcher(const std::string& regex_pattern) {
+        r_ = boost::regex(regex_pattern);
+    }
+
+    // Factory method for LIKE pattern matching with fnmatch optimization
+    static RegexMatcher
+    FromLikePattern(const std::string& like_pattern) {
+        RegexMatcher matcher;
+        matcher.use_fnmatch_ = is_simple_pattern(like_pattern);
+        if (matcher.use_fnmatch_) {
+            matcher.fnmatch_pattern_ =
+                translate_pattern_match_to_fnmatch(like_pattern);
+        } else {
+            auto regex_pattern = translate_pattern_match_to_regex(like_pattern);
+            matcher.r_ = boost::regex(regex_pattern);
+        }
+        return matcher;
     }
 
  private:
+    RegexMatcher() = default;
+    bool use_fnmatch_ = false;
+    std::string fnmatch_pattern_;
     // avoid to construct the regex everytime.
     boost::regex r_;
 };
@@ -59,6 +87,10 @@ struct RegexMatcher {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string& operand) {
+    if (use_fnmatch_) {
+        // fnmatch returns 0 on match, FNM_NOMATCH on no match
+        return fnmatch(fnmatch_pattern_.c_str(), operand.c_str(), 0) == 0;
+    }
     // corner case:
     // . don't match \n, but .* match \n.
     // For example,
@@ -71,6 +103,11 @@ RegexMatcher::operator()(const std::string& operand) {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
+    if (use_fnmatch_) {
+        // fnmatch requires null-terminated string, so convert string_view to string
+        std::string str(operand);
+        return fnmatch(fnmatch_pattern_.c_str(), str.c_str(), 0) == 0;
+    }
     return boost::regex_match(operand.begin(), operand.end(), r_);
 }
 }  // namespace milvus
