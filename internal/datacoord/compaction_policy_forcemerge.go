@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/types"
