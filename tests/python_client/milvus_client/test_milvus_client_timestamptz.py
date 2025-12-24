@@ -1178,6 +1178,7 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(0)
     def test_milvus_client_timestamptz_edge_case(self):
         """
         target:  Test timestamptz edge case can be successfully queried
@@ -1194,6 +1195,7 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(1)
     def test_milvus_client_timestamptz_Feb_29(self):
         """
         target:  Milvus can query input data with Feb 29 on a leap year
@@ -1211,6 +1213,7 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
 
     
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(2)
     def test_milvus_client_timestamptz_partial_update(self):
         """
         target:  Milvus can partial update timestamptz field
@@ -1235,6 +1238,7 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
         
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(3)
     def test_milvus_client_timestamptz_query(self):
         """
         target:  Milvus can query rows with timestamptz field
@@ -1305,6 +1309,7 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
 
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(4)
     def test_milvus_client_timestamptz_different_time_expressions(self):
         """
         target:  Milvus can query rows with different time expressions
@@ -1324,14 +1329,6 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
                 {default_primary_key_field_name: 7, default_vector_field_name: [22,23,24], default_timestamp_field_name: "2024-12-31 22:00:00-08:00"}]
         self.upsert(client, collection_name, rows)
 
-        # expected_rows = [{default_primary_key_field_name: 0, default_vector_field_name: [1,2,3], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"},
-        #                  {default_primary_key_field_name: 1, default_vector_field_name: [4,5,6], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
-        #                  {default_primary_key_field_name: 2, default_vector_field_name: [7,8,9], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
-        #                  {default_primary_key_field_name: 3, default_vector_field_name: [10,11,12], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
-        #                  {default_primary_key_field_name: 4, default_vector_field_name: [13,14,15], default_timestamp_field_name: "2025-01-01T14:00:00+08:00"},
-        #                  {default_primary_key_field_name: 5, default_vector_field_name: [16,17,18], default_timestamp_field_name: "2025-01-01T06:00:00+08:00"},
-        #                  {default_primary_key_field_name: 6, default_vector_field_name: [19,20,21], default_timestamp_field_name: "2024-12-31T22:00:00+08:00"},
-        #                  {default_primary_key_field_name: 7, default_vector_field_name: [22,23,24], default_timestamp_field_name: "2025-01-01T14:00:00+08:00"}]
         expected_rows = cf.convert_timestamptz(rows, default_timestamp_field_name, "Asia/Shanghai")
         self.query(client, collection_name, filter=f"{default_primary_key_field_name} <= 7",
                     check_task=CheckTasks.check_query_results,
@@ -1340,6 +1337,7 @@ class TestMilvusClientTimestamptz(TestMilvusClientV2Base):
 
     
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.order(5)
     def test_milvus_client_timestamptz_different_timezone_query(self):
         """
         target:  Milvus can query rows with different time expressions with filter
