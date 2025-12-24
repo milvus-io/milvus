@@ -351,6 +351,33 @@ class SegmentExpr : public Expr {
                    : batch_size_;
     }
 
+    // Get the next batch size for element-level processing
+    // Returns: (batch_rows, elem_count) where batch_rows is number of rows to process
+    // and elem_count is the total number of elements in those rows
+    std::pair<int64_t, int64_t>
+    GetNextBatchSizeForElementLevel() {
+        auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        AssertInfo(array_offsets != nullptr,
+                   "ArrayOffsets not found for field {}",
+                   field_id_.get());
+
+        auto data_pos = current_data_chunk_pos_;
+        auto batch_rows =
+            std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
+                     active_count_ - data_pos);
+
+        if (batch_rows == 0) {
+            return {0, 0};
+        }
+
+        auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(data_pos);
+        auto [elem_end, __] =
+            array_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
+        auto elem_count = elem_end - elem_start;
+
+        return {batch_rows, elem_count};
+    }
+
     // used for processing raw data expr for sealed segments.
     // now only used for std::string_view && json
     // TODO: support more types
@@ -846,6 +873,56 @@ class SegmentExpr : public Expr {
 
             return processed_size;
         }
+    }
+
+    // Process element-level data without offset input (brute force scan)
+    // This is the counterpart of ProcessDataChunks for element-level expressions
+    // Iterates over rows in batch, but returns element-level results
+    // The caller must pre-allocate res/valid_res with elem_count size (from GetNextBatchSizeForElementLevel)
+    template <typename ElementType, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataChunksForElementLevel(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        AssertInfo(array_offsets != nullptr,
+                   "ArrayOffsets not found for field {}",
+                   field_id_.get());
+
+        auto data_pos = current_data_chunk_pos_;
+        auto batch_rows =
+            std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
+                     active_count_ - data_pos);
+
+        if (batch_rows == 0) {
+            return 0;
+        }
+
+        auto& skip_index = segment_->GetSkipIndex();
+        int64_t result_idx = 0;
+
+        // TODO(SpadeA): Implement the actual element-level brute force scan logic
+        // This should iterate over each row in [data_pos, data_pos + batch_rows),
+        // then for each row, iterate over its elements and apply the filter function.
+        // The implementation should handle both Sealed and Growing segments.
+        //
+        // Pseudocode:
+        // for (row in data_pos..data_pos+batch_rows):
+        //     array_view = get_array_at(row)
+        //     for (elem_idx in 0..array_view.length()):
+        //         value = array_view.get_data<ElementType>(elem_idx)
+        //         func(&value, &is_valid, ..., res + result_idx, valid_res + result_idx, values...)
+        //         result_idx++
+        //
+        // For now, this is a placeholder that will cause assertion failure if called.
+        AssertInfo(false,
+                   "ProcessDataChunksForElementLevel is not yet implemented");
+
+        current_data_chunk_pos_ += batch_rows;
+        return result_idx;
     }
 
     // Template parameter to control whether segment offsets are needed (for GIS functions)
