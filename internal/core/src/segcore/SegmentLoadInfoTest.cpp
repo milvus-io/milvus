@@ -326,3 +326,213 @@ TEST_F(SegmentLoadInfoTest, IndexWithoutFiles) {
     EXPECT_FALSE(info.HasIndexInfo(FieldId(101)));
     EXPECT_EQ(info.GetIndexInfoCount(), 1);  // Proto still has it
 }
+
+// ==================== GetLoadDiff Tests ====================
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithEmptyInfo) {
+    // Empty SegmentLoadInfo should return empty diff
+    SegmentLoadInfo empty_info;
+    auto diff = empty_info.GetLoadDiff();
+
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.column_groups_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+    EXPECT_FALSE(diff.manifest_updated);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesOnly) {
+    // Create info with only indexes (no binlogs, no manifest)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add two indexes
+    auto* index1 = test_proto.add_index_infos();
+    index1->set_fieldid(101);
+    index1->set_indexid(1001);
+    index1->add_index_file_paths("/path/to/index1");
+
+    auto* index2 = test_proto.add_index_infos();
+    index2->set_fieldid(102);
+    index2->set_indexid(1002);
+    index2->add_index_file_paths("/path/to/index2");
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Both indexes should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 2);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(102)) > 0);
+    EXPECT_EQ(diff.indexes_to_load[FieldId(101)].size(), 1);
+    EXPECT_EQ(diff.indexes_to_load[FieldId(102)].size(), 1);
+
+    // No drops or other changes
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithBinlogsOnly) {
+    // Create info with only binlogs (no indexes, no manifest)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add binlog with child fields
+    auto* binlog = test_proto.add_binlog_paths();
+    binlog->set_fieldid(200);
+    binlog->add_child_fields(201);
+    binlog->add_child_fields(202);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Binlogs should be in binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 2);  // 2 child fields
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 201);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[1].get(), 202);
+
+    // No index changes
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesAndBinlogs) {
+    // Create info with both indexes and binlogs
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add index
+    auto* index = test_proto.add_index_infos();
+    index->set_fieldid(101);
+    index->set_indexid(1001);
+    index->add_index_file_paths("/path/to/index");
+
+    // Add binlog with child fields
+    auto* binlog = test_proto.add_binlog_paths();
+    binlog->set_fieldid(200);
+    binlog->add_child_fields(201);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Index should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+
+    // Binlog should be in binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 201);
+
+    // No drops
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffIgnoresIndexesWithoutFiles) {
+    // Indexes without files should be ignored in GetLoadDiff
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add index with files
+    auto* index1 = test_proto.add_index_infos();
+    index1->set_fieldid(101);
+    index1->set_indexid(1001);
+    index1->add_index_file_paths("/path/to/index");
+
+    // Add index without files - should be ignored
+    auto* index2 = test_proto.add_index_infos();
+    index2->set_fieldid(102);
+    index2->set_indexid(1002);
+    // No index_file_paths added
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Only index with files should be in indexes_to_load
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_FALSE(diff.indexes_to_load.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleIndexesPerField) {
+    // A field can have multiple indexes (e.g., JSON field with multiple paths)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add two indexes for the same field
+    auto* index1 = test_proto.add_index_infos();
+    index1->set_fieldid(101);
+    index1->set_indexid(1001);
+    index1->add_index_file_paths("/path/to/index1");
+
+    auto* index2 = test_proto.add_index_infos();
+    index2->set_fieldid(101);
+    index2->set_indexid(1002);
+    index2->add_index_file_paths("/path/to/index2");
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Both indexes should be in indexes_to_load for the same field
+    EXPECT_EQ(diff.indexes_to_load.size(), 1);
+    EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
+    EXPECT_EQ(diff.indexes_to_load[FieldId(101)].size(), 2);
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleBinlogGroups) {
+    // Test with multiple binlog groups
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add first binlog group
+    auto* binlog1 = test_proto.add_binlog_paths();
+    binlog1->set_fieldid(200);
+    binlog1->add_child_fields(201);
+    binlog1->add_child_fields(202);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // Add second binlog group
+    auto* binlog2 = test_proto.add_binlog_paths();
+    binlog2->set_fieldid(300);
+    binlog2->add_child_fields(301);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/binlog2");
+    log2->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Both binlog groups should be in binlogs_to_load
+    EXPECT_EQ(diff.binlogs_to_load.size(), 2);
+
+    // Check first group
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 2);
+    // Check second group
+    EXPECT_EQ(diff.binlogs_to_load[1].first.size(), 1);
+}
