@@ -6776,19 +6776,20 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 	}
 
 	log.Info("receive AddFileResource request")
+	return merr.Status(errors.New("AddFileResource is not implemented")), nil
 
-	status, err := node.mixCoord.AddFileResource(ctx, req)
-	if err != nil {
-		log.Warn("AddFileResource fail", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	if err = merr.Error(status); err != nil {
-		log.Warn("AddFileResource fail", zap.Error(err))
-		return merr.Status(err), nil
-	}
+	// status, err := node.mixCoord.AddFileResource(ctx, req)
+	// if err != nil {
+	// 	log.Warn("AddFileResource fail", zap.Error(err))
+	// 	return merr.Status(err), nil
+	// }
+	// if err = merr.Error(status); err != nil {
+	// 	log.Warn("AddFileResource fail", zap.Error(err))
+	// 	return merr.Status(err), nil
+	// }
 
-	log.Info("AddFileResource success")
-	return status, nil
+	// log.Info("AddFileResource success")
+	// return status, nil
 }
 
 // RemoveFileResource remove file resource from rootcoord
@@ -6805,19 +6806,20 @@ func (node *Proxy) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveF
 	}
 
 	log.Info("receive RemoveFileResource request")
+	return merr.Status(errors.New("RemoveFileResource is not implemented")), nil
 
-	status, err := node.mixCoord.RemoveFileResource(ctx, req)
-	if err != nil {
-		log.Warn("RemoveFileResource fail", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	if err = merr.Error(status); err != nil {
-		log.Warn("RemoveFileResource fail", zap.Error(err))
-		return merr.Status(err), nil
-	}
+	// status, err := node.mixCoord.RemoveFileResource(ctx, req)
+	// if err != nil {
+	// 	log.Warn("RemoveFileResource fail", zap.Error(err))
+	// 	return merr.Status(err), nil
+	// }
+	// if err = merr.Error(status); err != nil {
+	// 	log.Warn("RemoveFileResource fail", zap.Error(err))
+	// 	return merr.Status(err), nil
+	// }
 
-	log.Info("RemoveFileResource success")
-	return status, nil
+	// log.Info("RemoveFileResource success")
+	// return status, nil
 }
 
 // ListFileResources list file resources from rootcoord
@@ -6834,23 +6836,26 @@ func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFile
 	}
 
 	log.Info("receive ListFileResources request")
+	return &milvuspb.ListFileResourcesResponse{
+		Status: merr.Status(errors.New("ListFileResources is not implemented")),
+	}, nil
 
-	resp, err := node.mixCoord.ListFileResources(ctx, req)
-	if err != nil {
-		log.Warn("ListFileResources fail", zap.Error(err))
-		return &milvuspb.ListFileResourcesResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	if err = merr.Error(resp.GetStatus()); err != nil {
-		log.Warn("ListFileResources fail", zap.Error(err))
-		return &milvuspb.ListFileResourcesResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
+	// resp, err := node.mixCoord.ListFileResources(ctx, req)
+	// if err != nil {
+	// 	log.Warn("ListFileResources fail", zap.Error(err))
+	// 	return &milvuspb.ListFileResourcesResponse{
+	// 		Status: merr.Status(err),
+	// 	}, nil
+	// }
+	// if err = merr.Error(resp.GetStatus()); err != nil {
+	// 	log.Warn("ListFileResources fail", zap.Error(err))
+	// 	return &milvuspb.ListFileResourcesResponse{
+	// 		Status: merr.Status(err),
+	// 	}, nil
+	// }
 
-	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
-	return resp, nil
+	// log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
+	// return resp, nil
 }
 
 // UpdateReplicateConfiguration applies a full replacement of the current replication configuration across Milvus clusters.
