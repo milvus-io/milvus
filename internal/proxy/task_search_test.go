@@ -4709,7 +4709,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
 		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support OR")
+		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 	}
 }
 
