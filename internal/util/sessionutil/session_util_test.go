@@ -759,16 +759,36 @@ func (s *SessionSuite) TestKeepAliveRetryChannelClose() {
 func (s *SessionSuite) TestGetSessions() {
 	os.Setenv("MILVUS_SERVER_LABEL_key1", "value1")
 	os.Setenv("MILVUS_SERVER_LABEL_key2", "value2")
-	os.Setenv("key3", "value3")
+	os.Setenv("MILVUS_SERVER_LABEL_key3", "value3")
+	os.Setenv("MILVUS_SERVER_LABEL_qn_key3", "value33")
+	os.Setenv("MILVUS_SERVER_LABEL_sn_key3", "value33")
+	os.Setenv("key4", "value4")
+	os.Setenv("MILVUS_SERVER_LABEL_", "value5")
+	os.Setenv("MILVUS_SERVER_LABEL_qn", "value6")
 
 	defer os.Unsetenv("MILVUS_SERVER_LABEL_key1")
 	defer os.Unsetenv("MILVUS_SERVER_LABEL_key2")
-	defer os.Unsetenv("key3")
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_qn_key3")
+	defer os.Unsetenv("MILVUS_SERVER_LABEL_sn_key3")
+	defer os.Unsetenv("key4")
 
-	ret := GetServerLabelsFromEnv("querynode")
-	assert.Equal(s.T(), 2, len(ret))
-	assert.Equal(s.T(), "value1", ret["key1"])
-	assert.Equal(s.T(), "value2", ret["key2"])
+	roles := []string{typeutil.QueryNodeRole, typeutil.MixCoordRole, typeutil.StreamingNodeRole, typeutil.ProxyRole}
+
+	for _, role := range roles {
+		ret := getServerLabelsFromEnv(role)
+		switch role {
+		case typeutil.QueryNodeRole, typeutil.StreamingNodeRole:
+			assert.Equal(s.T(), 3, len(ret))
+			assert.Equal(s.T(), "value1", ret["key1"])
+			assert.Equal(s.T(), "value2", ret["key2"])
+			assert.Equal(s.T(), "value33", ret["key3"], "role: %s", role)
+		default:
+			assert.Equal(s.T(), 3, len(ret))
+			assert.Equal(s.T(), "value1", ret["key1"])
+			assert.Equal(s.T(), "value2", ret["key2"])
+			assert.Equal(s.T(), "value3", ret["key3"])
+		}
+	}
 }
 
 func (s *SessionSuite) TestVersionKey() {
