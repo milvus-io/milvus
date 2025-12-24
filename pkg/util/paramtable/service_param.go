@@ -462,6 +462,7 @@ type MetaStoreConfig struct {
 	SnapshotReserveTimeSeconds ParamItem `refreshable:"true"`
 	PaginationSize             ParamItem `refreshable:"true"`
 	ReadConcurrency            ParamItem `refreshable:"true"`
+	MaxEtcdTxnNum              ParamItem `refreshable:"true"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -507,6 +508,15 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Doc:          `read concurrency for fetching metadata from the metastore.`,
 	}
 	p.ReadConcurrency.Init(base.mgr)
+
+	p.MaxEtcdTxnNum = ParamItem{
+		Key:          "metastore.maxEtcdTxnNum",
+		Version:      "2.5.25",
+		DefaultValue: "64",
+		Doc:          `maximum number of operations in a single etcd transaction`,
+		Export:       true,
+	}
+	p.MaxEtcdTxnNum.Init(base.mgr)
 
 	// TODO: The initialization operation of metadata storage is called in the initialization phase of every node.
 	// There should be a single initialization operation for meta store, then move the metrics registration to there.

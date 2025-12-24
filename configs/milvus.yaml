@@ -67,6 +67,7 @@ metastore:
   snapshot:
     ttl: 86400 # snapshot ttl in seconds
     reserveTime: 3600 # snapshot reserve time in seconds
+  maxEtcdTxnNum: 64 # maximum number of operations in a single etcd transaction
 
 # Related configuration of tikv, used to store Milvus metadata.
 # Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
