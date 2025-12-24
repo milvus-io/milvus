@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -12,14 +13,80 @@ var _ schedulePolicy = &userTaskPollingPolicy{}
 
 // newUserTaskPollingPolicy create a new user task polling schedule policy.
 func newUserTaskPollingPolicy() *userTaskPollingPolicy {
+	cpuPoolSize := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt64()
+	gpuPoolSize := paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt64()
 	return &userTaskPollingPolicy{
 		queue: newFairPollingTaskQueue(),
+		metrics: &userTaskPollingPolicyExecutingMetrics{
+			cpuPoolSize: cpuPoolSize,
+			gpuPoolSize: gpuPoolSize,
+			cpuCounts:   make(map[string]int64),
+			gpuCounts:   make(map[string]int64),
+		},
 	}
 }
 
 // userTaskPollingPolicy is a user based polling schedule policy.
 type userTaskPollingPolicy struct {
-	queue *fairPollingTaskQueue
+	queue   *fairPollingTaskQueue
+	metrics *userTaskPollingPolicyExecutingMetrics
+}
+
+type userTaskPollingPolicyExecutingMetrics struct {
+	mu sync.Mutex
+
+	cpuPoolSize int64
+	gpuPoolSize int64
+	cpuCounts   map[string]int64
+	gpuCounts   map[string]int64
+}
+
+func (m *userTaskPollingPolicyExecutingMetrics) Incr(t Task) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if t.IsGpuIndex() {
+		m.gpuCounts[t.Username()]++
+	} else {
+		m.cpuCounts[t.Username()]++
+	}
+}
+
+func (m *userTaskPollingPolicyExecutingMetrics) Decr(t Task) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if t.IsGpuIndex() {
+		m.gpuCounts[t.Username()]--
+		if m.gpuCounts[t.Username()] == 0 {
+			delete(m.gpuCounts, t.Username())
+		}
+	} else {
+		m.cpuCounts[t.Username()]--
+		if m.cpuCounts[t.Username()] == 0 {
+			delete(m.cpuCounts, t.Username())
+		}
+	}
+}
+
+func (m *userTaskPollingPolicyExecutingMetrics) IsExceedConcurrentLimit(t Task) bool {
+	ratio := paramtable.Get().QueryNodeCfg.SchedulePolicyMaxConcurrentRatioPerUser.GetAsFloat()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var current, limit int64
+	if t.IsGpuIndex() {
+		limit = int64(ratio * float64(m.gpuPoolSize))
+		current = m.gpuCounts[t.Username()]
+	} else {
+		limit = int64(ratio * float64(m.cpuPoolSize))
+		current = m.cpuCounts[t.Username()]
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	return current >= limit
 }
 
 // Push add a new task into scheduler, an error will be returned if scheduler reaches some limit.
@@ -62,7 +129,17 @@ func (p *userTaskPollingPolicy) Push(task Task) (int, error) {
 // Pop get the task next ready to run.
 func (p *userTaskPollingPolicy) Pop() Task {
 	expire := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskQueueExpire.GetAsDuration(time.Second)
-	return p.queue.pop(expire)
+	task := p.queue.pop(expire, p.metrics.IsExceedConcurrentLimit)
+	if task == nil {
+		return nil
+	}
+	p.metrics.Incr(task)
+	return &taskWrapper{
+		Task: task,
+		callbackWhenDone: func() {
+			p.metrics.Decr(task)
+		},
+	}
 }
 
 // Len get ready task counts.
