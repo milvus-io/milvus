@@ -335,6 +335,22 @@ var (
 			Name:      "slot",
 			Help:      "number of available and used slot",
 		}, []string{nodeIDLabelName, "type"})
+
+	DataNodeCPUSlot = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "cpu_slot",
+			Help:      "number of available and used cpu slot",
+		}, []string{nodeIDLabelName, "type"})
+
+	DataNodeMemorySlot = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "memory_slot",
+			Help:      "number of available and used memory slot",
+		}, []string{nodeIDLabelName, "type"})
 )
 
 var registerDNOnce sync.Once
@@ -346,7 +362,9 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	})
 }
 
-// registerDataNodeOnce registers DataNode metrics
+// registerDataNodeOnce registers all DataNode-related Prometheus metrics with the provided registry.
+// It registers metric vectors for input, in-memory, output, compaction, deprecated, and index metrics,
+// and also registers logging and slot metrics. This function is intended to be executed once during initialization.
 func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeNumFlowGraphs)
 	// input related
@@ -386,8 +404,12 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
 	RegisterLoggingMetrics(registry)
+	registry.MustRegister(DataNodeCPUSlot)
+	registry.MustRegister(DataNodeMemorySlot)
 }
 
+// CleanupDataNodeCollectionMetrics removes collection-scoped DataNode metrics for the given node and collection.
+// The channel parameter is accepted for API compatibility but is ignored.
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
 	DataNodeConsumeTimeTickLag.
 		Delete(

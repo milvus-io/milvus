@@ -46,7 +46,8 @@ import (
 type indexBuildTask struct {
 	*model.SegmentIndex
 
-	taskSlot int64
+	cpuSlot    float64
+	memorySlot float64
 
 	times *taskcommon.Times
 
@@ -58,8 +59,11 @@ type indexBuildTask struct {
 
 var _ globalTask.Task = (*indexBuildTask)(nil)
 
+// newIndexBuildTask creates an indexBuildTask for the given SegmentIndex configured with the provided CPU and memory slots and associated managers.
+// It initializes the task times and stores references to meta, handler, chunk manager, and index engine version manager.
 func newIndexBuildTask(segIndex *model.SegmentIndex,
-	taskSlot int64,
+	cpuSlot float64,
+	memorySlot float64,
 	meta *meta,
 	handler Handler,
 	chunkManager storage.ChunkManager,
@@ -67,7 +71,8 @@ func newIndexBuildTask(segIndex *model.SegmentIndex,
 ) *indexBuildTask {
 	return &indexBuildTask{
 		SegmentIndex:              segIndex,
-		taskSlot:                  taskSlot,
+		cpuSlot:                   cpuSlot,
+		memorySlot:                memorySlot,
 		times:                     taskcommon.NewTimes(),
 		meta:                      meta,
 		handler:                   handler,
@@ -80,8 +85,8 @@ func (it *indexBuildTask) GetTaskID() int64 {
 	return it.BuildID
 }
 
-func (it *indexBuildTask) GetTaskSlot() int64 {
-	return it.taskSlot
+func (it *indexBuildTask) GetTaskSlot() (float64, float64) {
+	return it.cpuSlot, it.memorySlot
 }
 
 func (it *indexBuildTask) GetTaskState() taskcommon.State {
@@ -324,10 +329,11 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		Field:                     field,
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
-		TaskSlot:                  it.taskSlot,
 		LackBinlogRows:            segIndex.NumRows - totalRows,
 		InsertLogs:                segment.GetBinlogs(),
 		Manifest:                  segment.GetManifestPath(),
+		CpuSlot:                   it.cpuSlot,
+		MemorySlot:                it.memorySlot,
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)

@@ -283,6 +283,10 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
+// AssemblePreImportRequest builds a datapb.PreImportRequest for the given pre-import task and job.
+// It fills job and task identifiers, collection, partitions, vchannels, schema, options, storage config,
+// and converts the pre-import task's file stats into ImportFiles. CPU and memory slots are set from the
+// task's computed slots and the plugin import context is attached to the request.
 func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
@@ -298,13 +302,25 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		Schema:        job.GetSchema(),
 		ImportFiles:   importFiles,
 		Options:       job.GetOptions(),
-		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
 	}
+
+	req.CpuSlot, req.MemorySlot = task.GetTaskSlot()
 	WrapPluginContextWithImport(task.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req)
 	return req
 }
 
+// AssembleImportRequest builds a datapb.ImportRequest for the given import task and job.
+//
+// It resolves the task's SegmentIDs to request segments, allocates a timestamp if the job has none,
+// computes total rows from file stats, pre-allocates an ID range for auto IDs and log IDs using the
+// allocator (applying the configured expansion factor), and populates request fields such as cluster,
+// job/task/collection IDs, partitions, vchannels, schema, files, options, timestamp, IDRange,
+// RequestSegments, storage configuration/version, and UseLoonFfi. The request's CpuSlot and MemorySlot
+// are set from the task's calculated slots and the plugin context is attached.
+//
+// Returns the assembled ImportRequest, or an error if a referenced segment is missing or if any
+// allocation (timestamp or IDs) fails.
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
@@ -377,10 +393,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
 		StorageVersion:  storageVersion,
 		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
 	}
+
+	req.CpuSlot, req.MemorySlot = task.GetTaskSlot()
 	WrapPluginContextWithImport(task.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req)
 	return req, nil
 }
@@ -817,8 +834,12 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 // The function uses a dual-constraint approach:
 // 1. CPU constraint: Based on the number of files to process in parallel
 // 2. Memory constraint: Based on the total buffer size required for all virtual channels and partitions
-// Returns the maximum of the two constraints to ensure sufficient resources
-func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
+// CalculateTaskSlot computes required CPU and memory slot quantities for the given import task
+// based on import configuration and the associated job's characteristics.
+// It returns two values: the CPU-based slots (at least 1, derived from files per CPU slot) and
+// the memory-based slots expressed in gigabytes (derived from the task buffer size; uses the
+// delete buffer size when the job is an L0 import).
+func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) (float64, float64) {
 	job := importMeta.GetJob(context.TODO(), task.GetJobID())
 
 	// Calculate CPU-based slots
@@ -843,16 +864,15 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		// L0 import use fixed buffer size
 		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
-	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
-	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
+	memoryBasedSlots := float64(taskBufferSize) / 1024 / 1024 / 1024 // GB
 
-	// Return the larger value to ensure both CPU and memory constraints are satisfied
-	if cpuBasedSlots > memoryBasedSlots {
-		return cpuBasedSlots
-	}
-	return memoryBasedSlots
+	return float64(cpuBasedSlots), memoryBasedSlots
 }
 
+// createSortCompactionTask creates a CompactionTask to perform a sort compaction of originSegment into targetSegmentID.
+// If originSegment has zero rows the segment is marked Dropped in meta and nil, nil is returned. Otherwise the function
+// allocates IDs, reads collection schema and TTL, computes the expected segment size, and returns a populated
+// datapb.CompactionTask ready for scheduling. Returns an error if any allocation, metadata lookup, or update fails.
 func createSortCompactionTask(ctx context.Context,
 	originSegment *SegmentInfo,
 	targetSegmentID int64,

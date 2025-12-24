@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const NullNodeID = -1
@@ -137,24 +139,6 @@ func (s *globalTaskScheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
-	var maxAvailable int64 = -1
-	var nodeID int64 = NullNodeID
-
-	for id, ws := range workerSlots {
-		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
-			maxAvailable = ws.AvailableSlots
-			nodeID = id
-		}
-	}
-
-	if nodeID != NullNodeID {
-		workerSlots[nodeID].AvailableSlots = 0
-		return nodeID
-	}
-	return NullNodeID
-}
-
 func (s *globalTaskScheduler) schedule() {
 	pendingNum := len(s.pendingTasks.TaskIDs())
 	if pendingNum == 0 {
@@ -169,8 +153,8 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(nodeSlots, taskSlot)
+		cpuSlot, memorySlot := task.GetTaskSlot()
+		nodeID := s.pickNode(nodeSlots, cpuSlot, memorySlot)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
 			break
@@ -313,6 +297,11 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 	}
 }
 
+// NewGlobalTaskScheduler creates a GlobalScheduler that manages global task lifecycle and scheduling across the provided cluster.
+// The provided ctx is used as the parent context for the scheduler's lifecycle; canceling it will stop scheduler workers.
+// The cluster parameter is used to interact with worker nodes for task creation, state checks, and drops.
+// The returned scheduler is initialized with per-task key locking, a priority queue for pending tasks, a concurrent map for running tasks,
+// and fixed-size execution and check worker pools (128 workers each).
 func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) GlobalScheduler {
 	execPool := conc.NewPool[struct{}](128)
 	checkPool := conc.NewPool[struct{}](128)
@@ -328,4 +317,35 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		checkPool:    checkPool,
 		cluster:      cluster,
 	}
+}
+
+func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, cpuSlot, memorySlot float64) int64 {
+	var nodeID int64 = NullNodeID
+	if len(workerSlots) <= 0 {
+		return nodeID
+	}
+
+	workerSlotsList := lo.Values(workerSlots)
+	sort.Slice(workerSlotsList, func(i, j int) bool {
+		if workerSlotsList[i].AvailableMemorySlot == workerSlotsList[j].AvailableMemorySlot {
+			return workerSlotsList[i].AvailableCpuSlot > workerSlotsList[j].AvailableCpuSlot
+		}
+		return workerSlotsList[i].AvailableMemorySlot > workerSlotsList[j].AvailableMemorySlot
+	})
+	optimal := workerSlotsList[0]
+	if memorySlot >= optimal.AvailableMemorySlot {
+		if optimal.TotalMemorySlot == optimal.AvailableMemorySlot {
+			nodeID = optimal.NodeID
+		}
+	} else {
+		if cpuSlot <= optimal.AvailableCpuSlot || optimal.AvailableCpuSlot == optimal.TotalCpuSlot || cpuSlot < 4 {
+			nodeID = optimal.NodeID
+		}
+	}
+
+	if nodeID != NullNodeID {
+		workerSlots[nodeID].AvailableCpuSlot -= cpuSlot
+		workerSlots[nodeID].AvailableMemorySlot -= memorySlot
+	}
+	return nodeID
 }

@@ -366,6 +366,7 @@ func createStorageConfig() *indexpb.StorageConfig {
 	return storageConfig
 }
 
+// getSortStatus reports the sort state as either "sorted" or "unsorted".
 func getSortStatus(sorted bool) string {
 	if sorted {
 		return "sorted"
@@ -373,35 +374,60 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
-func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
-	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if !isVectorIndex {
-		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
+// calculateStatsTaskSlot computes CPU and memory slot values for a stats task based on the segment size.
+// It returns cpuSlot and memorySlot, where cpuSlot is taken from the configured CPU factor and memorySlot equals the segment size converted to GiB multiplied by the configured memory factor.
+func calculateStatsTaskSlot(segmentSize int64) (float64, float64) {
+	cpuSlot := Params.DataCoordCfg.StatsTaskCPUFactor.GetAsFloat()
+	memorySlot := float64(segmentSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.StatsTaskMemoryFactor.GetAsFloat()
+	return cpuSlot, memorySlot
+}
+
+// CalculateIndexTaskSlot computes CPU and memory slot estimates for an index-building task.
+//
+// CalculateIndexTaskSlot selects CPU and memory factors from configuration for scalar or vector
+// indexes based on isVectorIndex. The memory slot scales linearly with fieldSize (interpreted in bytes
+// and converted to GiB). The returned cpuSlot is reduced for smaller fields (full, 1/2, 1/4, 1/8),
+// while memorySlot is always proportional to fieldSize * configured memory factor.
+//
+// Parameters:
+//   - fieldSize: size of the field in bytes.
+//   - isVectorIndex: when true, use vector-index factors; otherwise use scalar-index factors.
+//
+// Returns two floats: cpuSlot and memorySlot. cpuSlot is the computed CPU slot value; memorySlot is
+// the computed memory slot value in the same unit as the configured memory factor.
+func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) (float64, float64) {
+	cpuSlot := Params.DataCoordCfg.ScalarIndexTaskCPUFactor.GetAsFloat()
+	memorySlot := float64(fieldSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.ScalarIndexTaskMemoryFactor.GetAsFloat()
+
+	if isVectorIndex {
+		cpuSlot = Params.DataCoordCfg.VectorIndexTaskCPUFactor.GetAsFloat()
+		memorySlot = float64(fieldSize) / 1024 / 1024 / 1024 * Params.DataCoordCfg.VectorIndexTaskMemoryFactor.GetAsFloat()
 	}
+
 	if fieldSize > 512*1024*1024 {
-		taskSlot := max(fieldSize/512/1024/1024, 1) * defaultSlots
-		return max(taskSlot, 1)
+		return cpuSlot, memorySlot
 	} else if fieldSize > 100*1024*1024 {
-		return max(defaultSlots/4, 1)
+		return cpuSlot / 2, memorySlot
 	} else if fieldSize > 10*1024*1024 {
-		return max(defaultSlots/16, 1)
+		return cpuSlot / 4, memorySlot
 	}
-	return max(defaultSlots/64, 1)
+	return cpuSlot / 8, memorySlot
 }
 
-func calculateStatsTaskSlot(segmentSize int64) int64 {
-	defaultSlots := Params.DataCoordCfg.StatsTaskSlotUsage.GetAsInt64()
-	if segmentSize > 512*1024*1024 {
-		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
-		return max(taskSlot, 1)
-	} else if segmentSize > 100*1024*1024 {
-		return max(defaultSlots/2, 1)
-	} else if segmentSize > 10*1024*1024 {
-		return max(defaultSlots/4, 1)
+// IsVectorField determines whether the specified field in the collection is a vector field.
+// It returns `true` if the field exists and is a vector field, `false` otherwise.
+func IsVectorField(meta *meta, collID, fieldID int64) bool {
+	coll := meta.GetCollection(collID)
+	for _, field := range coll.Schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			return typeutil.IsVectorType(field.GetDataType())
+		}
 	}
-	return max(defaultSlots/8, 1)
+	return false
 }
 
+// enableSortCompaction reports whether sort-based compaction is enabled.
+// It returns true when both DataCoordCfg.EnableSortCompaction and DataCoordCfg.EnableCompaction are enabled in the configuration, false otherwise.
 func enableSortCompaction() bool {
 	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
 }

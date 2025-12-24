@@ -80,6 +80,8 @@ func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
 	return kvs
 }
 
+// CalculateNodeSlots computes the number of worker slots available to a data node.
+// It derives a base slot from half of the CPU count and from total memory (GiB / 8), takes the smaller of the two, multiplies that by DataNodeCfg.WorkerSlotUnit and BuildParallel, and if running in Standalone role scales the result by StandaloneSlotRatio; the final value is at least 1.
 func CalculateNodeSlots() int64 {
 	cpuNum := hardware.GetCPUNum()
 	memory := hardware.GetMemoryCount()
@@ -95,4 +97,21 @@ func CalculateNodeSlots() int64 {
 		totalSlot = max(int64(float64(totalSlot)*paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()), 1)
 	}
 	return totalSlot
+}
+
+// CalculateNodeSlotsV2 computes two slot estimates for a data node: a CPU-based slot and a memory-based slot.
+// The CPU slot is CPU count multiplied by the configured BuildParallel factor; the memory slot is total memory in GiB
+// multiplied by the same BuildParallel factor. If running in the Standalone role, both slots are further scaled
+// by the configured StandaloneSlotRatio.
+func CalculateNodeSlotsV2() (float64, float64) {
+	cpuNum := hardware.GetCPUNum()
+	memory := hardware.GetMemoryCount()
+
+	cpuSlot := float64(cpuNum) * paramtable.Get().DataNodeCfg.BuildParallel.GetAsFloat()
+	memorySlot := float64(memory) / 1024 / 1024 / 1024 * paramtable.Get().DataNodeCfg.BuildParallel.GetAsFloat()
+	if paramtable.GetRole() == typeutil.StandaloneRole {
+		cpuSlot = cpuSlot * paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()
+		memorySlot = memorySlot * paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()
+	}
+	return cpuSlot, memorySlot
 }
