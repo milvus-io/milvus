@@ -20,11 +20,11 @@ expr:
 	| PHRASEMATCH'('Identifier',' StringLiteral (',' expr)? ')'       			                            # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
-	| MATCH_ALL'(' Identifier ',' expr ')'                                                                      # MatchAll
-	| MATCH_ANY'(' Identifier ',' expr ')'                                                                      # MatchAny
-	| MATCH_LEAST'(' Identifier ',' expr ',' IntegerConstant ')'                                                # MatchLeast
-	| MATCH_MOST'(' Identifier ',' expr ',' IntegerConstant ')'                                                 # MatchMost
-	| MATCH_EXACT'(' Identifier ',' expr ',' IntegerConstant ')'                                                # MatchExact
+	| MATCH_ALL'(' Identifier ',' expr ')'                                                                  # MatchAll
+	| MATCH_ANY'(' Identifier ',' expr ')'                                                                  # MatchAny
+	| MATCH_LEAST'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                           # MatchLeast
+	| MATCH_MOST'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                            # MatchMost
+	| MATCH_EXACT'(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'                           # MatchExact
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -93,6 +93,7 @@ MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
+THRESHOLD: 'threshold' | 'THRESHOLD';
 ASSIGN: '=';
 
 ADD: '+';

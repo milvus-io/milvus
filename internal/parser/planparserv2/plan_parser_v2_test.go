@@ -2579,24 +2579,24 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_ANY(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100)`,
 
 		// MATCH_LEAST: at least N elements must match
-		`MATCH_LEAST(struct_array, $[sub_int] > 1, 3)`,
-		`MATCH_LEAST(struct_array, $[sub_str] == "aaa", 1)`,
-		`MATCH_LEAST(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, 2)`,
+		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`,
+		`MATCH_LEAST(struct_array, $[sub_str] == "aaa", threshold=1)`,
+		`MATCH_LEAST(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, threshold=2)`,
 
 		// MATCH_MOST: at most N elements must match
-		`MATCH_MOST(struct_array, $[sub_int] > 1, 3)`,
-		`MATCH_MOST(struct_array, $[sub_str] == "aaa", 0)`,
-		`MATCH_MOST(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, 5)`,
+		`MATCH_MOST(struct_array, $[sub_int] > 1, threshold=3)`,
+		`MATCH_MOST(struct_array, $[sub_str] == "aaa", threshold=0)`,
+		`MATCH_MOST(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, threshold=5)`,
 
 		// MATCH_EXACT: exactly N elements must match
-		`MATCH_EXACT(struct_array, $[sub_int] > 1, 2)`,
-		`MATCH_EXACT(struct_array, $[sub_str] == "aaa", 0)`,
-		`MATCH_EXACT(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, 3)`,
+		`MATCH_EXACT(struct_array, $[sub_int] > 1, threshold=2)`,
+		`MATCH_EXACT(struct_array, $[sub_str] == "aaa", threshold=0)`,
+		`MATCH_EXACT(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, threshold=3)`,
 
 		// Combined with other expressions (match must be last)
 		`Int64Field > 0 && MATCH_ALL(struct_array, $[sub_int] > 1)`,
 		`Int64Field > 0 && MATCH_ANY(struct_array, $[sub_str] == "test")`,
-		`Int64Field > 0 && MATCH_LEAST(struct_array, $[sub_int] > 1, 2)`,
+		`Int64Field > 0 && MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=2)`,
 
 		// Complex predicates
 		`MATCH_ALL(struct_array, ($[sub_int] > 0 && $[sub_int] < 100) || $[sub_str] == "default")`,
@@ -2605,9 +2605,9 @@ func TestExpr_Match(t *testing.T) {
 		// Case insensitivity
 		`match_all(struct_array, $[sub_int] > 1)`,
 		`match_any(struct_array, $[sub_int] > 1)`,
-		`match_least(struct_array, $[sub_int] > 1, 2)`,
-		`match_most(struct_array, $[sub_int] > 1, 2)`,
-		`match_exact(struct_array, $[sub_int] > 1, 2)`,
+		`match_least(struct_array, $[sub_int] > 1, threshold=2)`,
+		`match_most(struct_array, $[sub_int] > 1, threshold=2)`,
+		`match_exact(struct_array, $[sub_int] > 1, threshold=2)`,
 
 		// Multiple match expressions with logical operators
 		`MATCH_ALL(struct_array, $[sub_int] > 1) || MATCH_ANY(struct_array, $[sub_str] == "test")`,
@@ -2640,7 +2640,7 @@ func TestExpr_Match(t *testing.T) {
 	})
 
 	t.Run("MatchLeast_Proto", func(t *testing.T) {
-		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, 3)`, nil)
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
 		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
@@ -2649,7 +2649,7 @@ func TestExpr_Match(t *testing.T) {
 	})
 
 	t.Run("MatchMost_Proto", func(t *testing.T) {
-		expr, err := ParseExpr(helper, `MATCH_MOST(struct_array, $[sub_str] == "aaa", 5)`, nil)
+		expr, err := ParseExpr(helper, `MATCH_MOST(struct_array, $[sub_str] == "aaa", threshold=5)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
 		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
@@ -2658,7 +2658,7 @@ func TestExpr_Match(t *testing.T) {
 	})
 
 	t.Run("MatchExact_Proto", func(t *testing.T) {
-		expr, err := ParseExpr(helper, `MATCH_EXACT(struct_array, $[sub_int] == 100, 2)`, nil)
+		expr, err := ParseExpr(helper, `MATCH_EXACT(struct_array, $[sub_int] == 100, threshold=2)`, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, expr.GetMatchExpr())
 		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
@@ -2694,10 +2694,10 @@ func TestExpr_Match(t *testing.T) {
 		`MATCH_ANY(struct_array, $[sub_int] > 1, 2)`,
 
 		// Invalid count values
-		`MATCH_LEAST(struct_array, $[sub_int] > 1, 0)`,  // count must be positive for MATCH_LEAST
-		`MATCH_LEAST(struct_array, $[sub_int] > 1, -1)`, // negative count
-		`MATCH_MOST(struct_array, $[sub_int] > 1, -1)`,  // negative count
-		`MATCH_EXACT(struct_array, $[sub_int] > 1, -1)`, // negative count
+		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=0)`,  // count must be positive for MATCH_LEAST
+		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=-1)`, // negative count
+		`MATCH_MOST(struct_array, $[sub_int] > 1, threshold=-1)`,  // negative count
+		`MATCH_EXACT(struct_array, $[sub_int] > 1, threshold=-1)`, // negative count
 	}
 
 	for _, expr := range invalidExprs {
