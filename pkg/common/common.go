@@ -134,7 +134,8 @@ const (
 )
 
 const (
-	JSONStatsDataFormatVersion = 2
+	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
+	JSONStatsDataFormatVersion = 3
 )
 
 // Search, Index parameter keys
