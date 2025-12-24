@@ -157,7 +157,6 @@ class PhyConjunctFilterExpr : public Expr {
     void
     SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
         TargetBitmapView last_res_bitmap(vec->GetRawData(), vec->size());
-        last_res_bitmap.count();
         TargetBitmap next_input_bitmap(last_res_bitmap);
         if (is_and_) {
             context.set_bitmap_input(std::move(next_input_bitmap));
