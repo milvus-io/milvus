@@ -96,14 +96,14 @@ func TestAddCollectionFieldInvalid(t *testing.T) {
 			expectedError: "type param(max_length) should be specified for the field(" + common.DefaultNewField + ") of collection",
 		},
 		{
-			name: "addVectorField",
+			name: "addVectorFieldWithoutNullable",
 			setupCollection: func(collName string) error {
 				return mc.CreateCollection(ctx, client.SimpleCreateCollectionOptions(collName, common.DefaultDim))
 			},
 			fieldBuilder: func() *entity.Field {
-				return entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeFloatVector).WithNullable(true)
+				return entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 			},
-			expectedError: "not support to add vector field, field name = " + common.DefaultNewField + ": invalid parameter",
+			expectedError: "adding vector field to existing collection requires nullable=true, field name = " + common.DefaultNewField,
 		},
 		{
 			name: "addFieldAsPrimary",
