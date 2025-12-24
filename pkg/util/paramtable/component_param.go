@@ -3225,8 +3225,9 @@ type queryNodeConfig struct {
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
 	// tsafe
-	MaxTimestampLag ParamItem `refreshable:"true"`
-	DowngradeTsafe  ParamItem `refreshable:"true"`
+	MaxTimestampLag           ParamItem `refreshable:"true"`
+	DowngradeTsafe            ParamItem `refreshable:"true"`
+	CatchUpStreamingDataTsLag ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -4191,6 +4192,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       false,
 	}
 	p.DowngradeTsafe.Init(base.mgr)
+
+	p.CatchUpStreamingDataTsLag = ParamItem{
+		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
+		Version:      "2.6.8",
+		DefaultValue: "1s",
+		Doc:          "Tolerable lag for delegator to be considered caught up with streaming data",
+	}
+	p.CatchUpStreamingDataTsLag.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
