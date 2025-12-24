@@ -1222,3 +1222,56 @@ func TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy(t *testing.T)
 	assert.Contains(t, finalNodes, int64(1002), "Healthy node should remain")
 	assert.Equal(t, 2, len(finalNodes), "Should have exactly 2 nodes")
 }
+
+func (suite *ResourceManagerSuite) TestTransferNodeIdempotent() {
+	ctx := suite.ctx
+
+	// Setup: create two RGs with 0 requests (so HandleNodeUp assigns to default RG)
+	suite.manager.AddResourceGroup(ctx, "rg1", newResourceGroupConfig(0, 10))
+	suite.manager.AddResourceGroup(ctx, "rg2", newResourceGroupConfig(0, 10))
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
+	// Case 1: Normal transfer - node from default RG to rg1
+	suite.manager.HandleNodeUp(ctx, 1)
+	nodes, _ := suite.manager.GetNodes(ctx, DefaultResourceGroupName)
+	suite.Contains(nodes, int64(1))
+
+	// Transfer node from default to rg1
+	err := suite.manager.transferNode(ctx, DefaultResourceGroupName, "rg1", 1)
+	suite.NoError(err)
+	suite.True(suite.manager.groups["rg1"].ContainNode(1))
+	suite.False(suite.manager.groups[DefaultResourceGroupName].ContainNode(1))
+
+	// Case 2: Simulate inconsistent state - node exists in both rg1 and rg2
+	// This can happen if a previous transfer partially succeeded
+	suite.manager.groups["rg2"].nodes.Insert(1)
+	suite.True(suite.manager.groups["rg1"].ContainNode(1))
+	suite.True(suite.manager.groups["rg2"].ContainNode(1)) // inconsistent state
+
+	// transferNode should clean up source RG even when node already in target
+	err = suite.manager.transferNode(ctx, "rg1", "rg2", 1)
+	suite.NoError(err)
+	suite.False(suite.manager.groups["rg1"].ContainNode(1)) // source cleaned up
+	suite.True(suite.manager.groups["rg2"].ContainNode(1))  // target unchanged
+
+	// Case 3: Idempotent - calling again should succeed with no changes
+	err = suite.manager.transferNode(ctx, "rg1", "rg2", 1)
+	suite.NoError(err)
+	suite.False(suite.manager.groups["rg1"].ContainNode(1))
+	suite.True(suite.manager.groups["rg2"].ContainNode(1))
+
+	// Case 4: Transfer with empty sourceRGName (for assignIncomingNode scenario)
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	err = suite.manager.transferNode(ctx, "", "rg1", 2)
+	suite.NoError(err)
+	suite.True(suite.manager.groups["rg1"].ContainNode(2))
+}
