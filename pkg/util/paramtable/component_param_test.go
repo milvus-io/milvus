@@ -525,6 +525,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1.0, Params.PartialResultRequiredDataRatio.GetAsFloat())
 		params.Save(Params.PartialResultRequiredDataRatio.Key, "0.8")
 		assert.Equal(t, 0.8, Params.PartialResultRequiredDataRatio.GetAsFloat())
+
+		// test CatchUpStreamingDataTsLag parameter
+		assert.Equal(t, 1*time.Second, Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
+		params.Save(Params.CatchUpStreamingDataTsLag.Key, "5s")
+		assert.Equal(t, 5*time.Second, Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
+		params.Save(Params.CatchUpStreamingDataTsLag.Key, "0s")
+		assert.Equal(t, time.Duration(0), Params.CatchUpStreamingDataTsLag.GetAsDurationByParse())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
