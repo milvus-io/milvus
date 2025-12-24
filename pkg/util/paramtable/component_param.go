@@ -4284,7 +4284,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
 		Version:      "2.6.8",
 		DefaultValue: "1s",
-		Doc:          "Tolerable lag in seconds for delegator to be considered caught up with streaming data",
+		Doc:          "Tolerable lag for delegator to be considered caught up with streaming data",
 	}
 	p.CatchUpStreamingDataTsLag.Init(base.mgr)
 
