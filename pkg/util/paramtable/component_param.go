@@ -3332,10 +3332,15 @@ type queryNodeConfig struct {
 	DiskSizeFetchInterval       ParamItem `refreshable:"false"`
 
 	// schedule task policy.
-	SchedulePolicyName                    ParamItem `refreshable:"false"`
-	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
-	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
-	SchedulePolicyMaxPendingTaskPerUser   ParamItem `refreshable:"true"`
+	SchedulePolicyName                                          ParamItem `refreshable:"false"`
+	SchedulePolicyTaskQueueExpire                               ParamItem `refreshable:"true"`
+	SchedulePolicyEnableCrossUserGrouping                       ParamItem `refreshable:"true"`
+	SchedulePolicyMaxPendingTaskPerUser                         ParamItem `refreshable:"true"`
+	SchedulePolicyMaxConcurrentRatioPerUser                     ParamItem `refreshable:"true"`
+	SchedulePolicySegmentSQLimitEnabled                         ParamItem `refreshable:"true"`
+	SchedulePolicySegmentSQConcurrencyLimitCPUUsageLwmThreshold ParamItem `refreshable:"true"`
+	SchedulePolicySegmentSQConcurrencyLimitCPUUsageHwmThreshold ParamItem `refreshable:"true"`
+	SchedulePolicySegmentSQConcurrencyLimitOfLwm                ParamItem `refreshable:"true"`
 
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
@@ -4408,6 +4413,57 @@ user-task-polling:
 		Export:       true,
 	}
 	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
+
+	p.SchedulePolicyMaxConcurrentRatioPerUser = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.maxConcurrentRatioPerUser",
+		Version:      "2.6.8",
+		DefaultValue: "0.4",
+		Doc: `Max concurrent ratio per user in scheduler, 
+which means the user can have at most (maxReadConcurrentRatio * hardware.CPUNum * maxConcurrentRatioPerUser, at least 1) concurrent tasks running in scheduler`,
+		Export: false,
+	}
+	p.SchedulePolicyMaxConcurrentRatioPerUser.Init(base.mgr)
+
+	p.SchedulePolicySegmentSQLimitEnabled = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.segmentSQLimitEnabled",
+		Version:      "2.6.8",
+		DefaultValue: "",
+		Doc: `Enable segment search concurrent limit for scheduler.
+if not set, enabled by default when SchedulePolicyName is user-task-polling,
+otherwise parse as boolean value to determine if the segment search concurrent limit is enabled.`,
+		Export: false,
+	}
+	p.SchedulePolicySegmentSQLimitEnabled.Init(base.mgr)
+
+	p.SchedulePolicySegmentSQConcurrencyLimitCPUUsageLwmThreshold = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.segmentSQConcurrencyLimitCPUUsageLwmThreshold",
+		Version:      "2.6.8",
+		DefaultValue: "0.3",
+		Doc: `CPU usage low water mark threshold to limit segment search concurrent limit per task,
+when CPU usage is less than this threshold, the concurrent limit will be equal to hardware.CPUNum * segmentSQLimitMxaConcurrencyRatio`,
+		Export: false,
+	}
+	p.SchedulePolicySegmentSQConcurrencyLimitCPUUsageLwmThreshold.Init(base.mgr)
+
+	p.SchedulePolicySegmentSQConcurrencyLimitCPUUsageHwmThreshold = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.segmentSQConcurrencyLimitCPUUsageHwmThreshold",
+		Version:      "2.6.8",
+		DefaultValue: "0.9",
+		Doc: `CPU usage high water mark threshold to limit segment search concurrent limit per task,
+when CPU usage is greater than this threshold, the concurrent limit will be equal to 1`,
+		Export: false,
+	}
+	p.SchedulePolicySegmentSQConcurrencyLimitCPUUsageHwmThreshold.Init(base.mgr)
+
+	p.SchedulePolicySegmentSQConcurrencyLimitOfLwm = ParamItem{
+		Key:          "queryNode.scheduler.scheduleReadPolicy.segmentSQConcurrencyLimitOfLwm",
+		Version:      "2.6.8",
+		DefaultValue: "0.5",
+		Doc: `Concurrency limit of low water mark to limit segment search concurrent limit per task,
+when CPU usage is less than the low water mark threshold, the concurrent limit will be equal to hardware.CPUNum * segmentSQConcurrencyLimitOfLwm`,
+		Export: false,
+	}
+	p.SchedulePolicySegmentSQConcurrencyLimitOfLwm.Init(base.mgr)
 
 	p.CGOPoolSizeRatio = ParamItem{
 		Key:          "queryNode.segcore.cgoPoolSizeRatio",
