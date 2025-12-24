@@ -80,6 +80,7 @@ class DefaultValueChunkTranslator
     int64_t segment_id_;
     std::string key_;
     bool use_mmap_;
+    std::string mmap_dir_path_;
     CTMeta meta_;
     milvus::FieldMeta field_meta_;
 };
