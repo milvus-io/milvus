@@ -49,17 +49,21 @@ namespace milvus::segcore::storagev2translator {
 
 ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t segment_id,
+    GroupChunkType group_chunk_type,
     int64_t column_group_index,
     std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     bool use_mmap,
+    const std::string& mmap_dir_path,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
+      group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
       chunk_reader_(std::move(chunk_reader)),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_index)),
       field_metas_(field_metas),
+      mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
@@ -86,33 +90,56 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     return false;
                 }(),
                 /* is_index */ false),
-            /* support_eviction */ true) {
+            /* support_eviction */ true),
+      use_mmap_(use_mmap),
+      load_priority_(load_priority) {
     auto chunk_size_result = chunk_reader_->get_chunk_size();
     if (!chunk_size_result.ok()) {
-        throw std::runtime_error("get chunk size failed");
+        throw std::runtime_error("get row group size failed");
     }
-    chunk_size_ = chunk_size_result.ValueOrDie();
+    const auto& row_group_sizes = chunk_size_result.ValueOrDie();
 
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
-        throw std::runtime_error("get chunk rows failed");
+        throw std::runtime_error("get row group rows failed");
     }
+    const auto& row_group_rows = rows_result.ValueOrDie();
 
-    auto chunk_rows = rows_result.ValueOrDie();
+    // Merge row groups into group chunks(cache cells)
+    size_t total_row_groups = row_group_sizes.size();
+    meta_.total_row_groups_ = total_row_groups;
+    size_t num_cells =
+        (total_row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
 
+    // Build num_rows_until_chunk_ and chunk_memory_size_
+    meta_.num_rows_until_chunk_.reserve(num_cells + 1);
     meta_.num_rows_until_chunk_.push_back(0);
-    for (int i = 0; i < chunk_reader_->total_number_of_chunks(); ++i) {
-        meta_.num_rows_until_chunk_.push_back(
-            meta_.num_rows_until_chunk_.back() +
-            static_cast<int64_t>(chunk_rows[i]));
-        meta_.chunk_memory_size_.push_back(
-            static_cast<int64_t>(chunk_size_[i]));
+    meta_.chunk_memory_size_.reserve(num_cells);
+
+    int64_t cumulative_rows = 0;
+    for (size_t cell_id = 0; cell_id < num_cells; ++cell_id) {
+        auto [start, end] = meta_.get_row_group_range(cell_id);
+        int64_t cell_size = 0;
+        for (size_t i = start; i < end; ++i) {
+            cumulative_rows += static_cast<int64_t>(row_group_rows[i]);
+            cell_size += static_cast<int64_t>(row_group_sizes[i]);
+        }
+        meta_.num_rows_until_chunk_.push_back(cumulative_rows);
+        meta_.chunk_memory_size_.push_back(cell_size);
     }
+
+    LOG_INFO(
+        "[StorageV2] translator {} merged {} row groups into {} cells ({} "
+        "row groups per cell)",
+        key_,
+        total_row_groups,
+        num_cells,
+        kRowGroupsPerCell);
 }
 
 size_t
 ManifestGroupTranslator::num_cells() const {
-    return chunk_reader_->total_number_of_chunks();
+    return meta_.chunk_memory_size_.size();
 }
 
 milvus::cachinglayer::cid_t
@@ -124,9 +151,8 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 ManifestGroupTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    // return chunk_reader_->get_chunk_size()[cid];
-    AssertInfo(cid < chunk_size_.size(), "invalid cid");
-    auto cell_sz = static_cast<int64_t>(chunk_size_[cid]);
+    assert(cid < meta_.chunk_memory_size_.size());
+    auto cell_sz = meta_.chunk_memory_size_[cid];
 
     if (use_mmap_) {
         // why double the disk size for loading?
@@ -152,29 +178,63 @@ ManifestGroupTranslator::get_cells(
         cells;
     cells.reserve(cids.size());
 
+    auto max_cid = *std::max_element(cids.begin(), cids.end());
+    if (max_cid >= meta_.chunk_memory_size_.size()) {
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "[StorageV2] translator {} cid {} is out of range. Total cells: {}",
+            key_,
+            max_cid,
+            meta_.chunk_memory_size_.size());
+    }
+
+    // Collect all row group indices needed for the requested cells
+    std::vector<int64_t> needed_row_group_indices;
+    needed_row_group_indices.reserve(kRowGroupsPerCell * cids.size());
+    for (auto cid : cids) {
+        auto [start, end] = meta_.get_row_group_range(cid);
+        for (size_t i = start; i < end; ++i) {
+            needed_row_group_indices.push_back(static_cast<int64_t>(i));
+        }
+    }
+
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
-    auto read_result =
-        chunk_reader_->get_chunks(cids, static_cast<int64_t>(parallel_degree));
+    auto read_result = chunk_reader_->get_chunks(
+        needed_row_group_indices, static_cast<int64_t>(parallel_degree));
 
     if (!read_result.ok()) {
         throw std::runtime_error("get chunk failed");
     }
 
-    auto chunks = read_result.ValueOrDie();
-    for (size_t i = 0; i < chunks.size(); ++i) {
-        auto& chunk = chunks[i];
-        AssertInfo(chunk != nullptr,
-                   "chunk is null, idx = {}, group index = {}, segment id = "
-                   "{}, parallel degree = {}",
-                   i,
-                   column_group_index_,
-                   segment_id_,
-                   parallel_degree);
-        auto cid = cids[i];
-        auto group_chunk = load_group_chunk(chunk, cid);
-        cells.emplace_back(cid, std::move(group_chunk));
+    auto loaded_row_groups = read_result.ValueOrDie();
+
+    // Build a map from row group index to loaded record batch
+    std::unordered_map<int64_t, std::shared_ptr<arrow::RecordBatch>>
+        row_group_map;
+    row_group_map.reserve(needed_row_group_indices.size());
+    for (size_t i = 0; i < needed_row_group_indices.size(); ++i) {
+        row_group_map[needed_row_group_indices[i]] = loaded_row_groups[i];
+    }
+
+    for (const auto& cid : cids) {
+        auto [start, end] = meta_.get_row_group_range(cid);
+        std::vector<std::shared_ptr<arrow::RecordBatch>> record_batches;
+        record_batches.reserve(end - start);
+
+        for (size_t i = start; i < end; ++i) {
+            auto it = row_group_map.find(static_cast<int64_t>(i));
+            AssertInfo(it != row_group_map.end(),
+                       fmt::format("[StorageV2] translator {} row group {} for "
+                                   "cell {} was not loaded",
+                                   key_,
+                                   i,
+                                   cid));
+            record_batches.push_back(it->second);
+        }
+
+        cells.emplace_back(cid, load_group_chunk(record_batches, cid));
     }
 
     return cells;
@@ -182,13 +242,23 @@ ManifestGroupTranslator::get_cells(
 
 std::unique_ptr<milvus::GroupChunk>
 ManifestGroupTranslator::load_group_chunk(
-    const std::shared_ptr<arrow::RecordBatch>& record_batch,
+    const std::vector<std::shared_ptr<arrow::RecordBatch>>& record_batches,
     const milvus::cachinglayer::cid_t cid) {
-    std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
+    assert(!record_batches.empty());
+    // Use the first record batch as the reference for field iteration
+    const auto& first_batch = record_batches[0];
+
+    std::vector<FieldId> field_ids;
+    field_ids.reserve(first_batch->num_columns());
+    std::vector<FieldMeta> field_metas;
+    field_metas.reserve(first_batch->num_columns());
+    std::vector<arrow::ArrayVector> array_vecs;
+    array_vecs.reserve(first_batch->num_columns());
+
     // Iterate through field_id_list to get field_id and create chunk
-    for (int i = 0; i < record_batch->num_columns(); ++i) {
+    for (int i = 0; i < first_batch->num_columns(); ++i) {
         // column name here is field id
-        auto column_name = record_batch->column_name(i);
+        auto column_name = first_batch->column_name(i);
         auto field_id = std::stoll(column_name);
 
         auto fid = milvus::FieldId(field_id);
@@ -204,41 +274,54 @@ ManifestGroupTranslator::load_group_chunk(
             fid.get());
         const auto& field_meta = it->second;
 
-        const arrow::ArrayVector array_vec = {record_batch->column(i)};
-        std::unique_ptr<Chunk> chunk;
-        if (!use_mmap_) {
-            // Memory mode
-            chunk = create_chunk(field_meta, array_vec);
-        } else {
-            // Mmap mode
-            std::filesystem::path filepath;
-            if (field_meta.get_main_field_id() != INVALID_FIELD_ID) {
-                // json shredding mode
-                filepath = std::filesystem::path(mmap_dir_path_) /
-                           std::to_string(segment_id_) /
-                           std::to_string(field_meta.get_main_field_id()) /
-                           std::to_string(field_id) / std::to_string(cid);
-            } else {
-                filepath = std::filesystem::path(mmap_dir_path_) /
-                           std::to_string(segment_id_) /
-                           std::to_string(field_id) / std::to_string(cid);
-            }
-
-            LOG_INFO(
-                "[StorageV2] translator {} mmaping field {} chunk {} to path "
-                "{}",
-                key_,
-                field_id,
-                cid,
-                filepath.string());
-
-            std::filesystem::create_directories(filepath.parent_path());
-
-            chunk = create_chunk(field_meta, array_vec, filepath.string());
+        // Merge arrays from all record batches for this field
+        // All record batches in a cell come from the same column group with consistent schema
+        arrow::ArrayVector merged_array_vec;
+        for (const auto& batch : record_batches) {
+            merged_array_vec.push_back(batch->column(i));
         }
 
-        chunks[fid] = std::move(chunk);
+        field_ids.push_back(fid);
+        field_metas.push_back(field_meta);
+        array_vecs.push_back(std::move(merged_array_vec));
     }
+
+    std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
+    if (!use_mmap_) {
+        // Memory mode
+        chunks = create_group_chunk(field_ids, field_metas, array_vecs);
+    } else {
+        // Mmap mode
+        std::filesystem::path filepath;
+        switch (group_chunk_type_) {
+            case GroupChunkType::DEFAULT:
+                filepath = std::filesystem::path(mmap_dir_path_) /
+                           fmt::format("seg_{}_cg_{}_{}",
+                                       segment_id_,
+                                       column_group_index_,
+                                       cid);
+                break;
+            case GroupChunkType::JSON_KEY_STATS:
+                filepath =
+                    std::filesystem::path(mmap_dir_path_) /
+                    fmt::format(
+                        "seg_{}_jks_{}_cg_{}_{}",
+                        segment_id_,
+                        // NOTE: here we assume the first field is the main field for json key stats group chunk
+                        std::to_string(field_metas[0].get_main_field_id()),
+                        column_group_index_,
+                        cid);
+                break;
+            default:
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "unknown group chunk type: {}",
+                          static_cast<uint8_t>(group_chunk_type_));
+        }
+        std::filesystem::create_directories(filepath.parent_path());
+        chunks = create_group_chunk(
+            field_ids, field_metas, array_vecs, filepath.string());
+    }
+
     return std::make_unique<milvus::GroupChunk>(chunks);
 }
 

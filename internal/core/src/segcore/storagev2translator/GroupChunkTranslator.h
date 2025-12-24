@@ -65,11 +65,10 @@ class GroupChunkTranslator
     get_cells(const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
     std::pair<size_t, size_t>
-    get_file_and_row_group_index(milvus::cachinglayer::cid_t cid) const;
+    get_file_and_row_group_offset(size_t global_row_group_idx) const;
 
     milvus::cachinglayer::cid_t
-    get_cid_from_file_and_row_group_index(size_t file_idx,
-                                          size_t row_group_idx) const;
+    get_global_row_group_idx(size_t file_idx, size_t row_group_idx) const;
 
     milvus::cachinglayer::Meta*
     meta() override {
@@ -82,19 +81,16 @@ class GroupChunkTranslator
         constexpr int64_t MIN_STORAGE_BYTES = 1 * 1024 * 1024;
         int64_t total_size = 0;
         for (auto cid : cids) {
-            auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
-            auto& row_group_meta =
-                row_group_meta_list_[file_idx].Get(row_group_idx);
             total_size +=
-                std::max(static_cast<int64_t>(row_group_meta.memory_size()),
-                         MIN_STORAGE_BYTES);
+                std::max(meta_.chunk_memory_size_[cid], MIN_STORAGE_BYTES);
         }
         return total_size;
     }
 
  private:
+    // Load a single cell which may contain multiple row groups
     std::unique_ptr<milvus::GroupChunk>
-    load_group_chunk(const std::shared_ptr<arrow::Table>& table,
+    load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
                      const milvus::cachinglayer::cid_t cid);
 
     int64_t segment_id_;

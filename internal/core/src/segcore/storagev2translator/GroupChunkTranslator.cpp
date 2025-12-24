@@ -140,19 +140,40 @@ GroupChunkTranslator::GroupChunkTranslator(
                                              file_metas.size());
     }
 
-    meta_.num_rows_until_chunk_.reserve(total_row_groups + 1);
-    meta_.chunk_memory_size_.reserve(total_row_groups);
-
-    meta_.num_rows_until_chunk_.push_back(0);
+    // Collect row group sizes and row counts
+    std::vector<int64_t> row_group_row_counts;
+    std::vector<int64_t> row_group_sizes;
+    row_group_sizes.reserve(total_row_groups);
+    row_group_row_counts.reserve(total_row_groups);
     for (const auto& row_group_meta : row_group_meta_list_) {
         for (int i = 0; i < row_group_meta.size(); ++i) {
-            meta_.num_rows_until_chunk_.push_back(
-                meta_.num_rows_until_chunk_.back() +
-                row_group_meta.Get(i).row_num());
-            meta_.chunk_memory_size_.push_back(
-                row_group_meta.Get(i).memory_size());
+            row_group_sizes.push_back(row_group_meta.Get(i).memory_size());
+            row_group_row_counts.push_back(row_group_meta.Get(i).row_num());
         }
     }
+
+    // Build cell mapping: each cell contains up to kRowGroupsPerCell row groups
+    meta_.total_row_groups_ = total_row_groups;
+    size_t num_cells =
+        (total_row_groups + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
+
+    // Merge row groups into group chunks(cache cells)
+    meta_.num_rows_until_chunk_.reserve(num_cells + 1);
+    meta_.num_rows_until_chunk_.push_back(0);
+    meta_.chunk_memory_size_.reserve(num_cells);
+
+    int64_t cumulative_rows = 0;
+    for (size_t cell_id = 0; cell_id < num_cells; ++cell_id) {
+        auto [start, end] = meta_.get_row_group_range(cell_id);
+        int64_t cell_size = 0;
+        for (size_t i = start; i < end; ++i) {
+            cumulative_rows += row_group_row_counts[i];
+            cell_size += row_group_sizes[i];
+        }
+        meta_.num_rows_until_chunk_.push_back(cumulative_rows);
+        meta_.chunk_memory_size_.push_back(cell_size);
+    }
+
     AssertInfo(
         meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
         fmt::format(
@@ -161,6 +182,14 @@ GroupChunkTranslator::GroupChunkTranslator(
             column_group_info_.field_id,
             meta_.num_rows_until_chunk_.back(),
             column_group_info_.row_count));
+
+    LOG_INFO(
+        "[StorageV2] translator {} merged {} row groups into {} cells ({} "
+        "row groups per cell)",
+        key_,
+        total_row_groups,
+        num_cells,
+        kRowGroupsPerCell);
 }
 
 GroupChunkTranslator::~GroupChunkTranslator() {
@@ -180,10 +209,8 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 GroupChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
-    auto& row_group_meta = row_group_meta_list_[file_idx].Get(row_group_idx);
-
-    auto cell_sz = static_cast<int64_t>(row_group_meta.memory_size());
+    assert(cid < meta_.chunk_memory_size_.size());
+    auto cell_sz = meta_.chunk_memory_size_[cid];
 
     if (use_mmap_) {
         // why double the disk size for loading?
@@ -201,26 +228,29 @@ GroupChunkTranslator::key() const {
 }
 
 std::pair<size_t, size_t>
-GroupChunkTranslator::get_file_and_row_group_index(
-    milvus::cachinglayer::cid_t cid) const {
+GroupChunkTranslator::get_file_and_row_group_offset(
+    size_t global_row_group_idx) const {
     for (size_t file_idx = 0; file_idx < file_row_group_prefix_sum_.size() - 1;
          ++file_idx) {
-        if (cid < file_row_group_prefix_sum_[file_idx + 1]) {
-            return {file_idx, cid - file_row_group_prefix_sum_[file_idx]};
+        if (global_row_group_idx < file_row_group_prefix_sum_[file_idx + 1]) {
+            return {
+                file_idx,
+                global_row_group_idx - file_row_group_prefix_sum_[file_idx]};
         }
     }
 
-    AssertInfo(false,
-               fmt::format("[StorageV2] translator {} cid {} is out of range. "
-                           "Total row groups across all files: {}",
-                           key_,
-                           cid,
-                           file_row_group_prefix_sum_.back()));
+    AssertInfo(
+        false,
+        fmt::format("[StorageV2] translator {} global_row_group_idx {} is out "
+                    "of range. Total row groups across all files: {}",
+                    key_,
+                    global_row_group_idx,
+                    file_row_group_prefix_sum_.back()));
 }
 
 milvus::cachinglayer::cid_t
-GroupChunkTranslator::get_cid_from_file_and_row_group_index(
-    size_t file_idx, size_t row_group_idx) const {
+GroupChunkTranslator::get_global_row_group_idx(size_t file_idx,
+                                               size_t row_group_idx) const {
     AssertInfo(file_idx < file_row_group_prefix_sum_.size() - 1,
                fmt::format("[StorageV2] translator {} file_idx {} is out of "
                            "range. Total files: {}",
@@ -242,7 +272,6 @@ GroupChunkTranslator::get_cid_from_file_and_row_group_index(
     return file_start + row_group_idx;
 }
 
-// the returned cids are sorted. It may not follow the order of cids.
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
 GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     std::vector<std::pair<milvus::cachinglayer::cid_t,
@@ -250,12 +279,31 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
         cells;
     cells.reserve(cids.size());
 
-    // Create row group lists for requested cids
-    std::vector<std::vector<int64_t>> row_group_lists(insert_files_.size());
+    auto max_cid = *std::max_element(cids.begin(), cids.end());
+    if (max_cid >= meta_.chunk_memory_size_.size()) {
+        ThrowInfo(
+            ErrorCode::UnexpectedError,
+            "[StorageV2] translator {} cid {} is out of range. Total cells: {}",
+            key_,
+            max_cid,
+            meta_.chunk_memory_size_.size());
+    }
 
+    // Collect all row group indices needed for the requested cells
+    std::vector<size_t> needed_row_group_indices;
+    needed_row_group_indices.reserve(kRowGroupsPerCell * cids.size());
     for (auto cid : cids) {
-        auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
-        row_group_lists[file_idx].push_back(row_group_idx);
+        auto [start, end] = meta_.get_row_group_range(cid);
+        for (size_t i = start; i < end; ++i) {
+            needed_row_group_indices.push_back(i);
+        }
+    }
+
+    // Create row group lists for file loading
+    std::vector<std::vector<int64_t>> row_group_lists(insert_files_.size());
+    for (auto rg_idx : needed_row_group_indices) {
+        auto [file_idx, row_group_off] = get_file_and_row_group_offset(rg_idx);
+        row_group_lists[file_idx].push_back(row_group_off);
     }
 
     auto parallel_degree =
@@ -284,57 +332,72 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
         key_,
         column_group_info_.field_id);
 
+    // Collect loaded tables by row group index
+    std::unordered_map<size_t, std::shared_ptr<arrow::Table>> row_group_tables;
+    row_group_tables.reserve(needed_row_group_indices.size());
+
     std::shared_ptr<milvus::ArrowDataWrapper> r;
-    std::unordered_set<cachinglayer::cid_t> filled_cids;
-    filled_cids.reserve(cids.size());
+    // !!! NOTE: the popped row group tables are sorted by the global row group index
+    // !!! Never rely on the order of the popped row group tables.
     while (channel->pop(r)) {
         for (const auto& table_info : r->arrow_tables) {
-            // Convert file_index and row_group_index to global cid
-            auto cid = get_cid_from_file_and_row_group_index(
-                table_info.file_index, table_info.row_group_index);
-            cells.emplace_back(cid, load_group_chunk(table_info.table, cid));
-            filled_cids.insert(cid);
+            // Convert file_index and row_group_index (file inner index, not global index) to global row group index
+            auto rg_idx = get_global_row_group_idx(table_info.file_index,
+                                                   table_info.row_group_index);
+            row_group_tables[rg_idx] = table_info.table;
         }
     }
 
     // access underlying feature to get exception if any
     load_future.get();
 
-    // Verify all requested cids have been filled
+    // Build cells from collected tables
     for (auto cid : cids) {
-        AssertInfo(filled_cids.find(cid) != filled_cids.end(),
-                   "[StorageV2] translator {} cid {} was not filled, missing "
-                   "row group id {}",
-                   key_,
-                   cid,
-                   cid);
+        auto [start, end] = meta_.get_row_group_range(cid);
+        std::vector<std::shared_ptr<arrow::Table>> tables;
+        tables.reserve(end - start);
+
+        for (size_t i = start; i < end; ++i) {
+            auto it = row_group_tables.find(i);
+            AssertInfo(it != row_group_tables.end(),
+                       fmt::format("[StorageV2] translator {} row group {} "
+                                   "for cell {} was not loaded",
+                                   key_,
+                                   i,
+                                   cid));
+            tables.push_back(it->second);
+        }
+
+        cells.emplace_back(cid, load_group_chunk(tables, cid));
     }
+
     return cells;
 }
 
 std::unique_ptr<milvus::GroupChunk>
 GroupChunkTranslator::load_group_chunk(
-    const std::shared_ptr<arrow::Table>& table,
+    const std::vector<std::shared_ptr<arrow::Table>>& tables,
     const milvus::cachinglayer::cid_t cid) {
-    AssertInfo(table != nullptr, "arrow table is nullptr");
-    // Create chunks for each field in this batch
-    std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
-    // Iterate through field_id_list to get field_id and create chunk
-    std::vector<FieldId> field_ids;
-    std::vector<FieldMeta> field_metas;
-    std::vector<arrow::ArrayVector> array_vecs;
-    field_metas.reserve(table->schema()->num_fields());
-    array_vecs.reserve(table->schema()->num_fields());
+    assert(!tables.empty());
+    // Use the first table's schema as reference for field iteration
+    const auto& schema = tables[0]->schema();
 
-    for (int i = 0; i < table->schema()->num_fields(); ++i) {
-        AssertInfo(table->schema()->field(i)->metadata()->Contains(
+    // Collect field info and merge array vectors from all tables
+    std::vector<FieldId> field_ids;
+    field_ids.reserve(schema->num_fields());
+    std::vector<FieldMeta> field_metas;
+    field_metas.reserve(schema->num_fields());
+    std::vector<arrow::ArrayVector> array_vecs;
+    array_vecs.reserve(schema->num_fields());
+
+    for (int i = 0; i < schema->num_fields(); ++i) {
+        AssertInfo(schema->field(i)->metadata()->Contains(
                        milvus_storage::ARROW_FIELD_ID_KEY),
                    "[StorageV2] translator {} field id not found in metadata "
                    "for field {}",
                    key_,
-                   table->schema()->field(i)->name());
-        auto field_id = std::stoll(table->schema()
-                                       ->field(i)
+                   schema->field(i)->name());
+        auto field_id = std::stoll(schema->field(i)
                                        ->metadata()
                                        ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
                                        ->data());
@@ -351,12 +414,22 @@ GroupChunkTranslator::load_group_chunk(
             key_,
             fid.get());
         const auto& field_meta = it->second;
-        const arrow::ArrayVector& array_vec = table->column(i)->chunks();
+
+        // Merge array vectors from all tables for this field
+        // All tables in a cell come from the same column group with consistent schema
+        arrow::ArrayVector merged_array_vec;
+        for (const auto& table : tables) {
+            const arrow::ArrayVector& array_vec = table->column(i)->chunks();
+            merged_array_vec.insert(
+                merged_array_vec.end(), array_vec.begin(), array_vec.end());
+        }
+
         field_ids.push_back(fid);
         field_metas.push_back(field_meta);
-        array_vecs.push_back(array_vec);
+        array_vecs.push_back(std::move(merged_array_vec));
     }
 
+    std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     if (!use_mmap_) {
         chunks = create_group_chunk(field_ids, field_metas, array_vecs);
     } else {

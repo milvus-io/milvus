@@ -466,6 +466,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     bool global_use_mmap = is_vector ? mmap_config.GetVectorFieldEnableMmap()
                                      : mmap_config.GetScalarFieldEnableMmap();
     auto use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
+    auto mmap_dir_path =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager()
+            ->GetRootPath();
 
     auto chunk_reader_result = reader_->get_chunk_reader(index);
     AssertInfo(chunk_reader_result.ok(),
@@ -482,10 +486,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     auto translator =
         std::make_unique<storagev2translator::ManifestGroupTranslator>(
             get_segment_id(),
+            GroupChunkType::DEFAULT,
             index,
             std::move(chunk_reader),
             field_metas,
             use_mmap,
+            mmap_dir_path,
             column_group->columns.size(),
             segment_load_info_.priority());
     auto chunked_column_group =
