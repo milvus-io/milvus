@@ -918,6 +918,61 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     }
 }
 
+ChunkedSegmentSealedImpl::ValidResult
+ChunkedSegmentSealedImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                                                   FieldId field_id,
+                                                   const int64_t* seg_offsets,
+                                                   int64_t count) const {
+    ValidResult result;
+    result.valid_count = count;
+
+    if (vector_indexings_.is_ready(field_id)) {
+        auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+        auto cache_index = field_indexing->indexing_;
+        auto ca = SemiInlineGet(cache_index->PinCells(op_ctx, {0}));
+        auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
+
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            result.valid_data = std::make_unique<bool[]>(count);
+            result.valid_offsets.reserve(count);
+
+            for (int64_t i = 0; i < count; ++i) {
+                bool is_valid = vec_index->IsRowValid(seg_offsets[i]);
+                result.valid_data[i] = is_valid;
+                if (is_valid) {
+                    int64_t physical_offset =
+                        vec_index->GetPhysicalOffset(seg_offsets[i]);
+                    if (physical_offset >= 0) {
+                        result.valid_offsets.push_back(physical_offset);
+                    }
+                }
+            }
+            result.valid_count = result.valid_offsets.size();
+        }
+    } else {
+        auto column = get_column(field_id);
+        if (column != nullptr && column->IsNullable()) {
+            result.valid_data = std::make_unique<bool[]>(count);
+            result.valid_offsets.reserve(count);
+
+            const auto& offset_mapping = column->GetOffsetMapping();
+            for (int64_t i = 0; i < count; ++i) {
+                bool is_valid = offset_mapping.IsValid(seg_offsets[i]);
+                result.valid_data[i] = is_valid;
+                if (is_valid) {
+                    int64_t physical_offset =
+                        offset_mapping.GetPhysicalOffset(seg_offsets[i]);
+                    if (physical_offset >= 0) {
+                        result.valid_offsets.push_back(physical_offset);
+                    }
+                }
+            }
+            result.valid_count = result.valid_offsets.size();
+        }
+    }
+    return result;
+}
+
 std::unique_ptr<DataArray>
 ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
                                      FieldId field_id,
@@ -945,16 +1000,29 @@ ChunkedSegmentSealedImpl::get_vector(milvus::OpContext* op_ctx,
 
     if (has_raw_data) {
         // If index has raw data, get vector from memory.
-        auto ids_ds = GenIdsDataset(count, ids);
+        ValidResult filter_result;
+        knowhere::DataSetPtr ids_ds;
+        int64_t valid_count = count;
+        const bool* valid_data = nullptr;
+        if (field_meta.is_nullable()) {
+            filter_result =
+                FilterVectorValidOffsets(op_ctx, field_id, ids, count);
+            ids_ds = GenIdsDataset(filter_result.valid_count,
+                                   filter_result.valid_offsets.data());
+            valid_count = filter_result.valid_count;
+            valid_data = filter_result.valid_data.get();
+        } else {
+            ids_ds = GenIdsDataset(count, ids);
+        }
         if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32) {
             auto res = vec_index->GetSparseVector(ids_ds);
             return segcore::CreateVectorDataArrayFrom(
-                res.get(), count, field_meta);
+                res.get(), valid_data, count, valid_count, field_meta);
         } else {
             // dense vector:
             auto vector = vec_index->GetVector(ids_ds);
             return segcore::CreateVectorDataArrayFrom(
-                vector.data(), count, field_meta);
+                vector.data(), valid_data, count, valid_count, field_meta);
         }
     }
 
@@ -1529,10 +1597,13 @@ ChunkedSegmentSealedImpl::ClearData() {
 
 std::unique_ptr<DataArray>
 ChunkedSegmentSealedImpl::fill_with_empty(FieldId field_id,
-                                          int64_t count) const {
+                                          int64_t count,
+                                          int64_t valid_count,
+                                          const void* valid_data) const {
     auto& field_meta = schema_->operator[](field_id);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        return CreateEmptyVectorDataArray(count, field_meta);
+        return CreateEmptyVectorDataArray(
+            count, valid_count, valid_data, field_meta);
     }
     return CreateEmptyScalarDataArray(count, field_meta);
 }
@@ -1682,8 +1753,22 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
     AssertInfo(column != nullptr,
                "field {} must exist when getting raw data",
                field_id.get());
-    auto ret = fill_with_empty(field_id, count);
-    if (column->IsNullable()) {
+
+    int64_t valid_count = count;
+    const bool* valid_data = nullptr;
+    const int64_t* valid_offsets = seg_offsets;
+    ValidResult filter_result;
+
+    if (field_meta.is_vector() && field_meta.is_nullable()) {
+        filter_result =
+            FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
+        valid_count = filter_result.valid_count;
+        valid_data = filter_result.valid_data.get();
+        valid_offsets = filter_result.valid_offsets.data();
+    }
+    auto ret = fill_with_empty(field_id, count, valid_count, valid_data);
+
+    if (!field_meta.is_vector() && column->IsNullable()) {
         auto dst = ret->mutable_valid_data()->mutable_data();
         column->BulkIsValid(
             op_ctx,
@@ -1691,6 +1776,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             seg_offsets,
             count);
     }
+
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
         case DataType::STRING:
@@ -1827,8 +1913,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             bulk_subscript_impl(op_ctx,
                                 field_meta.get_sizeof(),
                                 column.get(),
-                                seg_offsets,
-                                count,
+                                valid_offsets,
+                                valid_count,
                                 ret->mutable_vectors()
                                     ->mutable_float_vector()
                                     ->mutable_data()
@@ -1840,8 +1926,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 ret->mutable_vectors()->mutable_float16_vector()->data());
             break;
         }
@@ -1850,8 +1936,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 ret->mutable_vectors()->mutable_bfloat16_vector()->data());
             break;
         }
@@ -1860,8 +1946,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
             break;
         }
@@ -1870,8 +1956,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_meta.get_sizeof(),
                 column.get(),
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
@@ -1881,7 +1967,7 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             column->BulkValueAt(
                 op_ctx,
                 [&](const char* value, size_t i) mutable {
-                    auto offset = seg_offsets[i];
+                    auto offset = valid_offsets[i];
                     auto row =
                         offset != INVALID_SEG_OFFSET
                             ? static_cast<const knowhere::sparse::SparseRow<
@@ -1895,8 +1981,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
                     max_dim = std::max(max_dim, row->dim());
                     dst->add_contents(row->data(), row->data_byte_size());
                 },
-                seg_offsets,
-                count);
+                valid_offsets,
+                valid_count);
             dst->set_dim(max_dim);
             ret->mutable_vectors()->set_dim(dst->dim());
             break;
@@ -1905,8 +1991,8 @@ ChunkedSegmentSealedImpl::get_raw_data(milvus::OpContext* op_ctx,
             bulk_subscript_vector_array_impl(
                 op_ctx,
                 column.get(),
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 ret->mutable_vectors()->mutable_vector_array()->mutable_data());
             break;
         }
@@ -2267,7 +2353,12 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         return false;
     }
     try {
-        int64_t row_count = num_rows;
+        std::shared_ptr<ChunkedColumnInterface> vec_data = get_column(field_id);
+        AssertInfo(
+            vec_data != nullptr, "vector field {} not loaded", field_id.get());
+        int64_t row_count = field_meta.is_nullable()
+                                ? vec_data->GetOffsetMapping().GetValidCount()
+                                : num_rows;
 
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
@@ -2279,9 +2370,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
         if (row_count < field_binlog_config->GetBuildThreshold()) {
             return false;
         }
-        std::shared_ptr<ChunkedColumnInterface> vec_data = get_column(field_id);
-        AssertInfo(
-            vec_data != nullptr, "vector field {} not loaded", field_id.get());
         auto dim = is_sparse ? std::numeric_limits<uint32_t>::max()
                              : field_meta.get_dim();
         auto interim_index_type = field_binlog_config->GetIndexType();
@@ -2395,6 +2483,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     // system field only needs to emplace column to fields_ map
     if (SystemProperty::Instance().IsSystem(field_id)) {
         return;
+    }
+
+    if (column->IsNullable() && IsVectorDataType(data_type)) {
+        column->BuildValidRowIds(nullptr);
     }
 
     if (!enable_mmap) {
@@ -2517,12 +2609,7 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
 
     auto absent_fields = sch->AbsentFields(*schema_);
     for (const auto& field_meta : *absent_fields) {
-        // vector field is not supported to be "added field", thus if a vector
-        // field is absent, it means for some reason we want to skip loading this
-        // field.
-        if (!IsVectorDataType(field_meta.get_data_type())) {
-            fill_empty_field(field_meta);
-        }
+        fill_empty_field(field_meta);
     }
 
     schema_ = sch;
@@ -2597,10 +2684,6 @@ ChunkedSegmentSealedImpl::FinishLoad() {
             // no filling fields that index already loaded and has raw data
             continue;
         }
-        if (IsVectorDataType(field_meta.get_data_type())) {
-            // no filling vector fields
-            continue;
-        }
         fill_empty_field(field_meta);
     }
 }
@@ -2608,10 +2691,11 @@ ChunkedSegmentSealedImpl::FinishLoad() {
 void
 ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
+    auto data_type = field_meta.get_data_type();
     LOG_INFO(
         "start fill empty field {} (data type {}) for sealed segment "
         "{}",
-        field_meta.get_data_type(),
+        data_type,
         field_id.get(),
         id_);
     int64_t size = num_rows_.value();
@@ -2620,40 +2704,11 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(), field_meta, field_data_info, false);
-    std::shared_ptr<milvus::ChunkedColumnBase> column{};
-    switch (field_meta.get_data_type()) {
-        case milvus::DataType::STRING:
-        case milvus::DataType::VARCHAR:
-        case milvus::DataType::TEXT: {
-            column = std::make_shared<ChunkedVariableColumn<std::string>>(
-                std::move(translator), field_meta);
-            break;
-        }
-        case milvus::DataType::JSON: {
-            column = std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                std::move(translator), field_meta);
-            break;
-        }
-        case milvus::DataType::GEOMETRY: {
-            column = std::make_shared<ChunkedVariableColumn<std::string>>(
-                std::move(translator), field_meta);
-            break;
-        }
-        case milvus::DataType::ARRAY: {
-            column = std::make_shared<ChunkedArrayColumn>(std::move(translator),
-                                                          field_meta);
-            break;
-        }
-        case milvus::DataType::VECTOR_ARRAY: {
-            column = std::make_shared<ChunkedVectorArrayColumn>(
-                std::move(translator), field_meta);
-            break;
-        }
-        default: {
-            column = std::make_shared<ChunkedColumn>(std::move(translator),
-                                                     field_meta);
-            break;
-        }
+    auto column =
+        MakeChunkedColumnBase(data_type, std::move(translator), field_meta);
+
+    if (column->IsNullable() && IsVectorDataType(data_type)) {
+        column->BuildValidRowIds(nullptr);
     }
 
     fields_.wlock()->emplace(field_id, column);

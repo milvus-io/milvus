@@ -43,12 +43,18 @@ func TestConvertArrowSchema(t *testing.T) {
 		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
 		{FieldID: 15, Name: "field14", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
 		{FieldID: 16, Name: "field15", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 17, Name: "field16", DataType: schemapb.DataType_BinaryVector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 18, Name: "field17", DataType: schemapb.DataType_FloatVector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 19, Name: "field18", DataType: schemapb.DataType_Float16Vector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 20, Name: "field19", DataType: schemapb.DataType_BFloat16Vector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 21, Name: "field20", DataType: schemapb.DataType_Int8Vector, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 22, Name: "field21", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
 	}
 
 	StructArrayFieldSchemas := []*schemapb.StructArrayFieldSchema{
-		{FieldID: 17, Name: "struct_field0", Fields: []*schemapb.FieldSchema{
-			{FieldID: 18, Name: "field16", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
-			{FieldID: 19, Name: "field17", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+		{FieldID: 23, Name: "struct_field0", Fields: []*schemapb.FieldSchema{
+			{FieldID: 24, Name: "field22", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			{FieldID: 25, Name: "field23", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
 		}},
 	}
 
@@ -59,6 +65,14 @@ func TestConvertArrowSchema(t *testing.T) {
 	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	assert.NoError(t, err)
 	assert.Equal(t, len(fieldSchemas)+len(StructArrayFieldSchemas[0].Fields), len(arrowSchema.Fields()))
+
+	for i, field := range arrowSchema.Fields() {
+		if i >= 16 && i <= 20 {
+			dimVal, ok := field.Metadata.GetValue("dim")
+			assert.True(t, ok, "nullable vector field should have dim metadata")
+			assert.Equal(t, "128", dimVal)
+		}
+	}
 }
 
 func TestConvertArrowSchemaWithoutDim(t *testing.T) {

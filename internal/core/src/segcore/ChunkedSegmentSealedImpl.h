@@ -880,7 +880,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         google::protobuf::RepeatedPtrField<T>* dst);
 
     std::unique_ptr<DataArray>
-    fill_with_empty(FieldId field_id, int64_t count) const;
+    fill_with_empty(FieldId field_id,
+                    int64_t count,
+                    int64_t valid_count = 0,
+                    const void* valid_data = nullptr) const;
 
     std::unique_ptr<DataArray>
     get_raw_data(milvus::OpContext* op_ctx,
@@ -888,6 +891,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;
+
+    struct ValidResult {
+        int64_t valid_count = 0;
+        std::unique_ptr<bool[]> valid_data;
+        std::vector<int64_t> valid_offsets;
+    };
+
+    ValidResult
+    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                             FieldId field_id,
+                             const int64_t* seg_offsets,
+                             int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {

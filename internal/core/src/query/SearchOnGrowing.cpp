@@ -22,6 +22,7 @@
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
+#include "query/Utils.h"
 #include "exec/operator/Utils.h"
 
 namespace milvus::query {
@@ -82,8 +83,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& search_result) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
-    auto active_row_count =
-        std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
 
     // step 1.1: get meta
     // step 1.2: get which vector field to search
@@ -155,6 +154,19 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         // step 3: brute force search where small indexing is unavailable
         auto vec_ptr = record.get_data_base(vecfield_id);
+        const auto& offset_mapping = vec_ptr->get_offset_mapping();
+
+        TargetBitmap transformed_bitset;
+        BitsetView search_bitset = bitset;
+        if (offset_mapping.IsEnabled()) {
+            transformed_bitset = TransformBitset(bitset, offset_mapping);
+            search_bitset = BitsetView(transformed_bitset);
+        }
+
+        auto active_count = offset_mapping.IsEnabled()
+                                ? offset_mapping.GetValidCount()
+                                : std::min(int64_t(bitset.size()),
+                                           segment.get_active_count(timestamp));
 
         if (info.iterator_v2_info_.has_value()) {
             AssertInfo(data_type != DataType::VECTOR_ARRAY,
@@ -163,17 +175,20 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
-                                             active_row_count,
+                                             active_count,
                                              info,
                                              index_info,
-                                             bitset,
+                                             search_bitset,
                                              data_type);
             cached_iter.NextBatch(info, search_result);
+            if (offset_mapping.IsEnabled()) {
+                TransformOffset(search_result.seg_offsets_, offset_mapping);
+            }
             return;
         }
 
         auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-        auto max_chunk = upper_div(active_row_count, vec_size_per_chunk);
+        auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
         // embedding search embedding on embedding list
         bool embedding_search = false;
@@ -188,7 +203,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
             auto row_begin = chunk_id * vec_size_per_chunk;
             auto row_end =
-                std::min(active_row_count, (chunk_id + 1) * vec_size_per_chunk);
+                std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = row_end - row_begin;
 
             query::dataset::RawDataset sub_data;
@@ -260,7 +275,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                                sub_data,
                                                                info,
                                                                index_info,
-                                                               bitset,
+                                                               search_bitset,
                                                                vector_type);
                 final_qr.merge(sub_qr);
             } else {
@@ -268,7 +283,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                sub_data,
                                                info,
                                                index_info,
-                                               bitset,
+                                               search_bitset,
                                                vector_type,
                                                element_type,
                                                op_context);
@@ -286,6 +301,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 max_chunk,
                 chunk_rows,
                 final_qr.chunk_iterators(),
+                offset_mapping,
                 larger_is_closer);
         } else {
             if (info.array_offsets_ != nullptr) {
@@ -300,6 +316,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     std::move(final_qr.mutable_offsets());
             }
             search_result.distances_ = std::move(final_qr.mutable_distances());
+            if (offset_mapping.IsEnabled()) {
+                TransformOffset(search_result.seg_offsets_, offset_mapping);
+            }
         }
         search_result.unity_topK_ = topk;
         search_result.total_nq_ = num_queries;
