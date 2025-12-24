@@ -100,3 +100,15 @@ func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
 		return false
 	}
 }
+
+// isCompactionTaskCleaned returns true if the task has been cleaned
+// (cleaned, or unknown) and requires no further processing.
+func isCompactionTaskCleaned(t *datapb.CompactionTask) bool {
+	switch t.GetState() {
+	case datapb.CompactionTaskState_cleaned,
+		datapb.CompactionTaskState_unknown:
+		return true
+	default:
+		return false
+	}
+}
