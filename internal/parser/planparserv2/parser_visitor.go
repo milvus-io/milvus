@@ -2307,7 +2307,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 
 	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
-		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter or MATCH_ALL/MATCH_ANY/MATCH_LEAST/MATCH_MOST/MATCH_EXACT", fieldName)
+		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
 	}
 
 	// Construct full field name for struct array field
