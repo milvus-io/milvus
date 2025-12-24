@@ -533,7 +533,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
             auto field_data = codecs[i]->GetFieldData();
-            num_rows += uint32_t(field_data->get_num_rows());
+            num_rows += uint32_t(field_data->get_valid_rows());
             cache_raw_data_to_disk_common<DataType>(
                 field_data,
                 local_chunk_manager,
@@ -637,7 +637,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         auto sparse_rows =
             static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
-        for (size_t i = 0; i < field_data->Length(); ++i) {
+        for (size_t i = 0; i < field_data->get_valid_rows(); ++i) {
             auto row = sparse_rows[i];
             auto row_byte_size = row.data_byte_size();
             uint32_t nnz = row.size();
@@ -692,7 +692,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
     } else {
         dim = field_data->get_dim();
         auto data_size =
-            field_data->get_num_rows() * milvus::GetVecRowSize<DataType>(dim);
+            field_data->get_valid_rows() * milvus::GetVecRowSize<DataType>(dim);
         local_chunk_manager->Write(local_data_path,
                                    write_offset,
                                    const_cast<void*>(field_data->Data()),
@@ -764,7 +764,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                  fs_);
     }
     for (auto& field_data : field_datas) {
-        num_rows += uint32_t(field_data->get_num_rows());
+        num_rows += uint32_t(field_data->get_valid_rows());
         cache_raw_data_to_disk_common<T>(field_data,
                                          local_chunk_manager,
                                          local_data_path,

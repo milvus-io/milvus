@@ -9,8 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <map>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
@@ -19,6 +21,7 @@
 #include "index/StringIndexMarisa.h"
 
 #include "common/SystemProperty.h"
+#include "segcore/ConcurrentVector.h"
 #include "segcore/FieldIndexing.h"
 #include "index/VectorMemIndex.h"
 #include "IndexConfigGenerator.h"
@@ -28,6 +31,104 @@
 
 namespace milvus::segcore {
 using std::unique_ptr;
+
+void
+IndexingRecord::AppendingIndex(int64_t reserved_offset,
+                               int64_t size,
+                               FieldId fieldId,
+                               const DataArray* stream_data,
+                               const InsertRecord<false>& record) {
+    if (!is_in(fieldId)) {
+        return;
+    }
+    auto& indexing = field_indexings_.at(fieldId);
+    auto type = indexing->get_data_type();
+    auto field_raw_data = record.get_data_base(fieldId);
+    auto field_meta = schema_.get_fields().at(fieldId);
+    int64_t valid_count = reserved_offset + size;
+    if (field_meta.is_nullable() && field_raw_data->is_mapping_storage()) {
+        valid_count = field_raw_data->get_valid_count();
+    }
+    if (type == DataType::VECTOR_FLOAT &&
+        valid_count >= indexing->get_build_threshold()) {
+        indexing->AppendSegmentIndexDense(
+            reserved_offset,
+            size,
+            field_raw_data,
+            stream_data->vectors().float_vector().data().data());
+    } else if (type == DataType::VECTOR_FLOAT16 &&
+               valid_count >= indexing->get_build_threshold()) {
+        indexing->AppendSegmentIndexDense(
+            reserved_offset,
+            size,
+            field_raw_data,
+            stream_data->vectors().float16_vector().data());
+    } else if (type == DataType::VECTOR_BFLOAT16 &&
+               valid_count >= indexing->get_build_threshold()) {
+        indexing->AppendSegmentIndexDense(
+            reserved_offset,
+            size,
+            field_raw_data,
+            stream_data->vectors().bfloat16_vector().data());
+    } else if (type == DataType::VECTOR_SPARSE_U32_F32 &&
+               valid_count >= indexing->get_build_threshold()) {
+        auto data = SparseBytesToRows(
+            stream_data->vectors().sparse_float_vector().contents());
+        indexing->AppendSegmentIndexSparse(
+            reserved_offset,
+            size,
+            stream_data->vectors().sparse_float_vector().dim(),
+            field_raw_data,
+            data.get());
+    } else if (type == DataType::GEOMETRY) {
+        // For geometry fields, append data incrementally to RTree index
+        indexing->AppendSegmentIndex(
+            reserved_offset, size, field_raw_data, stream_data);
+    }
+}
+
+// concurrent, reentrant
+void
+IndexingRecord::AppendingIndex(int64_t reserved_offset,
+                               int64_t size,
+                               FieldId fieldId,
+                               const FieldDataPtr data,
+                               const InsertRecord<false>& record) {
+    if (!is_in(fieldId)) {
+        return;
+    }
+    auto& indexing = field_indexings_.at(fieldId);
+    auto type = indexing->get_data_type();
+    const void* p = data->Data();
+    auto vec_base = record.get_data_base(fieldId);
+    auto field_meta = schema_.get_fields().at(fieldId);
+    int64_t valid_count = reserved_offset + size;
+    if (field_meta.is_nullable() && vec_base->is_mapping_storage()) {
+        valid_count = vec_base->get_valid_count();
+    }
+
+    if ((type == DataType::VECTOR_FLOAT || type == DataType::VECTOR_FLOAT16 ||
+         type == DataType::VECTOR_BFLOAT16) &&
+        valid_count >= indexing->get_build_threshold()) {
+        auto vec_base = record.get_data_base(fieldId);
+        indexing->AppendSegmentIndexDense(
+            reserved_offset, size, vec_base, data->Data());
+    } else if (type == DataType::VECTOR_SPARSE_U32_F32 &&
+               valid_count >= indexing->get_build_threshold()) {
+        auto vec_base = record.get_data_base(fieldId);
+        indexing->AppendSegmentIndexSparse(
+            reserved_offset,
+            size,
+            std::dynamic_pointer_cast<const FieldData<SparseFloatVector>>(data)
+                ->Dim(),
+            vec_base,
+            p);
+    } else if (type == DataType::GEOMETRY) {
+        // For geometry fields, append data incrementally to RTree index
+        auto vec_base = record.get_data_base(fieldId);
+        indexing->AppendSegmentIndex(reserved_offset, size, vec_base, data);
+    }
+}
 
 VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
                                          const FieldIndexMeta& field_index_meta,
@@ -140,54 +241,133 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                                               int64_t new_data_dim,
                                               const VectorBase* field_raw_data,
                                               const void* data_source) {
+    using value_type = knowhere::sparse::SparseRow<SparseValueType>;
+    AssertInfo(get_data_type() == DataType::VECTOR_SPARSE_U32_F32,
+               "Data type of vector field is not VECTOR_SPARSE_U32_F32");
+
     auto conf = get_build_params(get_data_type());
-    auto source = dynamic_cast<const ConcurrentVector<SparseFloatVector>*>(
-        field_raw_data);
-    AssertInfo(source,
+    auto field_source =
+        dynamic_cast<const ConcurrentVector<SparseFloatVector>*>(
+            field_raw_data);
+    AssertInfo(field_source,
                "field_raw_data can't cast to "
                "ConcurrentVector<SparseFloatVector> type");
-    AssertInfo(size > 0, "append 0 sparse rows to index is not allowed");
-    if (!built_) {
-        AssertInfo(!sync_with_index_, "index marked synced before built");
-        idx_t total_rows = reserved_offset + size;
-        idx_t chunk_id = 0;
-        auto dim = source->Dim();
+    auto source = static_cast<const value_type*>(data_source);
 
-        while (total_rows > 0) {
-            auto mat = static_cast<
-                const knowhere::sparse::SparseRow<SparseValueType>*>(
-                source->get_chunk_data(chunk_id));
-            auto rows = std::min(source->get_size_per_chunk(), total_rows);
-            auto dataset = knowhere::GenDataSet(rows, dim, mat);
-            dataset->SetIsSparse(true);
-            try {
-                if (chunk_id == 0) {
-                    index_->BuildWithDataset(dataset, conf);
-                } else {
-                    index_->AddWithDataset(dataset, conf);
+    auto dim = new_data_dim;
+    auto size_per_chunk = field_raw_data->get_size_per_chunk();
+    auto build_threshold = get_build_threshold();
+    bool is_mapping_storage = field_raw_data->is_mapping_storage();
+    auto& valid_data = field_raw_data->get_valid_data();
+
+    if (!built_) {
+        const void* data_ptr = nullptr;
+        std::vector<value_type> data_buf;
+
+        int64_t start_chunk = 0;
+        int64_t end_chunk = (build_threshold - 1) / size_per_chunk;
+
+        if (start_chunk == end_chunk) {
+            data_ptr = field_raw_data->get_chunk_data(start_chunk);
+        } else {
+            data_buf.resize(build_threshold);
+            int64_t actual_copy_count = 0;
+            for (int64_t chunk_id = start_chunk; chunk_id <= end_chunk;
+                 ++chunk_id) {
+                int64_t copy_start =
+                    std::max((int64_t)0, chunk_id * size_per_chunk);
+                int64_t copy_end =
+                    std::min(build_threshold, (chunk_id + 1) * size_per_chunk);
+                int64_t copy_count = copy_end - copy_start;
+                // For mapping storage, chunk data is already compactly stored,
+                // so we can copy directly from chunk
+                auto chunk_data = static_cast<const value_type*>(
+                    field_raw_data->get_chunk_data(chunk_id));
+                int64_t chunk_offset = copy_start - chunk_id * size_per_chunk;
+                for (int64_t i = 0; i < copy_count; ++i) {
+                    data_buf[actual_copy_count + i] =
+                        chunk_data[chunk_offset + i];
                 }
-            } catch (SegcoreError& error) {
-                LOG_ERROR("growing sparse index build error: {}", error.what());
-                recreate_index(get_data_type(), nullptr);
-                index_cur_ = 0;
-                return;
+                actual_copy_count += copy_count;
             }
-            index_cur_.fetch_add(rows);
-            total_rows -= rows;
-            chunk_id++;
+            data_ptr = data_buf.data();
         }
-        built_ = true;
-        sync_with_index_ = true;
-        // if not built_, new rows in data_source have already been added to
-        // source(ConcurrentVector<SparseFloatVector>) and thus added to the
-        // index, thus no need to add again.
-        return;
+
+        auto dataset = knowhere::GenDataSet(build_threshold, dim, data_ptr);
+        dataset->SetIsSparse(true);
+        try {
+            index_->BuildWithDataset(dataset, conf);
+            if (is_mapping_storage) {
+                auto logical_offset =
+                    field_raw_data->get_logical_offset(build_threshold - 1);
+                auto update_count = logical_offset + 1;
+                index_->UpdateValidData(valid_data.data(), update_count);
+            }
+            built_ = true;
+            index_cur_.fetch_add(build_threshold);
+        } catch (SegcoreError& error) {
+            LOG_ERROR("growing sparse index build error: {}", error.what());
+            recreate_index(get_data_type(), field_raw_data);
+            return;
+        }
     }
 
-    auto dataset = knowhere::GenDataSet(size, new_data_dim, data_source);
-    dataset->SetIsSparse(true);
-    index_->AddWithDataset(dataset, conf);
-    index_cur_.fetch_add(size);
+    // Append rest data when index has been built
+    int64_t add_count = 0;
+    int64_t total_count = 0;
+    if (valid_data.empty()) {
+        // Non-nullable case: add all rows
+        add_count = reserved_offset + size - index_cur_.load();
+        total_count = size;
+        if (add_count <= 0) {
+            sync_with_index_.store(true);
+            return;
+        }
+        auto data_ptr = source + (total_count - add_count);
+        auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
+        dataset->SetIsSparse(true);
+        try {
+            index_->AddWithDataset(dataset, conf);
+            index_cur_.fetch_add(add_count);
+            sync_with_index_.store(true);
+        } catch (SegcoreError& error) {
+            LOG_ERROR("growing sparse index add error: {}", error.what());
+            recreate_index(get_data_type(), field_raw_data);
+        }
+    } else {
+        // Nullable case: only add valid rows (matching dense vector approach)
+        auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
+        auto add_valid_data_count = reserved_offset + size - index_total_count;
+        for (auto i = reserved_offset; i < reserved_offset + size; i++) {
+            if (valid_data[i]) {
+                total_count++;
+                if (i >= index_total_count) {
+                    add_count++;
+                }
+            }
+        }
+        if (add_count <= 0 && add_valid_data_count <= 0) {
+            sync_with_index_.store(true);
+            return;
+        }
+        if (add_count > 0) {
+            auto data_ptr = source + (total_count - add_count);
+            auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
+            dataset->SetIsSparse(true);
+            try {
+                index_->AddWithDataset(dataset, conf);
+            } catch (SegcoreError& error) {
+                LOG_ERROR("growing sparse index add error: {}", error.what());
+                recreate_index(get_data_type(), field_raw_data);
+            }
+        }
+        if (add_valid_data_count > 0) {
+            index_->UpdateValidData(valid_data.data() + index_total_count,
+                                    add_valid_data_count);
+        }
+        index_cur_.fetch_add(add_count);
+        sync_with_index_.store(true);
+    }
 }
 
 void
@@ -203,8 +383,10 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
     auto dim = get_dim();
     auto conf = get_build_params(get_data_type());
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
-    //append vector [vector_id_beg, vector_id_end] into index
-    //build index [vector_id_beg, build_threshold) when index not exist
+    auto build_threshold = get_build_threshold();
+    bool is_mapping_storage = field_raw_data->is_mapping_storage();
+    auto& valid_data = field_raw_data->get_valid_data();
+
     AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
                "vec_base can't cast to ConcurrentVector type");
     size_t vec_length;
@@ -216,88 +398,112 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
         vec_length = dim * sizeof(bfloat16);
     }
     if (!built_) {
-        idx_t vector_id_beg = index_cur_.load();
-        Assert(vector_id_beg == 0);
-        idx_t vector_id_end = get_build_threshold() - 1;
-        auto chunk_id_beg = vector_id_beg / size_per_chunk;
-        auto chunk_id_end = vector_id_end / size_per_chunk;
+        const void* data_ptr;
+        std::unique_ptr<char[]> data_buf;
+        // Chunk data stores valid vectors compactly for both nullable and non-nullable
+        int64_t start_chunk = 0;
+        int64_t end_chunk = (build_threshold - 1) / size_per_chunk;
 
-        int64_t vec_num = vector_id_end - vector_id_beg + 1;
-        // for train index
-        const void* data_addr;
-        unique_ptr<char[]> vec_data;
-        //all train data in one chunk
-        if (chunk_id_beg == chunk_id_end) {
-            data_addr = field_raw_data->get_chunk_data(chunk_id_beg);
+        if (start_chunk == end_chunk) {
+            auto chunk_data = static_cast<const char*>(
+                field_raw_data->get_chunk_data(start_chunk));
+            data_ptr = chunk_data;
         } else {
-            //merge data from multiple chunks together
-            vec_data = std::make_unique<char[]>(vec_num * vec_length);
-            int64_t offset = 0;
-            //copy vector data [vector_id_beg, vector_id_end]
-            for (int chunk_id = chunk_id_beg; chunk_id <= chunk_id_end;
-                 chunk_id++) {
-                int chunk_offset = 0;
-                int chunk_copysz =
-                    chunk_id == chunk_id_end
-                        ? vector_id_end - chunk_id * size_per_chunk + 1
-                        : size_per_chunk;
-                std::memcpy(
-                    (void*)((const char*)vec_data.get() + offset * vec_length),
-                    (void*)((const char*)field_raw_data->get_chunk_data(
-                                chunk_id) +
-                            chunk_offset * vec_length),
-                    chunk_copysz * vec_length);
-                offset += chunk_copysz;
+            data_buf = std::make_unique<char[]>(build_threshold * vec_length);
+            int64_t actual_copy_count = 0;
+            for (int64_t chunk_id = start_chunk; chunk_id <= end_chunk;
+                 ++chunk_id) {
+                auto chunk_data = static_cast<const char*>(
+                    field_raw_data->get_chunk_data(chunk_id));
+                int64_t copy_start =
+                    std::max((int64_t)0, chunk_id * size_per_chunk);
+                int64_t copy_end =
+                    std::min(build_threshold, (chunk_id + 1) * size_per_chunk);
+                int64_t copy_count = copy_end - copy_start;
+                auto src =
+                    chunk_data +
+                    (copy_start - chunk_id * size_per_chunk) * vec_length;
+                std::memcpy(data_buf.get() + actual_copy_count * vec_length,
+                            src,
+                            copy_count * vec_length);
+                actual_copy_count += copy_count;
             }
-            data_addr = vec_data.get();
+            data_ptr = data_buf.get();
         }
-        auto dataset = knowhere::GenDataSet(vec_num, dim, data_addr);
-        dataset->SetIsOwner(false);
+
+        auto dataset = knowhere::GenDataSet(build_threshold, dim, data_ptr);
         try {
             index_->BuildWithDataset(dataset, conf);
+            if (is_mapping_storage) {
+                auto logical_offset =
+                    field_raw_data->get_logical_offset(build_threshold - 1);
+                auto update_count = logical_offset + 1;
+                index_->UpdateValidData(valid_data.data(), update_count);
+            }
+            built_ = true;
+            index_cur_.fetch_add(build_threshold);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index build error: {}", error.what());
             recreate_index(get_data_type(), field_raw_data);
             return;
         }
-        index_cur_.fetch_add(vec_num);
-        built_ = true;
     }
     //append rest data when index has built
-    idx_t vector_id_beg = index_cur_.load();
-    idx_t vector_id_end = reserved_offset + size - 1;
-    auto chunk_id_beg = vector_id_beg / size_per_chunk;
-    auto chunk_id_end = vector_id_end / size_per_chunk;
-    int64_t vec_num = vector_id_end - vector_id_beg + 1;
-
-    if (vec_num <= 0) {
-        sync_with_index_.store(true);
-        return;
-    }
-
-    if (sync_with_index_.load()) {
-        Assert(size == vec_num);
-        auto dataset = knowhere::GenDataSet(vec_num, dim, data_source);
-        index_->AddWithDataset(dataset, conf);
-        index_cur_.fetch_add(vec_num);
-    } else {
-        for (int chunk_id = chunk_id_beg; chunk_id <= chunk_id_end;
-             chunk_id++) {
-            int chunk_offset = chunk_id == chunk_id_beg
-                                   ? index_cur_ - chunk_id * size_per_chunk
-                                   : 0;
-            int chunk_sz =
-                chunk_id == chunk_id_end
-                    ? vector_id_end % size_per_chunk - chunk_offset + 1
-                    : size_per_chunk - chunk_offset;
-            auto dataset = knowhere::GenDataSet(
-                chunk_sz,
-                dim,
-                (const char*)field_raw_data->get_chunk_data(chunk_id) +
-                    chunk_offset * vec_length);
-            index_->AddWithDataset(dataset, conf);
-            index_cur_.fetch_add(chunk_sz);
+    int64_t add_count = 0;
+    int64_t total_count = 0;
+    if (valid_data.empty()) {
+        add_count = reserved_offset + size - index_cur_.load();
+        total_count = size;
+        if (add_count <= 0) {
+            sync_with_index_.store(true);
+            return;
         }
+        auto data_ptr = static_cast<const char*>(data_source) +
+                        (total_count - add_count) * vec_length;
+        auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
+        try {
+            index_->AddWithDataset(dataset, conf);
+            index_cur_.fetch_add(add_count);
+            sync_with_index_.store(true);
+        } catch (SegcoreError& error) {
+            LOG_ERROR("growing index add error: {}", error.what());
+            recreate_index(get_data_type(), field_raw_data);
+        }
+    } else {
+        // Nullable dense vectors: data_source (proto) contains valid vectors compactly
+        auto index_total_count = index_->GetOffsetMapping().GetTotalCount();
+        auto add_valid_data_count = reserved_offset + size - index_total_count;
+        auto index_cur_val = index_cur_.load();
+        // Count valid vectors in this batch range
+        for (auto i = reserved_offset; i < reserved_offset + size; i++) {
+            if (valid_data[i]) {
+                total_count++;
+                if (i >= index_total_count) {
+                    add_count++;
+                }
+            }
+        }
+        if (add_count <= 0 && add_valid_data_count <= 0) {
+            sync_with_index_.store(true);
+            return;
+        }
+        if (add_count > 0) {
+            // data_source contains valid vectors compactly, skip already indexed ones
+            auto data_ptr = static_cast<const char*>(data_source) +
+                            (total_count - add_count) * vec_length;
+            auto dataset = knowhere::GenDataSet(add_count, dim, data_ptr);
+            try {
+                index_->AddWithDataset(dataset, conf);
+            } catch (SegcoreError& error) {
+                LOG_ERROR("growing index add error: {}", error.what());
+                recreate_index(get_data_type(), field_raw_data);
+            }
+        }
+        if (add_valid_data_count > 0) {
+            index_->UpdateValidData(valid_data.data() + index_total_count,
+                                    add_valid_data_count);
+        }
+        index_cur_.fetch_add(add_count);
         sync_with_index_.store(true);
     }
 }

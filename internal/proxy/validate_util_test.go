@@ -310,23 +310,77 @@ func Test_validateUtil_checkTextFieldData(t *testing.T) {
 }
 
 func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
-	v := newValidateUtil()
-	assert.Error(t, v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil))
-	assert.NoError(t, v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{
-		Vectors: &schemapb.VectorField{
-			Dim: 128,
-			Data: &schemapb.VectorField_BinaryVector{
-				BinaryVector: []byte(strings.Repeat("1", 128)),
+	t.Run("not binary vector", func(t *testing.T) {
+		v := newValidateUtil()
+		err := v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		v := newValidateUtil()
+		err := v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 128,
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: []byte(strings.Repeat("1", 128)),
+				},
 			},
-		},
-	}}, nil))
+		}}, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("nil vector not nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_BinaryVector,
+			Nullable: false,
+		}
+		v := newValidateUtil()
+		err := v.checkBinaryVectorFieldData(data, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil vector nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_BinaryVector,
+			Nullable: true,
+		}
+		v := newValidateUtil()
+		err := v.checkBinaryVectorFieldData(data, schema)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
+	nb := 5
+	dim := int64(8)
+	data := testutils.GenerateFloatVectors(nb, int(dim))
+	invalidData := testutils.GenerateFloatVectorsWithInvalidData(nb, int(dim))
+
 	t.Run("not float vector", func(t *testing.T) {
-		f := &schemapb.FieldData{}
 		v := newValidateUtil()
-		err := v.checkFloatVectorFieldData(f, nil)
+		err := v.checkFloatVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -336,7 +390,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 				Vectors: &schemapb.VectorField{
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
-							Data: []float32{1.1, 2.2},
+							Data: invalidData,
 						},
 					},
 				},
@@ -354,7 +408,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 				Vectors: &schemapb.VectorField{
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
-							Data: []float32{float32(math.NaN())},
+							Data: invalidData,
 						},
 					},
 				},
@@ -371,7 +425,7 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 				Vectors: &schemapb.VectorField{
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
-							Data: []float32{1.1, 2.2},
+							Data: data,
 						},
 					},
 				},
@@ -409,6 +463,49 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 		err = v.fillWithValue(data, h, 1)
 		assert.Error(t, err)
 	})
+
+	t.Run("nil vector not nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+			Nullable: false,
+		}
+		v := newValidateUtil()
+		err := v.checkFloatVectorFieldData(data, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil vector nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_FloatVector,
+			Nullable: true,
+		}
+
+		v := newValidateUtil()
+		err := v.checkFloatVectorFieldData(data, schema)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
@@ -418,9 +515,8 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 	invalidData := testutils.GenerateFloat16VectorsWithInvalidData(nb, int(dim))
 
 	t.Run("not float16 vector", func(t *testing.T) {
-		f := &schemapb.FieldData{}
 		v := newValidateUtil()
-		err := v.checkFloat16VectorFieldData(f, nil)
+		err := v.checkFloat16VectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -500,17 +596,60 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 		err = v.fillWithValue(data, h, 1)
 		assert.Error(t, err)
 	})
+
+	t.Run("nil vector not nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_Float16Vector,
+			Nullable: false,
+		}
+		v := newValidateUtil()
+		err := v.checkFloat16VectorFieldData(data, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil vector nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_Float16Vector,
+			Nullable: true,
+		}
+
+		v := newValidateUtil()
+		err := v.checkFloat16VectorFieldData(data, schema)
+		assert.NoError(t, err)
+	})
 }
 
-func Test_validateUtil_checkBfloatVectorFieldData(t *testing.T) {
+func Test_validateUtil_checkBFloat16VectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
-	data := testutils.GenerateFloat16Vectors(nb, int(dim))
+	data := testutils.GenerateBFloat16Vectors(nb, int(dim))
 	invalidData := testutils.GenerateBFloat16VectorsWithInvalidData(nb, int(dim))
-	t.Run("not float vector", func(t *testing.T) {
-		f := &schemapb.FieldData{}
+
+	t.Run("not bfloat16 vector", func(t *testing.T) {
 		v := newValidateUtil()
-		err := v.checkBFloat16VectorFieldData(f, nil)
+		err := v.checkBFloat16VectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
 		assert.Error(t, err)
 	})
 
@@ -589,6 +728,203 @@ func Test_validateUtil_checkBfloatVectorFieldData(t *testing.T) {
 		v := newValidateUtil()
 		err = v.fillWithValue(data, h, 1)
 		assert.Error(t, err)
+	})
+
+	t.Run("nil vector not nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_BFloat16Vector,
+			Nullable: false,
+		}
+		v := newValidateUtil()
+		err := v.checkBFloat16VectorFieldData(data, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil vector nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_BFloat16Vector,
+			Nullable: true,
+		}
+
+		v := newValidateUtil()
+		err := v.checkBFloat16VectorFieldData(data, schema)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_validateUtil_checkSparseFloatVectorFieldData(t *testing.T) {
+	nb := 5
+	sparseContents, dim := testutils.GenerateSparseFloatVectorsData(nb)
+
+	t.Run("not sparse float vector", func(t *testing.T) {
+		v := newValidateUtil()
+		err := v.checkSparseFloatVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Contents: sparseContents,
+							Dim:      dim,
+						},
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_SparseFloatVector,
+		}
+		v := newValidateUtil()
+		err := v.checkSparseFloatVectorFieldData(fieldData, schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("nil vector not nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: false,
+		}
+		v := newValidateUtil()
+		err := v.checkSparseFloatVectorFieldData(data, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil vector nullable", func(t *testing.T) {
+		data := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: true,
+		}
+
+		v := newValidateUtil()
+		err := v.checkSparseFloatVectorFieldData(data, schema)
+		assert.NoError(t, err)
+	})
+}
+
+func Test_validateUtil_checkInt8VectorFieldData(t *testing.T) {
+	nb := 5
+	dim := int64(8)
+	data := typeutil.Int8ArrayToBytes(testutils.GenerateInt8Vectors(nb, int(dim)))
+
+	t.Run("not int8 vector", func(t *testing.T) {
+		v := newValidateUtil()
+		err := v.checkInt8VectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 128,
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: data,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_Int8Vector,
+		}
+		v := newValidateUtil()
+		err := v.checkInt8VectorFieldData(fieldData, schema)
+		assert.NoError(t, err)
+	})
+
+	t.Run("nil vector not nullable", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_Int8Vector,
+			Nullable: false,
+		}
+		v := newValidateUtil()
+		err := v.checkInt8VectorFieldData(fieldData, schema)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil vector nullable", func(t *testing.T) {
+		fieldData := &schemapb.FieldData{
+			FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_Int8Vector{
+						Int8Vector: nil,
+					},
+				},
+			},
+		}
+		schema := &schemapb.FieldSchema{
+			Name:     "vec",
+			DataType: schemapb.DataType_Int8Vector,
+			Nullable: true,
+		}
+
+		v := newValidateUtil()
+		err := v.checkInt8VectorFieldData(fieldData, schema)
+		assert.NoError(t, err)
 	})
 }
 

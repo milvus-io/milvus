@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	keyRawArr = "key_raw_arr"
+	keyRawArr   = "key_raw_arr"
+	keyValidArr = "key_valid_arr"
 )
 
 type Dataset struct {
@@ -48,6 +49,7 @@ func GenSparseFloatVecDataset(data *storage.SparseFloatVectorFieldData) *Dataset
 	// wrapper. Such tests are skipping sparse vector for now.
 	return &Dataset{
 		DType: schemapb.DataType_SparseFloatVector,
+		Data:  make(map[string]interface{}),
 	}
 }
 
@@ -72,73 +74,154 @@ func GenInt8VecDataset(vectors []int8) *Dataset {
 func GenDataset(data storage.FieldData) *Dataset {
 	switch f := data.(type) {
 	case *storage.BoolFieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Bool,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.Int8FieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Int8,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.Int16FieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Int16,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.Int32FieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Int32,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.Int64FieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Int64,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.FloatFieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Float,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.DoubleFieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_Double,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.StringFieldData:
-		return &Dataset{
+		ds := &Dataset{
 			DType: schemapb.DataType_VarChar,
 			Data: map[string]interface{}{
 				keyRawArr: f.Data,
 			},
 		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.BinaryVectorFieldData:
-		return GenBinaryVecDataset(f.Data)
+		ds := &Dataset{
+			DType: schemapb.DataType_BinaryVector,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.FloatVectorFieldData:
-		return GenFloatVecDataset(f.Data)
+		ds := &Dataset{
+			DType: schemapb.DataType_FloatVector,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.Float16VectorFieldData:
-		return GenFloat16VecDataset(f.Data)
+		ds := &Dataset{
+			DType: schemapb.DataType_Float16Vector,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.BFloat16VectorFieldData:
-		return GenBFloat16VecDataset(f.Data)
+		ds := &Dataset{
+			DType: schemapb.DataType_BFloat16Vector,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.SparseFloatVectorFieldData:
-		return GenSparseFloatVecDataset(f)
+		ds := GenSparseFloatVecDataset(f)
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	case *storage.Int8VectorFieldData:
-		return GenInt8VecDataset(f.Data)
+		ds := &Dataset{
+			DType: schemapb.DataType_Int8Vector,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+		if f.Nullable && len(f.ValidData) > 0 {
+			ds.Data[keyValidArr] = f.ValidData
+		}
+		return ds
 	default:
 		return &Dataset{
 			DType: schemapb.DataType_None,

@@ -19,6 +19,7 @@
 #include "query/PlanImpl.h"
 #include "common/QueryResult.h"
 #include "segcore/ReduceStructure.h"
+#include "segcore/Utils.h"
 #include "common/EasyAssert.h"
 
 namespace milvus::segcore {
@@ -206,6 +207,13 @@ class StreamReducerHelper {
 
     void
     CleanReduceStatus();
+
+    void
+    SetNullableVectorValidDataOffsets(
+        const std::map<FieldId, std::unique_ptr<milvus::DataArray>>&
+            output_fields_data,
+        int64_t ki,
+        MergeBase& merge_base);
 
     std::unique_ptr<MergedSearchResult> merged_search_result;
     milvus::query::Plan* plan_;
