@@ -318,7 +318,7 @@ func (c *compactionInspector) loadMeta() {
 	triggers := c.meta.GetCompactionTasks(context.TODO())
 	for _, tasks := range triggers {
 		for _, task := range tasks {
-			if isCompactionTaskFinished(task) {
+			if isCompactionTaskCleaned(task) {
 				log.Info("compactionInspector loadMeta abandon compactionTask",
 					zap.Int64("planID", task.GetPlanID()),
 					zap.String("type", task.GetType().String()),
