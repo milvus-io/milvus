@@ -942,10 +942,12 @@ func (h *HandlersV1) search(c *gin.Context) {
 		return
 	}
 	req := &milvuspb.SearchRequest{
-		DbName:             httpReq.DbName,
-		CollectionName:     httpReq.CollectionName,
-		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vectors2PlaceholderGroupBytes([][]float32{httpReq.Vector}),
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
+		Dsl:            httpReq.Filter,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: vectors2PlaceholderGroupBytes([][]float32{httpReq.Vector}),
+		},
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		GuaranteeTimestamp: BoundedTimestamp,
