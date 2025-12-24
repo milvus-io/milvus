@@ -4198,7 +4198,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.6.8",
 		DefaultValue: "1s",
 		Doc:          "Tolerable lag in seconds for delegator to be considered caught up with streaming data",
-		Export:       true,
 	}
 	p.CatchUpStreamingDataTsLag.Init(base.mgr)
 
