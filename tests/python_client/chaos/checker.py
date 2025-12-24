@@ -1901,7 +1901,7 @@ class TextMatchChecker(Checker):
             pre_tags=["<em>"],
             post_tags=["</em>"],
             highlight_search_text=False,
-            queries=[{"type": "TextMatch", "field": self.text_match_field_name, "text": self.key_word}]
+            highlight_query=[{"type": "TextMatch", "field": self.text_match_field_name, "text": self.key_word}]
         )
         try:
             res = self.milvus_client.search(
