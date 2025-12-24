@@ -29,8 +29,8 @@ import (
 
 // Because current flusher need the empty time tick to trigger the cp update,
 // too huge threshold will block the GetFlushState operation,
-// so we set 5s here as a threshold.
-const thresholdUpdateIntervalMs = int64(5000)
+// so we set 1 second here as a threshold.
+const thresholdUpdateIntervalMs = 1000
 
 var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable")
 

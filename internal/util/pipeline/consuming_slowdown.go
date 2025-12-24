@@ -19,15 +19,17 @@ package pipeline
 import (
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
-const thresholdUpdateIntervalMs = int64(5000)
+// Set 1 minute as a threshold for the consuming slowdowner of delegator.
+const thresholdUpdateIntervalMs = int64(60 * 1000)
 
 type LastestMVCCTimeTickGetter interface {
 	GetLatestRequiredMVCCTimeTick() uint64
@@ -96,7 +98,7 @@ func (sd *emptyTimeTickSlowdowner) Filter(msg *msgstream.MsgPack) (filtered bool
 	// so we mark the notified flag to true, stop the mvcc check, then the threshold check will be activated.
 	if !sd.lastestMVCCTimeTickNotified && timetick >= sd.lastestMVCCTimeTick {
 		sd.lastestMVCCTimeTickNotified = true
-		// It may be the first time tick satisfies the tsafe check, so we should filter it.
+		// This is the first time tick satisfying the tsafe check, so we should NOT filter it.
 		sd.tsafeTimeTickUnfilteredCounter.Inc()
 		return false
 	}

@@ -4,10 +4,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestConsumingSlowdown(t *testing.T) {
