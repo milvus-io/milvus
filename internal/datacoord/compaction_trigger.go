@@ -550,7 +550,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
 				!segment.GetIsInvisible() &&
-				segment.GetIsSorted()
+				(segment.GetIsSorted() || segment.GetIsPartitionKeySorted())
 		}),
 	}
 
@@ -813,7 +813,7 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 func canTriggerSortCompaction(segment *SegmentInfo, isPartitionIsolationEnabled bool) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		(!segment.GetIsSorted() || (isPartitionIsolationEnabled && !segment.GetIsPartitionKeySorted())) &&
+		(!segment.GetIsSorted() && !segment.GetIsPartitionKeySorted()) &&
 		!segment.GetIsImporting() &&
 		!segment.isCompacting
 }

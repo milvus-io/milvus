@@ -2327,8 +2327,9 @@ func (m *meta) completeSortCompactionMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
-		IsSorted:                  true,
+		IsSorted:                  t.GetType() == datapb.CompactionType_SortCompaction,
 		ManifestPath:              resultSegment.GetManifest(),
+		IsPartitionKeySorted:      t.GetType() == datapb.CompactionType_PartitionKeySortCompaction,
 	}
 
 	segment := NewSegmentInfo(segmentInfo)

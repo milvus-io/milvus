@@ -444,6 +444,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	}
 
 	version := ex.targetMgr.GetCollectionTargetVersion(ctx, task.CollectionID(), meta.NextTargetFirst)
+
+	log.Info("[remove] collection schema", zap.Any("schema", collectionInfo.GetSchema()))
 	req := packSubChannelRequest(
 		task,
 		action,
