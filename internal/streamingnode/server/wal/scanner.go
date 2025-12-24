@@ -24,6 +24,9 @@ type ReadOption struct {
 	// the default message handler will be used, and the receiver will be returned from Chan.
 	// Otherwise, Chan will panic.
 	// vaild every message will be passed to this handler before being delivered to the consumer.
+
+	// IgnorePauseConsumption is the flag to ignore the consumption pause of the scanner.
+	IgnorePauseConsumption bool
 }
 
 // Scanner is the interface for reading records from the wal.

@@ -4126,10 +4126,7 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	logger.Debug(rpcDone(method))
-	for channel, msg := range ft.result.GetFlushAllMsgs() {
-		logger.Debug("flushall message", zap.String("channel", channel), log.FieldMessage(message.MilvusMessageToImmutableMessage(msg)))
-	}
+	logger.Debug(rpcDone(method), log.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.result.GetFlushAllMsgs()))))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil

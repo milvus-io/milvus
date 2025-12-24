@@ -244,7 +244,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllMsgs", flushAllMsgs))
+	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), log.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
 		Status:       merr.Success(),
 		FlushAllMsgs: flushAllMsgs,
