@@ -40,8 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// TODO: we just warn about the long executing/queuing tasks
-// need to get rid of long queuing tasks because the compaction tasks are local optimum.
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
 	datapb.CompactionType_MixCompaction:          30 * time.Minute,
 	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
@@ -62,11 +60,6 @@ type CompactionInspector interface {
 	removeTasksByChannel(channel string)
 	getCompactionTasksNum(filters ...compactionTaskFilter) int
 }
-
-var (
-	errChannelNotWatched = errors.New("channel is not watched")
-	errChannelInBuffer   = errors.New("channel is in buffer")
-)
 
 var _ CompactionInspector = (*compactionInspector)(nil)
 
@@ -187,8 +180,6 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 func newCompactionInspector(meta CompactionMeta,
 	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
 ) *compactionInspector {
-	// Higher capacity will have better ordering in priority, but consumes more memory.
-	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
 		queueTasks:     NewCompactionQueue(capacity, getPrioritizer()),
