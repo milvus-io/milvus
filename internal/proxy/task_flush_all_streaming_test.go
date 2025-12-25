@@ -26,10 +26,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -46,10 +44,10 @@ func TestFlushAllTask_Success(t *testing.T) {
 	}
 
 	messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
-	msg := message.NewInsertMessageBuilderV1().
+	msg := message.NewFlushAllMessageBuilderV2().
 		WithVChannel("test-vchannel").
-		WithHeader(&messagespb.InsertMessageHeader{}).
-		WithBody(&msgpb.InsertRequest{}).
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
 		MustBuildMutable().WithTimeTick(1000).
 		WithLastConfirmed(messageID)
 	milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID))
