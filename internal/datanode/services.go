@@ -203,6 +203,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 	var task compactor.Compactor
 	binlogIO := io.NewBinlogIO(cm)
+	namespaceEnabled := common.IsNamespaceEnabled(req.GetSchema())
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
@@ -220,23 +221,33 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if err != nil {
 			return merr.Status(err), err
 		}
+		sortFields := []int64{pk.GetFieldID()}
+		if namespaceEnabled {
+			if partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema()); err == nil && partitionKey != nil {
+				sortFields = append([]int64{partitionKey.GetFieldID()}, sortFields...)
+			}
+		}
 		task = compactor.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,
 			compactionParams,
-			[]int64{pk.GetFieldID()},
+			sortFields,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
-		task = compactor.NewClusteringCompactionTask(
-			taskCtx,
-			binlogIO,
-			req,
-			compactionParams,
-		)
+		if namespaceEnabled {
+			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, compactionParams, nil)
+		} else {
+			task = compactor.NewClusteringCompactionTask(
+				taskCtx,
+				binlogIO,
+				req,
+				compactionParams,
+			)
+		}
 	case datapb.CompactionType_SortCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
@@ -245,42 +256,19 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		if err != nil {
 			return merr.Status(err), err
 		}
-		task = compactor.NewSortCompactionTask(
-			taskCtx,
-			binlogIO,
-			req,
-			compactionParams,
-			[]int64{pk.GetFieldID()},
-		)
-	case datapb.CompactionType_PartitionKeySortCompaction:
-		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
-		}
-		pk, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
-		partitionkey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
-		if err != nil {
-			return merr.Status(err), err
+		sortFields := []int64{pk.GetFieldID()}
+		if namespaceEnabled {
+			if partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema()); err == nil && partitionKey != nil {
+				sortFields = append([]int64{partitionKey.GetFieldID()}, sortFields...)
+			}
 		}
 		task = compactor.NewSortCompactionTask(
 			taskCtx,
 			binlogIO,
 			req,
 			compactionParams,
-			[]int64{partitionkey.GetFieldID(), pk.GetFieldID()},
+			sortFields,
 		)
-	case datapb.CompactionType_ClusteringPartitionKeySortCompaction:
-		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
-			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
-		}
-		pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
-		if err != nil {
-			return merr.Status(err), err
-		}
-		partitionkey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
-		if err != nil {
-			return merr.Status(err), err
-		}
-		task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, compactionParams, []int64{partitionkey.GetFieldID(), pk.GetFieldID()})
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil

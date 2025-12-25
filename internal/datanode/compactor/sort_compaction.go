@@ -272,18 +272,21 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		zap.Int("expired rows", entityFilter.GetExpiredCount()),
 		zap.Duration("total elapse", time.Since(sortStartTime)))
 
+	isPartitionKeySorted := common.IsNamespaceEnabled(t.plan.GetSchema())
+	isSorted := !isPartitionKeySorted
 	res := []*datapb.CompactionSegment{
 		{
-			PlanID:              t.GetPlanID(),
-			SegmentID:           targetSegmentID,
-			NumOfRows:           int64(numValidRows),
-			InsertLogs:          insertLogs,
-			Field2StatslogPaths: statsLogs,
-			Bm25Logs:            bm25StatsLogs,
-			Channel:             t.GetChannelName(),
-			IsSorted:            true,
-			StorageVersion:      t.storageVersion,
-			Manifest:            manifest,
+			PlanID:               t.GetPlanID(),
+			SegmentID:            targetSegmentID,
+			NumOfRows:            int64(numValidRows),
+			InsertLogs:           insertLogs,
+			Field2StatslogPaths:  statsLogs,
+			Bm25Logs:             bm25StatsLogs,
+			Channel:              t.GetChannelName(),
+			IsSorted:             isSorted,
+			IsPartitionKeySorted: isPartitionKeySorted,
+			StorageVersion:       t.storageVersion,
+			Manifest:             manifest,
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{

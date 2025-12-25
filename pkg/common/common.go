@@ -648,6 +648,18 @@ func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error 
 	return nil
 }
 
+// IsNamespaceEnabled returns whether namespace is enabled in the given schema properties.
+func IsNamespaceEnabled(schema *schemapb.CollectionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	enabled, _, err := ParseNamespaceProp(schema.GetProperties()...)
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
 func ConvertWKTToWKB(wktStr string) ([]byte, error) {
 	geomT, err := wkt.Unmarshal(wktStr)
 	if err != nil {

@@ -1922,7 +1922,7 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeMixCompactionMutation(t, result)
 	case datapb.CompactionType_ClusteringCompaction:
 		return m.completeClusterCompactionMutation(t, result)
-	case datapb.CompactionType_SortCompaction, datapb.CompactionType_PartitionKeySortCompaction:
+	case datapb.CompactionType_SortCompaction:
 		return m.completeSortCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
@@ -2328,9 +2328,9 @@ func (m *meta) completeSortCompactionMutation(
 		Bm25Statslogs:             resultSegment.GetBm25Logs(),
 		Deltalogs:                 resultSegment.GetDeltalogs(),
 		CompactionFrom:            []int64{compactFromSegID},
-		IsSorted:                  t.GetType() == datapb.CompactionType_SortCompaction,
+		IsSorted:                  resultSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
-		IsPartitionKeySorted:      t.GetType() == datapb.CompactionType_PartitionKeySortCompaction,
+		IsPartitionKeySorted:      resultSegment.GetIsPartitionKeySorted(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
