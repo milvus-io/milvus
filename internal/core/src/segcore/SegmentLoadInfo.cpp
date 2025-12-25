@@ -191,7 +191,14 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     std::map<int64_t, int64_t> current_fields;
     for (int i = 0; i < GetBinlogPathCount(); i++) {
         auto& field_binlog = GetBinlogPath(i);
-        for (auto child_id : field_binlog.child_fields()) {
+        std::vector<int64_t> child_fields(field_binlog.child_fields().begin(),
+                                          field_binlog.child_fields().end());
+        // v1 or legacy, group id == field id
+        if (child_fields.empty()) {
+            child_fields.emplace_back(field_binlog.fieldid());
+        }
+
+        for (auto child_id : child_fields) {
             current_fields[child_id] = field_binlog.fieldid();
         }
     }
@@ -200,7 +207,14 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
         std::vector<FieldId> ids_to_load;
-        for (auto child_id : new_field_binlog.child_fields()) {
+        std::vector<int64_t> child_fields(
+            new_field_binlog.child_fields().begin(),
+            new_field_binlog.child_fields().end());
+        // v1 or legacy, group id == field id
+        if (child_fields.empty()) {
+            child_fields.emplace_back(new_field_binlog.fieldid());
+        }
+        for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
             auto iter = current_fields.find(new_field_binlog.fieldid());
             // Find binlogs to load: fields in new_info match current
