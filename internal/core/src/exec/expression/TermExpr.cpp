@@ -859,7 +859,13 @@ PhyTermFilterExpr::ExecVisitorImplForIndex() {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    auto real_batch_size = GetNextBatchSize();
+    int64_t real_batch_size;
+    if (expr_->column_.element_level_) {
+        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+        real_batch_size = elem_count;
+    } else {
+        real_batch_size = GetNextBatchSize();
+    }
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -906,7 +912,13 @@ template <>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplForIndex<bool>() {
     using Index = index::ScalarIndex<bool>;
-    auto real_batch_size = GetNextBatchSize();
+    int64_t real_batch_size;
+    if (expr_->column_.element_level_) {
+        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+        real_batch_size = elem_count;
+    } else {
+        real_batch_size = GetNextBatchSize();
+    }
     if (real_batch_size == 0) {
         return nullptr;
     }

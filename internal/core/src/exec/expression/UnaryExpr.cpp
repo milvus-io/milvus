@@ -38,10 +38,8 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
 
     // num_index_chunk_ == 1 is guaranteed by CanUseIndex()
     auto index_ptr = dynamic_cast<const Index*>(pinned_index_[0].get());
-    if (index_ptr->GetIndexType() ==
-            milvus::index::ScalarIndexType::HYBRID ||
-        index_ptr->GetIndexType() ==
-            milvus::index::ScalarIndexType::BITMAP) {
+    if (index_ptr->GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
+        index_ptr->GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
         return false;
     }
     return true;
@@ -1378,7 +1376,13 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
 
-    auto real_batch_size = GetNextBatchSize();
+    int64_t real_batch_size;
+    if (expr_->column_.element_level_) {
+        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+        real_batch_size = elem_count;
+    } else {
+        real_batch_size = GetNextBatchSize();
+    }
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -1446,11 +1450,11 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     };
     IndexInnerType val = value_arg_.GetValue<IndexInnerType>();
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
-    // AssertInfo(res->size() == real_batch_size,
-    //            "internal error: expr processed rows {} not equal "
-    //            "expect batch size {}",
-    //            res->size(),
-    //            real_batch_size);
+    AssertInfo(res->size() == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               res->size(),
+               real_batch_size);
     return res;
 }
 

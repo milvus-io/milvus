@@ -122,11 +122,12 @@ ProcessContiguousRows(int64_t row_count,
         int64_t bitset_start = first_elem - elem_start;
         int64_t row_elem_count = last_elem - first_elem;
 
-        if (MatchSingleRow<match_type, all_valid>(bitset_start,
-                                                  row_elem_count,
-                                                  match_bitset,
-                                                  valid_bitset,
-                                                  threshold)) {
+        bool matched = MatchSingleRow<match_type, all_valid>(bitset_start,
+                                                             row_elem_count,
+                                                             match_bitset,
+                                                             valid_bitset,
+                                                             threshold);
+        if (matched) {
             result_bitset[i] = true;
         }
     }

@@ -268,7 +268,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
 
-    auto real_batch_size = GetNextBatchSize();
+    int64_t real_batch_size;
+    if (expr_->column_.element_level_) {
+        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+        real_batch_size = elem_count;
+    } else {
+        real_batch_size = GetNextBatchSize();
+    }
     if (real_batch_size == 0) {
         return nullptr;
     }

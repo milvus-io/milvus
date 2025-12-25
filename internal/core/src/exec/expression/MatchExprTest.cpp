@@ -17,6 +17,7 @@
 #include <boost/format.hpp>
 #include <iostream>
 #include <random>
+#include <set>
 #include <unordered_set>
 
 #include "cachinglayer/Manager.h"
@@ -763,6 +764,166 @@ class SealedMatchExprTest : public ::testing::Test {
         std::cout << "==============================" << std::endl;
     }
 
+    // Create retrieve plan (no vector search, only predicates)
+    std::string
+    CreateRetrievePlanText(const std::string& match_type,
+                           int64_t count,
+                           const std::string& target_str,
+                           int32_t target_int) {
+        return boost::str(boost::format(R"(query: <
+            predicates: <
+                match_expr: <
+                    struct_name: "struct_array"
+                    match_type: %1%
+                    count: %2%
+                    predicate: <
+                        binary_expr: <
+                            op: LogicalAnd
+                            left: <
+                                unary_range_expr: <
+                                    column_info: <
+                                        field_id: %3%
+                                        data_type: Array
+                                        element_type: VarChar
+                                        nested_path: "sub_str"
+                                        is_element_level: true
+                                    >
+                                    op: Equal
+                                    value: <
+                                        string_val: "%5%"
+                                    >
+                                >
+                            >
+                            right: <
+                                unary_range_expr: <
+                                    column_info: <
+                                        field_id: %4%
+                                        data_type: Array
+                                        element_type: Int32
+                                        nested_path: "sub_int"
+                                        is_element_level: true
+                                    >
+                                    op: GreaterThan
+                                    value: <
+                                        int64_val: %6%
+                                    >
+                                >
+                            >
+                        >
+                    >
+                >
+            >
+        >
+        output_field_ids: %7%)") %
+                          match_type % count % sub_str_fid_.get() %
+                          sub_int_fid_.get() % target_str % target_int %
+                          int64_fid_.get());
+    }
+
+    // Execute retrieve and return results
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& raw_plan) {
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        EXPECT_TRUE(ok) << "Failed to parse plan";
+
+        auto plan = ProtoParser(schema_).CreateRetrievePlan(plan_node);
+        EXPECT_NE(plan, nullptr);
+
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    // Compute expected matching rows
+    std::set<int64_t>
+    ComputeExpectedRows(const std::string& target_str,
+                        int32_t target_int,
+                        int64_t threshold,
+                        VerifyFunc verify_func) {
+        std::set<int64_t> expected;
+        for (size_t i = 0; i < N_; ++i) {
+            int match_count = CountMatchingElements(i, target_str, target_int);
+            if (verify_func(match_count, array_len_, threshold)) {
+                expected.insert(static_cast<int64_t>(i));
+            }
+        }
+        return expected;
+    }
+
+    // Verify retrieve results - check both precision and recall
+    void
+    VerifyRetrieveResults(const proto::segcore::RetrieveResults* result,
+                          const std::string& match_type_name,
+                          int64_t threshold,
+                          const std::string& target_str,
+                          int32_t target_int,
+                          VerifyFunc verify_func) {
+        // Compute expected rows
+        auto expected_rows =
+            ComputeExpectedRows(target_str, target_int, threshold, verify_func);
+
+        // Get actual rows from result
+        std::set<int64_t> actual_rows;
+        for (const auto& offset : result->offset()) {
+            actual_rows.insert(offset);
+        }
+
+        std::cout << "=== " << match_type_name
+                  << " Retrieve Results ===" << std::endl;
+        std::cout << "Expected rows: " << expected_rows.size() << std::endl;
+        std::cout << "Actual rows: " << actual_rows.size() << std::endl;
+
+        // Check for false negatives (rows that should be returned but weren't)
+        std::vector<int64_t> missing_rows;
+        for (auto row : expected_rows) {
+            if (actual_rows.find(row) == actual_rows.end()) {
+                missing_rows.push_back(row);
+            }
+        }
+
+        // Check for false positives (rows that shouldn't be returned but were)
+        std::vector<int64_t> extra_rows;
+        for (auto row : actual_rows) {
+            if (expected_rows.find(row) == expected_rows.end()) {
+                extra_rows.push_back(row);
+            }
+        }
+
+        if (!missing_rows.empty()) {
+            std::cout << "Missing rows (false negatives): ";
+            for (size_t i = 0; i < std::min(missing_rows.size(), size_t(10));
+                 ++i) {
+                std::cout << missing_rows[i] << " ";
+            }
+            if (missing_rows.size() > 10)
+                std::cout << "... (" << missing_rows.size() << " total)";
+            std::cout << std::endl;
+        }
+
+        if (!extra_rows.empty()) {
+            std::cout << "Extra rows (false positives): ";
+            for (size_t i = 0; i < std::min(extra_rows.size(), size_t(10));
+                 ++i) {
+                std::cout << extra_rows[i] << " ";
+            }
+            if (extra_rows.size() > 10)
+                std::cout << "... (" << extra_rows.size() << " total)";
+            std::cout << std::endl;
+        }
+
+        EXPECT_TRUE(missing_rows.empty())
+            << match_type_name << " has " << missing_rows.size()
+            << " false negatives";
+        EXPECT_TRUE(extra_rows.empty())
+            << match_type_name << " has " << extra_rows.size()
+            << " false positives";
+        EXPECT_EQ(expected_rows.size(), actual_rows.size())
+            << match_type_name << " row count mismatch";
+
+        std::cout << "==============================" << std::endl;
+    }
+
     // Member variables
     std::shared_ptr<Schema> schema_;
     FieldId vec_fid_;
@@ -884,4 +1045,674 @@ TEST_F(SealedMatchExprTest, MatchExactWithNestedIndex) {
             // MatchExact: exactly N elements match
             return match_count == threshold;
         });
+}
+
+// Test fixture for sealed segment WITHOUT any nested index (brute force scan)
+class SealedMatchExprTestNoIndex : public SealedMatchExprTest {
+ protected:
+    void
+    SetUp() override {
+        // Set batch size to 100 for testing multiple batches
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+        // Create schema with struct array sub-fields
+        schema_ = std::make_shared<Schema>();
+        vec_fid_ = schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+        int64_fid_ = schema_->AddDebugField("id", DataType::INT64);
+        schema_->set_primary_field_id(int64_fid_);
+
+        sub_str_fid_ = schema_->AddDebugArrayField(
+            "struct_array[sub_str]", DataType::VARCHAR, false);
+        sub_int_fid_ = schema_->AddDebugArrayField(
+            "struct_array[sub_int]", DataType::INT32, false);
+
+        GenerateTestData();
+
+        // Create sealed segment WITHOUT loading any index
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
+        // No LoadNestedInvertedIndexes() call - brute force path
+    }
+};
+
+TEST_F(SealedMatchExprTestNoIndex, MatchAnyNoIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan = CreateSealedPlanText("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchAny (No Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, MatchAllNoIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan = CreateSealedPlanText("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchAll (No Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
+            return match_count == element_count;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, MatchLeastNoIndex) {
+    const int64_t threshold = 2;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateSealedPlanText("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchLeast(2) (No Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, MatchMostNoIndex) {
+    const int64_t threshold = 3;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateSealedPlanText("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchMost(3) (No Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, MatchExactNoIndex) {
+    const int64_t threshold = 1;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateSealedPlanText("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchExact(1) (No Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+}
+
+// Test fixture for sealed segment with PARTIAL index
+// (one field has index, another doesn't)
+class SealedMatchExprTestPartialIndex : public SealedMatchExprTest {
+ protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+        schema_ = std::make_shared<Schema>();
+        vec_fid_ = schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+        int64_fid_ = schema_->AddDebugField("id", DataType::INT64);
+        schema_->set_primary_field_id(int64_fid_);
+
+        sub_str_fid_ = schema_->AddDebugArrayField(
+            "struct_array[sub_str]", DataType::VARCHAR, false);
+        sub_int_fid_ = schema_->AddDebugArrayField(
+            "struct_array[sub_int]", DataType::INT32, false);
+
+        GenerateTestData();
+
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
+
+        // Only load index for sub_str field, NOT for sub_int
+        LoadPartialIndex();
+    }
+
+    void
+    LoadPartialIndex() {
+        // Only load nested index for sub_str field
+        auto index =
+            std::make_unique<index::InvertedIndexTantivy<std::string>>();
+        Config cfg;
+        cfg["is_array"] = true;
+        cfg["is_nested_index"] = true;
+        index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
+        LoadIndexInfo info{
+            .field_id = sub_str_fid_.get(),
+            .index_params = GenIndexParams(index.get()),
+            .cache_index = CreateTestCacheIndex("sub_str", std::move(index)),
+        };
+        seg_->LoadIndex(info);
+        // sub_int field has NO index - will use brute force
+    }
+};
+
+TEST_F(SealedMatchExprTestPartialIndex, MatchAnyPartialIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan = CreateSealedPlanText("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchAny (Partial Index: sub_str only)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, MatchAllPartialIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan = CreateSealedPlanText("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchAll (Partial Index: sub_str only)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
+            return match_count == element_count;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, MatchLeastPartialIndex) {
+    const int64_t threshold = 2;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateSealedPlanText("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchLeast(2) (Partial Index: sub_str only)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, MatchMostPartialIndex) {
+    const int64_t threshold = 3;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateSealedPlanText("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchMost(3) (Partial Index: sub_str only)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, MatchExactPartialIndex) {
+    const int64_t threshold = 1;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateSealedPlanText("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteSealedSearch(raw_plan);
+
+    VerifySealedResults(
+        result.get(),
+        "MatchExact(1) (Partial Index: sub_str only)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+}
+
+// ==================== Retrieve Tests ====================
+// These tests verify that ALL matching rows are returned (no false negatives)
+// and no non-matching rows are returned (no false positives)
+
+TEST_F(SealedMatchExprTest, RetrieveMatchAnyWithIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAny (With Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
+TEST_F(SealedMatchExprTest, RetrieveMatchAllWithIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAll (With Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
+            return match_count == element_count;
+        });
+}
+
+TEST_F(SealedMatchExprTest, RetrieveMatchLeastWithIndex) {
+    const int64_t threshold = 2;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchLeast(2) (With Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTest, RetrieveMatchMostWithIndex) {
+    const int64_t threshold = 3;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchMost(3) (With Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTest, RetrieveMatchExactWithIndex) {
+    const int64_t threshold = 1;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchExact(1) (With Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAnyNoIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAny (No Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchAllNoIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAll (No Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
+            return match_count == element_count;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchLeastNoIndex) {
+    const int64_t threshold = 2;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchLeast(2) (No Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchMostNoIndex) {
+    const int64_t threshold = 3;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchMost(3) (No Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestNoIndex, RetrieveMatchExactNoIndex) {
+    const int64_t threshold = 1;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchExact(1) (No Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchAnyPartialIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAny (Partial Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchAllPartialIndex) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAll", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchAll (Partial Index)",
+        0,
+        target_str,
+        target_int,
+        [](int match_count, int element_count, int64_t /*threshold*/) {
+            return match_count == element_count;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchLeastPartialIndex) {
+    const int64_t threshold = 2;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchLeast(2) (Partial Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchMostPartialIndex) {
+    const int64_t threshold = 3;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchMost", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchMost(3) (Partial Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count <= threshold;
+        });
+}
+
+TEST_F(SealedMatchExprTestPartialIndex, RetrieveMatchExactPartialIndex) {
+    const int64_t threshold = 1;
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchExact", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    VerifyRetrieveResults(
+        result.get(),
+        "Retrieve MatchExact(1) (Partial Index)",
+        threshold,
+        target_str,
+        target_int,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count == threshold;
+        });
+}
+
+// Test combining match expression with other expressions (id % 2 == 0 && match_any)
+TEST_F(SealedMatchExprTestNoIndex, MatchWithOtherExpr) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    // Plan: (id % 2 == 0) && match_any(sub_str == "aaa" && sub_int > 100)
+    auto raw_plan = boost::str(boost::format(R"(query: <
+        predicates: <
+            binary_expr: <
+                op: LogicalAnd
+                left: <
+                    binary_arith_op_eval_range_expr: <
+                        column_info: <
+                            field_id: %1%
+                            data_type: Int64
+                        >
+                        arith_op: Mod
+                        right_operand: <
+                            int64_val: 2
+                        >
+                        op: Equal
+                        value: <
+                            int64_val: 0
+                        >
+                    >
+                >
+                right: <
+                    match_expr: <
+                        struct_name: "struct_array"
+                        match_type: MatchAny
+                        count: 0
+                        predicate: <
+                            binary_expr: <
+                                op: LogicalAnd
+                                left: <
+                                    unary_range_expr: <
+                                        column_info: <
+                                            field_id: %2%
+                                            data_type: Array
+                                            element_type: VarChar
+                                            nested_path: "sub_str"
+                                            is_element_level: true
+                                        >
+                                        op: Equal
+                                        value: <
+                                            string_val: "%4%"
+                                        >
+                                    >
+                                >
+                                right: <
+                                    unary_range_expr: <
+                                        column_info: <
+                                            field_id: %3%
+                                            data_type: Array
+                                            element_type: Int32
+                                            nested_path: "sub_int"
+                                            is_element_level: true
+                                        >
+                                        op: GreaterThan
+                                        value: <
+                                            int64_val: %5%
+                                        >
+                                    >
+                                >
+                            >
+                        >
+                    >
+                >
+            >
+        >
+    >)") % int64_fid_.get() % sub_str_fid_.get() %
+                               sub_int_fid_.get() % target_str % target_int);
+
+    auto result = ExecuteRetrieve(raw_plan);
+
+    // Verify: all results should have id % 2 == 0 AND match_count > 0
+    std::cout << "=== MatchWithOtherExpr (id %% 2 == 0 && MatchAny) ==="
+              << std::endl;
+    std::cout << "Retrieved " << result->offset_size() << " rows" << std::endl;
+
+    int verified_count = 0;
+    for (int i = 0; i < result->offset_size(); ++i) {
+        int64_t id = result->offset(i);
+        int match_count = CountMatchingElements(id, target_str, target_int);
+        bool id_even = (id % 2 == 0);
+        bool has_match = (match_count > 0);
+
+        // Both conditions must be true
+        EXPECT_TRUE(id_even) << "Row " << id << " should have id %% 2 == 0";
+        EXPECT_TRUE(has_match)
+            << "Row " << id << " should have match_count > 0";
+
+        if (id_even && has_match) {
+            ++verified_count;
+        }
+    }
+
+    std::cout << "Verified " << verified_count << " rows meet both conditions"
+              << std::endl;
+    EXPECT_GT(result->offset_size(), 0)
+        << "Should have at least some matching rows";
+    std::cout << "==============================" << std::endl;
 }

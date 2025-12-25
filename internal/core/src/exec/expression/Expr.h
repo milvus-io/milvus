@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -361,18 +362,22 @@ class SegmentExpr : public Expr {
                    "ArrayOffsets not found for field {}",
                    field_id_.get());
 
-        auto data_pos = current_data_chunk_pos_;
-        auto batch_rows =
-            std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                     active_count_ - data_pos);
+        int64_t current_rows =
+            segment_->num_rows_until_chunk(field_id_, current_data_chunk_) +
+            current_data_chunk_pos_;
+
+        auto batch_rows = current_rows + batch_size_ >= active_count_
+                              ? active_count_ - current_rows
+                              : batch_size_;
 
         if (batch_rows == 0) {
             return {0, 0};
         }
 
-        auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(data_pos);
+        // Calculate elem_count based on global row positions
+        auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(current_rows);
         auto [elem_end, __] =
-            array_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
+            array_offsets->ElementIDRangeOfRow(current_rows + batch_rows);
         auto elem_count = elem_end - elem_start;
 
         return {batch_rows, elem_count};
@@ -875,7 +880,7 @@ class SegmentExpr : public Expr {
         }
     }
 
-    // Process element-level data without offset input (brute force scan)
+    // Process element-level data without offset input
     // This is the counterpart of ProcessDataChunks for element-level expressions
     // Iterates over rows in batch, but returns element-level results
     // The caller must pre-allocate res/valid_res with elem_count size (from GetNextBatchSizeForElementLevel)
@@ -887,42 +892,188 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         const ValTypes&... values) {
-        auto array_offsets = segment_->GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
-                   field_id_.get());
+        static_assert(!std::is_same_v<ElementType, Json>,
+                      "Json element type is not supported for "
+                      "element-level filtering");
 
-        auto data_pos = current_data_chunk_pos_;
-        auto batch_rows =
-            std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                     active_count_ - data_pos);
+        int64_t processed_rows = 0;
+        int64_t processed_elems = 0;
 
-        if (batch_rows == 0) {
-            return 0;
+        // Prefetch chunks to reduce cache miss latency
+        if (!prefetched_) {
+            std::vector<int64_t> pf_chunk_ids;
+            pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+                pf_chunk_ids.push_back(i);
+            }
+            segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
+            prefetched_ = true;
         }
 
-        auto& skip_index = segment_->GetSkipIndex();
-        int64_t result_idx = 0;
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
+            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            size = std::min(size, batch_size_ - processed_rows);
+            if (size == 0)
+                continue;
 
-        // TODO(SpadeA): Implement the actual element-level brute force scan logic
-        // This should iterate over each row in [data_pos, data_pos + batch_rows),
-        // then for each row, iterate over its elements and apply the filter function.
-        // The implementation should handle both Sealed and Growing segments.
-        //
-        // Pseudocode:
-        // for (row in data_pos..data_pos+batch_rows):
-        //     array_view = get_array_at(row)
-        //     for (elem_idx in 0..array_view.length()):
-        //         value = array_view.get_data<ElementType>(elem_idx)
-        //         func(&value, &is_valid, ..., res + result_idx, valid_res + result_idx, values...)
-        //         result_idx++
-        //
-        // For now, this is a placeholder that will cause assertion failure if called.
-        AssertInfo(false,
-                   "ProcessDataChunksForElementLevel is not yet implemented");
+            auto& skip_index = segment_->GetSkipIndex();
+            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
+                (!namespace_skip_func_.has_value() ||
+                 !namespace_skip_func_.value()(i))) {
+                if (segment_->type() == SegmentType::Sealed) {
+                    auto pw = segment_->get_batch_views<ArrayView>(
+                        op_ctx_, field_id_, i, data_pos, size);
+                    auto [data_vec, valid_data] = pw.get();
 
-        current_data_chunk_pos_ += batch_rows;
-        return result_idx;
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data_vec[j].length();
+                        bool is_row_valid = !valid_data.data() || valid_data[j];
+
+                        if (!is_row_valid) {
+                            // Row is invalid, mark all elements as false
+                            for (size_t k = 0; k < elem_count; k++) {
+                                res[processed_elems + k] =
+                                    valid_res[processed_elems + k] = false;
+                            }
+                        } else {
+                            // Row is valid, process array elements
+                            if constexpr (std::is_same_v<ElementType,
+                                                         std::string_view> ||
+                                          std::is_same_v<ElementType,
+                                                         std::string>) {
+                                // String type: extract one by one
+                                for (size_t k = 0; k < elem_count; k++) {
+                                    auto str_view =
+                                        data_vec[j]
+                                            .template get_data<
+                                                std::string_view>(k);
+                                    ElementType str_val(str_view);
+                                    func(&str_val,
+                                         nullptr,
+                                         nullptr,
+                                         1,
+                                         res + processed_elems + k,
+                                         valid_res + processed_elems + k,
+                                         values...);
+                                }
+                            } else {
+                                // Fixed-length type: batch process entire array
+                                auto* elem_data =
+                                    reinterpret_cast<const ElementType*>(
+                                        data_vec[j].data());
+                                func(elem_data,
+                                     nullptr,
+                                     nullptr,
+                                     elem_count,
+                                     res + processed_elems,
+                                     valid_res + processed_elems,
+                                     values...);
+                            }
+                        }
+                        processed_elems += elem_count;
+                    }
+                } else {
+                    // Growing segment: use Array
+                    auto pw =
+                        segment_->chunk_data<Array>(op_ctx_, field_id_, i);
+                    auto chunk = pw.get();
+                    const Array* data = chunk.data() + data_pos;
+                    const bool* valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data[j].length();
+                        bool is_row_valid = !valid_data || valid_data[j];
+
+                        if (!is_row_valid) {
+                            // Row is invalid, mark all elements as false
+                            for (size_t k = 0; k < elem_count; k++) {
+                                res[processed_elems + k] =
+                                    valid_res[processed_elems + k] = false;
+                            }
+                        } else {
+                            // Row is valid, process array elements
+                            if constexpr (std::is_same_v<ElementType,
+                                                         std::string_view> ||
+                                          std::is_same_v<ElementType,
+                                                         std::string>) {
+                                // String type: extract one by one
+                                for (size_t k = 0; k < elem_count; k++) {
+                                    auto str_view =
+                                        data[j]
+                                            .template get_data<
+                                                std::string_view>(k);
+                                    ElementType str_val(str_view);
+                                    func(&str_val,
+                                         nullptr,
+                                         nullptr,
+                                         1,
+                                         res + processed_elems + k,
+                                         valid_res + processed_elems + k,
+                                         values...);
+                                }
+                            } else {
+                                // Fixed-length type: batch process entire array
+                                auto* elem_data =
+                                    reinterpret_cast<const ElementType*>(
+                                        data[j].data());
+                                func(elem_data,
+                                     nullptr,
+                                     nullptr,
+                                     elem_count,
+                                     res + processed_elems,
+                                     valid_res + processed_elems,
+                                     values...);
+                            }
+                        }
+                        processed_elems += elem_count;
+                    }
+                }
+            } else {
+                // Chunk is skipped, mark all elements as false
+                if (segment_->type() == SegmentType::Sealed) {
+                    auto pw = segment_->get_batch_views<ArrayView>(
+                        op_ctx_, field_id_, i, data_pos, size);
+                    auto [data_vec, valid_data] = pw.get();
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data_vec[j].length();
+                        for (size_t k = 0; k < elem_count; k++) {
+                            res[processed_elems + k] =
+                                valid_res[processed_elems + k] = false;
+                        }
+                        processed_elems += elem_count;
+                    }
+                } else {
+                    auto pw =
+                        segment_->chunk_data<Array>(op_ctx_, field_id_, i);
+                    auto chunk = pw.get();
+                    const Array* data = chunk.data() + data_pos;
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data[j].length();
+                        for (size_t k = 0; k < elem_count; k++) {
+                            res[processed_elems + k] =
+                                valid_res[processed_elems + k] = false;
+                        }
+                        processed_elems += elem_count;
+                    }
+                }
+            }
+
+            processed_rows += size;
+            if (processed_rows >= batch_size_) {
+                current_data_chunk_ = i;
+                current_data_chunk_pos_ = data_pos + size;
+                break;
+            }
+        }
+
+        return processed_elems;
     }
 
     // Template parameter to control whether segment offsets are needed (for GIS functions)
