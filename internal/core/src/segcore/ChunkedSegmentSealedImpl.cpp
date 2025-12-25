@@ -2629,6 +2629,7 @@ ChunkedSegmentSealedImpl::Reopen(
 
     // compute load diff
     auto diff = current.ComputeDiff(new_seg_load_info);
+    LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
     ApplyLoadDiff(new_seg_load_info, diff);
 
     LOG_INFO("Reopen segment {} done", id_);
@@ -3180,6 +3181,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx) {
     LOG_INFO("Loading segment {} with {} rows", id_, num_rows);
 
     auto diff = segment_load_info_.GetLoadDiff();
+    LOG_WARN("Load segment {} with diff {}", id_, diff.ToString());
     ApplyLoadDiff(segment_load_info_, diff);
 
     LOG_INFO("Successfully loaded segment {} with {} rows", id_, num_rows);
