@@ -929,6 +929,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.Description = result.Schema.Description
 	t.result.Schema.AutoID = result.Schema.AutoID
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
+	t.result.Schema.EnableNamespace = result.Schema.EnableNamespace
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames

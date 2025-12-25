@@ -245,7 +245,6 @@ const (
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
-	NamespaceEnabledKey        = "namespace.enabled"
 
 	// timezone releated
 	TimezoneKey             = "timezone"
@@ -563,19 +562,6 @@ func ValidateAutoIndexMmapConfig(autoIndexConfigEnable, isVectorField bool, inde
 	return nil
 }
 
-func ParseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
-	for _, p := range props {
-		if p.GetKey() == NamespaceEnabledKey {
-			value, err := strconv.ParseBool(p.GetValue())
-			if err != nil {
-				return false, false, fmt.Errorf("invalid namespace prop value: %s", p.GetValue())
-			}
-			return value, true, nil
-		}
-	}
-	return false, false, nil
-}
-
 func AllocAutoID(allocFunc func(uint32) (int64, int64, error), rowNum uint32, clusterID uint64) (int64, int64, error) {
 	idStart, idEnd, err := allocFunc(rowNum)
 	if err != nil {
@@ -634,10 +620,7 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {
-	enabled, _, err := ParseNamespaceProp(schema.Properties...)
-	if err != nil {
-		return err
-	}
+	enabled := schema.GetEnableNamespace()
 	namespaceIsSet := namespace != nil
 	if enabled != namespaceIsSet {
 		if namespaceIsSet {
@@ -646,18 +629,6 @@ func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error 
 		return fmt.Errorf("namespace data is not set but namespace enabled")
 	}
 	return nil
-}
-
-// IsNamespaceEnabled returns whether namespace is enabled in the given schema properties.
-func IsNamespaceEnabled(schema *schemapb.CollectionSchema) bool {
-	if schema == nil {
-		return false
-	}
-	enabled, _, err := ParseNamespaceProp(schema.GetProperties()...)
-	if err != nil {
-		return false
-	}
-	return enabled
 }
 
 func ConvertWKTToWKB(wktStr string) ([]byte, error) {

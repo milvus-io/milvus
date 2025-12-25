@@ -272,7 +272,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		zap.Int("expired rows", entityFilter.GetExpiredCount()),
 		zap.Duration("total elapse", time.Since(sortStartTime)))
 
-	isNamespaceSorted := common.IsNamespaceEnabled(t.plan.GetSchema())
+	isNamespaceSorted := t.plan.GetSchema().GetEnableNamespace()
 	isSorted := !isNamespaceSorted
 	res := []*datapb.CompactionSegment{
 		{

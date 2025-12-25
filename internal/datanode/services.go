@@ -203,7 +203,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 	}
 	var task compactor.Compactor
 	binlogIO := io.NewBinlogIO(cm)
-	namespaceEnabled := common.IsNamespaceEnabled(req.GetSchema())
+	namespaceEnabled := req.GetSchema().GetEnableNamespace()
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
