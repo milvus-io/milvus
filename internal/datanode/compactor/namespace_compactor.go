@@ -2,7 +2,6 @@ package compactor
 
 import (
 	"context"
-	"math"
 
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -38,7 +37,6 @@ func (c *NamespaceCompactor) Compact() (*datapb.CompactionPlanResult, error) {
 }
 
 func NewNamespaceCompactor(ctx context.Context, plan *datapb.CompactionPlan, binlogIO io.BinlogIO, compactionParams compaction.Params, sortByFieldIDs []int64) *NamespaceCompactor {
-	compactionParams.BinLogMaxSize = math.MaxInt64
 	return &NamespaceCompactor{
 		mixCompactionTask: NewMixCompactionTask(ctx, binlogIO, plan, compactionParams, sortByFieldIDs),
 	}
