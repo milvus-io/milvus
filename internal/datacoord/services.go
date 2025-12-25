@@ -1550,13 +1550,7 @@ OUTER:
 				return resp, nil
 			}
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
-				if req.GetFlushAllTs() != 0 {
-					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
-					if !s.verifyFlushAllStateByLegacyFlushAllTs(log, channel, req.GetFlushAllTs()) {
-						allFlushed = false
-						break OUTER
-					}
-				} else {
+				if len(req.GetFlushAllTss()) > 0 {
 					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(log, channel, req.GetFlushAllTss())
 					if err != nil {
 						resp.Status = merr.Status(err)
@@ -1566,6 +1560,15 @@ OUTER:
 						allFlushed = false
 						break OUTER
 					}
+				} else if req.GetFlushAllTs() != 0 {
+					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
+					if !s.verifyFlushAllStateByLegacyFlushAllTs(log, channel, req.GetFlushAllTs()) {
+						allFlushed = false
+						break OUTER
+					}
+				} else {
+					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTss or FlushAllTs is required"))
+					return resp, nil
 				}
 			}
 		}
