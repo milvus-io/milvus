@@ -22,9 +22,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -32,6 +34,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+type storageClient interface {
+	Exist(ctx context.Context, filePath string) (bool, error)
+}
 
 type FileResourceManager struct {
 	ctx  context.Context
@@ -45,21 +51,77 @@ type FileResourceManager struct {
 	sf       conc.Singleflight[any]
 	once     sync.Once
 
+	storage storageClient
+
+	mixCoord types.MixCoord
+	qnMode   fileresource.Mode // query node and streaming node file resource mode
+	dnMode   fileresource.Mode // data node file resource mode
 	// close
 	closeCh chan struct{}
 	wg      sync.WaitGroup
 }
 
-func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session.NodeManager) *FileResourceManager {
+func NewFileResourceManager(ctx context.Context, mixCoord types.MixCoord, meta *meta, nodeManager session.NodeManager, storage storageClient) *FileResourceManager {
 	return &FileResourceManager{
 		ctx:          ctx,
 		meta:         meta,
 		nodeManager:  nodeManager,
 		distribution: map[int64]uint64{},
 
-		closeCh: make(chan struct{}),
-		sf:      conc.Singleflight[any]{},
+		closeCh:  make(chan struct{}),
+		sf:       conc.Singleflight[any]{},
+		qnMode:   fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()),
+		dnMode:   fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
+		storage:  storage,
+		mixCoord: mixCoord,
+
+		notifyCh: make(chan struct{}, 1),
 	}
+}
+
+func (m *FileResourceManager) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
+	exist, err := m.storage.Exist(ctx, resource.Path)
+	if err != nil {
+		return err
+	}
+
+	if !exist {
+		return merr.WrapErrAsInputError(errors.Errorf("add file resource failed: file path %s not exist", resource.Path))
+	}
+
+	err = m.meta.AddFileResource(ctx, resource)
+	if err != nil {
+		return err
+	}
+
+	m.Notify()
+	m.syncQcFileResource(ctx)
+	return nil
+}
+
+func (m *FileResourceManager) RemoveFileResource(ctx context.Context, name string) error {
+	err := m.meta.RemoveFileResource(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	m.Notify()
+	m.syncQcFileResource(ctx)
+	return nil
+}
+
+func (m *FileResourceManager) syncQcFileResource(ctx context.Context) error {
+	if m.qnMode != fileresource.SyncMode {
+		return nil
+	}
+	resources, version := m.meta.ListFileResource(ctx)
+	err := m.mixCoord.SyncQcFileResource(ctx, resources, version)
+	if err != nil {
+		log.Warn("sync qc file resource failed", zap.Error(err))
+		return err
+	}
+	log.Info("finish sync qc file resource to query node", zap.Uint64("version", version), zap.Int("resources", len(resources)))
+	return nil
 }
 
 func (m *FileResourceManager) syncLoop() {
@@ -87,7 +149,6 @@ func (m *FileResourceManager) syncLoop() {
 func (m *FileResourceManager) Start() {
 	if fileresource.IsSyncMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) {
 		m.once.Do(func() {
-			m.notifyCh = make(chan struct{}, 1)
 			m.wg.Add(1)
 			go m.syncLoop()
 		})
@@ -102,7 +163,7 @@ func (m *FileResourceManager) Close() {
 // notify sync file resource to datanode
 // if file resource mode was Sync
 func (m *FileResourceManager) Notify() {
-	if m == nil || m.notifyCh == nil {
+	if m == nil || m.dnMode != fileresource.SyncMode {
 		return
 	}
 

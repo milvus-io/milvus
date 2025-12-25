@@ -45,6 +45,9 @@ type FileResourceManagerSuite struct {
 	mockNodeManager *session.MockNodeManager
 	mockDataNode    *mocks.MockDataNodeClient
 	mockCatalog     *metamock.DataCoordCatalog
+	mockMixCoord    *mocks.MixCoord
+
+	mockStorage *mocks.ChunkManager
 }
 
 func (suite *FileResourceManagerSuite) SetupSuite() {
@@ -67,8 +70,11 @@ func (suite *FileResourceManagerSuite) SetupTest() {
 		resourceVersion: 0,
 	}
 
+	suite.mockMixCoord = mocks.NewMixCoord(suite.T())
+	suite.mockStorage = mocks.NewChunkManager(suite.T())
+
 	// Create FileResourceManager
-	suite.manager = NewFileResourceManager(suite.ctx, suite.testMeta, suite.mockNodeManager)
+	suite.manager = NewFileResourceManager(suite.ctx, suite.mockMixCoord, suite.testMeta, suite.mockNodeManager, suite.mockStorage)
 	suite.manager.Start()
 }
 
@@ -77,6 +83,8 @@ func (suite *FileResourceManagerSuite) TearDownTest() {
 	// Assert mock expectations
 	suite.mockNodeManager.AssertExpectations(suite.T())
 	suite.mockDataNode.AssertExpectations(suite.T())
+	suite.mockMixCoord.AssertExpectations(suite.T())
+	suite.mockStorage.AssertExpectations(suite.T())
 }
 
 func (suite *FileResourceManagerSuite) TestNormal() {

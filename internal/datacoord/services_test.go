@@ -1798,6 +1798,10 @@ func TestServer_AddFileResource(t *testing.T) {
 				catalog:       mockCatalog,
 			},
 		}
+
+		mockStorage := mocks2.NewChunkManager(t)
+		mockStorage.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, mockStorage)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		req := &milvuspb.AddFileResourceRequest{
@@ -1867,6 +1871,9 @@ func TestServer_AddFileResource(t *testing.T) {
 				catalog:       mockCatalog,
 			},
 		}
+		mockStorage := mocks2.NewChunkManager(t)
+		mockStorage.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, mockStorage)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		req := &milvuspb.AddFileResourceRequest{
@@ -1904,6 +1911,9 @@ func TestServer_AddFileResource(t *testing.T) {
 				catalog: mockCatalog,
 			},
 		}
+		mockStorage := mocks2.NewChunkManager(t)
+		mockStorage.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, mockStorage)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		req := &milvuspb.AddFileResourceRequest{
@@ -1915,6 +1925,37 @@ func TestServer_AddFileResource(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp))
 		assert.Contains(t, resp.GetReason(), "resource name exist")
+	})
+
+	t.Run("file not exist", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			mixCoord:    newMockMixCoord(),
+			meta: &meta{
+				resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+				resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
+				catalog:       mockCatalog,
+			},
+		}
+
+		mockStorage := mocks2.NewChunkManager(t)
+		mockStorage.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, nil)
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, mockStorage)
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
 	})
 }
 
@@ -1940,6 +1981,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			},
 			mixCoord: newMockMixCoord(),
 		}
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, nil)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		req := &milvuspb.RemoveFileResourceRequest{
@@ -1978,6 +2020,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			},
 			mixCoord: newMockMixCoord(),
 		}
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, nil)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		req := &milvuspb.RemoveFileResourceRequest{
@@ -2009,6 +2052,7 @@ func TestServer_RemoveFileResource(t *testing.T) {
 				catalog: mockCatalog,
 			},
 		}
+		server.fileManager = NewFileResourceManager(context.Background(), server.mixCoord, server.meta, server.nodeManager, nil)
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		req := &milvuspb.RemoveFileResourceRequest{

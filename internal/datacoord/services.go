@@ -2004,15 +2004,11 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		Path: req.GetPath(),
 	}
 
-	err = s.meta.AddFileResource(ctx, resource)
+	err = s.fileManager.AddFileResource(ctx, resource)
 	if err != nil {
 		log.Ctx(ctx).Warn("AddFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	s.fileManager.Notify()
-
-	resources, version := s.meta.ListFileResource(ctx)
-	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("AddFileResource success")
 	return merr.Success(), nil
@@ -2027,15 +2023,11 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 	log.Ctx(ctx).Info("receive RemoveFileResource request",
 		zap.String("name", req.GetName()))
 
-	err := s.meta.RemoveFileResource(ctx, req.GetName())
+	err := s.fileManager.RemoveFileResource(ctx, req.GetName())
 	if err != nil {
 		log.Ctx(ctx).Warn("RemoveFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	s.fileManager.Notify()
-
-	resources, version := s.meta.ListFileResource(ctx)
-	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("RemoveFileResource success")
 	return merr.Success(), nil
