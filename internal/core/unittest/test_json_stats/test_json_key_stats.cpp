@@ -170,7 +170,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         int64_t collection_id = 1;
         int64_t partition_id = 2;
         int64_t segment_id = 3;
-        int64_t field_id = 101;
+        field_id_ = 101;
         int64_t index_build_id = GenerateRandomInt64(1, 100000);
         int64_t index_version = 1;
         size_ = 1000;  // Use a larger size for better testing
@@ -191,7 +191,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         Init(collection_id,
              partition_id,
              segment_id,
-             field_id,
+             field_id_,
              index_build_id,
              index_version,
              size_);
@@ -206,6 +206,7 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
     DataType type_;
     bool nullable_;
     size_t size_;
+    int64_t field_id_;
     FixedVector<bool> valid_data;
     std::vector<milvus::Json> data_;
     std::vector<std::string> json_col;
@@ -231,25 +232,13 @@ TEST_P(JsonKeyStatsTest, TestBasicOperations) {
 TEST_P(JsonKeyStatsTest, TestExecuteForSharedData) {
     std::string path = "/int_shared";
     int count = 0;
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
     index_->ExecuteForSharedData(
-        nullptr, path, [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-            count++;
-        });
+        nullptr,
+        bson_index,
+        path,
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) { count++; });
     std::cout << "count: " << count << std::endl;
-    if (nullable_) {
-        EXPECT_EQ(count, 100);
-    } else {
-        EXPECT_EQ(count, 200);
-    }
-}
-
-TEST_P(JsonKeyStatsTest, TestExecuteExistsPathForSharedData) {
-    std::string path = "/int_shared";
-    TargetBitmap bitset(size_);
-    TargetBitmapView bitset_view(bitset);
-    index_->ExecuteExistsPathForSharedData(path, bitset_view);
-    std::cout << "bitset.count(): " << bitset.count() << std::endl;
-    auto count = bitset.count();
     if (nullable_) {
         EXPECT_EQ(count, 100);
     } else {
@@ -267,7 +256,15 @@ TEST_P(JsonKeyStatsTest, TestExecutorForGettingValid) {
             index_->ExecutorForGettingValid(nullptr, field, valid_res_view);
         EXPECT_EQ(processed_size, size_);
     }
-    index_->ExecuteExistsPathForSharedData(path, valid_res_view);
+    std::cout << "can not skip shared" << std::endl;
+    PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+    index_->ExecuteForSharedData(
+        nullptr,
+        bson_index,
+        path,
+        [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+            valid_res[row_id] = true;
+        });
     std::cout << "valid_res.count(): " << valid_res.count() << std::endl;
     if (nullable_) {
         EXPECT_EQ(valid_res.count(), 400);
@@ -439,7 +436,14 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
     VerifyPathInShared(const std::string& path) {
         TargetBitmap bitset(data_.size());
         TargetBitmapView bitset_view(bitset);
-        load_index_->ExecuteExistsPathForSharedData(path, bitset_view);
+        PinWrapper<BsonInvertedIndex*> bson_index{nullptr};
+        load_index_->ExecuteForSharedData(
+            nullptr,
+            bson_index,
+            path,
+            [&](BsonView bson, uint32_t row_id, uint32_t offset) {
+                bitset[row_id] = true;
+            });
         EXPECT_GT(bitset.size(), 0);
     }
 

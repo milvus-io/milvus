@@ -1271,7 +1271,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		LoadPriority: s.loadInfo.Load().GetPriority(),
 		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
 		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
-		StatsSize:    jsonKeyStats.GetMemorySize(),
+		StatsSize:    jsonKeyStats.GetLogSize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)

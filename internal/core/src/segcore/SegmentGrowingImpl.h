@@ -477,25 +477,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
                schema_->get_fields().end();
     }
 
-    void
-    LoadJsonStats(FieldId field_id,
-                  index::CacheJsonKeyStatsPtr cache_slot) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "LoadJsonStats not implemented for SegmentGrowingImpl");
-    }
-
-    PinWrapper<index::JsonKeyStats*>
-    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "GetJsonStats not implemented for SegmentGrowingImpl");
-    }
-
-    void
-    RemoveJsonStats(FieldId field_id) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "RemoveJsonStats not implemented for SegmentGrowingImpl");
-    }
-
     std::shared_ptr<const IArrayOffsets>
     GetArrayOffsets(FieldId field_id) const override {
         auto it = array_offsets_map_.find(field_id);
