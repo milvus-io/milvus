@@ -25,7 +25,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -93,13 +92,12 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
 		return nil
 	}
-	isPartitionIsolationEnabled := common.IsNamespaceEnabled(collection.Schema)
-	if !canTriggerSortCompaction(segment, isPartitionIsolationEnabled) {
+	if !canTriggerSortCompaction(segment) {
 		log.Warn("fail to apply triggerSegmentSortCompaction",
 			zap.String("state", segment.GetState().String()),
 			zap.String("level", segment.GetLevel().String()),
 			zap.Bool("isSorted", segment.GetIsSorted()),
-			zap.Bool("isPartitionKeySorted", segment.GetIsPartitionKeySorted()),
+			zap.Bool("isNamespaceSorted", segment.GetIsNamespaceSorted()),
 			zap.Bool("isImporting", segment.GetIsImporting()),
 			zap.Bool("isCompacting", segment.isCompacting),
 			zap.Bool("isInvisible", segment.GetIsInvisible()))
@@ -154,10 +152,9 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	isPartitionIsolationEnabled := common.IsNamespaceEnabled(collection.Schema)
 	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
 		SegmentFilterFunc(func(seg *SegmentInfo) bool {
-			return canTriggerSortCompaction(seg, isPartitionIsolationEnabled)
+			return canTriggerSortCompaction(seg)
 		}))
 	if len(triggerableSegments) == 0 {
 		log.RatedInfo(20, "no triggerable segments")

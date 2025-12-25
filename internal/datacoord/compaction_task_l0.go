@@ -295,15 +295,15 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 		}
 
 		sealedSegBinlogs = append(sealedSegBinlogs, &datapb.CompactionSegmentBinlogs{
-			SegmentID:            info.GetID(),
-			Field2StatslogPaths:  info.GetStatslogs(),
-			InsertChannel:        info.GetInsertChannel(),
-			Level:                info.GetLevel(),
-			CollectionID:         info.GetCollectionID(),
-			PartitionID:          info.GetPartitionID(),
-			IsSorted:             info.GetIsSorted(),
-			IsPartitionKeySorted: info.GetIsPartitionKeySorted(),
-			Manifest:             info.GetManifestPath(),
+			SegmentID:           info.GetID(),
+			Field2StatslogPaths: info.GetStatslogs(),
+			InsertChannel:       info.GetInsertChannel(),
+			Level:               info.GetLevel(),
+			CollectionID:        info.GetCollectionID(),
+			PartitionID:         info.GetPartitionID(),
+			IsSorted:            info.GetIsSorted(),
+			IsNamespaceSorted:   info.GetIsNamespaceSorted(),
+			Manifest:            info.GetManifestPath(),
 		})
 	}
 
@@ -336,15 +336,15 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
-			SegmentID:            segID,
-			CollectionID:         segInfo.GetCollectionID(),
-			PartitionID:          segInfo.GetPartitionID(),
-			Level:                segInfo.GetLevel(),
-			InsertChannel:        segInfo.GetInsertChannel(),
-			Deltalogs:            segInfo.GetDeltalogs(),
-			IsSorted:             segInfo.GetIsSorted(),
-			IsPartitionKeySorted: segInfo.GetIsPartitionKeySorted(),
-			Manifest:             segInfo.GetManifestPath(),
+			SegmentID:         segID,
+			CollectionID:      segInfo.GetCollectionID(),
+			PartitionID:       segInfo.GetPartitionID(),
+			Level:             segInfo.GetLevel(),
+			InsertChannel:     segInfo.GetInsertChannel(),
+			Deltalogs:         segInfo.GetDeltalogs(),
+			IsSorted:          segInfo.GetIsSorted(),
+			IsNamespaceSorted: segInfo.GetIsNamespaceSorted(),
+			Manifest:          segInfo.GetManifestPath(),
 		})
 		segments = append(segments, segInfo)
 	}

@@ -9,15 +9,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-// NamespaceCompactor compacts data with the same namespace together
-// Input segments must be sorted by namespace
+// NamespaceCompactor compacts data with the same namespace together.
+// Input segments must be sorted by namespace (partition key).
 type NamespaceCompactor struct {
 	*mixCompactionTask
 }
 
 func checkInputSorted(plan *datapb.CompactionPlan) bool {
 	for _, segment := range plan.GetSegmentBinlogs() {
-		if !segment.GetIsPartitionKeySorted() {
+		if !segment.GetIsNamespaceSorted() {
 			return false
 		}
 	}

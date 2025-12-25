@@ -1834,9 +1834,9 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted:             compactToSegment.GetIsSorted(),
-				IsPartitionKeySorted: compactToSegment.GetIsPartitionKeySorted(),
-				ManifestPath:         compactToSegment.GetManifest(),
+				IsSorted:          compactToSegment.GetIsSorted(),
+				IsNamespaceSorted: compactToSegment.GetIsNamespaceSorted(),
+				ManifestPath:      compactToSegment.GetManifest(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2330,7 +2330,7 @@ func (m *meta) completeSortCompactionMutation(
 		CompactionFrom:            []int64{compactFromSegID},
 		IsSorted:                  resultSegment.GetIsSorted(),
 		ManifestPath:              resultSegment.GetManifest(),
-		IsPartitionKeySorted:      resultSegment.GetIsPartitionKeySorted(),
+		IsNamespaceSorted:         resultSegment.GetIsNamespaceSorted(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)

@@ -131,10 +131,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	res := writer.GetCompactionSegments()
-	isPartitionKeySorted := common.IsNamespaceEnabled(plan.GetSchema())
+	isNamespaceSorted := common.IsNamespaceEnabled(plan.GetSchema())
 	for _, seg := range res {
-		seg.IsSorted = !isPartitionKeySorted
-		seg.IsPartitionKeySorted = isPartitionKeySorted
+		seg.IsSorted = !isNamespaceSorted
+		seg.IsNamespaceSorted = isNamespaceSorted
 	}
 
 	var (

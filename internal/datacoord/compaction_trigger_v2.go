@@ -380,13 +380,13 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 	log.Debug("Start to trigger compactions", zap.String("eventType", eventType.String()))
 	for _, view := range views {
 		outViews, reason := m.triggerViewForCompaction(ctx, eventType, view)
-		for _, outView := range outViews {
-			if outView != nil {
-				log.Info("Success to trigger a compaction, try to submit",
-					zap.String("eventType", eventType.String()),
-					zap.String("reason", reason),
-					zap.String("output view", outView.String()),
-					zap.Int64("triggerID", outView.GetTriggerID()))
+			for _, outView := range outViews {
+				if outView != nil {
+					log.Info("Success to trigger a compaction, try to submit",
+						zap.String("eventType", eventType.String()),
+						zap.String("reason", reason),
+						zap.String("output view", outView.String()),
+						zap.Int64("triggerID", outView.GetTriggerID()))
 
 				switch eventType {
 				case TriggerTypeLevelZeroViewChange, TriggerTypeLevelZeroViewIDLE, TriggerTypeLevelZeroViewManual:
