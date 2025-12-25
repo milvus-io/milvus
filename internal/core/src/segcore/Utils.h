@@ -23,6 +23,7 @@
 #include "cachinglayer/Utils.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Types.h"
+#include "common/Consts.h"
 
 namespace milvus::segcore {
 
@@ -177,9 +178,10 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info);
 
 /**
- * Convert Milvus timestamp to physical time in millisecond.
- * Milvus timestamp format: physical time (18 bits) + logical time (46 bits)
- * This function extracts the physical time part and converts it to millisecond.
+ * Convert Milvus timestamp to physical time in milliseconds.
+ * Milvus timestamp format: physical time in the high bits, logical counter in
+ * the lower LOGICAL_BITS bits. Shifting by LOGICAL_BITS extracts the physical
+ * time component in milliseconds.
  *
  * @param timestamp Milvus timestamp value
  * @return Physical time in millisecond

@@ -267,12 +267,17 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		}
 
 		var (
-			pkArray     = r.Column(pkField.FieldID)
-			tsArray     = r.Column(common.TimeStampField).(*array.Int64)
+			pkArray = r.Column(pkField.FieldID)
+			tsArray = r.Column(common.TimeStampField).(*array.Int64)
+			ttlArr  *array.Int64
 
 			sliceStart = -1
 			rb         *storage.RecordBuilder
 		)
+
+		if hasTTLField {
+			ttlArr = r.Column(t.plan.GetTtlFieldID()).(*array.Int64)
+		}
 
 		for i := range r.Len() {
 			// Filtering deleted entities
@@ -288,7 +293,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			ts := typeutil.Timestamp(tsArray.Value(i))
 			expireTs := int64(-1)
 			if hasTTLField {
-				expireTs = r.Column(t.plan.GetTtlFieldID()).(*array.Int64).Value(i)
+				if ttlArr.IsValid(i) {
+					expireTs = ttlArr.Value(i)
+				}
 			}
 			if entityFilter.Filtered(pk, ts, expireTs) {
 				if rb == nil {
