@@ -42,13 +42,14 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
 		return errors.Wrap(err, "failed to check field schema")
 	}
-
 	if fieldSchema.GetDataType() == schemapb.DataType_Timestamptz {
 		timezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, coll.Properties)
 		if !exist {
 			timezone = common.DefaultTimezone
 		}
-		timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone)
+		if err := timestamptz.CheckAndRewriteTimestampTzDefaultValueForFieldSchema(fieldSchema, timezone); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid default value of field, name: %s, err: %w", fieldSchema.Name, err)
+		}
 	}
 
 	// check if the field already exists
