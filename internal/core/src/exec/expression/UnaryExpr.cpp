@@ -36,11 +36,15 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
 
-    // num_index_chunk_ == 1 is guaranteed by CanUseIndex()
-    auto index_ptr = dynamic_cast<const Index*>(pinned_index_[0].get());
-    if (index_ptr->GetIndexType() == milvus::index::ScalarIndexType::HYBRID ||
-        index_ptr->GetIndexType() == milvus::index::ScalarIndexType::BITMAP) {
-        return false;
+    for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
+
+        if (index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::HYBRID ||
+            index_ptr->GetIndexType() ==
+                milvus::index::ScalarIndexType::BITMAP) {
+            return false;
+        }
     }
     return true;
 }
