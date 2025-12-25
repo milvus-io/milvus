@@ -239,7 +239,18 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
 		}
 		if namespaceEnabled {
-			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, compactionParams, nil)
+			var sortFields []int64
+			partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
+			}
+			sortFields = append(sortFields, partitionKey.GetFieldID())
+			pk, err := typeutil.GetPrimaryFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
+			}
+			sortFields = append(sortFields, pk.GetFieldID())
+			task = compactor.NewNamespaceCompactor(taskCtx, req, binlogIO, compactionParams, sortFields)
 		} else {
 			task = compactor.NewClusteringCompactionTask(
 				taskCtx,
