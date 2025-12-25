@@ -2294,9 +2294,9 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
             int64_t row_offset = 0;
 
             for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
-                auto chunk_data =
-                    ttl_column->DataOfChunk(nullptr, chunk_id).get();
-                auto ttl_data = reinterpret_cast<const int64_t*>(chunk_data);
+                auto chunk_data = ttl_column->DataOfChunk(nullptr, chunk_id);
+                auto ttl_data =
+                    reinterpret_cast<const int64_t*>(chunk_data.get());
                 auto chunk_rows = ttl_column->chunk_row_nums(chunk_id);
 
                 auto aligned_rows = (chunk_rows / 8) * 8;

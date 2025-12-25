@@ -207,7 +207,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {
-				expireTs = r.Column(t.plan.GetTtlFieldID()).(*array.Int64).Value(i)
+				col := r.Column(t.plan.GetTtlFieldID()).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
 			}
 			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}
@@ -217,7 +220,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {
-				expireTs = r.Column(t.plan.GetTtlFieldID()).(*array.Int64).Value(i)
+				col := r.Column(t.plan.GetTtlFieldID()).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
 			}
 			return !entityFilter.Filtered(pk, uint64(ts), expireTs)
 		}

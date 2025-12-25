@@ -115,7 +115,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {
-				expireTs = r.Column(ttlFieldID).(*array.Int64).Value(i)
+				col := r.Column(ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
 			}
 			return !segmentFilters[ri].Filtered(pk, uint64(ts), expireTs)
 		}
@@ -125,7 +128,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {
-				expireTs = r.Column(ttlFieldID).(*array.Int64).Value(i)
+				col := r.Column(ttlFieldID).(*array.Int64)
+				if col.IsValid(i) {
+					expireTs = col.Value(i)
+				}
 			}
 			return !segmentFilters[ri].Filtered(pk, uint64(ts), expireTs)
 		}
