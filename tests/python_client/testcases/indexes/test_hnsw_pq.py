@@ -5,24 +5,24 @@ from common import common_type as ct
 from common import common_func as cf
 from base.client_v2_base import TestMilvusClientV2Base
 import pytest
-from idx_hnsw_sq import HNSW_SQ
+from idx_hnsw_pq import HNSW_PQ
 
-index_type = "HNSW_SQ"
+index_type = "HNSW_PQ"
 success = "success"
 pk_field_name = 'id'
 vector_field_name = 'vector'
 dim = ct.default_dim
 default_nb = 2000
-default_build_params = {"M": 16, "efConstruction": 200, "sq_type": "SQ8"}
+default_build_params = {"M": 16, "efConstruction": 200, "m": 64, "nbits": 8}
 default_search_params = {"ef": 64, "refine_k": 1}
 
 
-class TestHnswSQBuildParams(TestMilvusClientV2Base):
+class TestHnswPQBuildParams(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("params", HNSW_SQ.build_params)
-    def test_hnsw_sq_build_params(self, params):
+    @pytest.mark.parametrize("params", HNSW_PQ.build_params)
+    def test_hnsw_pq_build_params(self, params):
         """
-        Test the build params of HNSW_SQ index
+        Test the build params of HNSW_PQ index
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -82,9 +82,9 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("vector_data_type", ct.all_vector_types)
-    def test_hnsw_sq_on_all_vector_types(self, vector_data_type):
+    def test_hnsw_pq_on_all_vector_types(self, vector_data_type):
         """
-        Test HNSW_SQ index on all the vector types and metrics
+        Test HNSW_PQ index on all the vector types and metrics
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -113,11 +113,11 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
                                metric_type=metric_type,
                                index_type=index_type,
                                params=default_build_params)
-        if vector_data_type not in HNSW_SQ.supported_vector_types:
+        if vector_data_type not in HNSW_PQ.supported_vector_types:
             self.create_index(client, collection_name, index_params,
                               check_task=CheckTasks.err_res,
                               check_items={"err_code": 999,
-                                           "err_msg": f"can't build with this index HNSW_SQ: invalid parameter"})
+                                           "err_msg": f"can't build with this index HNSW_PQ: invalid parameter"})
 
         else:
             self.create_index(client, collection_name, index_params)
@@ -137,10 +137,10 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
                                      "pk_name": pk_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("metric", HNSW_SQ.supported_metrics)
-    def test_hnsw_sq_on_all_metrics(self, metric):
+    @pytest.mark.parametrize("metric", HNSW_PQ.supported_metrics)
+    def test_hnsw_pq_on_all_metrics(self, metric):
         """
-        Test the search params of HNSW_SQ index
+        Test the search params of HNSW_PQ index
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -182,13 +182,13 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
                                  "pk_name": pk_field_name})
 
 
-@pytest.mark.xdist_group("TestHnswSQSearchParams")
-class TestHnswSQSearchParams(TestMilvusClientV2Base):
-    """Test search with pagination functionality for HNSW_SQ index"""
+@pytest.mark.xdist_group("TestHnswPQSearchParams")
+class TestHnswPQSearchParams(TestMilvusClientV2Base):
+    """Test search with pagination functionality for HNSW_PQ index"""
 
     def setup_class(self):
         super().setup_class(self)
-        self.collection_name = "TestHnswSQSearchParams" + cf.gen_unique_str("_")
+        self.collection_name = "TestHnswPQSearchParams" + cf.gen_unique_str("_")
         self.float_vector_field_name = vector_field_name
         self.float_vector_dim = dim
         self.primary_keys = []
@@ -206,6 +206,9 @@ class TestHnswSQSearchParams(TestMilvusClientV2Base):
         collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
         self.create_collection(client, self.collection_name, schema=collection_schema,
                                enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
+        insert_times = 2
+        float_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim,
+                                       vector_data_type=DataType.FLOAT_VECTOR)
         all_data = cf.gen_row_data_by_schema(
             nb=default_nb,
             schema=collection_schema,
@@ -214,9 +217,8 @@ class TestHnswSQSearchParams(TestMilvusClientV2Base):
         )
         self.insert(client, self.collection_name, data=all_data)
         self.primary_keys.extend([i for i in range(default_nb)])
-
         self.flush(client, self.collection_name)
-        # Create HNSW_SQ index
+        # Create HNSW_PQ index
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=self.float_vector_field_name,
                                metric_type="COSINE",
@@ -231,10 +233,10 @@ class TestHnswSQSearchParams(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("params", HNSW_SQ.search_params)
-    def test_hnsw_sq_search_params(self, params):
+    @pytest.mark.parametrize("params", HNSW_PQ.search_params)
+    def test_hnsw_pq_search_params(self, params):
         """
-        Test the search params of HNSW_SQ index
+        Test the search params of HNSW_PQ index
         """
         client = self._client()
         collection_name = self.collection_name
