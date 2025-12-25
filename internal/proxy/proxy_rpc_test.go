@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,7 +22,6 @@ import (
 
 func TestProxyRpcLimit(t *testing.T) {
 	var err error
-	var wg sync.WaitGroup
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	t.Setenv("ROCKSMQ_PATH", path)
@@ -50,8 +48,7 @@ func TestProxyRpcLimit(t *testing.T) {
 
 	testServer := newProxyTestServer(proxy)
 	testServer.Proxy.SetAddress(p.GetAddress())
-	wg.Add(1)
-	go testServer.startGrpc(ctx, &wg, &p)
+	go testServer.startGrpc(ctx, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
 	defer testServer.grpcServer.Stop()
 	client, err := grpcproxyclient.NewClient(ctx, "localhost:"+p.Port.GetValue(), 1)

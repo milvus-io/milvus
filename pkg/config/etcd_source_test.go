@@ -18,12 +18,10 @@ package config
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -32,29 +30,15 @@ import (
 type EtcdSourceSuite struct {
 	suite.Suite
 
-	embedEtcdServer *embed.Etcd
-	tempDir         string
-	endpoints       []string
+	tempDir   string
+	endpoints []string
 }
 
 func (s *EtcdSourceSuite) SetupSuite() {
-	// init embed etcd
-	embedServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-
-	s.Require().NoError(err)
-
-	s.embedEtcdServer = embedServer
-	s.tempDir = tempDir
-	s.endpoints = etcd.GetEmbedEtcdEndpoints(embedServer)
+	s.endpoints = []string{"localhost:2379"}
 }
 
 func (s *EtcdSourceSuite) TearDownSuite() {
-	if s.embedEtcdServer != nil {
-		s.embedEtcdServer.Close()
-	}
-	if s.tempDir != "" {
-		os.RemoveAll(s.tempDir)
-	}
 }
 
 func (s *EtcdSourceSuite) TestNewSource() {
