@@ -975,18 +975,20 @@ TEST(GrowingTest, SearchVectorArray) {
     std::cout << sr_parsed.dump(1) << std::endl;
 }
 
-void RunGrowingTTLTest(bool is_nullable) {
+void
+RunGrowingTTLTest(bool is_nullable) {
     using namespace milvus::segcore;
     int64_t count = 100;
     uint64_t base_ts = 1000000000ULL << 18;
-    
+
     auto schema = TTLTestHelper::CreateTTLSchema(is_nullable);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
-    
+
     std::vector<int64_t> pks, ttls;
     std::vector<Timestamp> tss;
     std::vector<bool> valid_data;
-    TTLTestHelper::PrepareTTLData(count, base_ts, is_nullable, pks, tss, ttls, valid_data);
+    TTLTestHelper::PrepareTTLData(
+        count, base_ts, is_nullable, pks, tss, ttls, valid_data);
 
     auto insert_record = std::make_unique<InsertRecordProto>();
     insert_record->set_num_rows(count);
@@ -995,13 +997,15 @@ void RunGrowingTTLTest(bool is_nullable) {
     auto pk_field_data = insert_record->add_fields_data();
     pk_field_data->set_field_id(schema->get_primary_field_id().get());
     pk_field_data->set_type(static_cast<int>(DataType::INT64));
-    for (auto v : pks) pk_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
+    for (auto v : pks)
+        pk_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
 
     // TTL Field
     auto ttl_field_data = insert_record->add_fields_data();
     ttl_field_data->set_field_id(schema->get_ttl_field_id().value().get());
     ttl_field_data->set_type(static_cast<int>(DataType::INT64));
-    for (auto v : ttls) ttl_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
+    for (auto v : ttls)
+        ttl_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
     if (is_nullable) {
         for (auto v : valid_data) ttl_field_data->add_valid_data(v);
     }
@@ -1016,5 +1020,9 @@ void RunGrowingTTLTest(bool is_nullable) {
     TTLTestHelper::VerifyTTLMask(view, count, is_nullable);
 }
 
-TEST(Growing, TestTTLNormal) { RunGrowingTTLTest(false); }
-TEST(Growing, TestTTLNullable) { RunGrowingTTLTest(true); }
+TEST(Growing, TestTTLNormal) {
+    RunGrowingTTLTest(false);
+}
+TEST(Growing, TestTTLNullable) {
+    RunGrowingTTLTest(true);
+}

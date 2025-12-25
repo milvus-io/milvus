@@ -2287,7 +2287,8 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
         auto ttl_field_id = schema_->get_ttl_field_id().value();
         auto ttl_column = get_column(ttl_field_id);
         if (ttl_column != nullptr) {
-            int64_t physical_us = static_cast<int64_t>(TimestampToPhysicalMs(timestamp)) * 1000;
+            int64_t physical_us =
+                static_cast<int64_t>(TimestampToPhysicalMs(timestamp)) * 1000;
             auto num_chunks = ttl_column->num_chunks();
             bool is_nullable = ttl_column->IsNullable();
             int64_t row_offset = 0;
