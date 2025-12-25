@@ -494,35 +494,43 @@ TEST_P(TestChunkSegment, TestPkRange) {
     }
 }
 
-void RunSealedTTLTest(bool is_nullable) {
+void
+RunSealedTTLTest(bool is_nullable) {
     using namespace milvus::segcore;
     int64_t count = 100;
     uint64_t base_ts = 1000000000ULL << 18;
 
     auto schema = TTLTestHelper::CreateTTLSchema(is_nullable);
-    auto segment = CreateSealedSegment(schema, nullptr, -1, SegcoreConfig::default_config(), true);
+    auto segment = CreateSealedSegment(
+        schema, nullptr, -1, SegcoreConfig::default_config(), true);
 
     std::vector<int64_t> pks, ttls;
     std::vector<Timestamp> tss;
     std::vector<bool> valid_data;
-    TTLTestHelper::PrepareTTLData(count, base_ts, is_nullable, pks, tss, ttls, valid_data);
+    TTLTestHelper::PrepareTTLData(
+        count, base_ts, is_nullable, pks, tss, ttls, valid_data);
 
     // Load PK
-    auto pk_field_data = std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+    auto pk_field_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
     pk_field_data->FillFieldData(pks.data(), count);
-    segment->LoadFieldData({schema->get_primary_field_id().get(), pk_field_data});
+    segment->LoadFieldData(
+        {schema->get_primary_field_id().get(), pk_field_data});
 
     // Load TTL
-    auto ttl_field_data = std::make_shared<FieldData<int64_t>>(DataType::INT64, is_nullable);
+    auto ttl_field_data =
+        std::make_shared<FieldData<int64_t>>(DataType::INT64, is_nullable);
     if (is_nullable) {
         ttl_field_data->FillFieldData(ttls.data(), valid_data.data(), count);
     } else {
         ttl_field_data->FillFieldData(ttls.data(), count);
     }
-    segment->LoadFieldData({schema->get_ttl_field_id().value().get(), ttl_field_data});
+    segment->LoadFieldData(
+        {schema->get_ttl_field_id().value().get(), ttl_field_data});
 
     // Load Timestamps (Sealed segment requirement)
-    auto ts_field_data = std::make_shared<FieldData<Timestamp>>(DataType::INT64, false);
+    auto ts_field_data =
+        std::make_shared<FieldData<Timestamp>>(DataType::INT64, false);
     ts_field_data->FillFieldData(tss.data(), count);
     segment->LoadFieldData({TimestampFieldID.get(), ts_field_data});
 
@@ -533,5 +541,9 @@ void RunSealedTTLTest(bool is_nullable) {
     TTLTestHelper::VerifyTTLMask(view, count, is_nullable);
 }
 
-TEST(Sealed, TestTTLNormal) { RunSealedTTLTest(false); }
-TEST(Sealed, TestTTLNullable) { RunSealedTTLTest(true); }
+TEST(Sealed, TestTTLNormal) {
+    RunSealedTTLTest(false);
+}
+TEST(Sealed, TestTTLNullable) {
+    RunSealedTTLTest(true);
+}
