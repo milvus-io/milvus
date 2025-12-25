@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -43,12 +42,6 @@ func (s *CollectionManagerSuite) SetupTest() {
 	schema := mock_segcore.GenTestCollectionSchema("collection_1", schemapb.DataType_Int64, false)
 	err := s.cm.PutOrRef(1, schema, mock_segcore.GenTestIndexMeta(1, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-		DbProperties: []*commonpb.KeyValuePair{
-			{
-				Key:   common.ReplicateIDKey,
-				Value: "local-test",
-			},
-		},
 	})
 	s.Require().NoError(err)
 }

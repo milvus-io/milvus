@@ -24,13 +24,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -104,12 +102,6 @@ func (suite *PipelineTestSuite) TestBasic() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	collection, err := segments.NewCollection(suite.collectionID, schema, mock_segcore.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
-		DbProperties: []*commonpb.KeyValuePair{
-			{
-				Key:   common.ReplicateIDKey,
-				Value: "local-test",
-			},
-		},
 	})
 	suite.Require().NoError(err)
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)

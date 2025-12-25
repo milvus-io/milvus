@@ -38,10 +38,9 @@ type (
 )
 
 type StreamConfig struct {
-	VChannel        string
-	Pos             *Pos
-	SubPos          SubPos
-	ReplicateConfig *msgstream.ReplicateConfig
+	VChannel string
+	Pos      *Pos
+	SubPos   SubPos
 }
 
 func NewStreamConfig(vchannel string, pos *Pos, subPos SubPos) *StreamConfig {

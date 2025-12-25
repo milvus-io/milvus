@@ -31,12 +31,11 @@ func TestCreateUser(t *testing.T) {
 	var msg TsMsg = &CreateUserMsg{
 		CreateCredentialRequest: &milvuspb.CreateCredentialRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_CreateCredential,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_CreateCredential,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			Username: "unit_user",
 			Password: "unit_password",
@@ -70,12 +69,11 @@ func TestUpdateUser(t *testing.T) {
 	var msg TsMsg = &UpdateUserMsg{
 		UpdateCredentialRequest: &milvuspb.UpdateCredentialRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_UpdateCredential,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_UpdateCredential,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			Username:    "unit_user",
 			OldPassword: "unit_old_password",
@@ -111,12 +109,11 @@ func TestDeleteUser(t *testing.T) {
 	var msg TsMsg = &DeleteUserMsg{
 		DeleteCredentialRequest: &milvuspb.DeleteCredentialRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_DeleteCredential,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_DeleteCredential,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			Username: "unit_user",
 		},
@@ -148,12 +145,11 @@ func TestCreateRole(t *testing.T) {
 	var msg TsMsg = &CreateRoleMsg{
 		CreateRoleRequest: &milvuspb.CreateRoleRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_CreateRole,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_CreateRole,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			Entity: &milvuspb.RoleEntity{
 				Name: "unit_role",
@@ -187,12 +183,11 @@ func TestDropRole(t *testing.T) {
 	var msg TsMsg = &DropRoleMsg{
 		DropRoleRequest: &milvuspb.DropRoleRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_DropRole,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_DropRole,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			RoleName: "unit_role",
 		},
@@ -224,12 +219,11 @@ func TestOperateUserRole(t *testing.T) {
 	var msg TsMsg = &OperateUserRoleMsg{
 		OperateUserRoleRequest: &milvuspb.OperateUserRoleRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_OperateUserRole,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_OperateUserRole,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			RoleName: "unit_role",
 			Username: "unit_user",
@@ -265,12 +259,11 @@ func TestOperatePrivilege(t *testing.T) {
 	var msg TsMsg = &OperatePrivilegeMsg{
 		OperatePrivilegeRequest: &milvuspb.OperatePrivilegeRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_OperatePrivilege,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_OperatePrivilege,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			Entity: &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: "unit_role"},
@@ -317,12 +310,11 @@ func TestOperatePrivilegeV2(t *testing.T) {
 	var msg TsMsg = &OperatePrivilegeV2Msg{
 		OperatePrivilegeV2Request: &milvuspb.OperatePrivilegeV2Request{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_OperatePrivilegeV2,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_OperatePrivilegeV2,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			Grantor: &milvuspb.GrantorEntity{
 				User: &milvuspb.UserEntity{Name: "unit_user"},
@@ -359,12 +351,11 @@ func TestCreatePrivilegeGroup(t *testing.T) {
 	var msg TsMsg = &CreatePrivilegeGroupMsg{
 		CreatePrivilegeGroupRequest: &milvuspb.CreatePrivilegeGroupRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_CreatePrivilegeGroup,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_CreatePrivilegeGroup,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			GroupName: "unit_group",
 		},
@@ -397,12 +388,11 @@ func TestDropPrivilegeGroup(t *testing.T) {
 	var msg TsMsg = &DropPrivilegeGroupMsg{
 		DropPrivilegeGroupRequest: &milvuspb.DropPrivilegeGroupRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_DropPrivilegeGroup,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_DropPrivilegeGroup,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			GroupName: "unit_group",
 		},
@@ -434,12 +424,11 @@ func TestOperatePrivilegeGroup(t *testing.T) {
 	var msg TsMsg = &OperatePrivilegeGroupMsg{
 		OperatePrivilegeGroupRequest: &milvuspb.OperatePrivilegeGroupRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_OperatePrivilegeGroup,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_OperatePrivilegeGroup,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			GroupName: "unit_group",
 			Type:      milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,

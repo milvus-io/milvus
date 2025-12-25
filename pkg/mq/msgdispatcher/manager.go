@@ -247,14 +247,11 @@ OUTER:
 		}
 	}
 
-	// For CDC, CDC needs to includeCurrentMsg when create new dispatcher
-	// and NOT includeCurrentMsg when create lag dispatcher. So if any dispatcher lagged,
+	// If any dispatcher is lagged,
 	// we give up batch subscription and create dispatcher for only one target.
-	includeCurrentMsg := false
 	for _, candidate := range candidateTargets {
 		if candidate.isLagged {
 			candidateTargets = []*target{candidate}
-			includeCurrentMsg = true
 			candidate.isLagged = false
 			break
 		}
@@ -272,7 +269,7 @@ OUTER:
 
 	// TODO: add newDispatcher timeout param and init context
 	id := c.idAllocator.Inc()
-	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, includeCurrentMsg, latestTarget.pos.GetTimestamp(), c.includeSkipWhenSplit)
+	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, latestTarget.pos.GetTimestamp(), c.includeSkipWhenSplit)
 	if err != nil {
 		panic(err)
 	}
@@ -379,19 +376,6 @@ func (c *dispatcherManager) tryMerge() {
 	log.Info("merge done", zap.Int64s("dispatchers", dispatcherIDs),
 		zap.Uint64("mergeTs", mergeTs),
 		zap.Duration("dur", time.Since(start)))
-}
-
-// deleteMetric remove specific prometheus metric,
-// Lock/RLock is required before calling this method.
-func (c *dispatcherManager) deleteMetric(channel string) {
-	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
-	if c.role == typeutil.DataNodeRole {
-		metrics.DataNodeMsgDispatcherTtLag.DeleteLabelValues(nodeIDStr, channel)
-		return
-	}
-	if c.role == typeutil.QueryNodeRole {
-		metrics.QueryNodeMsgDispatcherTtLag.DeleteLabelValues(nodeIDStr, channel)
-	}
 }
 
 func (c *dispatcherManager) uploadMetric() {

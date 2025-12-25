@@ -31,12 +31,11 @@ func TestImportMsg(t *testing.T) {
 	var msg TsMsg = &ImportMsg{
 		ImportMsg: &msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_Import,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_Import,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName: "unit_db",
 		},

@@ -841,7 +841,6 @@ msgChannel:
     # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
     # It is recommended to change this parameter before starting Milvus for the first time.
     rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
     # Sub-name prefix of the message channel where the query node publishes time tick messages.
     # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
     # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
@@ -1024,16 +1023,11 @@ common:
         enabled: false # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
-  # Whether to disable the internal time messaging mechanism for the system.
-  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
-  # This helps Milvus-CDC synchronize incremental data
-  ttMsgEnabled: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
   bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
-  collectionReplicateEnable: false # Whether to enable collection replication.
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction

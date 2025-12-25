@@ -50,7 +50,7 @@ func (suite *StreamPipelineSuite) SetupTest() {
 	suite.msgDispatcher = msgdispatcher.NewMockClient(suite.T())
 	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.inChannel, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
-	suite.pipeline = NewPipelineWithStream(suite.msgDispatcher, 0, false, suite.channel, nil)
+	suite.pipeline = NewPipelineWithStream(suite.msgDispatcher, 0, false, suite.channel)
 	suite.length = 4
 }
 
