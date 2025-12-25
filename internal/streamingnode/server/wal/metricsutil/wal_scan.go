@@ -22,8 +22,9 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 	catchupLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelCatchup
 	tailingLabel[metrics.WALScannerModelLabelName] = metrics.WALScannerModelTailing
 	return &ScanMetrics{
-		constLabel:   constLabel,
-		scannerTotal: metrics.WALScannerTotal.MustCurryWith(constLabel),
+		constLabel:    constLabel,
+		scannerTotal:  metrics.WALScannerTotal.MustCurryWith(constLabel),
+		scannerPaused: metrics.WALScannerPauseConsumption.With(constLabel),
 		tailing: underlyingScannerMetrics{
 			messageBytes:           metrics.WALScanMessageBytes.With(tailingLabel),
 			passMessageBytes:       metrics.WALScanPassMessageBytes.With(tailingLabel),
@@ -48,6 +49,7 @@ func NewScanMetrics(pchannel types.PChannelInfo) *ScanMetrics {
 type ScanMetrics struct {
 	constLabel       prometheus.Labels
 	scannerTotal     *prometheus.GaugeVec
+	scannerPaused    prometheus.Gauge
 	catchup          underlyingScannerMetrics
 	tailing          underlyingScannerMetrics
 	txnTotal         *prometheus.CounterVec
@@ -99,6 +101,7 @@ func (m *ScanMetrics) NewScannerMetrics() *ScannerMetrics {
 // Close closes the metrics.
 func (m *ScanMetrics) Close() {
 	metrics.WALScannerTotal.DeletePartialMatch(m.constLabel)
+	metrics.WALScannerPauseConsumption.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanPassMessageBytes.DeletePartialMatch(m.constLabel)
 	metrics.WALScanMessageTotal.DeletePartialMatch(m.constLabel)
@@ -123,6 +126,16 @@ func (m *ScannerMetrics) SwitchModel(s string) {
 	m.scannerTotal.WithLabelValues(m.scannerModel).Dec()
 	m.scannerModel = s
 	m.scannerTotal.WithLabelValues(m.scannerModel).Inc()
+}
+
+// PauseConsumption sets the pause consumption.
+func (m *ScannerMetrics) PauseConsumption() {
+	m.scannerPaused.Set(1)
+}
+
+// ResumeConsumption resumes the scanner consumption.
+func (m *ScannerMetrics) ResumeConsumption() {
+	m.scannerPaused.Set(0)
 }
 
 // ObserveMessage observes the message.
