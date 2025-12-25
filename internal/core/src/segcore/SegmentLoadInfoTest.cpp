@@ -566,7 +566,8 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffWithBinlogsLegacyFormat) {
     // In legacy format, field_id itself is used as the child_id
     EXPECT_EQ(diff.binlogs_to_load.size(), 1);
     EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
-    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 101);  // field_id as child_id
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(),
+              101);  // field_id as child_id
 
     // No index changes
     EXPECT_TRUE(diff.indexes_to_load.empty());
