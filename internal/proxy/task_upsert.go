@@ -1035,15 +1035,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		Timestamp: it.EndTs(),
 	}
 
-	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-	}
-	if replicateID != "" {
-		return merr.WrapErrCollectionReplicateMode("upsert")
-	}
-
 	// check collection exists
 	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
 	if err != nil {

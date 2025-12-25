@@ -31,12 +31,11 @@ func TestLoadPartitions(t *testing.T) {
 	msg := &LoadPartitionsMsg{
 		LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_LoadPartitions,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_LoadPartitions,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName:         "unit_db",
 			CollectionName: "col1",
@@ -76,12 +75,11 @@ func TestReleasePartitions(t *testing.T) {
 	msg := &ReleasePartitionsMsg{
 		ReleasePartitionsRequest: &milvuspb.ReleasePartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:       commonpb.MsgType_ReleasePartitions,
-				MsgID:         100,
-				Timestamp:     1000,
-				SourceID:      10000,
-				TargetID:      100000,
-				ReplicateInfo: nil,
+				MsgType:   commonpb.MsgType_ReleasePartitions,
+				MsgID:     100,
+				Timestamp: 1000,
+				SourceID:  10000,
+				TargetID:  100000,
 			},
 			DbName:         "unit_db",
 			CollectionName: "col1",

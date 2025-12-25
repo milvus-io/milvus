@@ -154,9 +154,6 @@ func GetPorperties(msg TsMsg) map[string]string {
 	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
 	if ok {
 		properties[common.TimestampTypeKey] = strconv.FormatUint(msgBase.GetBase().GetTimestamp(), 10)
-		if msgBase.GetBase().GetReplicateInfo() != nil {
-			properties[common.ReplicateIDTypeKey] = msgBase.GetBase().GetReplicateInfo().GetReplicateID()
-		}
 	}
 
 	return properties

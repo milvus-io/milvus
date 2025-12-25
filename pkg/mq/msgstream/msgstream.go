@@ -80,7 +80,6 @@ type ConsumeMsg interface {
 	GetID() int64
 	GetCollectionID() string
 	GetType() commonpb.MsgType
-	GetReplicateID() string
 
 	SetTraceCtx(ctx context.Context)
 	Unmarshal(unmarshalDispatcher UnmarshalDispatcher) (TsMsg, error)
@@ -124,15 +123,6 @@ func (m *UnmarshaledMsg) GetSize() int {
 	return m.msg.Size()
 }
 
-func (m *UnmarshaledMsg) GetReplicateID() string {
-	msgBase, ok := m.msg.(interface{ GetBase() *commonpb.MsgBase })
-	if !ok {
-		log.Warn("fail to get msg base, please check it", zap.Any("type", m.msg.Type()))
-		return ""
-	}
-	return msgBase.GetBase().GetReplicateInfo().GetReplicateID()
-}
-
 func (m *UnmarshaledMsg) SetPosition(pos *msgpb.MsgPosition) {
 	m.msg.SetPosition(pos)
 }
@@ -159,7 +149,6 @@ type MarshaledMsg struct {
 	timestamp    uint64
 	vchannel     string
 	collectionID string
-	replicateID  string
 	traceCtx     context.Context
 }
 
@@ -193,10 +182,6 @@ func (m *MarshaledMsg) GetType() commonpb.MsgType {
 
 func (m *MarshaledMsg) GetSize() int {
 	return len(m.msg.Payload())
-}
-
-func (m *MarshaledMsg) GetReplicateID() string {
-	return m.replicateID
 }
 
 func (m *MarshaledMsg) SetPosition(pos *msgpb.MsgPosition) {
@@ -269,11 +254,6 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 		msgType:      msgType,
 		vchannel:     vchannel,
 	}
-
-	replicateID, ok := properties[common.ReplicateIDTypeKey]
-	if ok {
-		result.replicateID = replicateID
-	}
 	return result, nil
 }
 
@@ -315,46 +295,6 @@ type MsgStream interface {
 	ForceEnableProduce(can bool)
 }
 
-type ReplicateConfig struct {
-	ReplicateID string
-	CheckFunc   CheckReplicateMsgFunc
-}
-
-type CheckReplicateMsgFunc func(*ReplicateMsg) bool
-
-func GetReplicateConfig(replicateID, dbName, colName string) *ReplicateConfig {
-	if replicateID == "" {
-		return nil
-	}
-	replicateConfig := &ReplicateConfig{
-		ReplicateID: replicateID,
-		CheckFunc: func(msg *ReplicateMsg) bool {
-			if !msg.GetIsEnd() {
-				return false
-			}
-			log.Info("check replicate msg",
-				zap.String("replicateID", replicateID),
-				zap.String("dbName", dbName),
-				zap.String("colName", colName),
-				zap.Any("msg", msg))
-			if msg.GetIsCluster() {
-				return true
-			}
-			return msg.GetDatabase() == dbName && (msg.GetCollection() == colName || msg.GetCollection() == "")
-		},
-	}
-	return replicateConfig
-}
-
-func GetReplicateID(msg TsMsg) string {
-	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
-	if !ok {
-		log.Warn("fail to get msg base, please check it", zap.Any("type", msg.Type()))
-		return ""
-	}
-	return msgBase.GetBase().GetReplicateInfo().GetReplicateID()
-}
-
 func GetTimestamp(msg TsMsg) uint64 {
 	msgBase, ok := msg.(interface{ GetBase() *commonpb.MsgBase })
 	if !ok {
@@ -362,10 +302,6 @@ func GetTimestamp(msg TsMsg) uint64 {
 		return 0
 	}
 	return msgBase.GetBase().GetTimestamp()
-}
-
-func MatchReplicateID(msg TsMsg, replicateID string) bool {
-	return GetReplicateID(msg) == replicateID
 }
 
 type Factory interface {

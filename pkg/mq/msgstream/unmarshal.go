@@ -92,7 +92,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	createPrivilegeGroupMsg := CreatePrivilegeGroupMsg{}
 	dropPrivilegeGroupMsg := DropPrivilegeGroupMsg{}
 	operatePrivilegeGroupMsg := OperatePrivilegeGroupMsg{}
-	replicateMsg := ReplicateMsg{}
 	importMsg := ImportMsg{}
 
 	createAliasMsg := CreateAliasMsg{}
@@ -134,7 +133,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_CreatePrivilegeGroup] = createPrivilegeGroupMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropPrivilegeGroup] = dropPrivilegeGroupMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_OperatePrivilegeGroup] = operatePrivilegeGroupMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_Replicate] = replicateMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Import] = importMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateAlias] = createAliasMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropAlias] = dropAliasMsg.Unmarshal

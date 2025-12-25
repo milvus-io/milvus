@@ -159,14 +159,6 @@ func (c *DDLCallback) alterDatabaseV1AckCallback(ctx context.Context, result mes
 }
 
 func MergeProperties(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
-	_, existEndTS := common.GetReplicateEndTS(updatedProps)
-	if existEndTS {
-		updatedProps = append(updatedProps, &commonpb.KeyValuePair{
-			Key:   common.ReplicateIDKey,
-			Value: "",
-		})
-	}
-
 	props := make(map[string]string)
 	for _, prop := range oldProps {
 		props[prop.Key] = prop.Value

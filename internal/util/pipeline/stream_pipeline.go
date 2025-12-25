@@ -41,13 +41,12 @@ type StreamPipeline interface {
 }
 
 type streamPipeline struct {
-	pipeline        *pipeline
-	input           <-chan *msgstream.MsgPack
-	scanner         streaming.Scanner
-	dispatcher      msgdispatcher.Client
-	startOnce       sync.Once
-	vChannel        string
-	replicateConfig *msgstream.ReplicateConfig
+	pipeline   *pipeline
+	input      <-chan *msgstream.MsgPack
+	scanner    streaming.Scanner
+	dispatcher msgdispatcher.Client
+	startOnce  sync.Once
+	vChannel   string
 
 	closeCh   chan struct{} // notify work to exit
 	closeWg   sync.WaitGroup
@@ -96,10 +95,9 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 
 	start := time.Now()
 	p.input, err = p.dispatcher.Register(ctx, &msgdispatcher.StreamConfig{
-		VChannel:        p.vChannel,
-		Pos:             position,
-		SubPos:          common.SubscriptionPositionUnknown,
-		ReplicateConfig: p.replicateConfig,
+		VChannel: p.vChannel,
+		Pos:      position,
+		SubPos:   common.SubscriptionPositionUnknown,
 	})
 	if err != nil {
 		log.Error("dispatcher register failed after retried", zap.String("channel", position.ChannelName), zap.Error(err))
@@ -151,7 +149,6 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 	nodeTtInterval time.Duration,
 	enableTtChecker bool,
 	vChannel string,
-	replicateConfig *msgstream.ReplicateConfig,
 ) StreamPipeline {
 	pipeline := &streamPipeline{
 		pipeline: &pipeline{
@@ -159,12 +156,11 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
 		},
-		dispatcher:      dispatcher,
-		vChannel:        vChannel,
-		replicateConfig: replicateConfig,
-		closeCh:         make(chan struct{}),
-		closeWg:         sync.WaitGroup{},
-		lastAccessTime:  atomic.NewTime(time.Now()),
+		dispatcher:     dispatcher,
+		vChannel:       vChannel,
+		closeCh:        make(chan struct{}),
+		closeWg:        sync.WaitGroup{},
+		lastAccessTime: atomic.NewTime(time.Now()),
 	}
 
 	return pipeline

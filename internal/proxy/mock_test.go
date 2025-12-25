@@ -317,9 +317,6 @@ func (ms *simpleMockMsgStream) CheckTopicValid(topic string) error {
 func (ms *simpleMockMsgStream) ForceEnableProduce(enabled bool) {
 }
 
-func (ms *simpleMockMsgStream) SetReplicate(config *msgstream.ReplicateConfig) {
-}
-
 func newSimpleMockMsgStream() *simpleMockMsgStream {
 	return &simpleMockMsgStream{
 		msgChan:  make(chan *msgstream.ConsumeMsgPack, 1024),
