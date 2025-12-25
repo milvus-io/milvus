@@ -301,6 +301,19 @@ func (c *genericColumnBase[T]) CompactNullableValues() {
 	c.values = c.values[0:cnt]
 }
 
+func (c *genericColumnBase[T]) ValidCount() int {
+	if !c.nullable || len(c.validData) == 0 {
+		return len(c.values)
+	}
+	count := 0
+	for _, v := range c.validData {
+		if v {
+			count++
+		}
+	}
+	return count
+}
+
 func (c *genericColumnBase[T]) withValidData(validData []bool) {
 	if len(validData) > 0 {
 		c.nullable = true

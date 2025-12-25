@@ -392,6 +392,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 
 		baseIdx := 0
+		idxComputer := typeutil.NewFieldDataIdxComputer(existFieldData)
 		for _, idx := range updateIdxInUpsert {
 			typeutil.AppendIDs(it.deletePKs, upsertIDs, idx)
 			oldPK := typeutil.GetPK(upsertIDs, int64(idx))
@@ -399,7 +400,8 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			if !ok {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
-			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
+			fieldIdxs := idxComputer.Compute(int64(existIndex))
+			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex), fieldIdxs...)
 			err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx))
 			baseIdx += 1
 			if err != nil {
@@ -438,8 +440,32 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				insertWithNullField = append(insertWithNullField, fieldData)
 			}
 		}
-		for _, idx := range insertIdxInUpsert {
-			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx))
+		vectorIdxMap := make([][]int64, len(insertIdxInUpsert))
+		for rowIdx, offset := range insertIdxInUpsert {
+			vectorIdxMap[rowIdx] = make([]int64, len(insertWithNullField))
+			for fieldIdx := range insertWithNullField {
+				vectorIdxMap[rowIdx][fieldIdx] = int64(offset)
+			}
+		}
+		for fieldIdx, fieldData := range insertWithNullField {
+			validData := fieldData.GetValidData()
+			if len(validData) > 0 && typeutil.IsVectorType(fieldData.Type) {
+				dataIdx := int64(0)
+				rowIdx := 0
+				for i := 0; i < len(validData) && rowIdx < len(insertIdxInUpsert); i++ {
+					if i == insertIdxInUpsert[rowIdx] {
+						vectorIdxMap[rowIdx][fieldIdx] = dataIdx
+						rowIdx++
+					}
+					if validData[i] {
+						dataIdx++
+					}
+				}
+			}
+		}
+
+		for rowIdx, idx := range insertIdxInUpsert {
+			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx), vectorIdxMap[rowIdx]...)
 		}
 	}
 
@@ -619,6 +645,10 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
+
+	case *schemapb.FieldData_Vectors:
+		// Vector data is already in compressed format, skip
+		return nil
 
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
@@ -1077,7 +1107,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// deduplicate upsert data to handle duplicate primary keys in the same batch
+	// check for duplicate primary keys in the same batch
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
 	if err != nil {
 		log.Warn("fail to get primary field schema", zap.Error(err))

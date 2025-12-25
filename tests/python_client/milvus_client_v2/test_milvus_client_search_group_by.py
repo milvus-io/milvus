@@ -357,3 +357,68 @@ class TestSearchGroupBy(TestcaseBase):
                             output_fields=[grpby_field],
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": err_code, "err_msg": err_msg})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("metric", ["L2", "IP", "COSINE"])
+    def test_search_group_by_flat_index_correctness(self, metric):
+        """
+        target: test search group by with FLAT index returns correct results
+        method: 1. create a collection with FLAT index
+                2. insert data with group_by field having multiple values per group
+                3. search with and without group_by
+                4. verify group_by search returns the best result (same as normal search top-1)
+        expected: The top result from group_by search should match the top result from normal search
+                  for the same group
+        issue: https://github.com/milvus-io/milvus/issues/46349
+        """
+        collection_w = self.init_collection_general(prefix, auto_id=True, insert_data=False, is_index=False,
+                                                    is_all_data_type=True, with_json=False)[0]
+        # create FLAT index
+        _index = {"index_type": "FLAT", "metric_type": metric, "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
+
+        # insert data with 10 different group values, 100 records per group
+        for _ in range(10):
+            data = cf.gen_dataframe_all_data_type(nb=100, auto_id=True, with_json=False)
+            collection_w.insert(data)
+
+        collection_w.flush()
+        collection_w.load()
+
+        nq = 1
+        limit = 1
+        search_vectors = cf.gen_vectors(nq, dim=ct.default_dim)
+        grpby_field = ct.default_int32_field_name
+        search_params = {"metric_type": metric, "params": {}}
+
+        # normal search to get the best result
+        normal_res = collection_w.search(search_vectors, ct.default_float_vec_field_name,
+                                         search_params, limit,
+                                         output_fields=[grpby_field])[0]
+
+        # group_by search
+        groupby_res = collection_w.search(search_vectors, ct.default_float_vec_field_name,
+                                          search_params, limit,
+                                          group_by_field=grpby_field,
+                                          output_fields=[grpby_field])[0]
+
+        # verify that the top result from group_by search matches the normal search
+        # for the same group value, group_by should return the best (closest) result
+        normal_top_distance = normal_res[0][0].distance
+        normal_top_group = normal_res[0][0].entity.get(grpby_field)
+        groupby_top_distance = groupby_res[0][0].distance
+        groupby_top_group = groupby_res[0][0].entity.get(grpby_field)
+
+        log.info(f"Normal search top result: distance={normal_top_distance}, group={normal_top_group}")
+        log.info(f"GroupBy search top result: distance={groupby_top_distance}, group={groupby_top_group}")
+
+        # The group_by result should have the same or better distance as normal search
+        # because group_by returns the best result per group
+        if metric == "L2":
+            # For L2, smaller is better
+            assert groupby_top_distance <= normal_top_distance + epsilon, \
+                f"GroupBy search should return result with distance <= normal search for L2 metric"
+        else:
+            # For IP/COSINE, larger is better
+            assert groupby_top_distance >= normal_top_distance - epsilon, \
+                f"GroupBy search should return result with distance >= normal search for {metric} metric"

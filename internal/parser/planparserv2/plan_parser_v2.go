@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -149,6 +150,7 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 		return nil, err
 	}
 
+	predicate.expr = rewriter.RewriteExpr(predicate.expr)
 	return predicate.expr, nil
 }
 

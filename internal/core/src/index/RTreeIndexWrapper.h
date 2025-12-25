@@ -97,6 +97,13 @@ class RTreeIndexWrapper {
     int64_t
     count() const;
 
+    /**
+     * @brief Get the estimated memory usage of the R-tree index
+     * @return Memory usage in bytes
+     */
+    int64_t
+    ByteSize() const;
+
     // Boost rtree does not use index/leaf capacities; keep only fill factor for
     // compatibility (no-op currently)
 

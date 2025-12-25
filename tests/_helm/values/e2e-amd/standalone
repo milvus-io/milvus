@@ -44,6 +44,10 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    quotaAndLimits:
+      flushRate:
+        collection:
+          max: 4
 metrics:
   serviceMonitor:
     enabled: true

@@ -3,6 +3,7 @@
 
 #include "index/StringIndexSort.h"
 #include "index/IndexFactory.h"
+#include "pb/plan.pb.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 constexpr int64_t nb = 100;
@@ -604,4 +605,392 @@ TEST(StringIndexSortStandaloneTest, StringIndexSortSerialization) {
         // So we expect more than 11 due to lexicographical ordering
         ASSERT_GT(bitset.count(), 0);
     }
+}
+
+// ============== PatternMatch Tests ==============
+
+using milvus::proto::plan::OpType;
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchBasicMemory) {
+    std::vector<std::string> test_data = {
+        "apple",        // 0
+        "application",  // 1
+        "apply",        // 2
+        "banana",       // 3
+        "band",         // 4
+        "cat",          // 5
+        "category",     // 6
+        "dog",          // 7
+        "application",  // 8 (duplicate)
+        "apple"         // 9 (duplicate)
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Test pattern "app%" - should match apple, application, apply
+    {
+        auto bitset = index->PatternMatch("app%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 5);  // apple(2), application(2), apply(1)
+        ASSERT_TRUE(bitset[0]);        // apple
+        ASSERT_TRUE(bitset[1]);        // application
+        ASSERT_TRUE(bitset[2]);        // apply
+        ASSERT_TRUE(bitset[8]);        // application (dup)
+        ASSERT_TRUE(bitset[9]);        // apple (dup)
+    }
+
+    // Test pattern "app%ion" - should match application only
+    {
+        auto bitset = index->PatternMatch("app%ion", OpType::Match);
+        ASSERT_EQ(bitset.count(), 2);  // application appears twice
+        ASSERT_TRUE(bitset[1]);        // application
+        ASSERT_TRUE(bitset[8]);        // application (dup)
+    }
+
+    // Test pattern "%ana%" - should match banana
+    {
+        auto bitset = index->PatternMatch("%ana%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 1);
+        ASSERT_TRUE(bitset[3]);  // banana
+    }
+
+    // Test pattern "cat%" - should match cat, category
+    {
+        auto bitset = index->PatternMatch("cat%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 2);
+        ASSERT_TRUE(bitset[5]);  // cat
+        ASSERT_TRUE(bitset[6]);  // category
+    }
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchWithUnderscoreMemory) {
+    std::vector<std::string> test_data = {
+        "abc",   // 0
+        "aXc",   // 1
+        "a1c",   // 2
+        "abcd",  // 3
+        "ac",    // 4
+        "abbc",  // 5
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Test pattern "a_c" - matches any single character between a and c
+    {
+        auto bitset = index->PatternMatch("a_c", OpType::Match);
+        ASSERT_EQ(bitset.count(), 3);  // abc, aXc, a1c
+        ASSERT_TRUE(bitset[0]);        // abc
+        ASSERT_TRUE(bitset[1]);        // aXc
+        ASSERT_TRUE(bitset[2]);        // a1c
+        ASSERT_FALSE(bitset[3]);       // abcd - too long
+        ASSERT_FALSE(bitset[4]);       // ac - too short
+        ASSERT_FALSE(bitset[5]);       // abbc - two chars between
+    }
+
+    // Test pattern "a_c%" - prefix with underscore
+    {
+        auto bitset = index->PatternMatch("a_c%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 4);  // abc, aXc, a1c, abcd
+        ASSERT_TRUE(bitset[0]);        // abc
+        ASSERT_TRUE(bitset[1]);        // aXc
+        ASSERT_TRUE(bitset[2]);        // a1c
+        ASSERT_TRUE(bitset[3]);        // abcd
+    }
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchEscapeMemory) {
+    std::vector<std::string> test_data = {
+        "100%",        // 0 - contains literal %
+        "100percent",  // 1
+        "50%off",      // 2 - contains literal %
+        "a_b",         // 3 - contains literal _
+        "axb",         // 4
+        "a%b",         // 5 - contains literal %
+        "ab",          // 6
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Test pattern "100\%" - matches literal "100%"
+    {
+        auto bitset = index->PatternMatch("100\\%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 1);
+        ASSERT_TRUE(bitset[0]);  // 100%
+    }
+
+    // Test pattern "%\%%" - matches strings containing literal %
+    {
+        auto bitset = index->PatternMatch("%\\%%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 3);
+        ASSERT_TRUE(bitset[0]);  // 100%
+        ASSERT_TRUE(bitset[2]);  // 50%off
+        ASSERT_TRUE(bitset[5]);  // a%b
+    }
+
+    // Test pattern "a\_b" - matches literal "a_b"
+    {
+        auto bitset = index->PatternMatch("a\\_b", OpType::Match);
+        ASSERT_EQ(bitset.count(), 1);
+        ASSERT_TRUE(bitset[3]);  // a_b
+    }
+
+    // Test pattern "a\%b" - matches literal "a%b"
+    {
+        auto bitset = index->PatternMatch("a\\%b", OpType::Match);
+        ASSERT_EQ(bitset.count(), 1);
+        ASSERT_TRUE(bitset[5]);  // a%b
+    }
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchNoPrefix) {
+    std::vector<std::string> test_data = {
+        "hello world",  // 0
+        "world hello",  // 1
+        "hello",        // 2
+        "world",        // 3
+        "say hello",    // 4
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Test pattern "%hello" - postfix match (no fixed prefix)
+    {
+        auto bitset = index->PatternMatch("%hello", OpType::Match);
+        ASSERT_EQ(bitset.count(), 3);
+        ASSERT_TRUE(bitset[1]);  // world hello
+        ASSERT_TRUE(bitset[2]);  // hello
+        ASSERT_TRUE(bitset[4]);  // say hello
+    }
+
+    // Test pattern "%world%" - inner match (no fixed prefix)
+    {
+        auto bitset = index->PatternMatch("%world%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 3);
+        ASSERT_TRUE(bitset[0]);  // hello world
+        ASSERT_TRUE(bitset[1]);  // world hello
+        ASSERT_TRUE(bitset[3]);  // world
+    }
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchMmap) {
+    std::vector<std::string> test_data = {
+        "apple",
+        "application",
+        "apply",
+        "banana",
+        "band",
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Serialize and reload with mmap
+    auto binary_set = index->Serialize(config);
+
+    milvus::Config mmap_config;
+    mmap_config[milvus::index::MMAP_FILE_PATH] =
+        "/tmp/test_pattern_match_mmap.idx";
+
+    auto mmap_index = milvus::index::CreateStringIndexSort({});
+    mmap_index->Load(binary_set, mmap_config);
+
+    // Test pattern "app%ion"
+    {
+        auto bitset = mmap_index->PatternMatch("app%ion", OpType::Match);
+        ASSERT_EQ(bitset.count(), 1);
+        ASSERT_TRUE(bitset[1]);  // application
+    }
+
+    // Test pattern "ban%" with underscore
+    {
+        auto bitset = mmap_index->PatternMatch("ban%", OpType::Match);
+        ASSERT_EQ(bitset.count(), 2);  // banana, band
+        ASSERT_TRUE(bitset[3]);
+        ASSERT_TRUE(bitset[4]);
+    }
+
+    std::remove("/tmp/test_pattern_match_mmap.idx");
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchComplexEscape) {
+    std::vector<std::string> test_data = {
+        "10%_off",   // 0 - contains both % and _
+        "10%aoff",   // 1
+        "10%boff",   // 2
+        "10a_off",   // 3
+        "discount",  // 4
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Test pattern "10\%\_off" - matches literal "10%_off"
+    {
+        auto bitset = index->PatternMatch("10\\%\\_off", OpType::Match);
+        ASSERT_EQ(bitset.count(), 1);
+        ASSERT_TRUE(bitset[0]);
+    }
+
+    // Test pattern "10\%_off" - matches "10%" followed by any single char and "off"
+    {
+        auto bitset = index->PatternMatch("10\\%_off", OpType::Match);
+        ASSERT_EQ(bitset.count(), 3);  // 10%_off, 10%aoff, 10%boff
+        ASSERT_TRUE(bitset[0]);
+        ASSERT_TRUE(bitset[1]);
+        ASSERT_TRUE(bitset[2]);
+    }
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchPrefixOp) {
+    std::vector<std::string> test_data = {
+        "apple",
+        "application",
+        "banana",
+    };
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Test PrefixMatch op - should delegate to PrefixMatch
+    auto bitset = index->PatternMatch("app", OpType::PrefixMatch);
+    ASSERT_EQ(bitset.count(), 2);  // apple, application
+    ASSERT_TRUE(bitset[0]);
+    ASSERT_TRUE(bitset[1]);
+}
+
+TEST(StringIndexSortPatternMatchTest, PatternMatchDuplicateValues) {
+    // Test that duplicate values are handled correctly
+    // (each unique value should only be regex-matched once)
+    std::vector<std::string> test_data;
+    for (int i = 0; i < 1000; ++i) {
+        test_data.push_back("repeated_value");
+    }
+    test_data.push_back("other_value");
+
+    milvus::Config config;
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Pattern that matches repeated_value
+    auto bitset = index->PatternMatch("repeated%", OpType::Match);
+    ASSERT_EQ(bitset.count(), 1000);
+
+    // Pattern that matches other_value
+    auto bitset2 = index->PatternMatch("other%", OpType::Match);
+    ASSERT_EQ(bitset2.count(), 1);
+    ASSERT_TRUE(bitset2[1000]);
+}
+
+TEST(StringIndexSortPatternMatchTest, PostfixMatch) {
+    std::vector<std::string> test_data = {
+        "hello_world",  // 0 - ends with "world"
+        "new_world",    // 1 - ends with "world"
+        "world_peace",  // 2 - ends with "peace"
+        "hello",        // 3
+        "world",        // 4 - ends with "world"
+    };
+
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // PostfixMatch: find strings ending with "world"
+    auto bitset = index->PatternMatch("world", OpType::PostfixMatch);
+    ASSERT_EQ(bitset.count(), 3);
+    ASSERT_TRUE(bitset[0]);   // hello_world
+    ASSERT_TRUE(bitset[1]);   // new_world
+    ASSERT_FALSE(bitset[2]);  // world_peace
+    ASSERT_FALSE(bitset[3]);  // hello
+    ASSERT_TRUE(bitset[4]);   // world
+
+    // PostfixMatch: find strings ending with "peace"
+    auto bitset2 = index->PatternMatch("peace", OpType::PostfixMatch);
+    ASSERT_EQ(bitset2.count(), 1);
+    ASSERT_TRUE(bitset2[2]);  // world_peace
+}
+
+TEST(StringIndexSortPatternMatchTest, InnerMatch) {
+    std::vector<std::string> test_data = {
+        "hello_world",  // 0 - contains "world"
+        "new_world",    // 1 - contains "world"
+        "world_peace",  // 2 - contains "world"
+        "hello",        // 3 - no "world"
+        "worldwide",    // 4 - contains "world"
+    };
+
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // InnerMatch: find strings containing "world"
+    auto bitset = index->PatternMatch("world", OpType::InnerMatch);
+    ASSERT_EQ(bitset.count(), 4);
+    ASSERT_TRUE(bitset[0]);   // hello_world
+    ASSERT_TRUE(bitset[1]);   // new_world
+    ASSERT_TRUE(bitset[2]);   // world_peace
+    ASSERT_FALSE(bitset[3]);  // hello
+    ASSERT_TRUE(bitset[4]);   // worldwide
+
+    // InnerMatch: find strings containing "ello"
+    auto bitset2 = index->PatternMatch("ello", OpType::InnerMatch);
+    ASSERT_EQ(bitset2.count(), 2);
+    ASSERT_TRUE(bitset2[0]);  // hello_world
+    ASSERT_FALSE(bitset2[1]);
+    ASSERT_FALSE(bitset2[2]);
+    ASSERT_TRUE(bitset2[3]);  // hello
+    ASSERT_FALSE(bitset2[4]);
+}
+
+TEST(StringIndexSortPatternMatchTest, PostfixMatchMmap) {
+    std::vector<std::string> test_data = {
+        "application",  // 0 - ends with "ion"
+        "revolution",   // 1 - ends with "ion"
+        "apple",        // 2
+    };
+
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Serialize and reload as mmap
+    auto binaryset = index->Serialize({});
+    auto mmap_index = milvus::index::CreateStringIndexSort({});
+    mmap_index->Load(binaryset, {});
+
+    // PostfixMatch on mmap
+    auto bitset = mmap_index->PatternMatch("ion", OpType::PostfixMatch);
+    ASSERT_EQ(bitset.count(), 2);
+    ASSERT_TRUE(bitset[0]);   // application
+    ASSERT_TRUE(bitset[1]);   // revolution
+    ASSERT_FALSE(bitset[2]);  // apple
+}
+
+TEST(StringIndexSortPatternMatchTest, InnerMatchMmap) {
+    std::vector<std::string> test_data = {
+        "application",  // 0 - contains "cat"
+        "category",     // 1 - contains "cat"
+        "dog",          // 2 - no "cat"
+    };
+
+    auto index = milvus::index::CreateStringIndexSort({});
+    index->Build(test_data.size(), test_data.data());
+
+    // Serialize and reload as mmap
+    auto binaryset = index->Serialize({});
+    auto mmap_index = milvus::index::CreateStringIndexSort({});
+    mmap_index->Load(binaryset, {});
+
+    // InnerMatch on mmap
+    auto bitset = mmap_index->PatternMatch("cat", OpType::InnerMatch);
+    ASSERT_EQ(bitset.count(), 2);
+    ASSERT_TRUE(bitset[0]);   // application
+    ASSERT_TRUE(bitset[1]);   // category
+    ASSERT_FALSE(bitset[2]);  // dog
 }

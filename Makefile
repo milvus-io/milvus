@@ -321,6 +321,10 @@ test-tso:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t tso)
 
+test-pkg:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t pkg)
+
 test-kv:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t kv)
@@ -386,15 +390,21 @@ run-test-cpp:
 	@echo $(PWD)/scripts/run_cpp_unittest.sh arg=${filter}
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh arg=${filter})
 
-# tool for benchmark
-exprparser-tool:
-	@echo "Building exprparser helper ..."
+plan-parser-so:
+	@echo "Building plan parser shared library ..."
 	@source $(PWD)/scripts/setenv.sh && \
-		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="-r $${RPATH}" -o $(INSTALL_PATH)/exprparser $(PWD)/cmd/tools/exprparser/main.go 1>/dev/null
+		mkdir -p $(PWD)/internal/core/output/lib $(PWD)/internal/core/output/include && \
+		go env -w CGO_ENABLED="1" && \
+		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper/wrapper.go && \
+		mv $(PWD)/internal/core/output/lib/libmilvus-planparser.h $(PWD)/internal/core/output/include/libmilvus-planparser.h && \
+		cp $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.h $(PWD)/internal/core/output/include/ && \
+		g++ -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
+			-I$(PWD)/internal/core/output/include \
+			-L$(PWD)/internal/core/output/lib -lmilvus-planparser \
+			-Wl,-rpath,'$$ORIGIN'
 
 # Build unittest with external scalar-benchmark enabled
-scalar-bench: generated-proto exprparser-tool
+scalar-bench: generated-proto plan-parser-so
 	@echo "Building Milvus cpp unittest with scalar-benchmark ... "
 	@(export CMAKE_EXTRA_ARGS="-DENABLE_SCALAR_BENCH=ON"; env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 
