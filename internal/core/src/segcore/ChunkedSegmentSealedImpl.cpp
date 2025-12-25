@@ -799,7 +799,8 @@ ChunkedSegmentSealedImpl::GetNgramIndexForJson(
 
         auto slot = iter->second.at(nested_path).get();
 
-        auto ca = SemiInlineGet(slot->PinCells(op_ctx, {0}));
+        milvus::OpContext ctx;
+        auto ca = SemiInlineGet(slot->PinCells(&ctx, {0}));
         auto index =
             dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
         AssertInfo(index != nullptr,
