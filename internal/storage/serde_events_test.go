@@ -236,7 +236,7 @@ func TestCompositeBinlogRecordWriter_TTLFieldCollection(t *testing.T) {
 	assert.ElementsMatch(t, []int64{10, 20}, w.ttlFieldValues)
 
 	neverExpire := int64(^uint64(0) >> 1)
-	got := w.GetExpirationTimeByPercentile()
+	got := w.GetExpirQuantiles()
 	assert.Equal(t, []int64{10, 20, neverExpire, neverExpire, neverExpire}, got)
 }
 

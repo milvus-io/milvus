@@ -120,18 +120,18 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			return err
 		}
 
-		fieldBinlogs, statsLog, bm25Logs, manifest, expirationTimeByPercentile := w.writer.GetLogs()
+		fieldBinlogs, statsLog, bm25Logs, manifest, expirQuantiles := w.writer.GetLogs()
 
 		result := &datapb.CompactionSegment{
-			SegmentID:                  w.currentSegmentID,
-			InsertLogs:                 storage.SortFieldBinlogs(fieldBinlogs),
-			Field2StatslogPaths:        []*datapb.FieldBinlog{statsLog},
-			NumOfRows:                  w.writer.GetRowNum(),
-			Channel:                    w.channel,
-			Bm25Logs:                   lo.Values(bm25Logs),
-			StorageVersion:             w.storageVersion,
-			Manifest:                   manifest,
-			ExpirationTimeByPercentile: expirationTimeByPercentile,
+			SegmentID:           w.currentSegmentID,
+			InsertLogs:          storage.SortFieldBinlogs(fieldBinlogs),
+			Field2StatslogPaths: []*datapb.FieldBinlog{statsLog},
+			NumOfRows:           w.writer.GetRowNum(),
+			Channel:             w.channel,
+			Bm25Logs:            lo.Values(bm25Logs),
+			StorageVersion:      w.storageVersion,
+			Manifest:            manifest,
+			ExpirQuantiles:      expirQuantiles,
 		}
 
 		w.res = append(w.res, result)

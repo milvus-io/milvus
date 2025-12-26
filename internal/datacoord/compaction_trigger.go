@@ -694,8 +694,8 @@ func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *comp
 	return false
 }
 
-func getExpirationPercentileIndexByRatio(ratio float64, percentilesLen int) int {
-	// expirationTimeByPercentile is [20%, 40%, 60%, 80%, 100%] (len = 5).
+func getExpirQuantilesIndexByRatio(ratio float64, percentilesLen int) int {
+	// expirQuantiles is [20%, 40%, 60%, 80%, 100%] (len = 5).
 	// We map ratio to the nearest lower 20% bucket:
 	// 0~0.39 -> 20%, 0.4~0.59 -> 40%, 0.6~0.79 -> 60%, 0.8~0.99 -> 80%, >=1.0 -> 100%
 	if percentilesLen <= 0 {
@@ -713,14 +713,14 @@ func getExpirationPercentileIndexByRatio(ratio float64, percentilesLen int) int 
 }
 
 func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *compactTime, segment *SegmentInfo) bool {
-	percentiles := segment.GetExpirationTimeByPercentile()
+	percentiles := segment.GetExpirQuantiles()
 	if len(percentiles) == 0 {
 		return false
 	}
 
 	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
 
-	index := getExpirationPercentileIndexByRatio(ratio, len(percentiles))
+	index := getExpirQuantilesIndexByRatio(ratio, len(percentiles))
 	expirationTime := percentiles[index]
 	// If current time (startTime) is greater than the expiration time at this percentile, trigger compaction
 	startTs := tsoutil.PhysicalTime(compactTime.startTime)
