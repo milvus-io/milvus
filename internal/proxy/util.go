@@ -2655,25 +2655,6 @@ func GetFailedResponse(req any, err error) any {
 	return nil
 }
 
-func GetReplicateID(ctx context.Context, database, collectionName string) (string, error) {
-	if globalMetaCache == nil {
-		return "", merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
-	}
-	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, database, collectionName, 0)
-	if err != nil {
-		return "", err
-	}
-	if colInfo.replicateID != "" {
-		return colInfo.replicateID, nil
-	}
-	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, database)
-	if err != nil {
-		return "", err
-	}
-	replicateID, _ := common.GetReplicateID(dbInfo.properties)
-	return replicateID, nil
-}
-
 func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
 	fields := make([]string, 0)
 	for _, fSchema := range collSchema.Functions {

@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/common"
@@ -76,19 +75,11 @@ func createNewInputFromDispatcher(initCtx context.Context,
 		start = time.Now()
 	)
 
-	replicateID, _ := pkgcommon.GetReplicateID(schema.GetProperties())
-	if replicateID == "" {
-		log.Info("datanode consume without replicateID, try to get replicateID from dbProperties", zap.Any("dbProperties", dbProperties))
-		replicateID, _ = pkgcommon.GetReplicateID(dbProperties)
-	}
-	replicateConfig := msgstream.GetReplicateConfig(replicateID, schema.GetDbName(), schema.GetName())
-
 	if seekPos != nil && len(seekPos.MsgID) != 0 {
 		input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
-			VChannel:        vchannel,
-			Pos:             seekPos,
-			SubPos:          common.SubscriptionPositionUnknown,
-			ReplicateConfig: replicateConfig,
+			VChannel: vchannel,
+			Pos:      seekPos,
+			SubPos:   common.SubscriptionPositionUnknown,
 		})
 		if err != nil {
 			log.Warn("datanode consume failed after retried", zap.Error(err))
@@ -105,10 +96,9 @@ func createNewInputFromDispatcher(initCtx context.Context,
 	}
 
 	input, err = dispatcherClient.Register(initCtx, &msgdispatcher.StreamConfig{
-		VChannel:        vchannel,
-		Pos:             nil,
-		SubPos:          common.SubscriptionPositionEarliest,
-		ReplicateConfig: replicateConfig,
+		VChannel: vchannel,
+		Pos:      nil,
+		SubPos:   common.SubscriptionPositionEarliest,
 	})
 	if err != nil {
 		log.Warn("datanode consume failed after retried", zap.Error(err))

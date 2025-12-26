@@ -950,12 +950,6 @@ func TestNumRowsWithSchema(t *testing.T) {
 func TestChannelConvert(t *testing.T) {
 	t.Run("is physical channel", func(t *testing.T) {
 		{
-			channel := "by-dev-replicate-msg"
-			ok := IsPhysicalChannel(channel)
-			assert.True(t, ok)
-		}
-
-		{
 			channel := "by-dev-rootcoord-dml_2"
 			ok := IsPhysicalChannel(channel)
 			assert.True(t, ok)
@@ -979,12 +973,6 @@ func TestChannelConvert(t *testing.T) {
 			channel := "by-dev-rootcoord-dml_2"
 			physicalChannel := ToPhysicalChannel(channel)
 			assert.Equal(t, "by-dev-rootcoord-dml_2", physicalChannel)
-		}
-
-		{
-			channel := "by-dev-replicate-msg"
-			physicalChannel := ToPhysicalChannel(channel)
-			assert.Equal(t, "by-dev-replicate-msg", physicalChannel)
 		}
 	})
 

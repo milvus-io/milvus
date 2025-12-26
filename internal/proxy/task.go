@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -1366,26 +1365,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 		}
 	}
-
-	_, ok := common.IsReplicateEnabled(t.Properties)
-	if ok {
-		return merr.WrapErrParameterInvalidMsg("can't set the replicate.id property")
-	}
-	endTS, ok := common.GetReplicateEndTS(t.Properties)
-	if ok && collBasicInfo.replicateID != "" {
-		allocResp, err := t.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
-			Count:          1,
-			BlockTimestamp: endTS,
-		})
-		if err = merr.CheckRPCCall(allocResp, err); err != nil {
-			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
-		}
-		if allocResp.GetTimestamp() <= endTS {
-			return merr.WrapErrServiceInternal("alter collection: alloc timestamp failed, timestamp is not greater than endTS",
-				fmt.Sprintf("timestamp = %d, endTS = %d", allocResp.GetTimestamp(), endTS))
-		}
-	}
-
 	return nil
 }
 
