@@ -196,7 +196,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
 	}
-	hasTTLField := t.plan.GetTtlFieldID() > 1
+	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
 
 	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
 	var predicate func(r storage.Record, ri, i int) bool

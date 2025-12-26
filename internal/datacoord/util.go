@@ -147,7 +147,25 @@ func getZeroTime() time.Time {
 	return t
 }
 
-func getTTLField(schema *schemapb.CollectionSchema) UniqueID {
+// getCollectionTTL returns ttl if collection's ttl is specified
+func getCollectionTTL(properties map[string]string) (time.Duration, error) {
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return -1, err
+		}
+		return time.Duration(ttl) * time.Second, nil
+	}
+
+	return -1, nil
+}
+
+func getTTLFieldID(schema *schemapb.CollectionSchema) UniqueID {
+	if schema == nil {
+		return common.InvalidFieldID
+	}
+
 	ttlFieldName := ""
 	for _, pair := range schema.GetProperties() {
 		if pair.GetKey() == common.CollectionTTLFieldKey {

@@ -373,7 +373,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	}
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("PlanID", t.GetTaskProto().GetPlanID()), zap.Int64("collectionID", t.GetTaskProto().GetCollectionID()))
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	ttlFieldID := getTTLField(taskProto.GetSchema())
+	ttlFieldID := getTTLFieldID(taskProto.GetSchema())
 	plan := &datapb.CompactionPlan{
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),

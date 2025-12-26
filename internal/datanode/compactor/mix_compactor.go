@@ -251,7 +251,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer reader.Close()
 
-	hasTTLField := t.plan.GetTtlFieldID() > 1
+	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
 
 	for {
 		var r storage.Record

@@ -648,7 +648,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	}
 	defer rr.Close()
 
-	hasTTLField := t.plan.GetTtlFieldID() > 1
+	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
 
 	offset := int64(-1)
 	for {
@@ -995,7 +995,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
-	hasTTLField := t.plan.GetTtlFieldID() > 1
+	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
 	for {
 		v, err := pkIter.NextValue()
 		if err != nil {
