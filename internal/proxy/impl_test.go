@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
@@ -494,10 +497,24 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 		node := createTestProxy()
 		defer node.sched.Close()
 
+		messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
+		msg := message.NewFlushAllMessageBuilderV2().
+			WithVChannel("test-vchannel").
+			WithHeader(&message.FlushAllMessageHeader{}).
+			WithBody(&message.FlushAllMessageBody{}).
+			MustBuildMutable().WithTimeTick(1000).
+			WithLastConfirmed(messageID)
+		milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID))
+
 		mixcoord := &grpcmixcoordclient.Client{}
 		node.mixCoord = mixcoord
 		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
-			return &datapb.FlushAllResponse{Status: successStatus}, nil
+			return &datapb.FlushAllResponse{
+				Status: successStatus,
+				FlushAllMsgs: map[string]*commonpb.ImmutableMessage{
+					"channel1": milvusMsg,
+				},
+			}, nil
 		}).Build()
 
 		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
