@@ -36,17 +36,10 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
 
-    for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
-
-        if (index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::HYBRID ||
-            index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::BITMAP) {
-            return false;
-        }
-    }
-    return true;
+    auto index_ptr = dynamic_cast<const Index*>(pinned_index_[0].get());
+    return index_ptr->GetIndexType() !=
+               milvus::index::ScalarIndexType::HYBRID &&
+           index_ptr->GetIndexType() != milvus::index::ScalarIndexType::BITMAP;
 }
 
 template <>
@@ -1285,7 +1278,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
     TargetBitmap result;
     result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -1363,7 +1356,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
     TargetBitmap result;
     result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -1878,11 +1871,9 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     TargetBitmap result;
     TargetBitmap valid_result;
-    result.append(
-        *cached_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        current_data_global_pos_,
-                        real_batch_size);
+    result.append(*cached_match_res_, current_global_pos_, real_batch_size);
+    valid_result.append(
+        *cached_index_chunk_valid_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           std::move(valid_result));
@@ -1924,10 +1915,9 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     TargetBitmap result;
     TargetBitmap valid_result;
     result.append(
-        *cached_ngram_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        current_data_global_pos_,
-                        real_batch_size);
+        *cached_ngram_match_res_, current_global_pos_, real_batch_size);
+    valid_result.append(
+        *cached_index_chunk_valid_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           std::move(valid_result));

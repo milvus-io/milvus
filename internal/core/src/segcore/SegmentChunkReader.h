@@ -43,7 +43,10 @@ class SegmentChunkReader {
                        int64_t active_count)
         : segment_(segment),
           active_count_(active_count),
-          size_per_chunk_(segment->size_per_chunk()),
+          // size_per_chunk_ is only valid for growing segment
+          size_per_chunk_(segment->type() == SegmentType::Growing
+                              ? segment->size_per_chunk()
+                              : 0),
           op_ctx_(op_ctx) {
     }
 

@@ -45,17 +45,7 @@ class PhyCallExpr : public Expr {
                 const segcore::SegmentInternalInterface* segment,
                 int64_t active_count,
                 int64_t batch_size)
-        : Expr(DataType::BOOL, std::move(input), name, op_ctx),
-          expr_(expr),
-          active_count_(active_count),
-          segment_(segment),
-          batch_size_(batch_size) {
-        size_per_chunk_ = segment_->size_per_chunk();
-        num_chunk_ = upper_div(active_count_, size_per_chunk_);
-        AssertInfo(
-            batch_size_ > 0,
-            fmt::format("expr batch size should greater than zero, but now: {}",
-                        batch_size_));
+        : Expr(DataType::BOOL, std::move(input), name, op_ctx), expr_(expr) {
     }
 
     void
@@ -85,17 +75,25 @@ class PhyCallExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        for (const auto& input : inputs_) {
+            if (!input->CanExecuteAllAtOnce()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        for (auto& input : inputs_) {
+            input->SetExecuteAllAtOnce();
+        }
+    }
+
  private:
     std::shared_ptr<const milvus::expr::CallExpr> expr_;
-
-    int64_t active_count_{0};
-    int64_t num_chunk_{0};
-    int64_t current_chunk_id_{0};
-    int64_t current_chunk_pos_{0};
-    int64_t size_per_chunk_{0};
-
-    const segcore::SegmentInternalInterface* segment_;
-    int64_t batch_size_;
 };
 
 }  // namespace exec

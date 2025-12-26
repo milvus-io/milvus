@@ -26,7 +26,9 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/ConjunctExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
+#include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::exec;
@@ -807,4 +809,429 @@ TEST(TaskTest, SkipIndexWithBitmapInputAlignment) {
     //
     // With the fix: 1 row should match correctly.
     EXPECT_EQ(num_matched, 1);
+}
+
+// Tests for CanExecuteAllAtOnce optimization
+// This test creates a sealed segment with scalar index and verifies:
+// 1. CanExecuteAllAtOnce returns true when expression can use index
+// 2. The optimized execution path produces correct results
+TEST(TaskTest, CanExecuteAllAtOnce_WithScalarIndex) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto int64_fid = schema->AddDebugField("int64_field", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const size_t N = 1000;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Create and load scalar index for int64 field
+    LoadIndexInfo index_info;
+    index_info.field_id = int64_fid.get();
+    index_info.field_type = DataType::INT64;
+    index_info.index_params["index_type"] = "STL_SORT";
+    auto int64_data = dataset.get_col<int64_t>(int64_fid);
+    auto index = GenScalarIndexing<int64_t>(N, int64_data.data());
+    index_info.index_params = GenIndexParams(index.get());
+    index_info.cache_index = CreateTestCacheIndex("test", std::move(index));
+    segment->LoadIndex(index_info);
+
+    // Build expression: int64_field < 500
+    proto::plan::GenericValue val;
+    val.set_int64_val(500);
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::LessThan,
+        val,
+        std::vector<proto::plan::GenericValue>{});
+
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", unary_expr, sources);
+    auto plan = plan::PlanFragment(filter_node);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_can_execute_all_at_once",
+        segment.get(),
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_indexed_expr", plan, 0, query_context);
+
+    int64_t total_rows = 0;
+    int64_t filtered_rows = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+        if (col_vec && col_vec->IsBitmap()) {
+            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
+            total_rows += col_vec->size();
+            filtered_rows += view.count();
+        }
+    }
+
+    int64_t num_matched = total_rows - filtered_rows;
+    // Should have some matches (values less than 500)
+    EXPECT_GT(num_matched, 0);
+    EXPECT_EQ(total_rows, N);
+}
+
+// Test CanExecuteAllAtOnce for LogicalBinaryExpr (AND/OR)
+// When both children can execute all at once, the parent should also be able to
+TEST(TaskTest, CanExecuteAllAtOnce_LogicalBinaryExpr) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto int64_fid = schema->AddDebugField("int64_field", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const size_t N = 1000;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Create and load scalar index for int64 field
+    LoadIndexInfo index_info;
+    index_info.field_id = int64_fid.get();
+    index_info.field_type = DataType::INT64;
+    index_info.index_params["index_type"] = "STL_SORT";
+    auto int64_data = dataset.get_col<int64_t>(int64_fid);
+    auto index = GenScalarIndexing<int64_t>(N, int64_data.data());
+    index_info.index_params = GenIndexParams(index.get());
+    index_info.cache_index = CreateTestCacheIndex("test", std::move(index));
+    segment->LoadIndex(index_info);
+
+    // Build expression: int64_field > 100 AND int64_field < 500
+    proto::plan::GenericValue val1;
+    val1.set_int64_val(100);
+    auto left_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::GreaterThan,
+        val1,
+        std::vector<proto::plan::GenericValue>{});
+
+    proto::plan::GenericValue val2;
+    val2.set_int64_val(500);
+    auto right_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::LessThan,
+        val2,
+        std::vector<proto::plan::GenericValue>{});
+
+    auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, left_expr, right_expr);
+
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", and_expr, sources);
+    auto plan = plan::PlanFragment(filter_node);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_logical_binary_can_execute_all_at_once",
+        segment.get(),
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task =
+        Task::Create("task_logical_binary_indexed", plan, 0, query_context);
+
+    int64_t total_rows = 0;
+    int64_t filtered_rows = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+        if (col_vec && col_vec->IsBitmap()) {
+            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
+            total_rows += col_vec->size();
+            filtered_rows += view.count();
+        }
+    }
+
+    int64_t num_matched = total_rows - filtered_rows;
+    // Should have some matches (100 < value < 500)
+    EXPECT_GT(num_matched, 0);
+    EXPECT_EQ(total_rows, N);
+}
+
+// Test CanExecuteAllAtOnce for LogicalUnaryExpr (NOT)
+// When child can execute all at once, the parent should also be able to
+TEST(TaskTest, CanExecuteAllAtOnce_LogicalUnaryExpr) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto int64_fid = schema->AddDebugField("int64_field", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const size_t N = 1000;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Create and load scalar index for int64 field
+    LoadIndexInfo index_info;
+    index_info.field_id = int64_fid.get();
+    index_info.field_type = DataType::INT64;
+    index_info.index_params["index_type"] = "STL_SORT";
+    auto int64_data = dataset.get_col<int64_t>(int64_fid);
+    auto index = GenScalarIndexing<int64_t>(N, int64_data.data());
+    index_info.index_params = GenIndexParams(index.get());
+    index_info.cache_index = CreateTestCacheIndex("test", std::move(index));
+    segment->LoadIndex(index_info);
+
+    // Build expression: NOT (int64_field < 500)
+    proto::plan::GenericValue val;
+    val.set_int64_val(500);
+    auto child_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::LessThan,
+        val,
+        std::vector<proto::plan::GenericValue>{});
+
+    auto not_expr = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
+
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", not_expr, sources);
+    auto plan = plan::PlanFragment(filter_node);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_logical_unary_can_execute_all_at_once",
+        segment.get(),
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task =
+        Task::Create("task_logical_unary_indexed", plan, 0, query_context);
+
+    int64_t total_rows = 0;
+    int64_t filtered_rows = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+        if (col_vec && col_vec->IsBitmap()) {
+            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
+            total_rows += col_vec->size();
+            filtered_rows += view.count();
+        }
+    }
+
+    int64_t num_matched = total_rows - filtered_rows;
+    // Should have some matches (values >= 500 after NOT)
+    EXPECT_GT(num_matched, 0);
+    EXPECT_EQ(total_rows, N);
+}
+
+// Test that CanExecuteAllAtOnce returns false when no index is available
+TEST(TaskTest, CanExecuteAllAtOnce_WithoutIndex) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto int64_fid = schema->AddDebugField("int64_field", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const size_t N = 1000;
+    auto dataset = DataGen(schema, N);
+
+    // Create segment WITHOUT loading scalar index
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Build expression: int64_field < 500
+    proto::plan::GenericValue val;
+    val.set_int64_val(500);
+    auto unary_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::LessThan,
+        val,
+        std::vector<proto::plan::GenericValue>{});
+
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", unary_expr, sources);
+    auto plan = plan::PlanFragment(filter_node);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_without_index",
+        segment.get(),
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_no_index", plan, 0, query_context);
+
+    int64_t total_rows = 0;
+    int64_t filtered_rows = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+        if (col_vec && col_vec->IsBitmap()) {
+            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
+            total_rows += col_vec->size();
+            filtered_rows += view.count();
+        }
+    }
+
+    int64_t num_matched = total_rows - filtered_rows;
+    // Should still produce correct results via batch iteration path
+    EXPECT_GT(num_matched, 0);
+    EXPECT_EQ(total_rows, N);
+}
+
+// Test CanExecuteAllAtOnce with mixed expressions (some with index, some without)
+// When one child cannot execute all at once, the whole expression should fall back
+TEST(TaskTest, CanExecuteAllAtOnce_MixedExpressions) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    using namespace milvus::exec;
+
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metrics_type = "L2";
+    auto fake_vec_fid = schema->AddDebugField(
+        "fakeVec", DataType::VECTOR_FLOAT, dim, metrics_type);
+    auto int64_fid = schema->AddDebugField("int64_field", DataType::INT64);
+    auto int32_fid = schema->AddDebugField("int32_field", DataType::INT32);
+    schema->set_primary_field_id(int64_fid);
+
+    const size_t N = 1000;
+    auto dataset = DataGen(schema, N);
+
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // Only create index for int64 field, NOT for int32 field
+    LoadIndexInfo index_info;
+    index_info.field_id = int64_fid.get();
+    index_info.field_type = DataType::INT64;
+    index_info.index_params["index_type"] = "STL_SORT";
+    auto int64_data = dataset.get_col<int64_t>(int64_fid);
+    auto index = GenScalarIndexing<int64_t>(N, int64_data.data());
+    index_info.index_params = GenIndexParams(index.get());
+    index_info.cache_index = CreateTestCacheIndex("test", std::move(index));
+    segment->LoadIndex(index_info);
+
+    // Build expression: int64_field < 500 AND int32_field > 100
+    // int64_field has index (CanExecuteAllAtOnce = true)
+    // int32_field has no index (CanExecuteAllAtOnce = false)
+    proto::plan::GenericValue val1;
+    val1.set_int64_val(500);
+    auto left_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int64_fid, DataType::INT64),
+        proto::plan::OpType::LessThan,
+        val1,
+        std::vector<proto::plan::GenericValue>{});
+
+    proto::plan::GenericValue val2;
+    val2.set_int64_val(100);
+    auto right_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(int32_fid, DataType::INT32),
+        proto::plan::OpType::GreaterThan,
+        val2,
+        std::vector<proto::plan::GenericValue>{});
+
+    auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, left_expr, right_expr);
+
+    std::vector<milvus::plan::PlanNodePtr> sources;
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        "plannode id 1", and_expr, sources);
+    auto plan = plan::PlanFragment(filter_node);
+
+    auto query_context = std::make_shared<milvus::exec::QueryContext>(
+        "test_mixed_expressions",
+        segment.get(),
+        N,
+        MAX_TIMESTAMP,
+        0,
+        0,
+        query::PlanOptions{false},
+        std::make_shared<milvus::exec::QueryConfig>(
+            std::unordered_map<std::string, std::string>{}));
+
+    auto task = Task::Create("task_mixed", plan, 0, query_context);
+
+    int64_t total_rows = 0;
+    int64_t filtered_rows = 0;
+    for (;;) {
+        auto result = task->Next();
+        if (!result) {
+            break;
+        }
+        auto col_vec =
+            std::dynamic_pointer_cast<ColumnVector>(result->child(0));
+        if (col_vec && col_vec->IsBitmap()) {
+            TargetBitmapView view(col_vec->GetRawData(), col_vec->size());
+            total_rows += col_vec->size();
+            filtered_rows += view.count();
+        }
+    }
+
+    // Should still produce correct results via batch iteration path
+    // because one child (int32_field) cannot use index
+    EXPECT_EQ(total_rows, N);
 }

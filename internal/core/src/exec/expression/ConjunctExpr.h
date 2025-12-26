@@ -144,6 +144,23 @@ class PhyConjunctFilterExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        for (const auto& input : inputs_) {
+            if (!input->CanExecuteAllAtOnce()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        for (auto& input : inputs_) {
+            input->SetExecuteAllAtOnce();
+        }
+    }
+
     void
     Reorder(const std::vector<size_t>& exprs_order) {
         input_order_ = exprs_order;

@@ -282,10 +282,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     int64_t
     num_chunk(FieldId field_id) const override;
 
-    // return size_per_chunk for each chunk, renaming against confusion
-    int64_t
-    size_per_chunk() const override;
-
     int64_t
     chunk_size(FieldId field_id, int64_t chunk_id) const override;
 
