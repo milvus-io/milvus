@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include "common/type_c.h"
 
 #ifdef __cplusplus
@@ -30,6 +32,49 @@ CleanArrowFileSystemSingleton();
 
 CStatus
 InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config);
+
+CStatus
+GetFileStats(const char* c_path,
+             int64_t* out_size,
+             char*** out_keys,
+             char*** out_values,
+             int* out_count);
+CStatus
+ReadFileData(const char* c_path, uint8_t** out_data, int64_t* out_size);
+
+CStatus
+WriteFileData(const char* c_path,
+              const uint8_t* data,
+              int64_t data_size,
+              const char** metadata_keys,
+              const char** metadata_values,
+              int metadata_count);
+
+CStatus
+DeleteFile(const char* c_path);
+
+CStatus
+GetFileInfo(const char* c_path,
+            bool* out_exists,
+            bool* out_is_dir,
+            int64_t* out_mtime_ns,
+            int64_t* out_ctime_ns);
+
+CStatus
+CreateDir(const char* c_path, bool recursive);
+
+
+CStatus
+ListDir(const char* c_path,
+        bool recursive,
+        char*** out_paths,
+        bool** out_is_dirs,
+        int64_t** out_sizes,
+        int64_t** out_mtime_ns,
+        int* out_count);
+
+ void
+ FreeMemory(void* ptr);
 
 #ifdef __cplusplus
 }

@@ -746,8 +746,8 @@ github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.3 h1:E1ctvB7uKFMOJw3fdOW32DwGE9I7t++CRUEMKvFoFiw=
 github.com/yusufpapurcu/wmi v1.2.3/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zilliztech/woodpecker v0.1.13 h1:aw4zj6jbZZS0YlARI1VTBrI4J5c+A8wwyoCDe6VkUZs=
-github.com/zilliztech/woodpecker v0.1.13/go.mod h1:xA7jPkUnnr5S4+LmQghrc/1hNU2kiU8KWZ93Uup2jks=
+github.com/zilliztech/woodpecker v0.1.14-0.20251224112947-718577ea898d h1:gwvijlzPn5fFQGxahUUI9Pbu5qIUCnkk3atpBJ+JasY=
+github.com/zilliztech/woodpecker v0.1.14-0.20251224112947-718577ea898d/go.mod h1:fx/oRpj34wvPGzmbBP4BhI+RJgIl67tfnHnjhMbg4C8=
 go.etcd.io/bbolt v1.3.12 h1:UAxZAIuJqzFwByP19gZC3zd5robK3FOangrGS+Fdczg=
 go.etcd.io/bbolt v1.3.12/go.mod h1:Gi2toLZr1jFkuReJm+yEPn7H8wk6ooptePtHYCbCS1g=
 go.etcd.io/etcd/api/v3 v3.5.23 h1:tQi/RaO6peOhmf0c11miU3RQIYPZmiL3UzG9V+f8g6k=

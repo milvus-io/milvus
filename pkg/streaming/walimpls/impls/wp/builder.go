@@ -44,7 +44,7 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	}
 	var storageClient wpStorageClient.ObjectStorage
 	if cfg.Woodpecker.Storage.IsStorageMinio() {
-		storageClient, err = wpStorageClient.NewObjectStorage(context.Background(), cfg)
+		storageClient, err = wpStorageClient.NewExternalObjectStorageIfNecessary(context.Background(), cfg, true)
 		if err != nil {
 			return nil, err
 		}
