@@ -920,7 +920,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	requiredFields := typeutil.NewSet[int64]()
 	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
-	if t.plan.GetTtlFieldID() > 1 {
+	if t.plan.GetTtlFieldID() >= common.StartOfUserFieldID {
 		requiredFields.Insert(t.plan.GetTtlFieldID())
 	}
 	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
