@@ -622,16 +622,19 @@ func (s *Session) checkKeepaliveTTL(nextKeepaliveInstant time.Time) error {
 	if err != nil {
 		if errors.Is(err, v3rpc.ErrLeaseNotFound) {
 			s.Logger().Error("confirm the lease is not found, the session is expired without activing closing", zap.Error(err))
+			log.Cleanup()
 			os.Exit(exitCodeSessionLeaseExpired)
 		}
 		if ctx.Err() != nil && errors.Is(context.Cause(ctx), errSessionExpiredAtClientSide) {
 			s.Logger().Error("session expired at client side, the session is expired without activing closing", zap.Error(err))
+			log.Cleanup()
 			os.Exit(exitCodeSessionLeaseExpired)
 		}
 		return errors.Wrap(err, "failed to check TTL")
 	}
 	if ttlResp.TTL <= 0 {
 		s.Logger().Error("confirm the lease is expired, the session is expired without activing closing", zap.Error(err))
+		log.Cleanup()
 		os.Exit(exitCodeSessionLeaseExpired)
 	}
 	s.Logger().Info("check TTL success, try to keep alive...", zap.Int64("ttl", ttlResp.TTL))
