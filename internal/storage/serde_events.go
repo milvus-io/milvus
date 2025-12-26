@@ -719,8 +719,8 @@ func (c *CompositeBinlogRecordWriter) writeStats() error {
 	return nil
 }
 
-func (c *CompositeBinlogRecordWriter) GetExpirationTimeByPercentile() []int64 {
-	return calculateExpirationTimeByPercentile(c.ttlFieldID, c.rowNum, c.ttlFieldValues)
+func (c *CompositeBinlogRecordWriter) GetExpirQuantiles() []int64 {
+	return calculateExpirQuantiles(c.ttlFieldID, c.rowNum, c.ttlFieldValues)
 }
 
 func (c *CompositeBinlogRecordWriter) GetLogs() (
@@ -728,9 +728,9 @@ func (c *CompositeBinlogRecordWriter) GetLogs() (
 	statsLog *datapb.FieldBinlog,
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 	manifest string,
-	expirationTimeByPercentile []int64,
+	expirQuantiles []int64,
 ) {
-	return c.fieldBinlogs, c.statsLog, c.bm25StatsLog, "", c.GetExpirationTimeByPercentile()
+	return c.fieldBinlogs, c.statsLog, c.bm25StatsLog, "", c.GetExpirQuantiles()
 }
 
 func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {

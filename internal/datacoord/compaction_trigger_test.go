@@ -3084,15 +3084,15 @@ func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 	ts := time.Now()
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
-			ID:                         1,
-			CollectionID:               2,
-			PartitionID:                1,
-			LastExpireTime:             100,
-			NumOfRows:                  100,
-			MaxRowNum:                  300,
-			InsertChannel:              "ch1",
-			State:                      commonpb.SegmentState_Flushed,
-			ExpirationTimeByPercentile: []int64{ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			ExpirQuantiles: []int64{ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
 		},
 	}
 

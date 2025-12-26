@@ -263,7 +263,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats, manifest, expirationTimeByPercentile := srw.GetLogs()
+	binlogs, stats, bm25stats, manifest, expirQuantiles := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
@@ -290,17 +290,17 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	res := []*datapb.CompactionSegment{
 		{
-			PlanID:                     t.GetPlanID(),
-			SegmentID:                  targetSegmentID,
-			NumOfRows:                  int64(numValidRows),
-			InsertLogs:                 insertLogs,
-			Field2StatslogPaths:        statsLogs,
-			Bm25Logs:                   bm25StatsLogs,
-			Channel:                    t.GetChannelName(),
-			IsSorted:                   true,
-			StorageVersion:             t.storageVersion,
-			Manifest:                   manifest,
-			ExpirationTimeByPercentile: expirationTimeByPercentile,
+			PlanID:              t.GetPlanID(),
+			SegmentID:           targetSegmentID,
+			NumOfRows:           int64(numValidRows),
+			InsertLogs:          insertLogs,
+			Field2StatslogPaths: statsLogs,
+			Bm25Logs:            bm25StatsLogs,
+			Channel:             t.GetChannelName(),
+			IsSorted:            true,
+			StorageVersion:      t.storageVersion,
+			Manifest:            manifest,
+			ExpirQuantiles:      expirQuantiles,
 		},
 	}
 	planResult := &datapb.CompactionPlanResult{

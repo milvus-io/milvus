@@ -42,7 +42,7 @@ type BinlogRecordWriter interface {
 		statsLog *datapb.FieldBinlog,
 		bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 		manifest string,
-		expirationTimeByPercentile []int64,
+		expirQuantiles []int64,
 	)
 	GetRowNum() int64
 	FlushChunk() error
@@ -99,8 +99,8 @@ func (pw *packedBinlogRecordWriterBase) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
-func (pw *packedBinlogRecordWriterBase) GetExpirationTimeByPercentile() []int64 {
-	return calculateExpirationTimeByPercentile(pw.ttlFieldID, pw.rowNum, pw.ttlFieldValues)
+func (pw *packedBinlogRecordWriterBase) GetExpirQuantiles() []int64 {
+	return calculateExpirQuantiles(pw.ttlFieldID, pw.rowNum, pw.ttlFieldValues)
 }
 
 func (pw *packedBinlogRecordWriterBase) writeStats() error {
@@ -146,9 +146,9 @@ func (pw *packedBinlogRecordWriterBase) GetLogs() (
 	statsLog *datapb.FieldBinlog,
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 	manifest string,
-	expirationTimeByPercentile []int64,
+	expirQuantiles []int64,
 ) {
-	return pw.fieldBinlogs, pw.statsLog, pw.bm25StatsLog, pw.manifest, pw.GetExpirationTimeByPercentile()
+	return pw.fieldBinlogs, pw.statsLog, pw.bm25StatsLog, pw.manifest, pw.GetExpirQuantiles()
 }
 
 func (pw *packedBinlogRecordWriterBase) GetRowNum() int64 {

@@ -53,7 +53,7 @@ Here, `ttl` is the name of the column that stores TTL information. This mechanis
 * **ExpireAt** : The value stored in the TTL field, representing the absolute expiration timestamp of an entity (UTC by default if no timezone is specified).
 * **Collection-level TTL** : The existing mechanism where retention duration is defined at the collection level (e.g., retain 30 days).
 * **insert_ts / mvcc_ts** : Existing Milvus write or MVCC timestamps, used as fallback when needed.
-* **expirationTimeByPercentile** : A time point corresponding to a certain percentile of expired data within a segment, used to quickly determine whether compaction should be triggered.
+* **expirQuantiles** : A time point corresponding to a certain percentile of expired data within a segment, used to quickly determine whether compaction should be triggered.
 
 Example:
 
@@ -100,7 +100,7 @@ If historical data should also have expiration times, users must perform an **up
 
 #### 4.1 SegmentInfo Metadata Extension
 
-A new field `expirationTimeByPercentile` is added to the segment metadata:
+A new field `expirQuantiles` is added to the segment metadata:
 
 ```proto
 message SegmentInfo {
@@ -173,35 +173,35 @@ message SegmentInfo {
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
 
-  // expirationTimeByPercentile records the expiration timestamps of the segment
+  // expirQuantiles records the expiration timestamps of the segment
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
-  repeated int64 expirationTimeByPercentile = 33;
+  repeated int64 expirQuantiles = 33;
 }
 ```
 
 Meaning:
 
-* `expirationTimeByPercentile`: The expiration timestamps corresponding to the 20%, 40%, 60%, 80%, and 100% percentiles of data within the segment.
+* `expirQuantiles`: The expiration timestamps corresponding to the 20%, 40%, 60%, 80%, and 100% percentiles of data within the segment.
 
 ---
 
 #### 4.2 Metadata Writing
 
 * Statistics are collected  **only during compaction** .
-* `expirationTimeByPercentile` is computed during sort or mix compaction tasks.
+* `expirQuantiles` is computed during sort or mix compaction tasks.
 * For streaming segments, sort compaction is required as the first step, making this approach sufficient.
 
 ---
 
 #### 4.3 Compaction Trigger Strategy
 
-* Based on a configured expired-data ratio, select the corresponding percentile from `expirationTimeByPercentile` (rounded down).
+* Based on a configured expired-data ratio, select the corresponding percentile from `expirQuantiles` (rounded down).
 * Compare the selected expiration time with the current time.
 * If the expiration condition is met, trigger a compaction task.
 
 Special cases:
 
-* If `expirationTimeByPercentile` is `NULL`, the segment is treated as non-expiring.
+* If `expirQuantiles` is `NULL`, the segment is treated as non-expiring.
 * For old segments without a TTL field, expiration logic is skipped.
 * Subsequent upsert operations will trigger the corresponding L0 compaction.
 

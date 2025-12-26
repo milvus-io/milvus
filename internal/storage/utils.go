@@ -1768,11 +1768,11 @@ func VectorArrayToArrowType(elementType schemapb.DataType, dim int) (arrow.DataT
 	}
 }
 
-// calculateExpirationTimeByPercentile computes TTL values at 20%, 40%, 60%, 80%, 100% percentiles.
+// calculateExpirQuantiles computes TTL values at 20%, 40%, 60%, 80%, 100% percentiles.
 // Returns nil if ttlFieldID is not enabled or no rows exist.
 // Precondition: ttlFieldValues must contain only positive values (>0); the caller is responsible
 // for filtering out null/zero TTL values which represent "never expire" rows.
-func calculateExpirationTimeByPercentile(ttlFieldID int64, rowNum int64, ttlFieldValues []int64) []int64 {
+func calculateExpirQuantiles(ttlFieldID int64, rowNum int64, ttlFieldValues []int64) []int64 {
 	// If ttl field is not enabled for this writer, do not emit percentile info.
 	if ttlFieldID <= 1 {
 		return nil
