@@ -394,12 +394,16 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 
 		if !segment.BloomFilterExist() {
-			log.Debug("BloomFilterExist", zap.Int64("segid", segment.ID()))
+			log.Debug("loading bloom filter for segment", zap.Int64("segmentID", segment.ID()))
 			bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
 			if err != nil {
 				return errors.Wrap(err, "At LoadBloomFilter")
 			}
 			segment.SetBloomFilter(bfs)
+			// Charge bloom filter resource for all segment types
+			if localSeg, ok := segment.(*LocalSegment); ok {
+				localSeg.ChargeBloomFilterResource(bfs)
+			}
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
@@ -722,11 +726,44 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, err
 	}
 	pkField := GetPkField(collection.Schema())
+	pkFieldID := pkField.GetFieldID()
+
+	// Calculate total memory size needed for bloom filters (PK stats)
+	var totalMemorySize int64
+	for _, info := range infos {
+		for _, fieldBinlog := range info.Statslogs {
+			if fieldBinlog.FieldID == pkFieldID {
+				totalMemorySize += getBinlogDataMemorySize(fieldBinlog)
+			}
+		}
+	}
+
+	// Reserve memory resource if tiered eviction is enabled
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
+		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
+			// double loading memory size for bloom filters to avoid OOM during loading
+			memory_bytes: C.int64_t(totalMemorySize * 2),
+			disk_bytes:   C.int64_t(0),
+		}, 1000); !ok {
+			return nil, fmt.Errorf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
+				logutil.ToMB(float64(totalMemorySize)))
+		}
+		log.Info("reserved loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+	}
+
+	defer func() {
+		if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
+			C.ReleaseLoadingResource(C.CResourceUsage{
+				memory_bytes: C.int64_t(totalMemorySize * 2),
+				disk_bytes:   C.int64_t(0),
+			})
+			log.Info("released loading resource for bloom filters", zap.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+		}
+	}()
 
 	log.Info("start loading remote...", zap.Int("segmentNum", segmentNum))
 
 	loadedBfs := typeutil.NewConcurrentSet[*pkoracle.BloomFilterSet]()
-	// TODO check memory for bf size
 	loadRemoteFunc := func(idx int) error {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
@@ -756,7 +793,88 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 		return nil, err
 	}
 
-	return loadedBfs.Collect(), nil
+	result := loadedBfs.Collect()
+
+	// Charge loaded resource for bloom filters
+	// This converts the reserved resource to actual usage tracked by the caching layer
+	var chargedSize int64
+	for _, bfs := range result {
+		chargedSize += bfs.MemSize()
+	}
+	if chargedSize > 0 {
+		C.ChargeLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(chargedSize),
+			disk_bytes:   0,
+		})
+		log.Info("charged loaded resource for bloom filters", zap.Float64("chargedSizeMB", logutil.ToMB(float64(chargedSize))))
+		// Mark all bloom filter sets as having resources charged
+		for _, bfs := range result {
+			bfs.SetResourceCharged(true)
+		}
+	}
+
+	return result, nil
+}
+
+// RefundBloomFilterSetResource refunds memory resources for removed BloomFilterSet candidates.
+// This should be called when bloom filter sets are removed from pkOracle.
+// Only refunds resources for bloom filter sets that were previously charged.
+func RefundBloomFilterSetResource(candidates []pkoracle.Candidate) {
+	var totalSize int64
+	var chargedCount int
+	for _, candidate := range candidates {
+		if bfs, ok := candidate.(*pkoracle.BloomFilterSet); ok {
+			// Only refund if resources were actually charged for this bloom filter set
+			if bfs.IsResourceCharged() {
+				totalSize += bfs.MemSize()
+				chargedCount++
+				// Mark as no longer charged to prevent double refund
+				bfs.SetResourceCharged(false)
+			}
+		}
+	}
+
+	if totalSize > 0 {
+		C.RefundLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(totalSize),
+			disk_bytes:   0,
+		})
+		log.Info("refunded loaded resource for bloom filters",
+			zap.Int("chargedCount", chargedCount),
+			zap.Int("totalCandidates", len(candidates)),
+			zap.Float64("totalSizeMB", logutil.ToMB(float64(totalSize))))
+	}
+}
+
+// RefundBloomFilterResourcesFromOracle refunds memory resources for all BloomFilterSet candidates
+// in the pkOracle without removing them. This is used during Close() to ensure resources are
+// properly refunded while preserving the pkOracle state for any remaining operations.
+func RefundBloomFilterResourcesFromOracle(oracle pkoracle.PkOracle) {
+	var totalSize int64
+	var chargedCount int
+
+	oracle.Range(func(candidate pkoracle.Candidate) bool {
+		if bfs, ok := candidate.(*pkoracle.BloomFilterSet); ok {
+			// Only refund if resources were actually charged for this bloom filter set
+			if bfs.IsResourceCharged() {
+				totalSize += bfs.MemSize()
+				chargedCount++
+				// Mark as no longer charged to prevent double refund
+				bfs.SetResourceCharged(false)
+			}
+		}
+		return true
+	})
+
+	if totalSize > 0 {
+		C.RefundLoadedResource(C.CResourceUsage{
+			memory_bytes: C.int64_t(totalSize),
+			disk_bytes:   0,
+		})
+		log.Info("refunded loaded resource for bloom filters from oracle",
+			zap.Int("chargedCount", chargedCount),
+			zap.Float64("totalSizeMB", logutil.ToMB(float64(totalSize))))
+	}
 }
 
 func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*IndexedFieldInfo, []*datapb.FieldBinlog) {

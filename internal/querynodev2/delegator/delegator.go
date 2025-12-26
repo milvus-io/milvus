@@ -1075,6 +1075,11 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
+	// Refund bloom filter resources without removing candidates from pkOracle
+	// We iterate and refund but don't remove, to preserve behavior for any
+	// operations that might still reference pkOracle after Close()
+	segments.RefundBloomFilterResourcesFromOracle(sd.pkOracle)
+
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()

@@ -34,12 +34,13 @@ var _ Candidate = (*BloomFilterSet)(nil)
 
 // BloomFilterSet is one implementation of Candidate with bloom filter in statslog.
 type BloomFilterSet struct {
-	statsMutex   sync.RWMutex
-	segmentID    int64
-	paritionID   int64
-	segType      commonpb.SegmentState
-	currentStat  *storage.PkStatistics
-	historyStats []*storage.PkStatistics
+	statsMutex      sync.RWMutex
+	segmentID       int64
+	paritionID      int64
+	segType         commonpb.SegmentState
+	currentStat     *storage.PkStatistics
+	historyStats    []*storage.PkStatistics
+	resourceCharged bool // tracks whether memory resources were charged for this bloom filter set
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
@@ -138,6 +139,38 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 	defer s.statsMutex.Unlock()
 
 	s.historyStats = append(s.historyStats, stats)
+}
+
+// MemSize returns the total memory size of all bloom filters in bytes.
+// This includes both currentStat and all historyStats.
+func (s *BloomFilterSet) MemSize() int64 {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	var size int64
+	if s.currentStat != nil && s.currentStat.PkFilter != nil {
+		size += int64(s.currentStat.PkFilter.Cap() / 8) // Cap returns bits, convert to bytes
+	}
+	for _, stats := range s.historyStats {
+		if stats != nil && stats.PkFilter != nil {
+			size += int64(stats.PkFilter.Cap() / 8)
+		}
+	}
+	return size
+}
+
+// SetResourceCharged marks that memory resources have been charged for this bloom filter set.
+func (s *BloomFilterSet) SetResourceCharged(charged bool) {
+	s.statsMutex.Lock()
+	defer s.statsMutex.Unlock()
+	s.resourceCharged = charged
+}
+
+// IsResourceCharged returns whether memory resources have been charged for this bloom filter set.
+func (s *BloomFilterSet) IsResourceCharged() bool {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+	return s.resourceCharged
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.

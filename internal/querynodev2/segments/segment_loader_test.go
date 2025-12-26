@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -1009,6 +1010,56 @@ func (suite *SegmentLoaderDetailSuite) TestCheckSegmentSizeWithMemoryLimit() {
 	_, _, err := suite.loader.checkSegmentSize(ctx, []*querypb.SegmentLoadInfo{loadInfo}, memUsage, totalMem, localDiskUsage)
 	suite.Error(err)
 	suite.True(errors.Is(err, merr.ErrSegmentRequestResourceFailed))
+}
+
+func TestRefundBloomFilterSetResource(t *testing.T) {
+	paramtable.Init()
+	initcore.InitRemoteChunkManager(paramtable.Get())
+
+	t.Run("refund empty candidates", func(t *testing.T) {
+		// Should not panic with empty slice
+		RefundBloomFilterSetResource(nil)
+		RefundBloomFilterSetResource([]pkoracle.Candidate{})
+	})
+
+	t.Run("refund with bloom filter candidates", func(t *testing.T) {
+		batchSize := 10
+		pks := make([]storage.PrimaryKey, 0)
+		for i := 0; i < batchSize; i++ {
+			pk := storage.NewInt64PrimaryKey(int64(i))
+			pks = append(pks, pk)
+		}
+
+		// Create bloom filter sets
+		bfs1 := pkoracle.NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs1.UpdateBloomFilter(pks)
+
+		bfs2 := pkoracle.NewBloomFilterSet(2, 1, commonpb.SegmentState_Sealed)
+		bfs2.UpdateBloomFilter(pks)
+
+		candidates := []pkoracle.Candidate{bfs1, bfs2}
+
+		// Should not panic and should calculate correct total size
+		RefundBloomFilterSetResource(candidates)
+	})
+
+	t.Run("refund with mixed candidates", func(t *testing.T) {
+		batchSize := 10
+		pks := make([]storage.PrimaryKey, 0)
+		for i := 0; i < batchSize; i++ {
+			pk := storage.NewInt64PrimaryKey(int64(i))
+			pks = append(pks, pk)
+		}
+
+		// Create bloom filter set
+		bfs := pkoracle.NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+		bfs.UpdateBloomFilter(pks)
+
+		candidates := []pkoracle.Candidate{bfs}
+
+		// Should not panic
+		RefundBloomFilterSetResource(candidates)
+	})
 }
 
 func TestSegmentLoader(t *testing.T) {
