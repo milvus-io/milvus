@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 const (
@@ -58,7 +59,7 @@ func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 
 func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) {
 	for _, property := range properties {
-		if property.Key == EncryptionEzIDKey {
+		if property.Key == common.EncryptionEzIDKey {
 			ezID, err := strconv.ParseInt(property.Value, 10, 64)
 			if err != nil {
 				return 0, false

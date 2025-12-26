@@ -231,6 +231,11 @@ const (
 	// collection level load properties
 	CollectionReplicaNumber  = "collection.replica.number"
 	CollectionResourceGroups = "collection.resource_groups"
+
+	// CMEK related property keys, used in db and collection properties
+	EncryptionEnabledKey = "cipher.enabled"
+	EncryptionRootKeyKey = "cipher.key"
+	EncryptionEzIDKey    = "cipher.ezID"
 )
 
 // common properties
