@@ -344,6 +344,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 
 		if realTopK != -1 && realTopK != j {
 			log.Ctx(ctx).Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+			log.Ctx(ctx).Warn("cqy debug: realTopK and j, ", zap.Int64("realtopk", realTopK), zap.Int64("j", j))
 		}
 		realTopK = j
 		ret.Results.Topks = append(ret.Results.Topks, realTopK)
