@@ -60,9 +60,9 @@ TEST(CPackedTest, PackedWriterAndReader) {
     char* paths[] = {const_cast<char*>("/tmp/0")};
     int64_t part_upload_size = 0;
 
-    CColumnGroups cgs = NewCColumnGroups();
+    CColumnSplits cgs = NewCColumnSplits();
     int group[] = {0};
-    AddCColumnGroup(cgs, group, 1);
+    AddCColumnSplit(cgs, group, 1);
 
     auto c_status = InitLocalArrowFileSystemSingleton(path);
     EXPECT_EQ(c_status.error_code, 0);
@@ -102,5 +102,5 @@ TEST(CPackedTest, PackedWriterAndReader) {
 
     c_status = CloseReader(c_packed_reader);
     EXPECT_EQ(c_status.error_code, 0);
-    FreeCColumnGroups(cgs);
+    FreeCColumnSplits(cgs);
 }

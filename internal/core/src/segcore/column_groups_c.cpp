@@ -23,8 +23,8 @@ using VecVecInt = std::vector<std::vector<int>>;
 
 extern "C" {
 
-CColumnGroups
-NewCColumnGroups() {
+CColumnSplits
+NewCColumnSplits() {
     SCOPE_CGO_CALL_METRIC();
 
     auto vv = std::make_unique<VecVecInt>();
@@ -32,7 +32,7 @@ NewCColumnGroups() {
 }
 
 void
-AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
+AddCColumnSplit(CColumnSplits cgs, int* group, int group_size) {
     SCOPE_CGO_CALL_METRIC();
 
     if (!cgs || !group)
@@ -44,7 +44,7 @@ AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
 }
 
 int
-CColumnGroupsSize(CColumnGroups cgs) {
+CColumnSplitsSize(CColumnSplits cgs) {
     SCOPE_CGO_CALL_METRIC();
 
     if (!cgs)
@@ -55,7 +55,7 @@ CColumnGroupsSize(CColumnGroups cgs) {
 }
 
 void
-FreeCColumnGroups(CColumnGroups cgs) {
+FreeCColumnSplits(CColumnSplits cgs) {
     SCOPE_CGO_CALL_METRIC();
 
     delete static_cast<VecVecInt*>(cgs);

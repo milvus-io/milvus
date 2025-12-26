@@ -55,7 +55,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 
 	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
 
-	cColumnGroups := C.NewCColumnGroups()
+	cColumnSplits := C.NewCColumnSplits()
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
@@ -65,7 +65,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		for i, val := range group.Columns {
 			cGroupSlice[i] = C.int(val)
 		}
-		C.AddCColumnGroup(cColumnGroups, (*C.int)(cGroup), C.int(len(group.Columns)))
+		C.AddCColumnSplit(cColumnSplits, (*C.int)(cGroup), C.int(len(group.Columns)))
 		C.free(cGroup)
 	}
 
@@ -117,9 +117,9 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter, pluginContextPtr)
+		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, cStorageConfig, &cPackedWriter, pluginContextPtr)
 	} else {
-		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContextPtr)
+		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, &cPackedWriter, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

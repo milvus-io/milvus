@@ -31,7 +31,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                  char** paths,
                                  int64_t num_paths,
                                  int64_t part_upload_size,
-                                 CColumnGroups column_groups,
+                                 CColumnSplits column_splits,
                                  CStorageConfig c_storage_config,
                                  CPackedWriter* c_packed_writer,
                                  CPluginContext* c_plugin_context);
@@ -42,7 +42,7 @@ NewPackedWriter(struct ArrowSchema* schema,
                 char** paths,
                 int64_t num_paths,
                 int64_t part_upload_size,
-                CColumnGroups column_groups,
+                CColumnSplits column_splits,
                 CPackedWriter* c_packed_writer,
                 CPluginContext* c_plugin_context);
 
