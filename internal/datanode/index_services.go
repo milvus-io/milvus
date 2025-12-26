@@ -205,6 +205,11 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
 		importUsed     = node.importScheduler.Slots()
+
+		totalCpuSlot, totalMemorySlot             = index.CalculateNodeSlotsV2()
+		indexStatsUsedCpu, indexedStatsUsedMemory = node.taskScheduler.TaskQueue.GetUsingSlotV2()
+		compactionUsedCpu, compactionUsedMemory   = node.compactionExecutor.SlotsV2()
+		importUsedCpu, importUsedMemory           = node.importScheduler.SlotsV2()
 	)
 
 	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
@@ -212,18 +217,35 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 		availableSlots = 0
 	}
 
+	availableCpuSlots := totalCpuSlot - indexStatsUsedCpu - compactionUsedCpu - importUsedCpu
+	availableMemorySlots := totalMemorySlot - indexedStatsUsedMemory - compactionUsedMemory - importUsedMemory
+
 	log.Ctx(ctx).Info("query slots done",
 		zap.Int64("totalSlots", totalSlots),
 		zap.Int64("availableSlots", availableSlots),
 		zap.Int64("indexStatsUsed", indexStatsUsed),
 		zap.Int64("compactionUsed", compactionUsed),
 		zap.Int64("importUsed", importUsed),
+		zap.Float64("totalCpuSlots", totalCpuSlot),
+		zap.Float64("totalMemorySlots", totalMemorySlot),
+		zap.Float64("availableCpuSlots", availableCpuSlots),
+		zap.Float64("availableMemorySlots", availableMemorySlots),
+		zap.Float64("indexStatsUsedCpu", indexStatsUsedCpu),
+		zap.Float64("indexedStatsUsedMemory", indexedStatsUsedMemory),
+		zap.Float64("compactionUsedCpu", compactionUsedCpu),
+		zap.Float64("compactionUsedMemory", compactionUsedMemory),
+		zap.Float64("importUsedCpu", importUsedCpu),
+		zap.Float64("importUsedMemory", importUsedMemory),
 	)
 
 	return &workerpb.GetJobStatsResponse{
-		Status:         merr.Success(),
-		TotalSlots:     totalSlots,
-		AvailableSlots: availableSlots,
+		Status:               merr.Success(),
+		TotalSlots:           totalSlots,
+		AvailableSlots:       availableSlots,
+		TotalCpuSlots:        totalCpuSlot,
+		TotalMemorySlots:     totalMemorySlot,
+		AvailableCpuSlots:    availableCpuSlots,
+		AvailableMemorySlots: availableMemorySlots,
 	}, nil
 }
 
@@ -267,6 +289,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.Int64("taskID", req.GetBuildID()),
 		zap.String("indexFilePrefix", req.GetIndexFilePrefix()),
 		zap.Int64("indexVersion", req.GetIndexVersion()),
 		zap.Strings("dataPaths", req.GetDataPaths()),
@@ -336,6 +359,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
+		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("fieldID", req.GetFieldID()),
 		zap.String("fieldName", req.GetFieldName()),
 		zap.String("dataType", req.GetFieldType().String()),
@@ -379,6 +403,7 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("numRows", req.GetNumRows()),
 		zap.Int64("targetSegmentID", req.GetTargetSegmentID()),
 		zap.String("subJobType", req.GetSubJobType().String()),
