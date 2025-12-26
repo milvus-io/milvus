@@ -34,7 +34,7 @@ class PhyMvccNode : public Operator {
                 const std::shared_ptr<const plan::MvccNode>& mvcc_node);
 
     bool
-    IsFilter() override {
+    IsFilter() const override {
         return false;
     }
 

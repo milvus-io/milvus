@@ -17,6 +17,7 @@
 #include "MvccNode.h"
 #include "common/Tracer.h"
 #include "fmt/format.h"
+#include <iostream>
 namespace milvus {
 namespace exec {
 
@@ -54,12 +55,12 @@ PhyMvccNode::GetOutput() {
 
     tracer::AutoSpan span("PhyMvccNode::Execute", tracer::GetRootSpan(), true);
 
-    if (!is_source_node_ && input_ == nullptr) {
+    if (active_count_ == 0) {
+        is_finished_ = true;
         return nullptr;
     }
 
-    if (active_count_ == 0) {
-        is_finished_ = true;
+    if (!is_source_node_ && input_ == nullptr) {
         return nullptr;
     }
 

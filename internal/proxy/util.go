@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -1573,7 +1574,7 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 // 4th return value is true if user requested pk field explicitly or using wildcard.
 // if removePkField is true, pk field will not be include in the first(resultFieldNames)/second(userOutputFields)
 // return value.
-func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
+func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, []agg.AggregateBase, bool, error) {
 	var primaryFieldName string
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
 	resultFieldNameMap := make(map[string]bool)
@@ -1583,6 +1584,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	userDynamicFieldsMap := make(map[string]bool)
 	userDynamicFields := make([]string, 0)
 	useAllDyncamicFields := false
+	aggregates := make([]agg.AggregateBase, 0)
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
@@ -1619,6 +1621,33 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			}
 			useAllDyncamicFields = true
 		} else {
+			if isAgg, aggregateName, aggFieldName := agg.MatchAggregationExpression(outputFieldName); isAgg {
+				if aggField, ok := allFieldNameMap[aggFieldName]; ok {
+					aggFuncs, aggErr := agg.NewAggregate(aggregateName, aggField.GetFieldID(), outputFieldName, aggField.GetDataType())
+					if aggErr != nil {
+						return nil, nil, nil, nil, false, aggErr
+					}
+					aggregates = append(aggregates, aggFuncs...)
+				} else if aggFieldName == "*" {
+					// only count(*) is allowed
+					if aggregateName != "count" {
+						return nil, nil, nil, nil, false, fmt.Errorf("%s(*) is not supported, only count(*) is allowed", aggregateName)
+					}
+					if err := agg.ValidateAggFieldType(aggregateName, schemapb.DataType_None); err != nil {
+						return nil, nil, nil, nil, false, err
+					}
+					aggFuncs, aggErr := agg.NewAggregate(aggregateName, 0, outputFieldName, schemapb.DataType_None)
+					if aggErr != nil {
+						return nil, nil, nil, nil, false, aggErr
+					}
+					aggregates = append(aggregates, aggFuncs...)
+				} else {
+					return nil, nil, nil, nil, false, fmt.Errorf("target field %s for aggregation:%s does not exist", aggFieldName, aggregateName)
+				}
+				userOutputFieldsMap[outputFieldName] = true
+				continue
+			}
+
 			if structArrayField, ok := structArrayNameToFields[outputFieldName]; ok {
 				for _, field := range structArrayField {
 					if schema.CanRetrieveRawFieldData(field) {
@@ -1630,7 +1659,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			}
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
-					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+					return nil, nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
 				}
 				resultFieldNameMap[outputFieldName] = true
 				userOutputFieldsMap[outputFieldName] = true
@@ -1661,13 +1690,13 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 					})
 					if err != nil {
 						log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
-						return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+						return nil, nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 					}
 					resultFieldNameMap[common.MetaFieldName] = true
 					userOutputFieldsMap[outputFieldName] = true
 					userDynamicFieldsMap[dynamicNestedPath] = true
 				} else {
-					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
+					return nil, nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
 				}
 			}
 		}
@@ -1690,7 +1719,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		}
 	}
 
-	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
+	return resultFieldNames, userOutputFields, userDynamicFields, aggregates, userRequestedPkFieldExplicitly, nil
 }
 
 func validCharInIndexName(c byte) bool {
