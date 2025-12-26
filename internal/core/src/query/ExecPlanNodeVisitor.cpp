@@ -27,15 +27,6 @@
 #include "common/Tracer.h"
 namespace milvus::query {
 
-static SearchResult
-empty_search_result(int64_t num_queries) {
-    SearchResult final_result;
-    final_result.total_nq_ = num_queries;
-    final_result.unity_topK_ = 0;  // no result
-    final_result.total_data_cnt_ = 0;
-    return final_result;
-}
-
 BitsetType
 ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
@@ -169,8 +160,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // PreExecute: skip all calculation
     if (active_count == 0) {
-        search_result_opt_ = std::move(
-            empty_search_result(placeholder_group_->at(0).num_of_queries_));
+        search_result_opt_ = std::move(make_empty_search_result(
+            placeholder_group_->at(0).num_of_queries_));
         return;
     }
 

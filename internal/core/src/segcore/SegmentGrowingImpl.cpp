@@ -1495,7 +1495,8 @@ SegmentGrowingImpl::BulkGetJsonData(
 
 void
 SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
-    if (sch->get_schema_version() > schema_->get_schema_version()) {
+    if (sch->get_schema_version() > schema_->get_schema_version() &&
+        !sch->get_do_physical_backfill()) {
         LOG_INFO(
             "lazy check schema segment {} found newer schema version, "
             "current "
@@ -1516,7 +1517,9 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         auto absent_fields = sch->AbsentFields(*schema_);
 
         for (const auto& field_meta : *absent_fields) {
-            fill_empty_field(field_meta);
+            if (!IsVectorDataType(field_meta.get_data_type())) {
+                fill_empty_field(field_meta);
+            }
         }
 
         schema_ = sch;

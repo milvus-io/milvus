@@ -5,7 +5,9 @@ package mock_util
 import (
 	context "context"
 
+	messagespb "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	message "github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -23,7 +25,7 @@ func (_m *MockMsgHandler) EXPECT() *MockMsgHandler_Expecter {
 }
 
 // HandleAlterCollection provides a mock function with given fields: ctx, alterCollectionMsg
-func (_m *MockMsgHandler) HandleAlterCollection(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
+func (_m *MockMsgHandler) HandleAlterCollection(ctx context.Context, alterCollectionMsg message.SpecializedImmutableMessage[*messagespb.AlterCollectionMessageHeader, *messagespb.AlterCollectionMessageBody]) error {
 	ret := _m.Called(ctx, alterCollectionMsg)
 
 	if len(ret) == 0 {
@@ -31,7 +33,7 @@ func (_m *MockMsgHandler) HandleAlterCollection(ctx context.Context, alterCollec
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.ImmutableAlterCollectionMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.SpecializedImmutableMessage[*messagespb.AlterCollectionMessageHeader, *messagespb.AlterCollectionMessageBody]) error); ok {
 		r0 = rf(ctx, alterCollectionMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -47,14 +49,14 @@ type MockMsgHandler_HandleAlterCollection_Call struct {
 
 // HandleAlterCollection is a helper method to define mock.On call
 //   - ctx context.Context
-//   - alterCollectionMsg message.ImmutableAlterCollectionMessageV2
+//   - alterCollectionMsg message.SpecializedImmutableMessage[*messagespb.AlterCollectionMessageHeader,*messagespb.AlterCollectionMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleAlterCollection(ctx interface{}, alterCollectionMsg interface{}) *MockMsgHandler_HandleAlterCollection_Call {
 	return &MockMsgHandler_HandleAlterCollection_Call{Call: _e.mock.On("HandleAlterCollection", ctx, alterCollectionMsg)}
 }
 
-func (_c *MockMsgHandler_HandleAlterCollection_Call) Run(run func(ctx context.Context, alterCollectionMsg message.ImmutableAlterCollectionMessageV2)) *MockMsgHandler_HandleAlterCollection_Call {
+func (_c *MockMsgHandler_HandleAlterCollection_Call) Run(run func(ctx context.Context, alterCollectionMsg message.SpecializedImmutableMessage[*messagespb.AlterCollectionMessageHeader, *messagespb.AlterCollectionMessageBody])) *MockMsgHandler_HandleAlterCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.ImmutableAlterCollectionMessageV2))
+		run(args[0].(context.Context), args[1].(message.SpecializedImmutableMessage[*messagespb.AlterCollectionMessageHeader, *messagespb.AlterCollectionMessageBody]))
 	})
 	return _c
 }
@@ -64,13 +66,13 @@ func (_c *MockMsgHandler_HandleAlterCollection_Call) Return(_a0 error) *MockMsgH
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleAlterCollection_Call) RunAndReturn(run func(context.Context, message.ImmutableAlterCollectionMessageV2) error) *MockMsgHandler_HandleAlterCollection_Call {
+func (_c *MockMsgHandler_HandleAlterCollection_Call) RunAndReturn(run func(context.Context, message.SpecializedImmutableMessage[*messagespb.AlterCollectionMessageHeader, *messagespb.AlterCollectionMessageBody]) error) *MockMsgHandler_HandleAlterCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HandleCreateSegment provides a mock function with given fields: ctx, createSegmentMsg
-func (_m *MockMsgHandler) HandleCreateSegment(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2) error {
+func (_m *MockMsgHandler) HandleCreateSegment(ctx context.Context, createSegmentMsg message.SpecializedImmutableMessage[*messagespb.CreateSegmentMessageHeader, *messagespb.CreateSegmentMessageBody]) error {
 	ret := _m.Called(ctx, createSegmentMsg)
 
 	if len(ret) == 0 {
@@ -78,7 +80,7 @@ func (_m *MockMsgHandler) HandleCreateSegment(ctx context.Context, createSegment
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.ImmutableCreateSegmentMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.SpecializedImmutableMessage[*messagespb.CreateSegmentMessageHeader, *messagespb.CreateSegmentMessageBody]) error); ok {
 		r0 = rf(ctx, createSegmentMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -94,14 +96,14 @@ type MockMsgHandler_HandleCreateSegment_Call struct {
 
 // HandleCreateSegment is a helper method to define mock.On call
 //   - ctx context.Context
-//   - createSegmentMsg message.ImmutableCreateSegmentMessageV2
+//   - createSegmentMsg message.SpecializedImmutableMessage[*messagespb.CreateSegmentMessageHeader,*messagespb.CreateSegmentMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleCreateSegment(ctx interface{}, createSegmentMsg interface{}) *MockMsgHandler_HandleCreateSegment_Call {
 	return &MockMsgHandler_HandleCreateSegment_Call{Call: _e.mock.On("HandleCreateSegment", ctx, createSegmentMsg)}
 }
 
-func (_c *MockMsgHandler_HandleCreateSegment_Call) Run(run func(ctx context.Context, createSegmentMsg message.ImmutableCreateSegmentMessageV2)) *MockMsgHandler_HandleCreateSegment_Call {
+func (_c *MockMsgHandler_HandleCreateSegment_Call) Run(run func(ctx context.Context, createSegmentMsg message.SpecializedImmutableMessage[*messagespb.CreateSegmentMessageHeader, *messagespb.CreateSegmentMessageBody])) *MockMsgHandler_HandleCreateSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.ImmutableCreateSegmentMessageV2))
+		run(args[0].(context.Context), args[1].(message.SpecializedImmutableMessage[*messagespb.CreateSegmentMessageHeader, *messagespb.CreateSegmentMessageBody]))
 	})
 	return _c
 }
@@ -111,13 +113,13 @@ func (_c *MockMsgHandler_HandleCreateSegment_Call) Return(_a0 error) *MockMsgHan
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleCreateSegment_Call) RunAndReturn(run func(context.Context, message.ImmutableCreateSegmentMessageV2) error) *MockMsgHandler_HandleCreateSegment_Call {
+func (_c *MockMsgHandler_HandleCreateSegment_Call) RunAndReturn(run func(context.Context, message.SpecializedImmutableMessage[*messagespb.CreateSegmentMessageHeader, *messagespb.CreateSegmentMessageBody]) error) *MockMsgHandler_HandleCreateSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HandleFlush provides a mock function with given fields: flushMsg
-func (_m *MockMsgHandler) HandleFlush(flushMsg message.ImmutableFlushMessageV2) error {
+func (_m *MockMsgHandler) HandleFlush(flushMsg message.SpecializedImmutableMessage[*messagespb.FlushMessageHeader, *messagespb.FlushMessageBody]) error {
 	ret := _m.Called(flushMsg)
 
 	if len(ret) == 0 {
@@ -125,7 +127,7 @@ func (_m *MockMsgHandler) HandleFlush(flushMsg message.ImmutableFlushMessageV2) 
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableFlushMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(message.SpecializedImmutableMessage[*messagespb.FlushMessageHeader, *messagespb.FlushMessageBody]) error); ok {
 		r0 = rf(flushMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -140,14 +142,14 @@ type MockMsgHandler_HandleFlush_Call struct {
 }
 
 // HandleFlush is a helper method to define mock.On call
-//   - flushMsg message.ImmutableFlushMessageV2
+//   - flushMsg message.SpecializedImmutableMessage[*messagespb.FlushMessageHeader,*messagespb.FlushMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleFlush(flushMsg interface{}) *MockMsgHandler_HandleFlush_Call {
 	return &MockMsgHandler_HandleFlush_Call{Call: _e.mock.On("HandleFlush", flushMsg)}
 }
 
-func (_c *MockMsgHandler_HandleFlush_Call) Run(run func(flushMsg message.ImmutableFlushMessageV2)) *MockMsgHandler_HandleFlush_Call {
+func (_c *MockMsgHandler_HandleFlush_Call) Run(run func(flushMsg message.SpecializedImmutableMessage[*messagespb.FlushMessageHeader, *messagespb.FlushMessageBody])) *MockMsgHandler_HandleFlush_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableFlushMessageV2))
+		run(args[0].(message.SpecializedImmutableMessage[*messagespb.FlushMessageHeader, *messagespb.FlushMessageBody]))
 	})
 	return _c
 }
@@ -157,13 +159,13 @@ func (_c *MockMsgHandler_HandleFlush_Call) Return(_a0 error) *MockMsgHandler_Han
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleFlush_Call) RunAndReturn(run func(message.ImmutableFlushMessageV2) error) *MockMsgHandler_HandleFlush_Call {
+func (_c *MockMsgHandler_HandleFlush_Call) RunAndReturn(run func(message.SpecializedImmutableMessage[*messagespb.FlushMessageHeader, *messagespb.FlushMessageBody]) error) *MockMsgHandler_HandleFlush_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HandleFlushAll provides a mock function with given fields: vchannel, flushAllMsg
-func (_m *MockMsgHandler) HandleFlushAll(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2) error {
+func (_m *MockMsgHandler) HandleFlushAll(vchannel string, flushAllMsg message.SpecializedImmutableMessage[*messagespb.FlushAllMessageHeader, *messagespb.FlushAllMessageBody]) error {
 	ret := _m.Called(vchannel, flushAllMsg)
 
 	if len(ret) == 0 {
@@ -171,7 +173,7 @@ func (_m *MockMsgHandler) HandleFlushAll(vchannel string, flushAllMsg message.Im
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, message.ImmutableFlushAllMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(string, message.SpecializedImmutableMessage[*messagespb.FlushAllMessageHeader, *messagespb.FlushAllMessageBody]) error); ok {
 		r0 = rf(vchannel, flushAllMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -187,14 +189,14 @@ type MockMsgHandler_HandleFlushAll_Call struct {
 
 // HandleFlushAll is a helper method to define mock.On call
 //   - vchannel string
-//   - flushAllMsg message.ImmutableFlushAllMessageV2
+//   - flushAllMsg message.SpecializedImmutableMessage[*messagespb.FlushAllMessageHeader,*messagespb.FlushAllMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleFlushAll(vchannel interface{}, flushAllMsg interface{}) *MockMsgHandler_HandleFlushAll_Call {
 	return &MockMsgHandler_HandleFlushAll_Call{Call: _e.mock.On("HandleFlushAll", vchannel, flushAllMsg)}
 }
 
-func (_c *MockMsgHandler_HandleFlushAll_Call) Run(run func(vchannel string, flushAllMsg message.ImmutableFlushAllMessageV2)) *MockMsgHandler_HandleFlushAll_Call {
+func (_c *MockMsgHandler_HandleFlushAll_Call) Run(run func(vchannel string, flushAllMsg message.SpecializedImmutableMessage[*messagespb.FlushAllMessageHeader, *messagespb.FlushAllMessageBody])) *MockMsgHandler_HandleFlushAll_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(message.ImmutableFlushAllMessageV2))
+		run(args[0].(string), args[1].(message.SpecializedImmutableMessage[*messagespb.FlushAllMessageHeader, *messagespb.FlushAllMessageBody]))
 	})
 	return _c
 }
@@ -204,13 +206,13 @@ func (_c *MockMsgHandler_HandleFlushAll_Call) Return(_a0 error) *MockMsgHandler_
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleFlushAll_Call) RunAndReturn(run func(string, message.ImmutableFlushAllMessageV2) error) *MockMsgHandler_HandleFlushAll_Call {
+func (_c *MockMsgHandler_HandleFlushAll_Call) RunAndReturn(run func(string, message.SpecializedImmutableMessage[*messagespb.FlushAllMessageHeader, *messagespb.FlushAllMessageBody]) error) *MockMsgHandler_HandleFlushAll_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HandleManualFlush provides a mock function with given fields: flushMsg
-func (_m *MockMsgHandler) HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error {
+func (_m *MockMsgHandler) HandleManualFlush(flushMsg message.SpecializedImmutableMessage[*messagespb.ManualFlushMessageHeader, *messagespb.ManualFlushMessageBody]) error {
 	ret := _m.Called(flushMsg)
 
 	if len(ret) == 0 {
@@ -218,7 +220,7 @@ func (_m *MockMsgHandler) HandleManualFlush(flushMsg message.ImmutableManualFlus
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableManualFlushMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(message.SpecializedImmutableMessage[*messagespb.ManualFlushMessageHeader, *messagespb.ManualFlushMessageBody]) error); ok {
 		r0 = rf(flushMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -233,14 +235,14 @@ type MockMsgHandler_HandleManualFlush_Call struct {
 }
 
 // HandleManualFlush is a helper method to define mock.On call
-//   - flushMsg message.ImmutableManualFlushMessageV2
+//   - flushMsg message.SpecializedImmutableMessage[*messagespb.ManualFlushMessageHeader,*messagespb.ManualFlushMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleManualFlush(flushMsg interface{}) *MockMsgHandler_HandleManualFlush_Call {
 	return &MockMsgHandler_HandleManualFlush_Call{Call: _e.mock.On("HandleManualFlush", flushMsg)}
 }
 
-func (_c *MockMsgHandler_HandleManualFlush_Call) Run(run func(flushMsg message.ImmutableManualFlushMessageV2)) *MockMsgHandler_HandleManualFlush_Call {
+func (_c *MockMsgHandler_HandleManualFlush_Call) Run(run func(flushMsg message.SpecializedImmutableMessage[*messagespb.ManualFlushMessageHeader, *messagespb.ManualFlushMessageBody])) *MockMsgHandler_HandleManualFlush_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableManualFlushMessageV2))
+		run(args[0].(message.SpecializedImmutableMessage[*messagespb.ManualFlushMessageHeader, *messagespb.ManualFlushMessageBody]))
 	})
 	return _c
 }
@@ -250,13 +252,13 @@ func (_c *MockMsgHandler_HandleManualFlush_Call) Return(_a0 error) *MockMsgHandl
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleManualFlush_Call) RunAndReturn(run func(message.ImmutableManualFlushMessageV2) error) *MockMsgHandler_HandleManualFlush_Call {
+func (_c *MockMsgHandler_HandleManualFlush_Call) RunAndReturn(run func(message.SpecializedImmutableMessage[*messagespb.ManualFlushMessageHeader, *messagespb.ManualFlushMessageBody]) error) *MockMsgHandler_HandleManualFlush_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HandleSchemaChange provides a mock function with given fields: ctx, schemaChangeMsg
-func (_m *MockMsgHandler) HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error {
+func (_m *MockMsgHandler) HandleSchemaChange(ctx context.Context, schemaChangeMsg message.SpecializedImmutableMessage[*messagespb.SchemaChangeMessageHeader, *messagespb.SchemaChangeMessageBody]) error {
 	ret := _m.Called(ctx, schemaChangeMsg)
 
 	if len(ret) == 0 {
@@ -264,7 +266,7 @@ func (_m *MockMsgHandler) HandleSchemaChange(ctx context.Context, schemaChangeMs
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.ImmutableSchemaChangeMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, message.SpecializedImmutableMessage[*messagespb.SchemaChangeMessageHeader, *messagespb.SchemaChangeMessageBody]) error); ok {
 		r0 = rf(ctx, schemaChangeMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -280,14 +282,14 @@ type MockMsgHandler_HandleSchemaChange_Call struct {
 
 // HandleSchemaChange is a helper method to define mock.On call
 //   - ctx context.Context
-//   - schemaChangeMsg message.ImmutableSchemaChangeMessageV2
+//   - schemaChangeMsg message.SpecializedImmutableMessage[*messagespb.SchemaChangeMessageHeader,*messagespb.SchemaChangeMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleSchemaChange(ctx interface{}, schemaChangeMsg interface{}) *MockMsgHandler_HandleSchemaChange_Call {
 	return &MockMsgHandler_HandleSchemaChange_Call{Call: _e.mock.On("HandleSchemaChange", ctx, schemaChangeMsg)}
 }
 
-func (_c *MockMsgHandler_HandleSchemaChange_Call) Run(run func(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2)) *MockMsgHandler_HandleSchemaChange_Call {
+func (_c *MockMsgHandler_HandleSchemaChange_Call) Run(run func(ctx context.Context, schemaChangeMsg message.SpecializedImmutableMessage[*messagespb.SchemaChangeMessageHeader, *messagespb.SchemaChangeMessageBody])) *MockMsgHandler_HandleSchemaChange_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.ImmutableSchemaChangeMessageV2))
+		run(args[0].(context.Context), args[1].(message.SpecializedImmutableMessage[*messagespb.SchemaChangeMessageHeader, *messagespb.SchemaChangeMessageBody]))
 	})
 	return _c
 }
@@ -297,13 +299,13 @@ func (_c *MockMsgHandler_HandleSchemaChange_Call) Return(_a0 error) *MockMsgHand
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleSchemaChange_Call) RunAndReturn(run func(context.Context, message.ImmutableSchemaChangeMessageV2) error) *MockMsgHandler_HandleSchemaChange_Call {
+func (_c *MockMsgHandler_HandleSchemaChange_Call) RunAndReturn(run func(context.Context, message.SpecializedImmutableMessage[*messagespb.SchemaChangeMessageHeader, *messagespb.SchemaChangeMessageBody]) error) *MockMsgHandler_HandleSchemaChange_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HandleTruncateCollection provides a mock function with given fields: truncateCollectionMsg
-func (_m *MockMsgHandler) HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error {
+func (_m *MockMsgHandler) HandleTruncateCollection(truncateCollectionMsg message.SpecializedImmutableMessage[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]) error {
 	ret := _m.Called(truncateCollectionMsg)
 
 	if len(ret) == 0 {
@@ -311,7 +313,7 @@ func (_m *MockMsgHandler) HandleTruncateCollection(truncateCollectionMsg message
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(message.ImmutableTruncateCollectionMessageV2) error); ok {
+	if rf, ok := ret.Get(0).(func(message.SpecializedImmutableMessage[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]) error); ok {
 		r0 = rf(truncateCollectionMsg)
 	} else {
 		r0 = ret.Error(0)
@@ -326,14 +328,14 @@ type MockMsgHandler_HandleTruncateCollection_Call struct {
 }
 
 // HandleTruncateCollection is a helper method to define mock.On call
-//   - truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2
+//   - truncateCollectionMsg message.SpecializedImmutableMessage[*messagespb.TruncateCollectionMessageHeader,*messagespb.TruncateCollectionMessageBody]
 func (_e *MockMsgHandler_Expecter) HandleTruncateCollection(truncateCollectionMsg interface{}) *MockMsgHandler_HandleTruncateCollection_Call {
 	return &MockMsgHandler_HandleTruncateCollection_Call{Call: _e.mock.On("HandleTruncateCollection", truncateCollectionMsg)}
 }
 
-func (_c *MockMsgHandler_HandleTruncateCollection_Call) Run(run func(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2)) *MockMsgHandler_HandleTruncateCollection_Call {
+func (_c *MockMsgHandler_HandleTruncateCollection_Call) Run(run func(truncateCollectionMsg message.SpecializedImmutableMessage[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody])) *MockMsgHandler_HandleTruncateCollection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.ImmutableTruncateCollectionMessageV2))
+		run(args[0].(message.SpecializedImmutableMessage[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]))
 	})
 	return _c
 }
@@ -343,7 +345,7 @@ func (_c *MockMsgHandler_HandleTruncateCollection_Call) Return(_a0 error) *MockM
 	return _c
 }
 
-func (_c *MockMsgHandler_HandleTruncateCollection_Call) RunAndReturn(run func(message.ImmutableTruncateCollectionMessageV2) error) *MockMsgHandler_HandleTruncateCollection_Call {
+func (_c *MockMsgHandler_HandleTruncateCollection_Call) RunAndReturn(run func(message.SpecializedImmutableMessage[*messagespb.TruncateCollectionMessageHeader, *messagespb.TruncateCollectionMessageBody]) error) *MockMsgHandler_HandleTruncateCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -73,7 +73,7 @@ func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID
 }
 
 func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
-	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
+	resp, err := s.broker.DescribeCollectionInternal(ctx, collID, typeutil.MaxTimestamp)
 	if err := merr.CheckRPCCall(resp.Status, err); err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	defer broadcaster.Close()
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
+	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID(), typeutil.MaxTimestamp)
 	if err := merr.CheckRPCCall(coll.Status, err); err != nil {
 		return merr.Status(err), nil
 	}
@@ -235,21 +235,25 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	// exclude the mmap.enable param, because it will be conflicted with the index's mmap.enable param
 	typeParams := DeleteParams(req.GetTypeParams(), []string{common.MmapEnabledKey})
 	index := &model.Index{
-		CollectionID:    req.GetCollectionID(),
-		FieldID:         req.GetFieldID(),
-		IndexID:         indexID,
-		IndexName:       req.GetIndexName(),
-		TypeParams:      typeParams,
-		IndexParams:     req.GetIndexParams(),
-		CreateTime:      req.GetTimestamp(),
-		IsAutoIndex:     req.GetIsAutoIndex(),
-		UserIndexParams: req.GetUserIndexParams(),
+		CollectionID:     req.GetCollectionID(),
+		FieldID:          req.GetFieldID(),
+		IndexID:          indexID,
+		IndexName:        req.GetIndexName(),
+		TypeParams:       typeParams,
+		IndexParams:      req.GetIndexParams(),
+		CreateTime:       req.GetTimestamp(),
+		IsAutoIndex:      req.GetIsAutoIndex(),
+		UserIndexParams:  req.GetUserIndexParams(),
+		MinSchemaVersion: schema.GetVersion(),
 	}
 	// Validate the index params.
 	if err := ValidateIndexParams(index); err != nil {
 		return nil, err
 	}
 
+	channels := make([]string, 0, len(coll.GetVirtualChannelNames())+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	channels = append(channels, coll.GetVirtualChannelNames()...)
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
@@ -261,7 +265,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithBroadcast(channels).
 		MustBuildBroadcast(),
 	); err != nil {
 		log.Error("CreateIndex fail", zap.Error(err))
@@ -270,7 +274,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	log.Info("CreateIndex successfully",
 		zap.String("IndexName", index.IndexName), zap.Int64("fieldID", index.FieldID),
-		zap.Int64("IndexID", index.IndexID))
+		zap.Int64("IndexID", index.IndexID), zap.Int32("MinSchemaVersion", index.MinSchemaVersion),
+		zap.Strings("channels", channels))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }
