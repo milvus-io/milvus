@@ -24,6 +24,8 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/Element.h"
 #include "segcore/SegmentInterface.h"
+#include "cachinglayer/CacheSlot.h"
+#include "index/json_stats/bson_inverted.h"
 
 namespace milvus {
 namespace exec {
@@ -330,7 +332,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     SingleElement lower_arg_;
     SingleElement upper_arg_;
     bool arg_inited_{false};
-    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
+    PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

@@ -43,9 +43,11 @@ class BsonInvertedIndex {
  public:
     BsonInvertedIndex(const std::string& path,
                       int64_t field_id,
-                      bool is_load,
                       const storage::FileManagerContext& ctx,
                       int64_t tantivy_index_version);
+
+    BsonInvertedIndex(std::shared_ptr<milvus::storage::DiskFileManagerImpl>
+                          disk_file_manager);
 
     ~BsonInvertedIndex();
 
@@ -77,12 +79,21 @@ class BsonInvertedIndex {
     bool
     KeyExists(const std::string& key) {
         auto array = wrapper_->term_query_i64(key);
-        return !array.array_.len == 0;
+        return array.array_.len != 0;
+    }
+
+    cachinglayer::ResourceUsage
+    CellByteSize() const {
+        return load_in_mmap_ ? cachinglayer::ResourceUsage(
+                                   0, wrapper_->index_size_bytes())
+                             : cachinglayer::ResourceUsage(
+                                   wrapper_->index_size_bytes(), 0);
     }
 
  private:
     std::string path_;
     bool is_load_;
+    bool load_in_mmap_{false};
     // json field id that this inverted index belongs to
     int64_t field_id_;
     int64_t tantivy_index_version_;
