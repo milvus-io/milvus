@@ -48,7 +48,7 @@ func TestTraceLogInterceptor(t *testing.T) {
 	_, _ = TraceLogInterceptor(context.Background(), &milvuspb.ShowCollectionsRequest{}, &grpc.UnaryServerInfo{}, handler)
 
 	// simple mode
-	ctx := GetContext(context.Background(), fmt.Sprintf("%s%s%s", "foo", util.CredentialSeperator, "FOO123456"))
+	ctx := GetContext(context.Background(), fmt.Sprintf("%s%s%s", "foo", util.CredentialSeparator, "FOO123456"))
 	_ = paramtable.Get().Save(paramtable.Get().CommonCfg.TraceLogMode.Key, "1")
 	{
 		_, _ = TraceLogInterceptor(ctx, &milvuspb.CreateCollectionRequest{

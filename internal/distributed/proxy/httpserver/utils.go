@@ -83,7 +83,7 @@ func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 	username, password, ok := c.Request.BasicAuth()
 	if !ok {
 		token := GetAuthorization(c)
-		i := strings.IndexAny(token, util.CredentialSeperator)
+		i := strings.IndexAny(token, util.CredentialSeparator)
 		if i != -1 {
 			username = token[:i]
 			password = token[i+1:]

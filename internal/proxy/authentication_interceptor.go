@@ -23,7 +23,7 @@ import (
 )
 
 func parseMD(rawToken string) (username, password string) {
-	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
+	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
 		log.Warn("invalid token format, length of secrets less than 2")
 		return
@@ -81,14 +81,14 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 			return nil, status.Error(codes.Unauthenticated, "invalid token format")
 		}
 
-		if !strings.Contains(rawToken, util.CredentialSeperator) {
+		if !strings.Contains(rawToken, util.CredentialSeparator) {
 			user, err := VerifyAPIKey(rawToken)
 			if err != nil {
 				log.Warn("fail to verify apikey", zap.Error(err))
 				return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 			}
 			metrics.UserRPCCounter.WithLabelValues(user).Inc()
-			userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, util.PasswordHolder)
+			userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeparator, util.PasswordHolder)
 			md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
 			md[util.HeaderToken] = []string{rawToken}
 			ctx = metadata.NewIncomingContext(ctx, md)

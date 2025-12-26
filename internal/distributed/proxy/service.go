@@ -130,12 +130,12 @@ func authenticate(c *gin.Context) {
 		if proxy.PasswordVerify(c, username, password) {
 			log.Ctx(context.TODO()).Debug("auth successful", zap.String("username", username))
 			c.Set(httpserver.ContextUsername, username)
-			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, password))
+			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
 		}
 	}
 	rawToken := httpserver.GetAuthorization(c)
-	if rawToken != "" && !strings.Contains(rawToken, util.CredentialSeperator) {
+	if rawToken != "" && !strings.Contains(rawToken, util.CredentialSeparator) {
 		user, err := proxy.VerifyAPIKey(rawToken)
 		if err == nil {
 			c.Set(httpserver.ContextUsername, user)

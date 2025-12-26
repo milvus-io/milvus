@@ -1409,7 +1409,7 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 		ctx = contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
 	}
 	if username != "" {
-		originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
+		originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, username)
 		authKey := strings.ToLower(util.HeaderAuthorize)
 		authValue := crypto.Base64Encode(originValue)
 		ctx = contextutil.AppendToIncomingContext(ctx, authKey, authValue)
@@ -1420,7 +1420,7 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 func AppendUserInfoForRPC(ctx context.Context) context.Context {
 	curUser, _ := GetCurUserFromContext(ctx)
 	if curUser != "" {
-		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeparator, curUser)
 		authKey := strings.ToLower(util.HeaderAuthorize)
 		authValue := crypto.Base64Encode(originValue)
 		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)

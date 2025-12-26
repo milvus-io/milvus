@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -2733,4 +2734,43 @@ func TestGenFunctionScore(t *testing.T) {
 		_, err := genFunctionScore(context.Background(), &fScore)
 		assert.NoError(t, err)
 	}
+}
+
+func TestParseUsernamePassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("token with credential separator", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/", nil)
+		c.Request.Header.Set("Authorization", "Bearer testuser:testpass")
+
+		username, password, ok := ParseUsernamePassword(c)
+		assert.True(t, ok)
+		assert.Equal(t, "testuser", username)
+		assert.Equal(t, "testpass", password)
+	})
+
+	t.Run("token without credential separator", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/", nil)
+		c.Request.Header.Set("Authorization", "Bearer tokenonly")
+
+		username, password, ok := ParseUsernamePassword(c)
+		assert.False(t, ok)
+		assert.Equal(t, "", username)
+		assert.Equal(t, "", password)
+	})
+
+	t.Run("empty authorization header", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/", nil)
+
+		username, password, ok := ParseUsernamePassword(c)
+		assert.False(t, ok)
+		assert.Equal(t, "", username)
+		assert.Equal(t, "", password)
+	})
 }

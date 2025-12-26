@@ -49,7 +49,7 @@ func getCurUserFromContext(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fail to decode the token, token: %s", token)
 	}
-	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
+	secrets := strings.SplitN(rawToken, util.CredentialSeparator, 2)
 	if len(secrets) < 2 {
 		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
 	}
