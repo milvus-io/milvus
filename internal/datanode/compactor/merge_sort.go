@@ -59,7 +59,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		return nil, err
 	}
 
-	hasTTLField := ttlFieldID > 1
+	hasTTLField := ttlFieldID >= common.StartOfUserFieldID
 
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))

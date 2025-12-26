@@ -1739,24 +1739,6 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	return nil, errors.New("primary field is not found")
 }
 
-func GetTTLFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
-	ttlFieldName := ""
-	for _, p := range schema.GetProperties() {
-		if p.Key == common.CollectionTTLFieldKey {
-			ttlFieldName = p.Value
-			break
-		}
-	}
-	if ttlFieldName == "" {
-		return nil, errors.New("ttl field is not found")
-	}
-	field := GetFieldByName(schema, ttlFieldName)
-	if field == nil {
-		return nil, errors.Errorf("ttl field %q is not found in schema", ttlFieldName)
-	}
-	return field, nil
-}
-
 func IsFieldSparseFloatVector(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	fieldSchema := GetField(schema, fieldID)
 	return fieldSchema != nil && IsSparseFloatVectorType(fieldSchema.DataType)

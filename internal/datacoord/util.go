@@ -161,7 +161,11 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	return -1, nil
 }
 
-func getTTLField(schema *schemapb.CollectionSchema) UniqueID {
+func getTTLFieldID(schema *schemapb.CollectionSchema) UniqueID {
+	if schema == nil {
+		return common.InvalidFieldID
+	}
+
 	ttlFieldName := ""
 	for _, pair := range schema.GetProperties() {
 		if pair.GetKey() == common.CollectionTTLFieldKey {
