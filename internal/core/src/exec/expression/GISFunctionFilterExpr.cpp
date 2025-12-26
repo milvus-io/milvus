@@ -171,17 +171,20 @@ namespace exec {
                real_batch_size);                                             \
     return res_vec;
 
-bool
-PhyGISFunctionFilterExpr::CanUseIndex(
-    proto::plan::GISFunctionFilterExpr_GISOp op) const {
+void
+PhyGISFunctionFilterExpr::DetermineUseIndex() {
+    // check base condition first
     if (!SegmentExpr::CanUseIndex()) {
-        return false;
+        use_index_ = false;
+        return;
     }
-    switch (op) {
+    // STIsValid operation cannot use index
+    switch (expr_->op_) {
         case proto::plan::GISFunctionFilterExpr_GISOp_STIsValid:
-            return false;
+            use_index_ = false;
+            break;
         default:
-            return true;
+            use_index_ = true;
     }
 }
 
@@ -190,7 +193,8 @@ PhyGISFunctionFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     AssertInfo(expr_->column_.data_type_ == DataType::GEOMETRY,
                "unsupported data type: {}",
                expr_->column_.data_type_);
-    if (CanUseIndex(expr_->op_)) {
+    // use_index_ is already determined during initialization by DetermineUseIndex()
+    if (use_index_) {
         result = EvalForIndexSegment();
     } else {
         result = EvalForDataSegment();
@@ -381,7 +385,6 @@ create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
 
 VectorPtr
 PhyGISFunctionFilterExpr::EvalForIndexSegment() {
-    AssertInfo(num_index_chunk_ == 1, "num_index_chunk_ should be 1");
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -551,14 +554,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     }
 
     if (segment_->type() == SegmentType::Sealed) {
-        auto size = ProcessIndexOneChunk(batch_result,
-                                         batch_valid,
-                                         0,
-                                         *cached_index_chunk_res_,
-                                         coarse_valid_global_,
-                                         processed_rows);
+        auto size = std::min(
+            batch_size_ - processed_rows,
+            int64_t(cached_index_chunk_res_->size()) - current_global_pos_);
+        batch_result.append(
+            *cached_index_chunk_res_, current_global_pos_, size);
+        batch_valid.append(coarse_valid_global_, current_global_pos_, size);
         processed_rows += size;
-        current_index_chunk_pos_ = current_index_chunk_pos_ + size;
     } else {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
@@ -568,17 +570,17 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
 
             if (size > 0) {
                 batch_result.append(
-                    *cached_index_chunk_res_, current_index_chunk_pos_, size);
+                    *cached_index_chunk_res_, current_global_pos_, size);
                 batch_valid.append(
-                    coarse_valid_global_, current_index_chunk_pos_, size);
+                    coarse_valid_global_, current_global_pos_, size);
             }
             // Update with actual processed size
             processed_rows += size;
-            current_index_chunk_pos_ += size;
 
             if (processed_rows >= real_batch_size) {
                 current_data_chunk_ = i;
                 current_data_chunk_pos_ = data_pos + size;
+                current_global_pos_ += processed_rows;
                 break;
             }
         }

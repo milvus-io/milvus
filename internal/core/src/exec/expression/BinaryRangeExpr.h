@@ -261,10 +261,14 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        DetermineUseIndex();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineUseIndex() override;
 
     std::string
     ToString() const {

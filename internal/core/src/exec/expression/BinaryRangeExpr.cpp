@@ -78,7 +78,8 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto value_type = expr_->lower_val_.val_case();
-            if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+            // use_index_ is already determined during initialization by DetermineUseIndex()
+            if (use_index_ && !has_offset_input_) {
                 switch (value_type) {
                     case proto::plan::GenericValue::ValCase::kInt64Val: {
                         proto::plan::GenericValue double_lower_val;
@@ -140,17 +141,14 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto value_type = expr_->lower_val_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<int64_t>(context);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<double>(context);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kStringVal: {
-                    SetNotUseIndex();
                     result = ExecRangeVisitorImplForArray<std::string>(context);
                     break;
                 }
@@ -182,7 +180,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
-    if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
+    // use_index_ is already determined during initialization by DetermineUseIndex()
+    if (use_index_ && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
@@ -219,9 +218,8 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
         }
         auto valid_res =
             (input != nullptr)
-                ? ProcessChunksForValidByOffsets<T>(SegmentExpr::CanUseIndex(),
-                                                    *input)
-                : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+                ? ProcessChunksForValidByOffsets<T>(use_index_, *input)
+                : ProcessChunksForValid<T>(use_index_);
 
         auto res_vec = std::make_shared<ColumnVector>(TargetBitmap(batch_size),
                                                       std::move(valid_res));
@@ -759,7 +757,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
 
     TargetBitmap result;
     result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -944,10 +942,33 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
     TargetBitmap result;
     result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
+}
+
+void
+PhyBinaryRangeFilterExpr::DetermineUseIndex() {
+    // check base condition first
+    if (!SegmentExpr::CanUseIndex()) {
+        use_index_ = false;
+        return;
+    }
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    // for ARRAY type, don't use index
+    if (data_type == DataType::ARRAY) {
+        use_index_ = false;
+        return;
+    }
+
+    // for other types (including JSON), use index
+    use_index_ = true;
 }
 
 }  // namespace exec

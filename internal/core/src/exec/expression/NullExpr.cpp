@@ -111,10 +111,10 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     if (auto res = PreCheckNullable(input)) {
         return res;
     }
+    // use_index_ is already determined during initialization by DetermineUseIndex()
     auto valid_res = (input != nullptr)
-                         ? ProcessChunksForValidByOffsets<T>(
-                               SegmentExpr::CanUseIndex(), *input)
-                         : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+                         ? ProcessChunksForValidByOffsets<T>(use_index_, *input)
+                         : ProcessChunksForValid<T>(use_index_);
     TargetBitmap res = valid_res.clone();
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();
@@ -162,6 +162,12 @@ PhyNullExpr::PreCheckNullable(OffsetVector* input) {
                       proto::plan::NullExpr_NullOp_Name(expr_->op_));
     }
     return res_vec;
+}
+
+void
+PhyNullExpr::DetermineUseIndex() {
+    // check base condition
+    use_index_ = SegmentExpr::CanUseIndex();
 }
 
 }  //namespace exec

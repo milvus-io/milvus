@@ -130,6 +130,16 @@ class PhyColumnExpr : public Expr {
         return expr_->GetColumn();
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = segment_chunk_reader_.active_count_;
+    }
+
  private:
     bool is_indexed_;
 

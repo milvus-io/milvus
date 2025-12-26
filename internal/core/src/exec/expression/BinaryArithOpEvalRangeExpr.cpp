@@ -899,7 +899,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImpl(OffsetVector* input) {
-    if (CanUseIndex<T>()) {
+    // use_index_ is already determined during initialization by DetermineUseIndex()
+    if (use_index_) {
         return ExecRangeVisitorImplForIndex<T>(input);
     } else {
         return ExecRangeVisitorImplForData<T>(input);
@@ -931,7 +932,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
-    auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
+    auto sub_batch_size = has_offset_input_ ? input->size() : active_count_;
 
     auto execute_sub_batch =
         [ op_type, arith_type,

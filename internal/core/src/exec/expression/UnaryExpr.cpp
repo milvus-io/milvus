@@ -36,17 +36,10 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
 
-    for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
-
-        if (index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::HYBRID ||
-            index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::BITMAP) {
-            return false;
-        }
-    }
-    return true;
+    auto index_ptr = dynamic_cast<const Index*>(pinned_index_[0].get());
+    return index_ptr->GetIndexType() !=
+               milvus::index::ScalarIndexType::HYBRID &&
+           index_ptr->GetIndexType() != milvus::index::ScalarIndexType::BITMAP;
 }
 
 template <>
@@ -1285,7 +1278,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
     TargetBitmap result;
     result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -1363,7 +1356,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
 
     TargetBitmap result;
     result.append(
-        *cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+        *cached_index_chunk_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           TargetBitmap(real_batch_size, true));
@@ -1878,15 +1871,103 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     TargetBitmap result;
     TargetBitmap valid_result;
-    result.append(
-        *cached_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        current_data_global_pos_,
-                        real_batch_size);
+    result.append(*cached_match_res_, current_global_pos_, real_batch_size);
+    valid_result.append(
+        *cached_index_chunk_valid_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           std::move(valid_result));
 };
+
+void
+PhyUnaryRangeFilterExpr::DetermineUseIndex() {
+    // for TextMatch/PhraseMatch, always use index path (text match index)
+    if (expr_->op_type_ == proto::plan::OpType::TextMatch ||
+        expr_->op_type_ == proto::plan::OpType::PhraseMatch) {
+        use_index_ = true;
+        return;
+    }
+
+    // check base condition first
+    if (!SegmentExpr::CanUseIndex()) {
+        use_index_ = false;
+        return;
+    }
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+
+    switch (data_type) {
+        case DataType::BOOL:
+            use_index_ = SegmentExpr::CanUseIndexForOp<bool>(expr_->op_type_);
+            break;
+        case DataType::INT8:
+            use_index_ = SegmentExpr::CanUseIndexForOp<int8_t>(expr_->op_type_);
+            break;
+        case DataType::INT16:
+            use_index_ = SegmentExpr::CanUseIndexForOp<int16_t>(expr_->op_type_);
+            break;
+        case DataType::INT32:
+            use_index_ = SegmentExpr::CanUseIndexForOp<int32_t>(expr_->op_type_);
+            break;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            use_index_ = SegmentExpr::CanUseIndexForOp<int64_t>(expr_->op_type_);
+            break;
+        case DataType::FLOAT:
+            use_index_ = SegmentExpr::CanUseIndexForOp<float>(expr_->op_type_);
+            break;
+        case DataType::DOUBLE:
+            use_index_ = SegmentExpr::CanUseIndexForOp<double>(expr_->op_type_);
+            break;
+        case DataType::VARCHAR:
+            use_index_ =
+                SegmentExpr::CanUseIndexForOp<std::string>(expr_->op_type_);
+            break;
+        case DataType::JSON: {
+            // For JSON type, check based on value type
+            auto val_type = FromValCase(expr_->val_.val_case());
+            bool has_index = pinned_index_.size() > 0;
+            switch (val_type) {
+                case DataType::STRING:
+                case DataType::VARCHAR:
+                    use_index_ =
+                        has_index &&
+                        expr_->op_type_ != proto::plan::OpType::Match &&
+                        expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
+                        expr_->op_type_ != proto::plan::OpType::InnerMatch;
+                    break;
+                default:
+                    use_index_ = has_index;
+            }
+            break;
+        }
+        case DataType::ARRAY: {
+            // For ARRAY type, determine based on value type and element type
+            auto val_type = expr_->val_.val_case();
+            switch (val_type) {
+                case proto::plan::GenericValue::ValCase::kBoolVal:
+                case proto::plan::GenericValue::ValCase::kInt64Val:
+                case proto::plan::GenericValue::ValCase::kFloatVal:
+                case proto::plan::GenericValue::ValCase::kStringVal:
+                    // These types don't use index for array
+                    use_index_ = false;
+                    break;
+                case proto::plan::GenericValue::ValCase::kArrayVal:
+                    // Array equality check - can use index based on element type
+                    use_index_ = CanUseIndexForArray<milvus::Array>();
+                    break;
+                default:
+                    use_index_ = false;
+            }
+            break;
+        }
+        default:
+            use_index_ = false;
+    }
+}
 
 bool
 PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
@@ -1924,10 +2005,9 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     TargetBitmap result;
     TargetBitmap valid_result;
     result.append(
-        *cached_ngram_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        current_data_global_pos_,
-                        real_batch_size);
+        *cached_ngram_match_res_, current_global_pos_, real_batch_size);
+    valid_result.append(
+        *cached_index_chunk_valid_res_, current_global_pos_, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           std::move(valid_result));

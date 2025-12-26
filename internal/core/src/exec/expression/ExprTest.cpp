@@ -5047,6 +5047,9 @@ TEST_P(ExprTest, test_term_pk) {
 }
 
 TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
+    // Save original batch size to restore after test
+    auto original_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
@@ -5100,6 +5103,9 @@ TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
             }
         }
     }
+
+    // Restore original batch size to avoid affecting other tests
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(original_batch_size);
 }
 
 TEST_P(ExprTest, TestConjuctExpr) {

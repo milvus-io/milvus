@@ -476,10 +476,58 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        DetermineUseIndex();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineUseIndex() override {
+        // check base condition first
+        if (!SegmentExpr::CanUseIndex()) {
+            use_index_ = false;
+            return;
+        }
+
+        auto data_type = expr_->column_.data_type_;
+        if (expr_->column_.element_level_) {
+            data_type = expr_->column_.element_type_;
+        }
+
+        // for JSON and ARRAY types, don't use index
+        if (data_type == DataType::JSON || data_type == DataType::ARRAY) {
+            use_index_ = false;
+            return;
+        }
+
+        // for basic types, check if index has raw data
+        switch (data_type) {
+            case DataType::BOOL:
+                use_index_ = IndexHasRawData<bool>();
+                break;
+            case DataType::INT8:
+                use_index_ = IndexHasRawData<int8_t>();
+                break;
+            case DataType::INT16:
+                use_index_ = IndexHasRawData<int16_t>();
+                break;
+            case DataType::INT32:
+                use_index_ = IndexHasRawData<int32_t>();
+                break;
+            case DataType::INT64:
+                use_index_ = IndexHasRawData<int64_t>();
+                break;
+            case DataType::FLOAT:
+                use_index_ = IndexHasRawData<float>();
+                break;
+            case DataType::DOUBLE:
+                use_index_ = IndexHasRawData<double>();
+                break;
+            default:
+                use_index_ = false;
+        }
+    }
 
     std::string
     ToString() const override {
@@ -516,17 +564,6 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     template <typename ValueType>
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
-
-    template <typename T>
-    bool
-    CanUseIndex() {
-        if (SegmentExpr::CanUseIndex() && IndexHasRawData<T>()) {
-            use_index_ = true;
-            return true;
-        }
-        use_index_ = false;
-        return false;
-    }
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;

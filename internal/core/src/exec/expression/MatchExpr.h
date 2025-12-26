@@ -74,6 +74,16 @@ class PhyMatchFilterExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = active_count_;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;

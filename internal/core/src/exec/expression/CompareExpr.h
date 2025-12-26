@@ -235,6 +235,16 @@ class PhyCompareFilterExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return false;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = segment_chunk_reader_.active_count_;
+    }
+
  private:
     int64_t
     GetCurrentRows() {

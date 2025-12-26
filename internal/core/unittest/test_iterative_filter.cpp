@@ -464,6 +464,11 @@ TEST(IterativeFilter, GrowingRawData) {
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
+
+    // Restore default config values to avoid affecting other tests
+    auto& default_config = SegcoreConfig::default_config();
+    default_config.set_chunk_rows(32 * 1024);
+    default_config.set_enable_interim_segment_index(false);
 }
 
 TEST(IterativeFilter, GrowingIndex) {
@@ -584,4 +589,10 @@ TEST(IterativeFilter, GrowingIndex) {
         CheckFilterSearchResult(
             *search_result, *search_result2, topK, num_queries);
     }
+
+    // Restore default config values to avoid affecting other tests
+    auto& default_config = SegcoreConfig::default_config();
+    default_config.set_chunk_rows(32 * 1024);
+    default_config.set_enable_interim_segment_index(false);
+    default_config.set_nlist(100);
 }

@@ -776,10 +776,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 pinned_ngram_index_ = segment->GetNgramIndex(op_ctx_, field_id);
             }
         }
+        DetermineUseIndex();
     }
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    void
+    DetermineUseIndex() override;
 
     bool
     SupportOffsetInput() override {
