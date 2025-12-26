@@ -12,12 +12,18 @@
 #include <gtest/gtest.h>
 
 #include "common/Types.h"
+#include "common/IndexMeta.h"
 #include "knowhere/comp/index_param.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "pb/schema.pb.h"
+#include "pb/plan.pb.h"
+#include "query/Plan.h"
+#include "expr/ITypeExpr.h"
+#include "plan/PlanNode.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "test_utils/GenExprProto.h"
 
 using namespace milvus::segcore;
 using namespace milvus;
@@ -432,6 +438,325 @@ TEST(Growing, FillNullableData) {
         EXPECT_EQ(string_array_result->valid_data_size(), num_inserted);
         EXPECT_EQ(double_array_result->valid_data_size(), num_inserted);
         EXPECT_EQ(float_array_result->valid_data_size(), num_inserted);
+    }
+}
+
+class GrowingNullableTest : public ::testing::TestWithParam<
+                                std::tuple</*data_type*/ DataType,
+                                           /*metric_type*/ knowhere::MetricType,
+                                           /*index_type*/ std::string,
+                                           /*null_percent*/ int,
+                                           /*enable_interim_index*/ bool>> {
+ public:
+    void
+    SetUp() override {
+        std::tie(data_type,
+                 metric_type,
+                 index_type,
+                 null_percent,
+                 enable_interim_index) = GetParam();
+    }
+
+    DataType data_type;
+    knowhere::MetricType metric_type;
+    std::string index_type;
+    int null_percent;
+    bool enable_interim_index;
+};
+
+static std::vector<
+    std::tuple<DataType, knowhere::MetricType, std::string, int, bool>>
+GenerateGrowingNullableTestParams() {
+    std::vector<
+        std::tuple<DataType, knowhere::MetricType, std::string, int, bool>>
+        params;
+
+    // Dense float vectors with IVF_FLAT
+    std::vector<std::tuple<DataType, knowhere::MetricType, std::string>>
+        base_configs = {
+            {DataType::VECTOR_FLOAT,
+             knowhere::metric::L2,
+             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+            {DataType::VECTOR_FLOAT,
+             knowhere::metric::IP,
+             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+            {DataType::VECTOR_FLOAT,
+             knowhere::metric::COSINE,
+             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+            {DataType::VECTOR_SPARSE_U32_F32,
+             knowhere::metric::IP,
+             knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
+        };
+
+    std::vector<int> null_percents = {0, 20, 100};
+
+    std::vector<bool> interim_index_configs = {true, false};
+
+    for (const auto& [dtype, metric, idx_type] : base_configs) {
+        for (int null_pct : null_percents) {
+            for (bool enable_interim : interim_index_configs) {
+                params.push_back(
+                    {dtype, metric, idx_type, null_pct, enable_interim});
+            }
+        }
+    }
+    return params;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NullableVectorParameters,
+    GrowingNullableTest,
+    ::testing::ValuesIn(GenerateGrowingNullableTestParams()));
+
+TEST_P(GrowingNullableTest, SearchAndQueryNullableVectors) {
+    using namespace milvus::query;
+
+    bool nullable = true;
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    int64_t dim = 8;
+    auto vec = schema->AddDebugField(
+        "embeddings", data_type, dim, metric_type, nullable);
+    schema->set_primary_field_id(int64_field);
+
+    std::map<std::string, std::string> index_params;
+    std::map<std::string, std::string> type_params;
+    if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+        index_params = {{"index_type", index_type},
+                        {"metric_type", metric_type}};
+        type_params = {};
+    } else {
+        index_params = {{"index_type", index_type},
+                        {"metric_type", metric_type},
+                        {"nlist", "128"}};
+        type_params = {{"dim", std::to_string(dim)}};
+    }
+    FieldIndexMeta fieldIndexMeta(
+        vec, std::move(index_params), std::move(type_params));
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(enable_interim_index);
+    // Explicitly set interim index type to avoid contamination from other tests
+    config.set_dense_vector_intermin_index_type(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC);
+    std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    auto segment_growing = CreateGrowingSegment(schema, metaPtr, 1, config);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+
+    int64_t batch_size = 2000;
+    int64_t num_rounds = 10;
+    int64_t topk = 5;
+    int64_t num_queries = 2;
+    Timestamp timestamp = 10000000;
+
+    // Prepare search plan
+    std::string search_params_fmt;
+    if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+        search_params_fmt = R"(
+            vector_anns:<
+                field_id: {}
+                query_info:<
+                    topk: {}
+                    round_decimal: 3
+                    metric_type: "{}"
+                    search_params: "{{\"drop_ratio_search\": 0.1}}"
+                >
+                placeholder_tag: "$0"
+            >
+        )";
+    } else {
+        search_params_fmt = R"(
+            vector_anns:<
+                field_id: {}
+                query_info:<
+                    topk: {}
+                    round_decimal: 3
+                    metric_type: "{}"
+                    search_params: "{{\"nprobe\": 10}}"
+                >
+                placeholder_tag: "$0"
+            >
+        )";
+    }
+
+    auto raw_plan =
+        fmt::format(search_params_fmt, vec.get(), topk, metric_type);
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    // Create query vectors
+    proto::common::PlaceholderGroup ph_group_raw;
+    if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+        ph_group_raw = CreateSparseFloatPlaceholderGroup(num_queries, 42);
+    } else {
+        auto query_data = generate_float_vector(num_queries, dim);
+        ph_group_raw =
+            CreatePlaceholderGroupFromBlob(num_queries, dim, query_data.data());
+    }
+
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // Store all inserted data for verification
+    // For nullable vectors, data is stored sparsely (only valid vectors)
+    // We need a mapping from logical offset to physical offset
+    std::vector<float> all_float_vectors;  // Physical storage (only valid)
+    std::vector<knowhere::sparse::SparseRow<float>> all_sparse_vectors;
+    std::vector<bool> all_valid_data;  // Logical storage (all rows)
+    std::vector<int64_t>
+        logical_to_physical;  // Maps logical offset to physical
+
+    // Insert data in multiple rounds and test after each round
+    for (int64_t round = 0; round < num_rounds; round++) {
+        int64_t total_rows = (round + 1) * batch_size;
+        int64_t expected_valid_count =
+            total_rows - (total_rows * null_percent / 100);
+
+        auto dataset = DataGen(schema,
+                               batch_size,
+                               42 + round,
+                               0,
+                               1,
+                               10,
+                               1,
+                               false,
+                               true,
+                               false,
+                               null_percent);
+
+        // Build logical to physical mapping for this batch
+        int64_t base_physical = all_float_vectors.size() / dim;
+        if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+            base_physical = all_sparse_vectors.size();
+        }
+
+        auto valid_data_from_dataset = dataset.get_col_valid(vec);
+        int64_t physical_idx = base_physical;
+        for (size_t i = 0; i < valid_data_from_dataset.size(); i++) {
+            if (valid_data_from_dataset[i]) {
+                logical_to_physical.push_back(physical_idx);
+                physical_idx++;
+            } else {
+                logical_to_physical.push_back(-1);  // null
+            }
+        }
+
+        // Get original data directly from proto (sparse storage for nullable)
+        // Data is stored sparsely - only valid vectors are in the proto
+        if (data_type == DataType::VECTOR_FLOAT) {
+            auto field_data = dataset.get_col(vec);
+            auto& float_data = field_data->vectors().float_vector().data();
+            all_float_vectors.insert(
+                all_float_vectors.end(), float_data.begin(), float_data.end());
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+            auto field_data = dataset.get_col(vec);
+            auto& sparse_array = field_data->vectors().sparse_float_vector();
+            for (int i = 0; i < sparse_array.contents_size(); i++) {
+                auto& content = sparse_array.contents(i);
+                auto row = CopyAndWrapSparseRow(content.data(), content.size());
+                all_sparse_vectors.push_back(std::move(row));
+            }
+        }
+        all_valid_data.insert(all_valid_data.end(),
+                              valid_data_from_dataset.begin(),
+                              valid_data_from_dataset.end());
+
+        auto offset = segment->PreInsert(batch_size);
+        segment->Insert(offset,
+                        batch_size,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+
+        auto& insert_record = segment->get_insert_record();
+        ASSERT_TRUE(insert_record.is_valid_data_exist(vec));
+
+        auto valid_data_ptr = insert_record.get_data_base(vec);
+        const auto& valid_data = valid_data_ptr->get_valid_data();
+
+        // Test search
+        auto sr =
+            segment_growing->Search(plan.get(), ph_group.get(), timestamp);
+
+        ASSERT_EQ(sr->total_nq_, num_queries);
+        ASSERT_EQ(sr->unity_topK_, topk);
+
+        if (expected_valid_count == 0) {
+            auto total_results = sr->get_total_result_count();
+            EXPECT_EQ(total_results, 0)
+                << "Round " << round
+                << ": 100% null should return 0 results, but got "
+                << total_results;
+        } else {
+            // Verify search results don't contain null vectors
+            for (size_t i = 0; i < sr->seg_offsets_.size(); i++) {
+                auto seg_offset = sr->seg_offsets_[i];
+                if (seg_offset < 0) {
+                    continue;
+                }
+                ASSERT_TRUE(valid_data[seg_offset])
+                    << "Round " << round
+                    << ": Search returned null vector at offset " << seg_offset;
+            }
+        }
+
+        auto vec_result = segment->bulk_subscript(
+            nullptr, vec, sr->seg_offsets_.data(), sr->seg_offsets_.size());
+        ASSERT_TRUE(vec_result != nullptr);
+
+        if (data_type == DataType::VECTOR_FLOAT) {
+            auto& float_data = vec_result->vectors().float_vector();
+            size_t valid_idx = 0;
+            for (size_t i = 0; i < sr->seg_offsets_.size(); i++) {
+                auto offset = sr->seg_offsets_[i];
+                if (offset < 0) {
+                    continue;  // Skip invalid offsets
+                }
+                auto physical_idx = logical_to_physical[offset];
+                for (int d = 0; d < dim; d++) {
+                    float expected_val =
+                        all_float_vectors[physical_idx * dim + d];
+                    float actual_val = float_data.data(valid_idx * dim + d);
+                    ASSERT_FLOAT_EQ(expected_val, actual_val)
+                        << "Round " << round << ": Mismatch at logical offset "
+                        << offset << " dim " << d;
+                }
+                valid_idx++;
+            }
+        } else if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
+            auto& sparse_data = vec_result->vectors().sparse_float_vector();
+            size_t valid_idx = 0;
+            for (size_t i = 0; i < sr->seg_offsets_.size(); i++) {
+                auto offset = sr->seg_offsets_[i];
+                if (offset < 0) {
+                    continue;  // Skip invalid offsets
+                }
+                auto physical_idx = logical_to_physical[offset];
+                auto& content = sparse_data.contents(valid_idx);
+                auto retrieved_row =
+                    CopyAndWrapSparseRow(content.data(), content.size());
+                const auto& expected_row = all_sparse_vectors[physical_idx];
+                ASSERT_EQ(retrieved_row.size(), expected_row.size())
+                    << "Round " << round
+                    << ": Sparse vector size mismatch at logical offset "
+                    << offset;
+                for (size_t j = 0; j < retrieved_row.size(); j++) {
+                    ASSERT_EQ(retrieved_row[j].id, expected_row[j].id)
+                        << "Round " << round
+                        << ": Sparse vector id mismatch at logical offset "
+                        << offset << " element " << j;
+                    ASSERT_FLOAT_EQ(retrieved_row[j].val, expected_row[j].val)
+                        << "Round " << round
+                        << ": Sparse vector val mismatch at logical offset "
+                        << offset << " element " << j;
+                }
+                valid_idx++;
+            }
+        }
     }
 }
 

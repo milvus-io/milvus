@@ -1009,16 +1009,30 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// not support vector field
 		fSchema = &schemapb.FieldSchema{
+			Name:     "vec_field",
 			DataType: schemapb.DataType_FloatVector,
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "128"},
+			},
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
 		task.Schema = bytes
 		err = task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.NoError(t, err)
+
+		fSchema = &schemapb.FieldSchema{
+			Name:     "sparse_vec",
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
 
 		// not support system field
 		fSchema = &schemapb.FieldSchema{
@@ -2595,11 +2609,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		// upsert require pk unique in same batch
-		hash := make([]uint32, nb)
-		for i := 0; i < nb; i++ {
-			hash[i] = uint32(i)
-		}
+		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{

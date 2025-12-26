@@ -63,9 +63,10 @@ func CreateConsumeServer(walManager walmanager.Manager, streamServer streamingpb
 		return nil, errors.New("The first message must be  create vchannel consumer request")
 	}
 	scanner, err := l.Read(streamServer.Context(), wal.ReadOption{
-		VChannel:      createVChannelReq.GetVchannel(),
-		DeliverPolicy: createVChannelReq.GetDeliverPolicy(),
-		MessageFilter: createVChannelReq.GetDeliverFilters(),
+		VChannel:               createVChannelReq.GetVchannel(),
+		DeliverPolicy:          createVChannelReq.GetDeliverPolicy(),
+		MessageFilter:          createVChannelReq.GetDeliverFilters(),
+		IgnorePauseConsumption: createVChannelReq.GetIgnorePauseConsumption(),
 	})
 	if err != nil {
 		return nil, err

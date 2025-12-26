@@ -89,7 +89,7 @@ func (rln *RateLimiterNode) Check(rt internalpb.RateType, n int) error {
 
 func (rln *RateLimiterNode) GetQuotaExceededError(rt internalpb.RateType) error {
 	switch rt {
-	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLUpsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
 		if errCode, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
 			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
 		}

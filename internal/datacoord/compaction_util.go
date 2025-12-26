@@ -110,3 +110,17 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		return
 	}
 }
+
+// isCompactionTaskFinished returns true if the task has reached a terminal state
+// (timeout, completed, cleaned, or unknown) and requires no further processing.
+func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
+	switch t.GetState() {
+	case datapb.CompactionTaskState_timeout,
+		datapb.CompactionTaskState_completed,
+		datapb.CompactionTaskState_cleaned,
+		datapb.CompactionTaskState_unknown:
+		return true
+	default:
+		return false
+	}
+}

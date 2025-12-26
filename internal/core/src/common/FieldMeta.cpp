@@ -168,6 +168,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
     }
 
     if (IsVectorDataType(data_type)) {
+        AssertInfo(!default_value.has_value(),
+                   "vector fields do not support default values");
         auto type_map = RepeatedKeyValToMap(schema_proto.type_params());
         auto index_map = RepeatedKeyValToMap(schema_proto.index_params());
 
@@ -183,12 +185,17 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                              data_type,
                              dim,
                              std::nullopt,
-                             false,
+                             nullable,
                              default_value};
         }
         auto metric_type = index_map.at("metric_type");
-        return FieldMeta{
-            name, field_id, data_type, dim, metric_type, false, default_value};
+        return FieldMeta{name,
+                         field_id,
+                         data_type,
+                         dim,
+                         metric_type,
+                         nullable,
+                         default_value};
     }
 
     if (IsStringDataType(data_type)) {

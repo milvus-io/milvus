@@ -541,6 +541,27 @@ ReduceHelper::GetSearchResultDataSlice(const int slice_index,
 
                 // set result offset to fill output fields data
                 result_pairs[loc] = {&search_result->output_fields_data_, ki};
+
+                for (auto field_id : plan_->target_entries_) {
+                    auto& field_meta = plan_->schema_->operator[](field_id);
+                    if (field_meta.is_vector() && field_meta.is_nullable()) {
+                        auto it =
+                            search_result->output_fields_data_.find(field_id);
+                        if (it != search_result->output_fields_data_.end()) {
+                            auto& field_data = it->second;
+                            if (field_data->valid_data_size() > 0) {
+                                int64_t valid_idx = 0;
+                                for (int64_t i = 0; i < ki; ++i) {
+                                    if (field_data->valid_data(i)) {
+                                        valid_idx++;
+                                    }
+                                }
+                                result_pairs[loc].setValidDataOffset(field_id,
+                                                                     valid_idx);
+                            }
+                        }
+                    }
+                }
             }
         }
 

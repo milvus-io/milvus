@@ -47,6 +47,7 @@ class ManifestGroupTranslator
      * @brief Construct a translator for a column group
      *
      * @param segment_id ID of the segment being loaded
+     * @param group_chunk_type Type of the group chunk
      * @param column_group_index Index of the column group within the segment
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
@@ -57,6 +58,7 @@ class ManifestGroupTranslator
      */
     ManifestGroupTranslator(
         int64_t segment_id,
+        GroupChunkType group_chunk_type,
         int64_t column_group_index,
         std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
@@ -145,35 +147,35 @@ class ManifestGroupTranslator
         int64_t total_size = 0;
 
         for (auto cid : cids) {
-            total_size += std::max(static_cast<int64_t>(chunk_size_[cid]),
-                                   MIN_STORAGE_BYTES);
+            assert(cid < meta_.chunk_memory_size_.size());
+            total_size +=
+                std::max(meta_.chunk_memory_size_[cid], MIN_STORAGE_BYTES);
         }
         return total_size;
     }
 
  private:
     /**
-     * @brief Load a single chunk from Arrow RecordBatch
+     * @brief Load a cell from multiple Arrow RecordBatches
      *
-     * Converts an Arrow RecordBatch into a GroupChunk containing
-     * field data for all columns in the chunk.
+     * Converts multiple Arrow RecordBatches (from row groups) into a single
+     * GroupChunk containing merged field data for all columns.
      *
-     * @param record_batch Arrow RecordBatch containing the chunk data
+     * @param record_batches Arrow RecordBatches from row groups
      * @param cid Cell ID of the chunk being loaded
      * @return GroupChunk containing the loaded field data
      */
     std::unique_ptr<milvus::GroupChunk>
-    load_group_chunk(const std::shared_ptr<arrow::RecordBatch>& record_batch,
-                     const milvus::cachinglayer::cid_t cid);
+    load_group_chunk(
+        const std::vector<std::shared_ptr<arrow::RecordBatch>>& record_batches,
+        milvus::cachinglayer::cid_t cid);
 
     int64_t segment_id_;
+    GroupChunkType group_chunk_type_;
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     std::unique_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
-
-    // chunk stats from reader
-    std::vector<uint64_t> chunk_size_;
 
     GroupCTMeta meta_;
     bool use_mmap_;

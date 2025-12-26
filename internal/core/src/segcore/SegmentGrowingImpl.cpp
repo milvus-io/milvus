@@ -312,13 +312,13 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         AssertInfo(field_id_to_offset.count(field_id),
                    fmt::format("can't find field {}", field_id.get()));
         auto data_offset = field_id_to_offset[field_id];
+        if (field_meta.is_nullable()) {
+            insert_record_.get_valid_data(field_id)->set_data_raw(
+                num_rows,
+                &insert_record_proto->fields_data(data_offset),
+                field_meta);
+        }
         if (!indexing_record_.HasRawData(field_id)) {
-            if (field_meta.is_nullable()) {
-                insert_record_.get_valid_data(field_id)->set_data_raw(
-                    num_rows,
-                    &insert_record_proto->fields_data(data_offset),
-                    field_meta);
-            }
             insert_record_.get_data_base(field_id)->set_data_raw(
                 reserved_offset,
                 num_rows,
@@ -937,14 +937,31 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
     auto& field_meta = schema_->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
-        auto result = CreateEmptyVectorDataArray(count, field_meta);
+        int64_t valid_count = count;
+        const bool* valid_data = nullptr;
+        const int64_t* valid_offsets = seg_offsets;
+        ValidResult filter_result;
+
+        if (field_meta.is_nullable()) {
+            filter_result =
+                FilterVectorValidOffsets(op_ctx, field_id, seg_offsets, count);
+            valid_count = filter_result.valid_count;
+            valid_data = filter_result.valid_data.get();
+            valid_offsets = filter_result.valid_offsets.data();
+        }
+
+        auto result = CreateEmptyVectorDataArray(
+            count, valid_count, valid_data, field_meta);
+        if (valid_count == 0) {
+            return result;
+        }
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             bulk_subscript_impl<FloatVector>(op_ctx,
                                              field_id,
                                              field_meta.get_sizeof(),
                                              vec_ptr,
-                                             seg_offsets,
-                                             count,
+                                             valid_offsets,
+                                             valid_count,
                                              result->mutable_vectors()
                                                  ->mutable_float_vector()
                                                  ->mutable_data()
@@ -955,8 +972,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 result->mutable_vectors()->mutable_binary_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
             bulk_subscript_impl<Float16Vector>(
@@ -964,8 +981,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 result->mutable_vectors()->mutable_float16_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BFLOAT16) {
             bulk_subscript_impl<BFloat16Vector>(
@@ -973,8 +990,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 result->mutable_vectors()->mutable_bfloat16_vector()->data());
         } else if (field_meta.get_data_type() ==
                    DataType::VECTOR_SPARSE_U32_F32) {
@@ -982,8 +999,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 op_ctx,
                 field_id,
                 (const ConcurrentVector<SparseFloatVector>*)vec_ptr,
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 result->mutable_vectors()->mutable_sparse_float_vector());
             result->mutable_vectors()->set_dim(
                 result->vectors().sparse_float_vector().dim());
@@ -993,8 +1010,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                 field_id,
                 field_meta.get_sizeof(),
                 vec_ptr,
-                seg_offsets,
-                count,
+                valid_offsets,
+                valid_count,
                 result->mutable_vectors()->mutable_int8_vector()->data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
             bulk_subscript_vector_array_impl(op_ctx,
@@ -1190,7 +1207,7 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
                 [&](size_t i) {
                     auto offset = seg_offsets[i];
                     return offset != INVALID_SEG_OFFSET
-                               ? vec_raw->get_element(offset)
+                               ? vec_raw->get_physical_element(offset)
                                : nullptr;
                 },
                 count,
@@ -1257,12 +1274,8 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
             for (int i = 0; i < count; ++i) {
                 auto dst = output_base + i * element_sizeof;
                 auto offset = seg_offsets[i];
-                if (offset == INVALID_SEG_OFFSET) {
-                    memset(dst, 0, element_sizeof);
-                } else {
-                    auto src = (const uint8_t*)vec.get_element(offset);
-                    memcpy(dst, src, element_sizeof);
-                }
+                auto src = (const uint8_t*)vec.get_physical_element(offset);
+                memcpy(dst, src, element_sizeof);
             }
             return;
         }
@@ -1858,6 +1871,70 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                   field_id.get(),
                   e.what());
     }
+}
+
+SegmentGrowingImpl::ValidResult
+SegmentGrowingImpl::FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                                             FieldId field_id,
+                                             const int64_t* seg_offsets,
+                                             int64_t count) const {
+    ValidResult result;
+    result.valid_count = count;
+
+    if (indexing_record_.SyncDataWithIndex(field_id)) {
+        const auto& field_indexing =
+            indexing_record_.get_vec_field_indexing(field_id);
+        auto indexing = field_indexing.get_segment_indexing();
+        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
+
+        if (vec_index != nullptr && vec_index->HasValidData()) {
+            result.valid_data = std::make_unique<bool[]>(count);
+            result.valid_offsets.reserve(count);
+
+            for (int64_t i = 0; i < count; ++i) {
+                bool is_valid = vec_index->IsRowValid(seg_offsets[i]);
+                result.valid_data[i] = is_valid;
+                if (is_valid) {
+                    int64_t physical_offset =
+                        vec_index->GetPhysicalOffset(seg_offsets[i]);
+                    if (physical_offset >= 0) {
+                        result.valid_offsets.push_back(physical_offset);
+                    }
+                }
+            }
+            result.valid_count = result.valid_offsets.size();
+        }
+    } else {
+        auto vec_base = insert_record_.get_data_base(field_id);
+        if (vec_base != nullptr) {
+            const auto& valid_data_vec = vec_base->get_valid_data();
+            bool is_mapping_storage = vec_base->is_mapping_storage();
+            if (!valid_data_vec.empty()) {
+                result.valid_data = std::make_unique<bool[]>(count);
+                result.valid_offsets.reserve(count);
+
+                for (int64_t i = 0; i < count; ++i) {
+                    auto offset = seg_offsets[i];
+                    bool is_valid =
+                        offset >= 0 &&
+                        offset < static_cast<int64_t>(valid_data_vec.size()) &&
+                        valid_data_vec[offset];
+                    result.valid_data[i] = is_valid;
+                    if (is_valid) {
+                        if (is_mapping_storage) {
+                            int64_t physical_offset =
+                                vec_base->get_physical_offset(offset);
+                            if (physical_offset >= 0) {
+                                result.valid_offsets.push_back(physical_offset);
+                            }
+                        }
+                    }
+                }
+                result.valid_count = result.valid_offsets.size();
+            }
+        }
+    }
+    return result;
 }
 
 }  // namespace milvus::segcore

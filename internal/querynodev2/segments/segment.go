@@ -1227,13 +1227,15 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return nil
 	}
 
+	// for compatibility, we only support load data format version equal to the current data format version
+	// if the data format version is less than the current version, wait for trigger a stats task again
 	if jsonKeyStats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
-		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+		log.Ctx(ctx).Warn("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
 
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
-	if info, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok && info.GetDataFormatVersion() >= common.JSONStatsDataFormatVersion {
+	if _, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok {
 		log.Warn("JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}

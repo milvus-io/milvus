@@ -201,7 +201,7 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 	defer node.lifetime.Done()
 
 	var (
-		totalSlots     = node.totalSlot
+		totalSlots     = index.CalculateNodeSlots()
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
 		importUsed     = node.importScheduler.Slots()
@@ -222,7 +222,7 @@ func (node *DataNode) GetJobStats(ctx context.Context, req *workerpb.GetJobStats
 
 	return &workerpb.GetJobStatsResponse{
 		Status:         merr.Success(),
-		TotalSlots:     node.totalSlot,
+		TotalSlots:     totalSlots,
 		AvailableSlots: availableSlots,
 	}, nil
 }
@@ -262,6 +262,8 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 
 func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
 	log.Ctx(ctx).Info("DataNode building index ...",
+		zap.String("clusterID", req.GetClusterID()),
+		zap.Int64("taskID", req.GetBuildID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
@@ -329,7 +331,10 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 }
 
 func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.AnalyzeRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("receive analyze job", zap.Int64("collectionID", req.GetCollectionID()),
+	log.Ctx(ctx).Info("receive analyze job",
+		zap.String("clusterID", req.GetClusterID()),
+		zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("fieldID", req.GetFieldID()),
 		zap.String("fieldName", req.GetFieldName()),
@@ -368,7 +373,10 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 }
 
 func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateStatsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("receive stats job", zap.Int64("collectionID", req.GetCollectionID()),
+	log.Ctx(ctx).Info("receive stats job",
+		zap.String("clusterID", req.GetClusterID()),
+		zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Int64("numRows", req.GetNumRows()),

@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -286,6 +288,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		int64(numValidRows), insertLogs, statsLogs, bm25StatsLogs)
 
 	debug.FreeOSMemory()
+	elapse := st.tr.RecordSpan()
 	log.Info("sort segment end",
 		zap.String("clusterID", st.req.GetClusterID()),
 		zap.Int64("taskID", st.req.GetTaskID()),
@@ -295,7 +298,9 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		zap.String("subTaskType", st.req.GetSubJobType().String()),
 		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
 		zap.Int64("old rows", numRows),
-		zap.Int("valid rows", numValidRows))
+		zap.Int("valid rows", numValidRows),
+		zap.Duration("elapse", elapse),
+	)
 	return insertLogs, nil
 }
 
@@ -468,40 +473,57 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		return err
 	}
 
-	textIndexLogs := make(map[int64]*datapb.TextIndexStats)
+	// Concurrent create text index for all match-enabled fields
+	var (
+		mu            sync.Mutex
+		textIndexLogs = make(map[int64]*datapb.TextIndexStats)
+	)
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
 	for _, field := range st.req.GetSchema().GetFields() {
+		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableMatch() {
 			continue
 		}
 		log.Info("field enable match, ready to create text index", zap.Int64("field id", field.GetFieldID()))
-		// create text index and upload the text index files.
-		files, err := getInsertFiles(field.GetFieldID(), field.GetNullable())
-		if err != nil {
-			return err
-		}
 
-		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
-		req.InsertLogs = insertBinlogs
-		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+		eg.Go(func() error {
+			files, err := getInsertFiles(field.GetFieldID(), field.GetNullable())
+			if err != nil {
+				return err
+			}
 
-		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
-		if err != nil {
-			return err
-		}
-		textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
-			FieldID: field.GetFieldID(),
-			Version: version,
-			BuildID: taskID,
-			Files:   lo.Keys(uploaded),
-		}
-		elapse := st.tr.RecordSpan()
-		log.Info("field enable match, create text index done",
-			zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
-			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(uploaded)),
-			zap.Duration("elapse", elapse),
-		)
+			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
+			req.InsertLogs = insertBinlogs
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, nil)
+
+			uploaded, err := indexcgowrapper.CreateTextIndex(egCtx, buildIndexParams)
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
+				FieldID: field.GetFieldID(),
+				Version: version,
+				BuildID: taskID,
+				Files:   lo.Keys(uploaded),
+			}
+			mu.Unlock()
+
+			log.Info("field enable match, create text index done",
+				zap.Int64("targetSegmentID", st.req.GetTargetSegmentID()),
+				zap.Int64("field id", field.GetFieldID()),
+				zap.Strings("files", lo.Keys(uploaded)),
+			)
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
@@ -511,6 +533,11 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		st.req.GetTargetSegmentID(),
 		st.req.GetInsertChannel(),
 		textIndexLogs)
+	totalElapse := st.tr.RecordSpan()
+	log.Info("create text index done",
+		zap.Int64("target segmentID", st.req.GetTargetSegmentID()),
+		zap.Duration("total elapse", totalElapse),
+	)
 	return nil
 }
 
@@ -542,9 +569,11 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	)
 
 	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
-		log.Info("create json key index failed dataformat invalid")
+		log.Warn("create json key index failed dataformat invalid", zap.Int64("dataformat version", jsonKeyStatsDataFormat),
+			zap.Int64("code version", common.JSONStatsDataFormatVersion))
 		return nil
 	}
+
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
 		return binlog.GetFieldID()
 	})
@@ -571,53 +600,72 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		return err
 	}
 
-	jsonKeyIndexStats := make(map[int64]*datapb.JsonKeyStats)
+	// Concurrent create JSON key index for all enabled fields
+	var (
+		mu                sync.Mutex
+		jsonKeyIndexStats = make(map[int64]*datapb.JsonKeyStats)
+	)
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
 	for _, field := range st.req.GetSchema().GetFields() {
+		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if !h.EnableJSONKeyStatsIndex() {
 			continue
 		}
 		log.Info("field enable json key index, ready to create json key index", zap.Int64("field id", field.GetFieldID()))
-		files, err := getInsertFiles(field.GetFieldID())
-		if err != nil {
-			return err
-		}
 
-		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
-		req.InsertLogs = insertBinlogs
-		options := &BuildIndexOptions{
-			JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
-			JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
-			JsonStatsWriteBatchSize:      jsonStatsWriteBatchSize,
-		}
-		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
+		eg.Go(func() error {
+			files, err := getInsertFiles(field.GetFieldID())
+			if err != nil {
+				return err
+			}
 
-		statsResult, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
-		if err != nil {
-			return err
-		}
+			req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
+			req.InsertLogs = insertBinlogs
+			options := &BuildIndexOptions{
+				JsonStatsMaxShreddingColumns: jsonStatsMaxShreddingColumns,
+				JsonStatsShreddingRatio:      jsonStatsShreddingRatioThreshold,
+				JsonStatsWriteBatchSize:      jsonStatsWriteBatchSize,
+			}
+			buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, options)
 
-		// calculate log size (disk size) from file sizes
-		var logSize int64
-		for _, fileSize := range statsResult.Files {
-			logSize += fileSize
-		}
+			statsResult, err := indexcgowrapper.CreateJSONKeyStats(egCtx, buildIndexParams)
+			if err != nil {
+				return err
+			}
 
-		jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
-			FieldID:                field.GetFieldID(),
-			Version:                version,
-			BuildID:                taskID,
-			Files:                  lo.Keys(statsResult.Files),
-			JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
-			MemorySize:             statsResult.MemSize,
-			LogSize:                logSize,
-		}
-		log.Info("field enable json key index, create json key index done",
-			zap.Int64("field id", field.GetFieldID()),
-			zap.Strings("files", lo.Keys(statsResult.Files)),
-			zap.Int64("memorySize", statsResult.MemSize),
-			zap.Int64("logSize", logSize),
-		)
+			// calculate log size (disk size) from file sizes
+			var logSize int64
+			for _, fileSize := range statsResult.Files {
+				logSize += fileSize
+			}
+
+			mu.Lock()
+			jsonKeyIndexStats[field.GetFieldID()] = &datapb.JsonKeyStats{
+				FieldID:                field.GetFieldID(),
+				Version:                version,
+				BuildID:                taskID,
+				Files:                  lo.Keys(statsResult.Files),
+				JsonKeyStatsDataFormat: jsonKeyStatsDataFormat,
+				MemorySize:             statsResult.MemSize,
+				LogSize:                logSize,
+			}
+			mu.Unlock()
+
+			log.Info("field enable json key index, create json key index done",
+				zap.Int64("field id", field.GetFieldID()),
+				zap.Strings("files", lo.Keys(statsResult.Files)),
+				zap.Int64("memorySize", statsResult.MemSize),
+				zap.Int64("logSize", logSize),
+			)
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	totalElapse := st.tr.RecordSpan()

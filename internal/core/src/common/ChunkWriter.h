@@ -129,6 +129,57 @@ class ChunkWriter final : public ChunkWriterBase {
     const int64_t dim_;
 };
 
+template <typename T>
+class NullableVectorChunkWriter final : public ChunkWriterBase {
+ public:
+    NullableVectorChunkWriter(int64_t dim, bool nullable)
+        : ChunkWriterBase(nullable), dim_(dim) {
+        Assert(nullable && "NullableVectorChunkWriter requires nullable=true");
+    }
+
+    std::pair<size_t, size_t>
+    calculate_size(const arrow::ArrayVector& array_vec) override {
+        size_t size = 0;
+        size_t row_nums = 0;
+
+        for (const auto& data : array_vec) {
+            row_nums += data->length();
+            auto binary_array =
+                std::static_pointer_cast<arrow::BinaryArray>(data);
+            int64_t valid_count = data->length() - binary_array->null_count();
+            size += valid_count * dim_ * sizeof(T);
+        }
+
+        // null bitmap size
+        size += (row_nums + 7) / 8;
+        row_nums_ = row_nums;
+        return {size, row_nums};
+    }
+
+    void
+    write_to_target(const arrow::ArrayVector& array_vec,
+                    const std::shared_ptr<ChunkTarget>& target) override {
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+        for (const auto& data : array_vec) {
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
+        }
+        write_null_bit_maps(null_bitmaps, target);
+
+        for (const auto& data : array_vec) {
+            auto binary_array =
+                std::static_pointer_cast<arrow::BinaryArray>(data);
+            auto data_offset = binary_array->value_offset(0);
+            auto data_ptr = binary_array->value_data()->data() + data_offset;
+            int64_t valid_count = data->length() - binary_array->null_count();
+            target->write(data_ptr, valid_count * dim_ * sizeof(T));
+        }
+    }
+
+ private:
+    const int64_t dim_;
+};
+
 template <>
 inline void
 ChunkWriter<arrow::BooleanArray, bool>::write_to_target(

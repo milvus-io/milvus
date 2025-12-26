@@ -126,10 +126,6 @@ func getCollectionRateLimitConfigDefaultValue(configKey string) float64 {
 		return Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
 	case common.CollectionInsertRateMinKey:
 		return Params.QuotaConfig.DMLMinInsertRatePerCollection.GetAsFloat()
-	case common.CollectionUpsertRateMaxKey:
-		return Params.QuotaConfig.DMLMaxUpsertRatePerCollection.GetAsFloat()
-	case common.CollectionUpsertRateMinKey:
-		return Params.QuotaConfig.DMLMinUpsertRatePerCollection.GetAsFloat()
 	case common.CollectionDeleteRateMaxKey:
 		return Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat()
 	case common.CollectionDeleteRateMinKey:
@@ -166,10 +162,6 @@ func getRateLimitConfig(properties map[string]string, configKey string, configVa
 		case common.CollectionInsertRateMaxKey:
 			return megaBytes2Bytes(rate)
 		case common.CollectionInsertRateMinKey:
-			return megaBytes2Bytes(rate)
-		case common.CollectionUpsertRateMaxKey:
-			return megaBytes2Bytes(rate)
-		case common.CollectionUpsertRateMinKey:
 			return megaBytes2Bytes(rate)
 		case common.CollectionDeleteRateMaxKey:
 			return megaBytes2Bytes(rate)
@@ -374,10 +366,6 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 			msg := fmt.Sprintf("ArrayOfVector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
-		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
-			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
 		if fieldSchema.GetNullable() && fieldSchema.IsPrimaryKey {
 			msg := fmt.Sprintf("primary field not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -499,11 +487,6 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 
 			if field.IsPartitionKey || field.IsPrimaryKey {
 				msg := fmt.Sprintf("partition key or primary key can not be in struct array field. data type:%s, element type:%s, name:%s",
-					field.DataType.String(), field.ElementType.String(), field.Name)
-				return merr.WrapErrParameterInvalidMsg(msg)
-			}
-			if field.GetNullable() && typeutil.IsVectorType(field.ElementType) {
-				msg := fmt.Sprintf("vector type not support null, data type:%s, element type:%s, name:%s",
 					field.DataType.String(), field.ElementType.String(), field.Name)
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}

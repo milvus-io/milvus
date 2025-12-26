@@ -373,6 +373,39 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
             "vector index build with multiple fields is not supported yet");
     }
 
+    auto manifest =
+        index::GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    // use manifest file for storage v2
+    auto manifest_path_str = manifest.value_or("");
+    if (manifest_path_str != "") {
+        AssertInfo(loon_ffi_properties_ != nullptr,
+                   "[StorageV2] loon ffi properties is null when build index "
+                   "with manifest");
+        std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
+        for (auto& [field_id, tup] : fields_map) {
+            const auto& field_type = std::get<1>(tup);
+            const auto& element_type = std::get<2>(tup);
+
+            // compose field schema for optional field
+            proto::schema::FieldSchema field_schema;
+            field_schema.set_fieldid(field_id);
+            field_schema.set_nullable(true);  // use always nullable
+            milvus::storage::FieldDataMeta field_meta{field_meta_.collection_id,
+                                                      field_meta_.partition_id,
+                                                      field_meta_.segment_id,
+                                                      field_id,
+                                                      field_schema};
+            auto field_datas = GetFieldDatasFromManifest(manifest_path_str,
+                                                         loon_ffi_properties_,
+                                                         field_meta_,
+                                                         field_type,
+                                                         1,  // scalar field
+                                                         element_type);
+
+            res[field_id] = GetOptFieldIvfData(field_type, field_datas);
+        }
+        return res;
+    }
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);

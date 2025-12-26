@@ -21,12 +21,13 @@ import (
 )
 
 type functionConfig struct {
-	BatchFactor            ParamItem  `refreshable:"true"`
-	TextEmbeddingProviders ParamGroup `refreshable:"true"`
-	RerankModelProviders   ParamGroup `refreshable:"true"`
-	LocalResourcePath      ParamItem  `refreshable:"true"`
-	LinderaDownloadUrls    ParamGroup `refreshable:"true"`
-	ZillizProviders        ParamGroup `refreshable:"true"`
+	BatchFactor                   ParamItem  `refreshable:"true"`
+	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
+	RerankModelProviders          ParamGroup `refreshable:"true"`
+	LocalResourcePath             ParamItem  `refreshable:"true"`
+	LinderaDownloadUrls           ParamGroup `refreshable:"true"`
+	ZillizProviders               ParamGroup `refreshable:"true"`
+	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -160,6 +161,15 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:   "2.6.5",
 	}
 	p.ZillizProviders.Init(base.mgr)
+
+	p.AnalyzerConcurrencyPerCPUCore = ParamItem{
+		Key:          "function.analyzer.concurrency_per_cpu_core",
+		Version:      "2.6.8",
+		Export:       true,
+		Doc:          "The concurrency per cpu core for analyzer, pipeline not included",
+		DefaultValue: "8",
+	}
+	p.AnalyzerConcurrencyPerCPUCore.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {

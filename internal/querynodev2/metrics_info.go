@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -269,7 +270,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	}
 
 	// Get jemalloc memory statistics
-	jemallocStats := hardware.GetJemallocStats()
+	jemallocStats := segcore.GetJemallocStats()
 
 	hardwareInfos := metricsinfo.HardwareMetrics{
 		IP:               node.session.Address,

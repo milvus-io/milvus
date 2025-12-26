@@ -51,12 +51,9 @@ const (
 	// DefaultServiceRoot default root path used in kv by Session
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
-	DefaultIDKey                        = "id"
-	SupportedLabelPrefix                = "MILVUS_SERVER_LABEL_"
-	LabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_STREAMING-EMBEDDED"
-	LabelStandalone                     = "STANDALONE"
-	MilvusNodeIDForTesting              = "MILVUS_NODE_ID_FOR_TESTING"
-	exitCodeSessionLeaseExpired         = 1
+	DefaultIDKey                = "id"
+	MilvusNodeIDForTesting      = "MILVUS_NODE_ID_FOR_TESTING"
+	exitCodeSessionLeaseExpired = 1
 
 	serverVersionKey = "version"
 )
@@ -70,12 +67,12 @@ func isNotSessionVersionCheckFailure(err error) bool {
 
 // EnableEmbededQueryNodeLabel set server labels for embedded query node.
 func EnableEmbededQueryNodeLabel() {
-	os.Setenv(SupportedLabelPrefix+LabelStreamingNodeEmbeddedQueryNode, "1")
+	os.Setenv(NewServerLabel(typeutil.QueryNodeRole, LabelStreamingNodeEmbeddedQueryNode), "1")
 }
 
 // EnableStandaloneLabel set server labels for standalone.
 func EnableStandaloneLabel() {
-	os.Setenv(SupportedLabelPrefix+LabelStandalone, "1")
+	os.Setenv(NewServerLabel("", LabelStandalone), "1")
 }
 
 // SessionEventType session event type
@@ -309,7 +306,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	s.ServerLabels = GetServerLabelsFromEnv(serverName)
+	s.ServerLabels = getServerLabelsFromEnv(serverName)
 	s.versionKey = path.Join(s.metaRoot, DefaultServiceRoot, serverVersionKey)
 
 	s.SetLogger(log.With(
@@ -386,25 +383,6 @@ func (s *Session) getServerID() (int64, error) {
 		paramtable.SetNodeID(nodeID)
 	}
 	return nodeID, nil
-}
-
-func GetServerLabelsFromEnv(role string) map[string]string {
-	ret := make(map[string]string)
-	switch role {
-	case "querynode":
-		for _, value := range os.Environ() {
-			rs := []rune(value)
-			in := strings.Index(value, "=")
-			key := string(rs[0:in])
-			value := string(rs[in+1:])
-
-			if strings.HasPrefix(key, SupportedLabelPrefix) {
-				label := strings.TrimPrefix(key, SupportedLabelPrefix)
-				ret[label] = value
-			}
-		}
-	}
-	return ret
 }
 
 func (s *Session) checkIDExist() {

@@ -185,6 +185,10 @@ func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption
 
 // AddCollectionField adds a field to a collection.
 func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldOption, callOpts ...grpc.CallOption) error {
+	if err := opt.Validate(); err != nil {
+		return err
+	}
+
 	req := opt.Request()
 
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {

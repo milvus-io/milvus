@@ -354,7 +354,6 @@ func TestQuotaCenter(t *testing.T) {
 
 			for _, rt := range []internalpb.RateType{
 				internalpb.RateType_DMLInsert,
-				internalpb.RateType_DMLUpsert,
 				internalpb.RateType_DMLDelete,
 				internalpb.RateType_DMLBulkLoad,
 			} {
@@ -372,7 +371,6 @@ func TestQuotaCenter(t *testing.T) {
 		assert.NotNil(t, limiters)
 		for _, rt := range []internalpb.RateType{
 			internalpb.RateType_DMLInsert,
-			internalpb.RateType_DMLUpsert,
 			internalpb.RateType_DMLDelete,
 			internalpb.RateType_DMLBulkLoad,
 		} {
@@ -539,8 +537,6 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "10.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "100.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMinInsertRatePerCollection.Key, "0.0")
-		paramtable.Get().Save(Params.QuotaConfig.DMLMaxUpsertRatePerCollection.Key, "100.0")
-		paramtable.Get().Save(Params.QuotaConfig.DMLMinUpsertRatePerCollection.Key, "0.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMaxDeleteRatePerCollection.Key, "100.0")
 		paramtable.Get().Save(Params.QuotaConfig.DMLMinDeleteRatePerCollection.Key, "0.0")
 		forceBak := Params.QuotaConfig.ForceDenyWriting.GetValue()
@@ -687,8 +683,6 @@ func TestQuotaCenter(t *testing.T) {
 		limiters := quotaCenter.rateLimiter.GetRootLimiters().GetLimiters()
 		a, _ := limiters.Get(internalpb.RateType_DMLInsert)
 		assert.Equal(t, Limit(0), a.Limit())
-		b, _ := limiters.Get(internalpb.RateType_DMLUpsert)
-		assert.Equal(t, Limit(0), b.Limit())
 		c, _ := limiters.Get(internalpb.RateType_DMLDelete)
 		assert.Equal(t, Limit(0), c.Limit())
 
@@ -718,8 +712,6 @@ func TestQuotaCenter(t *testing.T) {
 		limiters = rln.GetLimiters()
 		a, _ = limiters.Get(internalpb.RateType_DMLInsert)
 		assert.NotEqual(t, Limit(0), a.Limit())
-		b, _ = limiters.Get(internalpb.RateType_DMLUpsert)
-		assert.NotEqual(t, Limit(0), b.Limit())
 		c, _ = limiters.Get(internalpb.RateType_DMLDelete)
 		assert.NotEqual(t, Limit(0), c.Limit())
 
@@ -727,8 +719,6 @@ func TestQuotaCenter(t *testing.T) {
 		limiters = rln.GetLimiters()
 		a, _ = limiters.Get(internalpb.RateType_DMLInsert)
 		assert.Equal(t, Limit(0), a.Limit())
-		b, _ = limiters.Get(internalpb.RateType_DMLUpsert)
-		assert.Equal(t, Limit(0), b.Limit())
 		c, _ = limiters.Get(internalpb.RateType_DMLDelete)
 		assert.Equal(t, Limit(0), c.Limit())
 
@@ -891,15 +881,11 @@ func TestQuotaCenter(t *testing.T) {
 					if lo.Contains(notEquals, collection) {
 						a, _ := limiters.Get(internalpb.RateType_DMLInsert)
 						assert.NotEqual(t, Limit(0), a.Limit())
-						b, _ := limiters.Get(internalpb.RateType_DMLUpsert)
-						assert.NotEqual(t, Limit(0), b.Limit())
 						c, _ := limiters.Get(internalpb.RateType_DMLDelete)
 						assert.NotEqual(t, Limit(0), c.Limit())
 					} else {
 						a, _ := limiters.Get(internalpb.RateType_DMLInsert)
 						assert.Equal(t, Limit(0), a.Limit())
-						b, _ := limiters.Get(internalpb.RateType_DMLUpsert)
-						assert.Equal(t, Limit(0), b.Limit())
 						c, _ := limiters.Get(internalpb.RateType_DMLDelete)
 						assert.NotEqual(t, Limit(0), c.Limit())
 					}
@@ -911,8 +897,6 @@ func TestQuotaCenter(t *testing.T) {
 			root := quotaCenter.rateLimiter.GetRootLimiters().GetLimiters()
 			a, _ := root.Get(internalpb.RateType_DMLInsert)
 			assert.Equal(t, Limit(0), a.Limit())
-			b, _ := root.Get(internalpb.RateType_DMLUpsert)
-			assert.Equal(t, Limit(0), b.Limit())
 			c, _ := root.Get(internalpb.RateType_DMLDelete)
 			assert.NotEqual(t, Limit(0), c.Limit())
 		}
@@ -1091,7 +1075,6 @@ func TestQuotaCenter(t *testing.T) {
 		}
 
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DMLInsert), Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat())
-		assert.Equal(t, getRate(limiters, internalpb.RateType_DMLUpsert), Params.QuotaConfig.DMLMaxUpsertRatePerCollection.GetAsFloat())
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DMLDelete), Params.QuotaConfig.DMLMaxDeleteRatePerCollection.GetAsFloat())
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DMLBulkLoad), Params.QuotaConfig.DMLMaxBulkLoadRatePerCollection.GetAsFloat())
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLSearch), Params.QuotaConfig.DQLMaxSearchRatePerCollection.GetAsFloat())
@@ -1125,10 +1108,6 @@ func TestQuotaCenter(t *testing.T) {
 					Key:   common.CollectionSearchRateMaxKey,
 					Value: "5",
 				},
-				{
-					Key:   common.CollectionUpsertRateMaxKey,
-					Value: "6",
-				},
 			},
 		}, nil)
 		quotaCenter.resetAllCurrentRates()
@@ -1138,7 +1117,6 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DMLBulkLoad), float64(3*1024*1024))
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLQuery), float64(4))
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLSearch), float64(5))
-		assert.Equal(t, getRate(limiters, internalpb.RateType_DMLUpsert), float64(6*1024*1024))
 	})
 }
 
@@ -1579,7 +1557,7 @@ func TestGetRateType(t *testing.T) {
 
 	t.Run("ddl cluster scope", func(t *testing.T) {
 		a := getRateTypes(internalpb.RateScope_Cluster, allOps)
-		assert.Equal(t, 12, a.Len())
+		assert.Equal(t, 11, a.Len())
 	})
 }
 

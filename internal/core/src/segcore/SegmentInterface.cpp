@@ -500,10 +500,18 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     const milvus::FieldMeta& field_meta, int64_t count) const {
     auto data_type = field_meta.get_data_type();
     if (IsVectorDataType(data_type)) {
-        ThrowInfo(DataTypeInvalid,
-                  fmt::format("unsupported added field type {}",
-                              field_meta.get_data_type()));
+        AssertInfo(field_meta.is_nullable(),
+                   "Non-nullable vector field should not reach here");
+
+        auto result = CreateEmptyVectorDataArray(0, field_meta);
+
+        auto valid_data = result->mutable_valid_data();
+        for (int64_t i = 0; i < count; ++i) {
+            valid_data->Add(false);
+        }
+        return result;
     }
+
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         auto res = result->mutable_valid_data()->mutable_data();

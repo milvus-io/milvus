@@ -232,6 +232,17 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 		},
 	}))
 	suite.manager.HandleNodeUp(ctx, 10)
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   11,
+		Address:  "localhost",
+		Hostname: "localhost",
+		Labels: map[string]string{
+			sessionutil.LabelResourceGroup: "rg11",
+		},
+	}))
+	suite.manager.HandleNodeUp(ctx, 11)
+	suite.Equal(1, suite.manager.GetResourceGroup(ctx, "rg11").NodeNum())
 }
 
 func (suite *ResourceManagerSuite) TestNodeUpAndDown() {

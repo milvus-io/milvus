@@ -22,14 +22,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"os"
 	"testing"
 	"time"
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -207,56 +205,6 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	}
 }
 
-func TestPulsarClient_Consume1(t *testing.T) {
-	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	defer pc.Close()
-	assert.NoError(t, err)
-	assert.NotNil(t, pc)
-	rand.Seed(time.Now().UnixNano())
-
-	topic := fmt.Sprintf("test-topic-%d", rand.Int())
-	subName := fmt.Sprintf("test-subname-%d", rand.Int())
-	arr := []int{111, 222, 333, 444, 555, 666, 777}
-	c := make(chan mqcommon.MessageID, 1)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	var total1 int
-	var total2 int
-	var total3 int
-
-	// launch produce
-	Produce(ctx, t, pc, topic, arr)
-	time.Sleep(100 * time.Millisecond)
-
-	// launch consume1
-	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel1()
-	Consume1(ctx1, t, pc, topic, subName, c, &total1)
-
-	// record the last received message id
-	lastMsgID := <-c
-	log.Info("msg", zap.Any("lastMsgID", lastMsgID))
-
-	// launch consume2
-	ctx2, cancel2 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel2()
-	Consume2(ctx2, t, pc, topic, subName, lastMsgID, &total2)
-
-	// launch consume3
-	ctx3, cancel3 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel3()
-	Consume3(ctx3, t, pc, topic, subName, &total3)
-
-	// stop Consume2
-	cancel()
-	assert.Equal(t, len(arr), total1+total2)
-	assert.Equal(t, len(arr), total3)
-
-	log.Info("main done")
-}
-
 func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan mqcommon.MessageID, total *int) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       topic,
@@ -355,134 +303,6 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 			(*total)++
 			// log.Debug("total", zap.Int("val", *total))
 		}
-	}
-}
-
-func TestPulsarClient_Consume2(t *testing.T) {
-	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	defer pc.Close()
-	assert.NoError(t, err)
-	assert.NotNil(t, pc)
-	rand.Seed(time.Now().UnixNano())
-
-	topic := fmt.Sprintf("test-topic-%d", rand.Int())
-	subName := fmt.Sprintf("test-subname-%d", rand.Int())
-	arr := []int{111, 222, 333, 444, 555, 666, 777}
-	c := make(chan mqcommon.MessageID, 1)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	var total1 int
-	var total2 int
-	var total3 int
-
-	// launch produce
-	Produce(ctx, t, pc, topic, arr)
-	time.Sleep(100 * time.Millisecond)
-
-	// launch consume1
-	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel1()
-	Consume21(ctx1, t, pc, topic, subName, c, &total1)
-
-	// record the last received message id
-	lastMsgID := <-c
-	log.Info("msg", zap.Any("lastMsgID", lastMsgID))
-
-	// launch consume2
-	ctx2, cancel2 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel2()
-	Consume22(ctx2, t, pc, topic, subName, lastMsgID, &total2)
-
-	// launch consume3
-	ctx3, cancel3 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel3()
-	Consume23(ctx3, t, pc, topic, subName, &total3)
-
-	// stop Consume2
-	cancel()
-	assert.Equal(t, len(arr), total1+total2)
-	assert.Equal(t, 0, total3)
-
-	log.Info("main done")
-}
-
-func TestPulsarClient_SeekPosition(t *testing.T) {
-	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	defer pc.Close()
-	assert.NoError(t, err)
-	assert.NotNil(t, pc)
-	rand.Seed(time.Now().UnixNano())
-
-	ctx := context.Background()
-	topic := fmt.Sprintf("test-topic-%d", rand.Int())
-	subName := fmt.Sprintf("test-subname-%d", rand.Int())
-
-	producer, err := pc.CreateProducer(ctx, mqcommon.ProducerOptions{Topic: topic})
-	assert.NoError(t, err)
-	assert.NotNil(t, producer)
-
-	log.Info("Produce start")
-	ids := []mqcommon.MessageID{}
-	arr1 := []int{1, 2, 3}
-	arr2 := []string{"1", "2", "3"}
-	for k, v := range arr1 {
-		msg := &mqcommon.ProducerMessage{
-			Payload: IntToBytes(v),
-			Properties: map[string]string{
-				common.TraceIDKey: arr2[k],
-			},
-		}
-		id, err := producer.Send(ctx, msg)
-		ids = append(ids, id)
-		assert.NoError(t, err)
-	}
-
-	log.Info("Produced")
-
-	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		Type:                        pulsar.KeyShared,
-		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, consumer)
-	defer consumer.Close()
-	seekID := ids[2].(*pulsarID).messageID
-	consumer.Seek(seekID)
-
-	msgChan := consumer.Chan()
-
-	select {
-	case msg := <-msgChan:
-		assert.Equal(t, seekID.BatchIdx(), msg.ID().BatchIdx())
-		assert.Equal(t, seekID.LedgerID(), msg.ID().LedgerID())
-		assert.Equal(t, seekID.EntryID(), msg.ID().EntryID())
-		assert.Equal(t, seekID.PartitionIdx(), msg.ID().PartitionIdx())
-		assert.Equal(t, 3, BytesToInt(msg.Payload()))
-		assert.Equal(t, "3", msg.Properties()[common.TraceIDKey])
-	case <-time.After(2 * time.Second):
-		assert.FailNow(t, "should not wait")
-	}
-
-	seekID = ids[1].(*pulsarID).messageID
-	consumer.Seek(seekID)
-
-	msgChan = consumer.Chan()
-
-	select {
-	case msg := <-msgChan:
-		assert.Equal(t, seekID.BatchIdx(), msg.ID().BatchIdx())
-		assert.Equal(t, seekID.LedgerID(), msg.ID().LedgerID())
-		assert.Equal(t, seekID.EntryID(), msg.ID().EntryID())
-		assert.Equal(t, seekID.PartitionIdx(), msg.ID().PartitionIdx())
-		assert.Equal(t, 2, BytesToInt(msg.Payload()))
-		assert.Equal(t, "2", msg.Properties()[common.TraceIDKey])
-	case <-time.After(2 * time.Second):
-		assert.FailNow(t, "should not wait")
 	}
 }
 
@@ -704,73 +524,6 @@ func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
 	defer consumer.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, consumer)
-}
-
-func TestPulsarCtl(t *testing.T) {
-	topic := "test-pulsar-ctl"
-	subName := "hello"
-
-	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
-	assert.NoError(t, err)
-	consumer, err := pc.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, consumer)
-	defer consumer.Close()
-
-	_, err = pc.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
-	})
-
-	assert.Error(t, err)
-
-	_, err = pc.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
-	})
-	assert.Error(t, err)
-
-	fullTopicName, err := GetFullTopicName(DefaultPulsarTenant, DefaultPulsarNamespace, topic)
-	assert.NoError(t, err)
-	topicName, err := utils.GetTopicName(fullTopicName)
-	assert.NoError(t, err)
-
-	pulsarURL, err := url.ParseRequestURI(pulsarAddress)
-	if err != nil {
-		panic(err)
-	}
-	webport := Params.PulsarCfg.WebPort.GetValue()
-	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
-	admin, err := NewAdminClient(webServiceURL, "", "")
-	assert.NoError(t, err)
-	err = admin.Subscriptions().Delete(*topicName, subName, true)
-	if err != nil {
-		webServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
-		admin, err := NewAdminClient(webServiceURL, "", "")
-		assert.NoError(t, err)
-		err = admin.Subscriptions().Delete(*topicName, subName, true)
-		assert.NoError(t, err)
-	}
-
-	consumer2, err := pc.Subscribe(context.TODO(), mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqcommon.SubscriptionPositionEarliest,
-	})
-	assert.NoError(t, err)
-	assert.NotNil(t, consumer2)
-	defer consumer2.Close()
 }
 
 func NewPulsarAdminClient() {

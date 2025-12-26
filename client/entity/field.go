@@ -206,6 +206,17 @@ const (
 	FieldTypeStruct FieldType = 201
 )
 
+// IsVectorType returns true if the field type is a vector type
+func (t FieldType) IsVectorType() bool {
+	switch t {
+	case FieldTypeBinaryVector, FieldTypeFloatVector, FieldTypeFloat16Vector,
+		FieldTypeBFloat16Vector, FieldTypeSparseVector, FieldTypeInt8Vector:
+		return true
+	default:
+		return false
+	}
+}
+
 // Field represent field schema in milvus
 type Field struct {
 	ID              int64  // field id, generated when collection is created, input value is ignored

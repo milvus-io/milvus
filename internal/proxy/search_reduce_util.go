@@ -258,6 +258,11 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
 	}
 
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
+	for i, srd := range subSearchResultData {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
+	}
+
 	var realTopK int64 = -1
 	var retSize int64
 
@@ -316,7 +321,8 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			for _, groupEntity := range groupEntities {
 				subResData := subSearchResultData[groupEntity.subSearchIdx]
 				if len(ret.Results.FieldsData) > 0 {
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx)
+					fieldIdxs := idxComputers[groupEntity.subSearchIdx].Compute(groupEntity.resultIdx)
+					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subResData.FieldsData, groupEntity.resultIdx, fieldIdxs...)
 				}
 				typeutil.AppendPKs(ret.Results.Ids, groupEntity.id)
 				ret.Results.Scores = append(ret.Results.Scores, groupEntity.score)
@@ -424,6 +430,12 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
 			}
 		}
+
+		idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
+		for i, srd := range subSearchResultData {
+			idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
+		}
+
 		maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 		// reducing nq * topk results
 		for i := int64(0); i < nq; i++ {
@@ -456,7 +468,9 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				score := subSearchResultData[subSearchIdx].Scores[resultDataIdx]
 
 				if len(ret.Results.FieldsData) > 0 {
-					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, subSearchResultData[subSearchIdx].FieldsData, resultDataIdx)
+					fieldsData := subSearchResultData[subSearchIdx].FieldsData
+					fieldIdxs := idxComputers[subSearchIdx].Compute(resultDataIdx)
+					retSize += typeutil.AppendFieldData(ret.Results.FieldsData, fieldsData, resultDataIdx, fieldIdxs...)
 				}
 				typeutil.CopyPk(ret.Results.Ids, subSearchResultData[subSearchIdx].GetIds(), int(resultDataIdx))
 				ret.Results.Scores = append(ret.Results.Scores, score)

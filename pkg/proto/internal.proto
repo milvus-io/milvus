@@ -310,7 +310,7 @@ enum RateType {
   DMLBulkLoad = 7;
   DQLSearch = 8;
   DQLQuery = 9;
-  DMLUpsert = 10;
+  DMLUpsert = 10 [deprecated = true]; // UpsertRequest uses DMLInsert for rate limiting
   DDLDB = 11;
 }
 

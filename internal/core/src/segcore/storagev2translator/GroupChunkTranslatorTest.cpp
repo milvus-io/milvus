@@ -127,7 +127,9 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
                    reader_result.status().ToString());
     auto fr = reader_result.ValueOrDie();
     auto expected_num_cells =
-        fr->file_metadata()->GetRowGroupMetadataVector().size();
+        (fr->file_metadata()->GetRowGroupMetadataVector().size() +
+         kRowGroupsPerCell - 1) /
+        kRowGroupsPerCell;
     auto row_group_metadata_vector =
         fr->file_metadata()->GetRowGroupMetadataVector();
     auto status = fr->Close();
@@ -144,11 +146,16 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
 
     // estimated byte size
     for (size_t i = 0; i < translator->num_cells(); ++i) {
-        auto [file_idx, row_group_idx] =
-            translator->get_file_and_row_group_index(i);
-        // Get the expected size from the file directly
-        auto expected_size = static_cast<int64_t>(
-            row_group_metadata_vector.Get(row_group_idx).memory_size());
+        auto [start, end] = static_cast<GroupCTMeta*>(translator->meta())
+                                ->get_row_group_range(i);
+        auto expected_size = 0;
+        for (size_t j = start; j < end; ++j) {
+            auto [file_idx, row_group_idx] =
+                translator->get_file_and_row_group_offset(j);
+            // Get the expected size from the file directly
+            expected_size += static_cast<int64_t>(
+                row_group_metadata_vector.Get(row_group_idx).memory_size());
+        }
         auto usage = translator->estimated_byte_size_of_cell(i).first;
         if (use_mmap) {
             EXPECT_EQ(usage.file_bytes, expected_size);
@@ -157,8 +164,11 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         }
     }
 
-    // getting cells
-    std::vector<cachinglayer::cid_t> cids = {0, 1};
+    // getting cells - use all valid cell IDs
+    std::vector<cachinglayer::cid_t> cids;
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        cids.push_back(i);
+    }
     auto cells = translator->get_cells(cids);
     EXPECT_EQ(cells.size(), cids.size());
 
@@ -177,10 +187,12 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     EXPECT_EQ(meta->chunk_memory_size_.size(), num_cells);
     EXPECT_EQ(expected_total_size, chunked_column_group->memory_size());
 
-    // Verify the mmap files for cell 0 and 1 are created
-    std::vector<std::string> mmap_paths = {
-        (temp_dir / "seg_0_cg_0_0").string(),
-        (temp_dir / "seg_0_cg_0_1").string()};
+    // Verify the mmap files for all cells are created
+    std::vector<std::string> mmap_paths;
+    for (size_t i = 0; i < num_cells; ++i) {
+        mmap_paths.push_back(
+            (temp_dir / ("seg_0_cg_0_" + std::to_string(i))).string());
+    }
     // Verify mmap directory and files if in mmap mode
     if (use_mmap) {
         for (const auto& mmap_path : mmap_paths) {
@@ -275,62 +287,91 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     for (auto row_groups : expected_row_groups_per_file) {
         expected_total_cells += row_groups;
     }
+    expected_total_cells =
+        (expected_total_cells + kRowGroupsPerCell - 1) / kRowGroupsPerCell;
     EXPECT_EQ(translator->num_cells(), expected_total_cells);
 
-    // Test get_file_and_row_group_index for cids across different files
-    int64_t cid_offset = 0;
+    // Test get_file_and_row_group_offset for global row group indices across
+    // different files
+    size_t global_rg_idx = 0;
     for (size_t file_idx = 0; file_idx < expected_row_groups_per_file.size();
          ++file_idx) {
         for (int64_t row_group_idx = 0;
              row_group_idx < expected_row_groups_per_file[file_idx];
              ++row_group_idx) {
-            auto cid = cid_offset + row_group_idx;
             auto [actual_file_idx, actual_row_group_idx] =
-                translator->get_file_and_row_group_index(cid);
+                translator->get_file_and_row_group_offset(global_rg_idx);
             EXPECT_EQ(actual_file_idx, file_idx);
             EXPECT_EQ(actual_row_group_idx, row_group_idx);
+            global_rg_idx++;
         }
-        cid_offset += expected_row_groups_per_file[file_idx];
     }
 
-    // Test get_cells with cids from the same file
-    std::vector<cachinglayer::cid_t> same_file_cids = {0,
-                                                       1};  // Both from file 0
-    auto same_file_cells = translator->get_cells(same_file_cids);
-    EXPECT_EQ(same_file_cells.size(), same_file_cids.size());
+    // Test get_cells with first two cells (if available)
+    auto num_cells = translator->num_cells();
+    std::vector<cachinglayer::cid_t> first_cids;
+    for (size_t i = 0; i < std::min(num_cells, static_cast<size_t>(2)); ++i) {
+        first_cids.push_back(i);
+    }
+    auto first_cells = translator->get_cells(first_cids);
+    EXPECT_EQ(first_cells.size(), first_cids.size());
     int i = 0;
-    for (const auto& [cid, chunk] : same_file_cells) {
-        EXPECT_EQ(cid, same_file_cids[i++]);
+    for (const auto& [cid, chunk] : first_cells) {
+        EXPECT_EQ(cid, first_cids[i++]);
     }
 
-    // Test get_cells with cids in reverse order to test sorting
-    std::vector<cachinglayer::cid_t> cross_file_cids = {4, 7, 0};
-    auto cells = translator->get_cells(cross_file_cids);
-    std::vector<cachinglayer::cid_t> returned_cids = {0, 4, 7};
+    // Test get_cells with cids in reverse order to verify order preservation
+    // Use all valid cells in reverse order
+    std::vector<cachinglayer::cid_t> reverse_cids;
+    for (size_t j = num_cells; j > 0; --j) {
+        reverse_cids.push_back(j - 1);
+    }
+    auto cells = translator->get_cells(reverse_cids);
+    // Returned cids should be in the same order as input (reverse order)
     i = 0;
     for (const auto& [cid, chunk] : cells) {
-        EXPECT_EQ(cid, returned_cids[i++]);
+        EXPECT_EQ(cid, reverse_cids[i]);  // Verify order preservation
+        i++;
     }
+    EXPECT_EQ(cells.size(), num_cells);
 
     // Test estimated byte size for cids across different files
-    for (size_t i = 0; i < translator->num_cells(); ++i) {
-        auto [file_idx, row_group_idx] =
-            translator->get_file_and_row_group_index(i);
-        auto usage = translator->estimated_byte_size_of_cell(i).first;
-
-        // Get the expected memory size from the corresponding file
+    // First, build a vector of all row group metadata for easy lookup
+    std::vector<std::pair<size_t, milvus_storage::RowGroupMetadataVector>>
+        all_rg_metas;
+    for (size_t file_idx = 0; file_idx < multi_file_paths.size(); ++file_idx) {
         auto reader_result = milvus_storage::FileRowGroupReader::Make(
             fs_, multi_file_paths[file_idx]);
         AssertInfo(reader_result.ok(),
                    "[StorageV2] Failed to create file row group reader: " +
                        reader_result.status().ToString());
         auto fr = reader_result.ValueOrDie();
-        auto row_group_metadata_vector =
-            fr->file_metadata()->GetRowGroupMetadataVector();
-        auto expected_size = static_cast<int64_t>(
-            row_group_metadata_vector.Get(row_group_idx).memory_size());
+        all_rg_metas.emplace_back(
+            file_idx, fr->file_metadata()->GetRowGroupMetadataVector());
         auto status = fr->Close();
         AssertInfo(status.ok(), "failed to close file reader");
+    }
+
+    // For each cell, sum the byte sizes of all row groups it contains
+    size_t total_row_groups = 0;
+    for (auto rg_count : expected_row_groups_per_file) {
+        total_row_groups += rg_count;
+    }
+
+    for (size_t cid = 0; cid < translator->num_cells(); ++cid) {
+        auto usage = translator->estimated_byte_size_of_cell(cid).first;
+
+        // Calculate expected size by summing all row groups in this cell
+        size_t rg_start = cid * kRowGroupsPerCell;
+        size_t rg_end =
+            std::min(rg_start + kRowGroupsPerCell, total_row_groups);
+        int64_t expected_size = 0;
+        for (size_t rg_idx = rg_start; rg_idx < rg_end; ++rg_idx) {
+            auto [file_idx, local_rg_idx] =
+                translator->get_file_and_row_group_offset(rg_idx);
+            expected_size += static_cast<int64_t>(
+                all_rg_metas[file_idx].second.Get(local_rg_idx).memory_size());
+        }
 
         if (use_mmap) {
             EXPECT_EQ(usage.file_bytes, expected_size);

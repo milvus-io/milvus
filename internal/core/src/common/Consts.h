@@ -56,7 +56,8 @@ const char HINTS[] = "hints";
 const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
 constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
-constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "2";
+// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
+constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "3";
 constexpr const char* JSON_STATS_SHARED_INDEX_PATH = "shared_key_index";
 constexpr const char* JSON_STATS_SHREDDING_DATA_PATH = "shredding_data";
 constexpr const char* JSON_STATS_META_FILE_NAME = "meta.json";
