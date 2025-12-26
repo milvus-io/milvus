@@ -107,8 +107,8 @@ func RecoverAllCollection(m *meta.Meta) {
 }
 
 func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {
-	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
-		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
+	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && int(replicaNumber) % len(resourceGroups) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or divisor of replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
 	if streamingutil.IsStreamingServiceEnabled() {
@@ -128,7 +128,7 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 	} else {
 		// replicas should be spawned in different resource groups one by one.
 		for _, rgName := range resourceGroups {
-			replicaNumInRG[rgName] += 1
+			replicaNumInRG[rgName] += int(replicaNumber) / len(resourceGroups)
 		}
 	}
 
