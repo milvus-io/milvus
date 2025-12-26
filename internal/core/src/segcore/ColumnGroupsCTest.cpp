@@ -19,8 +19,8 @@
 #include <cstring>
 #include "segcore/column_groups_c.h"
 
-TEST(CColumnGroups, TestCColumnGroups) {
-    CColumnGroups cgs = NewCColumnGroups();
+TEST(CColumnSplits, TestCColumnSplits) {
+    CColumnSplits cgs = NewCColumnSplits();
     int group1[] = {2, 4, 5};
     int group2[] = {0, 1};
     int group3[] = {3, 6, 7, 8};
@@ -29,10 +29,10 @@ TEST(CColumnGroups, TestCColumnGroups) {
     int group_sizes[] = {3, 2, 4};
 
     for (int i = 0; i < 3; i++) {
-        AddCColumnGroup(cgs, test_groups[i], group_sizes[i]);
+        AddCColumnSplit(cgs, test_groups[i], group_sizes[i]);
     }
 
-    ASSERT_EQ(CColumnGroupsSize(cgs), 3);
+    ASSERT_EQ(CColumnSplitsSize(cgs), 3);
     auto vv = static_cast<std::vector<std::vector<int>>*>(cgs);
 
     for (int i = 0; i < 3; i++) {
@@ -42,5 +42,5 @@ TEST(CColumnGroups, TestCColumnGroups) {
         }
     }
 
-    FreeCColumnGroups(cgs);
+    FreeCColumnSplits(cgs);
 }
