@@ -229,13 +229,13 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.Int64).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}
 	case schemapb.DataType_VarChar:
 		predicate = func(r storage.Record, ri, i int) bool {
 			pk := r.Column(pkField.FieldID).(*array.String).Value(i)
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
-			return !entityFilter.Filtered(pk, uint64(ts))
+			return !entityFilter.Filtered(pk, uint64(ts), -1)
 		}
 	default:
 		log.Warn("sort task only support int64 and varchar pk field")
@@ -263,7 +263,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		return nil, err
 	}
 
-	binlogs, stats, bm25stats, _ := srw.GetLogs()
+	binlogs, stats, bm25stats, _, _ := srw.GetLogs()
 	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err

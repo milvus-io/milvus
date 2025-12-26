@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -146,7 +147,7 @@ func getZeroTime() time.Time {
 	return t
 }
 
-// getCollectionTTL returns ttl if collection's ttl is specified, or return global ttl
+// getCollectionTTL returns ttl if collection's ttl is specified
 func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	v, ok := properties[common.CollectionTTLConfigKey]
 	if ok {
@@ -157,7 +158,30 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 		return time.Duration(ttl) * time.Second, nil
 	}
 
-	return Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second), nil
+	return -1, nil
+}
+
+func getTTLFieldID(schema *schemapb.CollectionSchema) UniqueID {
+	if schema == nil {
+		return common.InvalidFieldID
+	}
+
+	ttlFieldName := ""
+	for _, pair := range schema.GetProperties() {
+		if pair.GetKey() == common.CollectionTTLFieldKey {
+			ttlFieldName = pair.GetValue()
+			break
+		}
+	}
+	if ttlFieldName == "" {
+		return common.InvalidFieldID
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetName() == ttlFieldName {
+			return field.GetFieldID()
+		}
+	}
+	return common.InvalidFieldID
 }
 
 func UpdateCompactionSegmentSizeMetrics(segments []*datapb.CompactionSegment) {
