@@ -2380,6 +2380,80 @@ func (_c *MockMixCoordClient_CreateRole_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// CreateSnapshot provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) CreateSnapshot(ctx context.Context, in *datapb.CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CreateSnapshotRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CreateSnapshotRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CreateSnapshotRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_CreateSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateSnapshot'
+type MockMixCoordClient_CreateSnapshot_Call struct {
+	*mock.Call
+}
+
+// CreateSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.CreateSnapshotRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) CreateSnapshot(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_CreateSnapshot_Call {
+	return &MockMixCoordClient_CreateSnapshot_Call{Call: _e.mock.On("CreateSnapshot",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_CreateSnapshot_Call) Run(run func(ctx context.Context, in *datapb.CreateSnapshotRequest, opts ...grpc.CallOption)) *MockMixCoordClient_CreateSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.CreateSnapshotRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_CreateSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_CreateSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_CreateSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.CreateSnapshotRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_CreateSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeactivateChecker provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) DeactivateChecker(ctx context.Context, in *querypb.DeactivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -2968,6 +3042,80 @@ func (_c *MockMixCoordClient_DescribeResourceGroup_Call) Return(_a0 *querypb.Des
 }
 
 func (_c *MockMixCoordClient_DescribeResourceGroup_Call) RunAndReturn(run func(context.Context, *querypb.DescribeResourceGroupRequest, ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error)) *MockMixCoordClient_DescribeResourceGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DescribeSnapshot provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) DescribeSnapshot(ctx context.Context, in *datapb.DescribeSnapshotRequest, opts ...grpc.CallOption) (*datapb.DescribeSnapshotResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DescribeSnapshot")
+	}
+
+	var r0 *datapb.DescribeSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DescribeSnapshotRequest, ...grpc.CallOption) (*datapb.DescribeSnapshotResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DescribeSnapshotRequest, ...grpc.CallOption) *datapb.DescribeSnapshotResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.DescribeSnapshotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DescribeSnapshotRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_DescribeSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeSnapshot'
+type MockMixCoordClient_DescribeSnapshot_Call struct {
+	*mock.Call
+}
+
+// DescribeSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.DescribeSnapshotRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) DescribeSnapshot(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_DescribeSnapshot_Call {
+	return &MockMixCoordClient_DescribeSnapshot_Call{Call: _e.mock.On("DescribeSnapshot",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_DescribeSnapshot_Call) Run(run func(ctx context.Context, in *datapb.DescribeSnapshotRequest, opts ...grpc.CallOption)) *MockMixCoordClient_DescribeSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.DescribeSnapshotRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_DescribeSnapshot_Call) Return(_a0 *datapb.DescribeSnapshotResponse, _a1 error) *MockMixCoordClient_DescribeSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_DescribeSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.DescribeSnapshotRequest, ...grpc.CallOption) (*datapb.DescribeSnapshotResponse, error)) *MockMixCoordClient_DescribeSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3634,6 +3782,80 @@ func (_c *MockMixCoordClient_DropRole_Call) Return(_a0 *commonpb.Status, _a1 err
 }
 
 func (_c *MockMixCoordClient_DropRole_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRoleRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropSnapshot provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) DropSnapshot(ctx context.Context, in *datapb.DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSnapshot")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSnapshotRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropSnapshotRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropSnapshotRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_DropSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSnapshot'
+type MockMixCoordClient_DropSnapshot_Call struct {
+	*mock.Call
+}
+
+// DropSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.DropSnapshotRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) DropSnapshot(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_DropSnapshot_Call {
+	return &MockMixCoordClient_DropSnapshot_Call{Call: _e.mock.On("DropSnapshot",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_DropSnapshot_Call) Run(run func(ctx context.Context, in *datapb.DropSnapshotRequest, opts ...grpc.CallOption)) *MockMixCoordClient_DropSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.DropSnapshotRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_DropSnapshot_Call) Return(_a0 *commonpb.Status, _a1 error) *MockMixCoordClient_DropSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_DropSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.DropSnapshotRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_DropSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -5858,6 +6080,80 @@ func (_c *MockMixCoordClient_GetReplicas_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// GetRestoreSnapshotState provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) GetRestoreSnapshotState(ctx context.Context, in *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRestoreSnapshotState")
+	}
+
+	var r0 *datapb.GetRestoreSnapshotStateResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) *datapb.GetRestoreSnapshotStateResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetRestoreSnapshotStateResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_GetRestoreSnapshotState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRestoreSnapshotState'
+type MockMixCoordClient_GetRestoreSnapshotState_Call struct {
+	*mock.Call
+}
+
+// GetRestoreSnapshotState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.GetRestoreSnapshotStateRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) GetRestoreSnapshotState(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_GetRestoreSnapshotState_Call {
+	return &MockMixCoordClient_GetRestoreSnapshotState_Call{Call: _e.mock.On("GetRestoreSnapshotState",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_GetRestoreSnapshotState_Call) Run(run func(ctx context.Context, in *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption)) *MockMixCoordClient_GetRestoreSnapshotState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.GetRestoreSnapshotStateRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetRestoreSnapshotState_Call) Return(_a0 *datapb.GetRestoreSnapshotStateResponse, _a1 error) *MockMixCoordClient_GetRestoreSnapshotState_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_GetRestoreSnapshotState_Call) RunAndReturn(run func(context.Context, *datapb.GetRestoreSnapshotStateRequest, ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error)) *MockMixCoordClient_GetRestoreSnapshotState_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentIndexState provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) GetSegmentIndexState(ctx context.Context, in *indexpb.GetSegmentIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetSegmentIndexStateResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -7634,6 +7930,154 @@ func (_c *MockMixCoordClient_ListResourceGroups_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// ListRestoreSnapshotJobs provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ListRestoreSnapshotJobs(ctx context.Context, in *datapb.ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRestoreSnapshotJobs")
+	}
+
+	var r0 *datapb.ListRestoreSnapshotJobsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) *datapb.ListRestoreSnapshotJobsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ListRestoreSnapshotJobsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ListRestoreSnapshotJobs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRestoreSnapshotJobs'
+type MockMixCoordClient_ListRestoreSnapshotJobs_Call struct {
+	*mock.Call
+}
+
+// ListRestoreSnapshotJobs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.ListRestoreSnapshotJobsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ListRestoreSnapshotJobs(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ListRestoreSnapshotJobs_Call {
+	return &MockMixCoordClient_ListRestoreSnapshotJobs_Call{Call: _e.mock.On("ListRestoreSnapshotJobs",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ListRestoreSnapshotJobs_Call) Run(run func(ctx context.Context, in *datapb.ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ListRestoreSnapshotJobs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.ListRestoreSnapshotJobsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListRestoreSnapshotJobs_Call) Return(_a0 *datapb.ListRestoreSnapshotJobsResponse, _a1 error) *MockMixCoordClient_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListRestoreSnapshotJobs_Call) RunAndReturn(run func(context.Context, *datapb.ListRestoreSnapshotJobsRequest, ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error)) *MockMixCoordClient_ListRestoreSnapshotJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListSnapshots provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ListSnapshots(ctx context.Context, in *datapb.ListSnapshotsRequest, opts ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSnapshots")
+	}
+
+	var r0 *datapb.ListSnapshotsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListSnapshotsRequest, ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ListSnapshotsRequest, ...grpc.CallOption) *datapb.ListSnapshotsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.ListSnapshotsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ListSnapshotsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ListSnapshots_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSnapshots'
+type MockMixCoordClient_ListSnapshots_Call struct {
+	*mock.Call
+}
+
+// ListSnapshots is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.ListSnapshotsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ListSnapshots(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ListSnapshots_Call {
+	return &MockMixCoordClient_ListSnapshots_Call{Call: _e.mock.On("ListSnapshots",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ListSnapshots_Call) Run(run func(ctx context.Context, in *datapb.ListSnapshotsRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ListSnapshots_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.ListSnapshotsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListSnapshots_Call) Return(_a0 *datapb.ListSnapshotsResponse, _a1 error) *MockMixCoordClient_ListSnapshots_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListSnapshots_Call) RunAndReturn(run func(context.Context, *datapb.ListSnapshotsRequest, ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error)) *MockMixCoordClient_ListSnapshots_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadBalance provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) LoadBalance(ctx context.Context, in *querypb.LoadBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -8666,6 +9110,80 @@ func (_c *MockMixCoordClient_RestoreRBAC_Call) Return(_a0 *commonpb.Status, _a1 
 }
 
 func (_c *MockMixCoordClient_RestoreRBAC_Call) RunAndReturn(run func(context.Context, *milvuspb.RestoreRBACMetaRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockMixCoordClient_RestoreRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RestoreSnapshot provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) RestoreSnapshot(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RestoreSnapshot")
+	}
+
+	var r0 *datapb.RestoreSnapshotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) *datapb.RestoreSnapshotResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.RestoreSnapshotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_RestoreSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RestoreSnapshot'
+type MockMixCoordClient_RestoreSnapshot_Call struct {
+	*mock.Call
+}
+
+// RestoreSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.RestoreSnapshotRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) RestoreSnapshot(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_RestoreSnapshot_Call {
+	return &MockMixCoordClient_RestoreSnapshot_Call{Call: _e.mock.On("RestoreSnapshot",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_RestoreSnapshot_Call) Run(run func(ctx context.Context, in *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption)) *MockMixCoordClient_RestoreSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.RestoreSnapshotRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_RestoreSnapshot_Call) Return(_a0 *datapb.RestoreSnapshotResponse, _a1 error) *MockMixCoordClient_RestoreSnapshot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_RestoreSnapshot_Call) RunAndReturn(run func(context.Context, *datapb.RestoreSnapshotRequest, ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error)) *MockMixCoordClient_RestoreSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -1625,6 +1625,51 @@ func (coord *MixCoordMock) GetRecoveryInfoV2(ctx context.Context, in *datapb.Get
 	return &datapb.GetRecoveryInfoResponseV2{}, nil
 }
 
+// Snapshot related methods
+func (coord *MixCoordMock) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest, opts ...grpc.CallOption) (*datapb.ListSnapshotsResponse, error) {
+	return &datapb.ListSnapshotsResponse{
+		Status:    merr.Success(),
+		Snapshots: []string{"test_snapshot1", "test_snapshot2"},
+	}, nil
+}
+
+func (coord *MixCoordMock) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest, opts ...grpc.CallOption) (*datapb.DescribeSnapshotResponse, error) {
+	return &datapb.DescribeSnapshotResponse{
+		Status: merr.Success(),
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Name:         req.GetName(),
+			CollectionId: 100,
+		},
+	}, nil
+}
+
+func (coord *MixCoordMock) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest, opts ...grpc.CallOption) (*datapb.RestoreSnapshotResponse, error) {
+	return &datapb.RestoreSnapshotResponse{
+		Status: merr.Success(),
+		JobId:  1,
+	}, nil
+}
+
+func (coord *MixCoordMock) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest, opts ...grpc.CallOption) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	return &datapb.GetRestoreSnapshotStateResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
+func (coord *MixCoordMock) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest, opts ...grpc.CallOption) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	return &datapb.ListRestoreSnapshotJobsResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func (coord *MixCoordMock) Search() {
 }
 

@@ -493,6 +493,65 @@ func (_c *MockCache_GetPartitionInfo_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// GetPartitionName provides a mock function with given fields: ctx, database, collectionName, partitionID
+func (_m *MockCache) GetPartitionName(ctx context.Context, database string, collectionName string, partitionID int64) (string, error) {
+	ret := _m.Called(ctx, database, collectionName, partitionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPartitionName")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) (string, error)); ok {
+		return rf(ctx, database, collectionName, partitionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64) string); ok {
+		r0 = rf(ctx, database, collectionName, partitionID)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64) error); ok {
+		r1 = rf(ctx, database, collectionName, partitionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCache_GetPartitionName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitionName'
+type MockCache_GetPartitionName_Call struct {
+	*mock.Call
+}
+
+// GetPartitionName is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - partitionID int64
+func (_e *MockCache_Expecter) GetPartitionName(ctx interface{}, database interface{}, collectionName interface{}, partitionID interface{}) *MockCache_GetPartitionName_Call {
+	return &MockCache_GetPartitionName_Call{Call: _e.mock.On("GetPartitionName", ctx, database, collectionName, partitionID)}
+}
+
+func (_c *MockCache_GetPartitionName_Call) Run(run func(ctx context.Context, database string, collectionName string, partitionID int64)) *MockCache_GetPartitionName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCache_GetPartitionName_Call) Return(_a0 string, _a1 error) *MockCache_GetPartitionName_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCache_GetPartitionName_Call) RunAndReturn(run func(context.Context, string, string, int64) (string, error)) *MockCache_GetPartitionName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartitions provides a mock function with given fields: ctx, database, collectionName
 func (_m *MockCache) GetPartitions(ctx context.Context, database string, collectionName string) (map[string]int64, error) {
 	ret := _m.Called(ctx, database, collectionName)

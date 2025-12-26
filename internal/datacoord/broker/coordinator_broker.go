@@ -36,11 +36,25 @@ import (
 //go:generate mockery --name=Broker --structname=MockBroker --output=./  --filename=mock_coordinator_broker.go --with-expecter --inpackage
 type Broker interface {
 	DescribeCollectionInternal(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error)
+	DescribeCollectionByName(ctx context.Context, dbName, collectionName string) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)
 	ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error)
 	ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error)
 	ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error)
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
+	ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error)
+
+	// CreateCollection creates a new collection via RootCoord.
+	// Used by DataCoord-driven snapshot restore.
+	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) error
+
+	// CreatePartition creates a new partition via RootCoord.
+	// Used by DataCoord-driven snapshot restore.
+	CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) error
+
+	// DropCollection drops a collection via RootCoord.
+	// Used for rollback when snapshot restore fails.
+	DropCollection(ctx context.Context, dbName, collectionName string) error
 }
 
 type coordinatorBroker struct {
@@ -74,7 +88,37 @@ func (b *coordinatorBroker) DescribeCollectionInternal(ctx context.Context, coll
 	return resp, nil
 }
 
+func (b *coordinatorBroker) DescribeCollectionByName(ctx context.Context, dbName, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := log.Ctx(ctx).With(zap.String("dbName", dbName), zap.String("collectionName", collectionName))
+
+	resp, err := b.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("DescribeCollectionByName failed", zap.Error(err))
+		return nil, err
+	}
+
+	return resp, nil
+}
+
 func (b *coordinatorBroker) ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error) {
+	resp, err := b.ShowPartitions(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.GetPartitionIDs(), nil
+}
+
+func (b *coordinatorBroker) ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
@@ -94,7 +138,7 @@ func (b *coordinatorBroker) ShowPartitionsInternal(ctx context.Context, collecti
 		return nil, err
 	}
 
-	return resp.GetPartitionIDs(), nil
+	return resp, nil
 }
 
 func (b *coordinatorBroker) ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error) {
@@ -171,4 +215,86 @@ func (b *coordinatorBroker) HasCollection(ctx context.Context, collectionID int6
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// CreateCollection creates a new collection via RootCoord.
+// Used by DataCoord-driven snapshot restore.
+func (b *coordinatorBroker) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := log.Ctx(ctx).With(
+		zap.String("dbName", req.GetDbName()),
+		zap.String("collectionName", req.GetCollectionName()),
+	)
+
+	if req.Base == nil {
+		req.Base = commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		)
+	}
+
+	resp, err := b.mixCoord.CreateCollection(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("CreateCollection failed", zap.Error(err))
+		return err
+	}
+
+	log.Info("CreateCollection succeeded")
+	return nil
+}
+
+// CreatePartition creates a new partition via RootCoord.
+// Used by DataCoord-driven snapshot restore.
+func (b *coordinatorBroker) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) error {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := log.Ctx(ctx).With(
+		zap.String("dbName", req.GetDbName()),
+		zap.String("collectionName", req.GetCollectionName()),
+		zap.String("partitionName", req.GetPartitionName()),
+	)
+
+	if req.Base == nil {
+		req.Base = commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		)
+	}
+
+	resp, err := b.mixCoord.CreatePartition(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("CreatePartition failed", zap.Error(err))
+		return err
+	}
+
+	log.Info("CreatePartition succeeded")
+	return nil
+}
+
+// DropCollection drops a collection via RootCoord.
+// Used for rollback when snapshot restore fails.
+func (b *coordinatorBroker) DropCollection(ctx context.Context, dbName, collectionName string) error {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	log := log.Ctx(ctx).With(
+		zap.String("dbName", dbName),
+		zap.String("collectionName", collectionName),
+	)
+
+	resp, err := b.mixCoord.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Warn("DropCollection failed", zap.Error(err))
+		return err
+	}
+
+	log.Info("DropCollection succeeded")
+	return nil
 }

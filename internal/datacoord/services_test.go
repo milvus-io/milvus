@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/tso"
@@ -43,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -53,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -2512,5 +2515,824 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		seg2After := meta.GetSegment(ctx, seg2.ID)
 		assert.NotNil(t, seg2After)
 		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
+	})
+}
+
+func TestGetSegmentInfo_WithCompaction(t *testing.T) {
+	t.Run("use handler.GetDeltaLogFromCompactTo", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		collID := int64(100)
+		partID := int64(10)
+
+		// Add collection
+		svr.meta.AddCollection(&collectionInfo{
+			ID:         collID,
+			Partitions: []int64{partID},
+		})
+
+		// Create parent segment
+		parent := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1000,
+			CollectionID: collID,
+			PartitionID:  partID,
+			State:        commonpb.SegmentState_Dropped,
+		})
+		err := svr.meta.AddSegment(context.TODO(), parent)
+		require.NoError(t, err)
+
+		// Create child segment with delta logs
+		child := NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             1001,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			State:          commonpb.SegmentState_Flushed,
+			CompactionFrom: []int64{1000},
+			NumOfRows:      100,
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 0,
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogSize: 100},
+					},
+				},
+			},
+		})
+		err = svr.meta.AddSegment(context.TODO(), child)
+		require.NoError(t, err)
+
+		// Test GetSegmentInfo
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{1000},
+			IncludeUnHealthy: true,
+		}
+
+		resp, err := svr.GetSegmentInfo(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetInfos(), 1)
+
+		// Verify delta logs were merged from child
+		info := resp.GetInfos()[0]
+		assert.Equal(t, int64(1000), info.GetID())
+		assert.NotEmpty(t, info.GetDeltalogs())
+	})
+}
+
+func TestGetRestoreSnapshotState(t *testing.T) {
+	t.Run("job not found", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 999,
+		}
+
+		resp, err := svr.GetRestoreSnapshotState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("job in progress", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add a copy job
+		job := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:          100,
+				CollectionId:   1,
+				State:          datapb.CopySegmentJobState_CopySegmentJobExecuting,
+				TotalSegments:  10,
+				CopiedSegments: 5,
+				SnapshotName:   "test_snapshot",
+				StartTs:        uint64(time.Now().UnixNano()),
+			},
+			tr: timerecord.NewTimeRecorder("test job"),
+		}
+		err := svr.copySegmentMeta.AddJob(context.TODO(), job)
+		require.NoError(t, err)
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 100,
+		}
+
+		resp, err := svr.GetRestoreSnapshotState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetInfo())
+		assert.Equal(t, int64(100), resp.GetInfo().GetJobId())
+		assert.Equal(t, "test_snapshot", resp.GetInfo().GetSnapshotName())
+		assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotExecuting, resp.GetInfo().GetState())
+		assert.Equal(t, int32(50), resp.GetInfo().GetProgress()) // 5/10 * 100 = 50%
+	})
+
+	t.Run("job completed", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		startTime := time.Now()
+		endTime := startTime.Add(10 * time.Second)
+
+		job := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:          200,
+				CollectionId:   1,
+				State:          datapb.CopySegmentJobState_CopySegmentJobCompleted,
+				TotalSegments:  10,
+				CopiedSegments: 10,
+				SnapshotName:   "completed_snapshot",
+				StartTs:        uint64(startTime.UnixNano()),
+				CompleteTs:     uint64(endTime.UnixNano()),
+			},
+			tr: timerecord.NewTimeRecorder("completed job"),
+		}
+		err := svr.copySegmentMeta.AddJob(context.TODO(), job)
+		require.NoError(t, err)
+
+		req := &datapb.GetRestoreSnapshotStateRequest{
+			JobId: 200,
+		}
+
+		resp, err := svr.GetRestoreSnapshotState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetInfo())
+		assert.Equal(t, datapb.RestoreSnapshotState_RestoreSnapshotCompleted, resp.GetInfo().GetState())
+		assert.Equal(t, int32(100), resp.GetInfo().GetProgress()) // 10/10 * 100 = 100%
+		assert.Greater(t, resp.GetInfo().GetTimeCost(), uint64(0))
+	})
+}
+
+func TestListRestoreSnapshotJobs(t *testing.T) {
+	t.Run("list all jobs", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add multiple jobs
+		for i := 1; i <= 3; i++ {
+			job := &copySegmentJob{
+				CopySegmentJob: &datapb.CopySegmentJob{
+					JobId:          int64(100 + i),
+					CollectionId:   1,
+					State:          datapb.CopySegmentJobState_CopySegmentJobExecuting,
+					TotalSegments:  int64(i * 10),
+					CopiedSegments: int64(i * 5),
+					SnapshotName:   fmt.Sprintf("snapshot_%d", i),
+				},
+				tr: timerecord.NewTimeRecorder(fmt.Sprintf("job_%d", i)),
+			}
+			err := svr.copySegmentMeta.AddJob(context.TODO(), job)
+			require.NoError(t, err)
+		}
+
+		req := &datapb.ListRestoreSnapshotJobsRequest{}
+
+		resp, err := svr.ListRestoreSnapshotJobs(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetJobs(), 3)
+	})
+
+	t.Run("filter by collection id", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		// Add jobs for different collections
+		job1 := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:        201,
+				CollectionId: 100,
+				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+				SnapshotName: "snapshot_1",
+			},
+			tr: timerecord.NewTimeRecorder("job_1"),
+		}
+		err := svr.copySegmentMeta.AddJob(context.TODO(), job1)
+		require.NoError(t, err)
+
+		job2 := &copySegmentJob{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:        202,
+				CollectionId: 200,
+				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
+				SnapshotName: "snapshot_2",
+			},
+			tr: timerecord.NewTimeRecorder("job_2"),
+		}
+		err = svr.copySegmentMeta.AddJob(context.TODO(), job2)
+		require.NoError(t, err)
+
+		req := &datapb.ListRestoreSnapshotJobsRequest{
+			CollectionId: 100,
+		}
+
+		resp, err := svr.ListRestoreSnapshotJobs(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(201), resp.GetJobs()[0].GetJobId())
+	})
+}
+
+func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
+	t.Run("snapshot name already exists", func(t *testing.T) {
+		ctx := context.Background()
+		existingSnapshotName := "test_snapshot"
+
+		// Mock snapshotManager.GetSnapshot to simulate existing snapshot
+		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(func(
+			sm *snapshotManager,
+			ctx context.Context,
+			name string,
+		) (*datapb.SnapshotInfo, error) {
+			// Return a snapshot to simulate it already exists
+			return &datapb.SnapshotInfo{Name: name}, nil
+		}).Build()
+		defer mockGetSnapshot.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		// Try to create snapshot with duplicate name
+		req := &datapb.CreateSnapshotRequest{
+			Name:         existingSnapshotName,
+			Description:  "duplicate snapshot",
+			CollectionId: 200,
+		}
+
+		resp, err := server.CreateSnapshot(ctx, req)
+
+		// Verify error response
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Error(t, merr.Error(resp))
+		assert.True(t, errors.Is(merr.Error(resp), merr.ErrParameterInvalid))
+		assert.Contains(t, resp.GetReason(), "already exists")
+		assert.Contains(t, resp.GetReason(), existingSnapshotName)
+	})
+}
+
+// --- Test startBroadcastRestoreSnapshot index validation ---
+// Note: Broker method tests (DescribeCollectionInternal, ShowPartitions, DropCollection)
+// are covered in internal/datacoord/broker/coordinator_broker_test.go
+
+func TestServer_StartBroadcastRestoreSnapshot_IndexValidation(t *testing.T) {
+	t.Run("index_not_found", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock GetIndexesForCollection to return empty (no indexes)
+		mockGetIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
+			func(im *indexMeta, collectionID int64, indexName string) []*model.Index {
+				return []*model.Index{} // No indexes exist
+			}).Build()
+		defer mockGetIndexes.UnPatch()
+
+		// Mock broker methods
+		mockDescribe := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
+			func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				return &milvuspb.DescribeCollectionResponse{
+					Status:         merr.Success(),
+					CollectionID:   collectionID,
+					CollectionName: "test_collection",
+					DbName:         "default",
+				}, nil
+			}).Build()
+		defer mockDescribe.UnPatch()
+
+		mockShowPartitions := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(
+			func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+				return &milvuspb.ShowPartitionsResponse{
+					Status:         merr.Success(),
+					PartitionNames: []string{"_default"},
+					PartitionIDs:   []int64{1},
+				}, nil
+			}).Build()
+		defer mockShowPartitions.UnPatch()
+
+		mockBroker := broker.NewMockBroker(t)
+		server := &Server{
+			broker: mockBroker,
+			meta:   &meta{indexMeta: &indexMeta{}},
+		}
+
+		// Snapshot has an index that should exist but doesn't
+		snapshotData := &SnapshotData{
+			Collection: &datapb.CollectionDescription{
+				Partitions: map[string]int64{
+					"_default": 1,
+				},
+			},
+			Indexes: []*indexpb.IndexInfo{
+				{
+					IndexID:   1001,
+					IndexName: "vector_index",
+					FieldID:   100,
+				},
+			},
+		}
+
+		// Execute
+		broadcaster, err := server.startBroadcastRestoreSnapshot(ctx, 100, snapshotData)
+
+		// Verify
+		assert.Error(t, err)
+		assert.Nil(t, broadcaster)
+		assert.Contains(t, err.Error(), "index vector_index for field 100 does not exist")
+	})
+
+	t.Run("index_found", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock GetIndexesForCollection to return matching index
+		mockGetIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
+			func(im *indexMeta, collectionID int64, indexName string) []*model.Index {
+				return []*model.Index{
+					{
+						FieldID:   100,
+						IndexName: "vector_index",
+					},
+				}
+			}).Build()
+		defer mockGetIndexes.UnPatch()
+
+		// Mock broker methods
+		mockDescribe := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
+			func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				return &milvuspb.DescribeCollectionResponse{
+					Status:         merr.Success(),
+					CollectionID:   collectionID,
+					CollectionName: "test_collection",
+					DbName:         "default",
+				}, nil
+			}).Build()
+		defer mockDescribe.UnPatch()
+
+		mockShowPartitions := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(
+			func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
+				return &milvuspb.ShowPartitionsResponse{
+					Status:         merr.Success(),
+					PartitionNames: []string{"_default"},
+					PartitionIDs:   []int64{1},
+				}, nil
+			}).Build()
+		defer mockShowPartitions.UnPatch()
+
+		// Mock StartBroadcastWithResourceKeys to avoid actual broadcast
+		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return nil, errors.New("broadcast not needed for this test")
+			}).Build()
+		defer mockBroadcast.UnPatch()
+
+		mockBroker := broker.NewMockBroker(t)
+		server := &Server{
+			broker: mockBroker,
+			meta:   &meta{indexMeta: &indexMeta{}},
+		}
+
+		snapshotData := &SnapshotData{
+			Collection: &datapb.CollectionDescription{
+				Partitions: map[string]int64{
+					"_default": 1,
+				},
+			},
+			Indexes: []*indexpb.IndexInfo{
+				{
+					IndexID:   1001,
+					IndexName: "vector_index",
+					FieldID:   100,
+				},
+			},
+		}
+
+		// Execute - should pass validation but fail at broadcast (which we don't need to test)
+		_, err := server.startBroadcastRestoreSnapshot(ctx, 100, snapshotData)
+
+		// Verify that we got past index validation (error is from broadcast mock, not validation)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "broadcast not needed")
+	})
+}
+
+// --- Test rollbackRestoreSnapshot ---
+// Note: The actual DropCollection RPC is tested in internal/datacoord/broker/coordinator_broker_test.go
+
+func TestServer_RollbackRestoreSnapshot(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+
+		dropCalled := false
+		mockDrop := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DropCollection")).To(
+			func(_ *broker.MockBroker, ctx context.Context, dbName, collectionName string) error {
+				dropCalled = true
+				assert.Equal(t, "test_db", dbName)
+				assert.Equal(t, "test_collection", collectionName)
+				return nil
+			}).Build()
+		defer mockDrop.UnPatch()
+
+		mockBroker := broker.NewMockBroker(t)
+		server := &Server{
+			broker: mockBroker,
+		}
+
+		err := server.rollbackRestoreSnapshot(ctx, "test_db", "test_collection")
+
+		assert.NoError(t, err)
+		assert.True(t, dropCalled)
+	})
+
+	t.Run("drop_failed", func(t *testing.T) {
+		ctx := context.Background()
+
+		expectedErr := errors.New("drop collection failed")
+		mockDrop := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DropCollection")).To(
+			func(_ *broker.MockBroker, ctx context.Context, dbName, collectionName string) error {
+				return expectedErr
+			}).Build()
+		defer mockDrop.UnPatch()
+
+		mockBroker := broker.NewMockBroker(t)
+		server := &Server{
+			broker: mockBroker,
+		}
+
+		err := server.rollbackRestoreSnapshot(ctx, "test_db", "test_collection")
+
+		assert.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+	})
+}
+
+// --- Test DropSnapshot ---
+
+func TestServer_DropSnapshot(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.DropSnapshot(ctx, &datapb.DropSnapshotRequest{
+			Name: "test_snapshot",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("snapshot_not_found_returns_success", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock GetSnapshot to return not found error
+		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+				return nil, errors.New("snapshot not found")
+			}).Build()
+		defer mockGetSnapshot.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.DropSnapshot(ctx, &datapb.DropSnapshotRequest{
+			Name: "non_existent_snapshot",
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+}
+
+// --- Test DescribeSnapshot ---
+
+func TestServer_DescribeSnapshot(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{
+			Name: "test_snapshot",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("snapshot_not_found", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock DescribeSnapshot to return error
+		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+				return nil, errors.New("snapshot not found: " + name)
+			}).Build()
+		defer mockDescribe.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{
+			Name: "non_existent_snapshot",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock DescribeSnapshot to return snapshot data
+		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+				return &SnapshotData{
+					SnapshotInfo: &datapb.SnapshotInfo{
+						Name:         name,
+						CollectionId: 100,
+					},
+					Collection: &datapb.CollectionDescription{
+						Schema: &schemapb.CollectionSchema{
+							Name: "test_collection",
+						},
+					},
+				}, nil
+			}).Build()
+		defer mockDescribe.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{
+			Name: "test_snapshot",
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, "test_snapshot", resp.GetSnapshotInfo().GetName())
+		assert.Equal(t, int64(100), resp.GetSnapshotInfo().GetCollectionId())
+	})
+
+	t.Run("success_with_collection_info", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock DescribeSnapshot to return snapshot data with collection info
+		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+				return &SnapshotData{
+					SnapshotInfo: &datapb.SnapshotInfo{
+						Name:         name,
+						CollectionId: 100,
+					},
+					Collection: &datapb.CollectionDescription{
+						Schema: &schemapb.CollectionSchema{
+							Name: "test_collection",
+						},
+					},
+					Indexes: []*indexpb.IndexInfo{
+						{IndexID: 1, IndexName: "idx1"},
+					},
+				}, nil
+			}).Build()
+		defer mockDescribe.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.DescribeSnapshot(ctx, &datapb.DescribeSnapshotRequest{
+			Name:                  "test_snapshot",
+			IncludeCollectionInfo: true,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetCollectionInfo())
+		assert.Equal(t, "test_collection", resp.GetCollectionInfo().GetSchema().GetName())
+		assert.Len(t, resp.GetIndexInfos(), 1)
+	})
+}
+
+// --- Test ListSnapshots ---
+
+func TestServer_ListSnapshots(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("success_empty_list", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock ListSnapshots to return empty list
+		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+				return []string{}, nil
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Empty(t, resp.GetSnapshots())
+	})
+
+	t.Run("success_with_snapshots", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock ListSnapshots to return list
+		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+				return []string{"snapshot1", "snapshot2"}, nil
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Len(t, resp.GetSnapshots(), 2)
+	})
+
+	t.Run("list_error", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock ListSnapshots to return error
+		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
+			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+				return nil, errors.New("failed to list snapshots")
+			}).Build()
+		defer mockList.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.ListSnapshots(ctx, &datapb.ListSnapshotsRequest{
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+}
+
+// --- Test RestoreSnapshot ---
+
+func TestServer_RestoreSnapshot(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "new_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("missing_snapshot_name", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			Name:           "",
+			DbName:         "default",
+			CollectionName: "new_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	})
+
+	t.Run("missing_collection_name", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			Name:           "test_snapshot",
+			DbName:         "default",
+			CollectionName: "",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid))
+	})
+
+	t.Run("snapshot_not_found", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock ReadSnapshotData to return error
+		mockRead := mockey.Mock((*snapshotManager).ReadSnapshotData).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*SnapshotData, error) {
+				return nil, errors.New("snapshot not found: " + name)
+			}).Build()
+		defer mockRead.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
+			Name:           "non_existent_snapshot",
+			DbName:         "default",
+			CollectionName: "new_collection",
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+}
+
+// --- Test CreateSnapshot additional cases ---
+
+func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
+	t.Run("server_not_healthy", func(t *testing.T) {
+		ctx := context.Background()
+
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "test_snapshot",
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("snapshot_already_exists", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Mock GetSnapshot to return existing snapshot (no error means it exists)
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).To(
+			func(sm *snapshotManager, ctx context.Context, name string) (*datapb.SnapshotInfo, error) {
+				return &datapb.SnapshotInfo{Name: name}, nil
+			}).Build()
+		defer mockGet.UnPatch()
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil),
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "existing_snapshot",
+			CollectionId: 100,
+		})
+
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.True(t, errors.Is(merr.Error(resp), merr.ErrParameterInvalid))
+		assert.Contains(t, resp.GetReason(), "already exists")
 	})
 }

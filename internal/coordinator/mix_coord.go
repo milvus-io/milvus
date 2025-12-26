@@ -1246,3 +1246,31 @@ func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int6
 func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
 }
+
+func (s *mixCoordImpl) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.CreateSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.DropSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	return s.datacoordServer.DescribeSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	return s.datacoordServer.RestoreSnapshot(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	return s.datacoordServer.GetRestoreSnapshotState(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	return s.datacoordServer.ListRestoreSnapshotJobs(ctx, req)
+}
+
+func (s *mixCoordImpl) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	return s.datacoordServer.ListSnapshots(ctx, req)
+}
