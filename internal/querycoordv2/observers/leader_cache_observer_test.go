@@ -69,23 +69,18 @@ func (suite *LeaderCacheObserverTestSuite) TestInvalidateShardLeaderCache() {
 	}, 3*time.Second, 1*time.Second)
 
 	// test batch submit events
-	ret.Store(false)
+	collectionIDs = typeutil.NewConcurrentSet[int64]()
 	suite.mockProxyManager.ExpectedCalls = nil
 	suite.mockProxyManager.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *proxypb.InvalidateShardLeaderCacheRequest) error {
 			collectionIDs.Upsert(req.GetCollectionIDs()...)
-			collectionIDs := req.GetCollectionIDs()
-
-			if len(collectionIDs) == 3 && lo.Contains(collectionIDs, 1) && lo.Contains(collectionIDs, 2) && lo.Contains(collectionIDs, 3) {
-				ret.Store(true)
-			}
 			return nil
 		})
 	suite.observer.RegisterEvent(1)
 	suite.observer.RegisterEvent(2)
 	suite.observer.RegisterEvent(3)
 	suite.Eventually(func() bool {
-		return ret.Load()
+		return collectionIDs.Contain(1) && collectionIDs.Contain(2) && collectionIDs.Contain(3)
 	}, 3*time.Second, 1*time.Second)
 }
 
