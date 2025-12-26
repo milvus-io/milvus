@@ -32,6 +32,9 @@ class RemoteOutputStream : public milvus::OutputStream {
     size_t
     Write(int fd, size_t size) override;
 
+    void
+    Close() override;
+
  private:
     std::shared_ptr<arrow::io::OutputStream> output_stream_;
 };
