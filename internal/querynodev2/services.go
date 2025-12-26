@@ -1667,17 +1667,20 @@ func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 	}
 	defer node.lifetime.Done()
 
+	resourceSet := typeutil.NewSet[int64]()
+
 	for _, info := range req.AnalyzerInfos {
-		err := analyzer.ValidateAnalyzer(info.GetParams())
+		ids, err := analyzer.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			if info.GetName() != "" {
 				return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err))}, nil
 			}
 			return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err))}, nil
 		}
+		resourceSet.Insert(ids...)
 	}
 
-	return &querypb.ValidateAnalyzerResponse{Status: merr.Status(nil)}, nil
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Status(nil), ResourceIds: resourceSet.Collect()}, nil
 }
 
 type deleteRequestStringer struct {

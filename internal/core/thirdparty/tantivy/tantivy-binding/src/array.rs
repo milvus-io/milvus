@@ -147,6 +147,14 @@ impl RustResult {
         }
     }
 
+    pub fn from_vec_i64(value: Vec<i64>) -> Self {
+        RustResult {
+            success: true,
+            value: Value::RustArrayI64(RustArrayI64::from_vec(value)),
+            error: std::ptr::null(),
+        }
+    }
+
     pub fn from_error(error: String) -> Self {
         RustResult {
             success: false,
@@ -182,6 +190,11 @@ pub extern "C" fn free_rust_result(result: RustResult) {
         Value::RustArray(array) => {
             if !array.array.is_null() {
                 free_rust_array(array);
+            }
+        }
+        Value::RustArrayI64(array) => {
+            if !array.array.is_null() {
+                free_rust_array_i64(array);
             }
         }
         _ => {}
