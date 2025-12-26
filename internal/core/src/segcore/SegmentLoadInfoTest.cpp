@@ -362,6 +362,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesOnly) {
 
     SegmentLoadInfo info(test_proto);
     auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
 
     EXPECT_TRUE(diff.HasChanges());
     // Both indexes should be in indexes_to_load
@@ -394,6 +395,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffWithBinlogsOnly) {
 
     SegmentLoadInfo info(test_proto);
     auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
 
     EXPECT_TRUE(diff.HasChanges());
     // Binlogs should be in binlogs_to_load
@@ -430,6 +432,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffWithIndexesAndBinlogs) {
 
     SegmentLoadInfo info(test_proto);
     auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
 
     EXPECT_TRUE(diff.HasChanges());
     // Index should be in indexes_to_load
@@ -466,6 +469,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffIgnoresIndexesWithoutFiles) {
 
     SegmentLoadInfo info(test_proto);
     auto diff = info.GetLoadDiff();
+    std::cout << diff.ToString() << "\n";
 
     EXPECT_TRUE(diff.HasChanges());
     // Only index with files should be in indexes_to_load
@@ -535,4 +539,242 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleBinlogGroups) {
     EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 2);
     // Check second group
     EXPECT_EQ(diff.binlogs_to_load[1].first.size(), 1);
+}
+
+// ==================== Legacy Format (v1) Tests ====================
+// Test binlogs without child_fields (v1/legacy format where group_id == field_id)
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithBinlogsLegacyFormat) {
+    // Create info with binlogs without child_fields (legacy/v1 format)
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add binlog WITHOUT child_fields - this is the legacy format
+    auto* binlog = test_proto.add_binlog_paths();
+    binlog->set_fieldid(101);
+    // Note: no child_fields added - this triggers the legacy handling
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+    std::cout << "Legacy format diff: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // In legacy format, field_id itself is used as the child_id
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(),
+              101);  // field_id as child_id
+
+    // No index changes
+    EXPECT_TRUE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.indexes_to_drop.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithMultipleBinlogsLegacyFormat) {
+    // Test multiple binlogs in legacy format
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    test_proto.set_num_of_rows(1000);
+
+    // Add first binlog without child_fields
+    auto* binlog1 = test_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // Add second binlog without child_fields
+    auto* binlog2 = test_proto.add_binlog_paths();
+    binlog2->set_fieldid(102);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/binlog2");
+    log2->set_entries_num(500);
+
+    SegmentLoadInfo info(test_proto);
+    auto diff = info.GetLoadDiff();
+
+    EXPECT_TRUE(diff.HasChanges());
+    EXPECT_EQ(diff.binlogs_to_load.size(), 2);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 101);
+    EXPECT_EQ(diff.binlogs_to_load[1].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[1].first[0].get(), 102);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffWithBinlogsLegacyFormat) {
+    // Test ComputeDiff between two SegmentLoadInfos using legacy format
+
+    // Current: has field 101
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // New: has field 101 and 102
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog1");
+    new_log1->set_entries_num(500);
+
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(102);
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/binlog2");
+    new_log2->set_entries_num(500);
+
+    SegmentLoadInfo current_info(current_proto);
+    SegmentLoadInfo new_info(new_proto);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "ComputeDiff legacy format: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Field 102 should be added
+    EXPECT_EQ(diff.binlogs_to_load.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_load[0].first[0].get(), 102);
+
+    // No fields should be dropped
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffDropFieldLegacyFormat) {
+    // Test ComputeDiff when dropping a field in legacy format
+
+    // Current: has fields 101 and 102
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    auto* binlog2 = current_proto.add_binlog_paths();
+    binlog2->set_fieldid(102);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/binlog2");
+    log2->set_entries_num(500);
+
+    // New: only has field 101 (102 is dropped)
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog1");
+    new_log1->set_entries_num(500);
+
+    SegmentLoadInfo current_info(current_proto);
+    SegmentLoadInfo new_info(new_proto);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_TRUE(diff.HasChanges());
+    // No new binlogs to load
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    // Field 102 should be dropped
+    EXPECT_EQ(diff.field_data_to_drop.size(), 1);
+    EXPECT_TRUE(diff.field_data_to_drop.count(FieldId(102)) > 0);
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffMixedFormats) {
+    // Test ComputeDiff with mixed formats: legacy and column group
+
+    // Current: has field 101 (legacy) and column group 200 with child fields 201, 202
+    proto::segcore::SegmentLoadInfo current_proto;
+    current_proto.set_segmentid(100);
+    current_proto.set_num_of_rows(1000);
+
+    // Legacy format binlog
+    auto* binlog1 = current_proto.add_binlog_paths();
+    binlog1->set_fieldid(101);
+    auto* log1 = binlog1->add_binlogs();
+    log1->set_log_path("/path/to/binlog1");
+    log1->set_entries_num(500);
+
+    // Column group format binlog
+    auto* binlog2 = current_proto.add_binlog_paths();
+    binlog2->set_fieldid(200);
+    binlog2->add_child_fields(201);
+    binlog2->add_child_fields(202);
+    auto* log2 = binlog2->add_binlogs();
+    log2->set_log_path("/path/to/group_binlog");
+    log2->set_entries_num(1000);
+
+    // New: has all existing + new field 103 (legacy) + new field 203 in column group
+    proto::segcore::SegmentLoadInfo new_proto;
+    new_proto.set_segmentid(100);
+    new_proto.set_num_of_rows(1000);
+
+    auto* new_binlog1 = new_proto.add_binlog_paths();
+    new_binlog1->set_fieldid(101);
+    auto* new_log1 = new_binlog1->add_binlogs();
+    new_log1->set_log_path("/path/to/binlog1");
+    new_log1->set_entries_num(500);
+
+    // New legacy field
+    auto* new_binlog3 = new_proto.add_binlog_paths();
+    new_binlog3->set_fieldid(103);
+    auto* new_log3 = new_binlog3->add_binlogs();
+    new_log3->set_log_path("/path/to/binlog3");
+    new_log3->set_entries_num(500);
+
+    // Updated column group with additional field
+    auto* new_binlog2 = new_proto.add_binlog_paths();
+    new_binlog2->set_fieldid(200);
+    new_binlog2->add_child_fields(201);
+    new_binlog2->add_child_fields(202);
+    new_binlog2->add_child_fields(203);  // New field added to group
+    auto* new_log2 = new_binlog2->add_binlogs();
+    new_log2->set_log_path("/path/to/group_binlog_new");
+    new_log2->set_entries_num(1500);
+
+    SegmentLoadInfo current_info(current_proto);
+    SegmentLoadInfo new_info(new_proto);
+    auto diff = current_info.ComputeDiff(new_info);
+    std::cout << "Mixed format diff: " << diff.ToString() << "\n";
+
+    EXPECT_TRUE(diff.HasChanges());
+    // Field 103 (legacy) and field 203 (in column group) should be loaded
+    EXPECT_EQ(diff.binlogs_to_load.size(), 2);
+
+    // No fields should be dropped
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ComputeDiffNoChangesLegacyFormat) {
+    // Test ComputeDiff when there are no changes (same binlogs)
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+
+    auto* binlog = proto.add_binlog_paths();
+    binlog->set_fieldid(101);
+    auto* log = binlog->add_binlogs();
+    log->set_log_path("/path/to/binlog");
+    log->set_entries_num(500);
+
+    SegmentLoadInfo current_info(proto);
+    SegmentLoadInfo new_info(proto);
+    auto diff = current_info.ComputeDiff(new_info);
+
+    EXPECT_FALSE(diff.HasChanges());
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
 }

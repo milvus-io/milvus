@@ -14,6 +14,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -71,6 +72,88 @@ struct LoadDiff {
     [[nodiscard]] bool
     HasManifestChange() const {
         return manifest_updated;
+    }
+
+    [[nodiscard]] std::string
+    ToString() const {
+        std::ostringstream oss;
+        oss << "LoadDiff{";
+
+        // indexes_to_load
+        oss << "indexes_to_load=[";
+        bool first = true;
+        for (const auto& [field_id, infos] : indexes_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get() << ":" << infos.size() << " indexes";
+        }
+        oss << "], ";
+
+        // binlogs_to_load
+        oss << "binlogs_to_load=[";
+        first = true;
+        for (const auto& [field_ids, binlog] : binlogs_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // column_groups_to_load
+        oss << "column_groups_to_load=[";
+        first = true;
+        for (const auto& [group_idx, field_ids] : column_groups_to_load) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "group" << group_idx << ":[";
+            for (size_t i = 0; i < field_ids.size(); ++i) {
+                if (i > 0)
+                    oss << ",";
+                oss << field_ids[i].get();
+            }
+            oss << "]";
+        }
+        oss << "], ";
+
+        // indexes_to_drop
+        oss << "indexes_to_drop=[";
+        first = true;
+        for (const auto& field_id : indexes_to_drop) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // field_data_to_drop
+        oss << "field_data_to_drop=[";
+        first = true;
+        for (const auto& field_id : field_data_to_drop) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << field_id.get();
+        }
+        oss << "], ";
+
+        // manifest_updated and new_manifest_path
+        oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
+        if (manifest_updated) {
+            oss << ", new_manifest_path=" << new_manifest_path;
+        }
+
+        oss << "}";
+        return oss.str();
     }
 };
 
