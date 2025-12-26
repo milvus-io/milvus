@@ -74,7 +74,7 @@ PhyFilterBitsNode::GetOutput() {
     std::chrono::high_resolution_clock::time_point scalar_start =
         std::chrono::high_resolution_clock::now();
 
-    EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
+    EvalCtx eval_ctx(operator_context_->get_exec_context());
 
     TargetBitmap bitset;
     TargetBitmap valid_bitset;

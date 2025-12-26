@@ -2557,3 +2557,150 @@ func TestExpr_ElementFilter(t *testing.T) {
 		assertInvalidExpr(t, helper, expr)
 	}
 }
+
+func TestExpr_Match(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Valid MATCH_ALL expressions
+	validExprs := []string{
+		// MATCH_ALL: all elements must match
+		`MATCH_ALL(struct_array, $[sub_int] > 1)`,
+		`MATCH_ALL(struct_array, $[sub_int] == 100)`,
+		`MATCH_ALL(struct_array, $[sub_str] == "aaa")`,
+		`MATCH_ALL(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100)`,
+		`MATCH_ALL(struct_array, $[sub_str] != "" || $[sub_int] >= 0)`,
+
+		// MATCH_ANY: at least one element must match
+		`MATCH_ANY(struct_array, $[sub_int] > 1)`,
+		`MATCH_ANY(struct_array, $[sub_int] == 100)`,
+		`MATCH_ANY(struct_array, $[sub_str] == "aaa")`,
+		`MATCH_ANY(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100)`,
+
+		// MATCH_LEAST: at least N elements must match
+		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`,
+		`MATCH_LEAST(struct_array, $[sub_str] == "aaa", threshold=1)`,
+		`MATCH_LEAST(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, threshold=2)`,
+
+		// MATCH_MOST: at most N elements must match
+		`MATCH_MOST(struct_array, $[sub_int] > 1, threshold=3)`,
+		`MATCH_MOST(struct_array, $[sub_str] == "aaa", threshold=0)`,
+		`MATCH_MOST(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, threshold=5)`,
+
+		// MATCH_EXACT: exactly N elements must match
+		`MATCH_EXACT(struct_array, $[sub_int] > 1, threshold=2)`,
+		`MATCH_EXACT(struct_array, $[sub_str] == "aaa", threshold=0)`,
+		`MATCH_EXACT(struct_array, $[sub_str] == "aaa" && $[sub_int] > 100, threshold=3)`,
+
+		// Combined with other expressions (match must be last)
+		`Int64Field > 0 && MATCH_ALL(struct_array, $[sub_int] > 1)`,
+		`Int64Field > 0 && MATCH_ANY(struct_array, $[sub_str] == "test")`,
+		`Int64Field > 0 && MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=2)`,
+
+		// Complex predicates
+		`MATCH_ALL(struct_array, ($[sub_int] > 0 && $[sub_int] < 100) || $[sub_str] == "default")`,
+		`MATCH_ANY(struct_array, !($[sub_int] < 0))`,
+
+		// Case insensitivity
+		`match_all(struct_array, $[sub_int] > 1)`,
+		`match_any(struct_array, $[sub_int] > 1)`,
+		`match_least(struct_array, $[sub_int] > 1, threshold=2)`,
+		`match_most(struct_array, $[sub_int] > 1, threshold=2)`,
+		`match_exact(struct_array, $[sub_int] > 1, threshold=2)`,
+
+		// Multiple match expressions with logical operators
+		`MATCH_ALL(struct_array, $[sub_int] > 1) || MATCH_ANY(struct_array, $[sub_str] == "test")`,
+		`MATCH_ALL(struct_array, $[sub_int] > 1) && MATCH_ANY(struct_array, $[sub_str] == "test")`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1) || Int64Field > 0`,
+		`MATCH_ALL(struct_array, $[sub_int] > 1) && Int64Field > 0`,
+	}
+
+	for _, expr := range validExprs {
+		assertValidExpr(t, helper, expr)
+	}
+
+	// Test proto structure assertions
+	t.Run("MatchAll_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ALL(struct_array, $[sub_int] > 1)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchAll, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchAny_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_str] == "aaa")`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchAny, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(0), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchLeast_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=3)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchLeast, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(3), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchMost_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_MOST(struct_array, $[sub_str] == "aaa", threshold=5)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchMost, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(5), expr.GetMatchExpr().GetCount())
+	})
+
+	t.Run("MatchExact_Proto", func(t *testing.T) {
+		expr, err := ParseExpr(helper, `MATCH_EXACT(struct_array, $[sub_int] == 100, threshold=2)`, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, expr.GetMatchExpr())
+		assert.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+		assert.Equal(t, planpb.MatchType_MatchExact, expr.GetMatchExpr().GetMatchType())
+		assert.Equal(t, int64(2), expr.GetMatchExpr().GetCount())
+	})
+
+	// Invalid expressions
+	invalidExprs := []string{
+		// Nested match expressions not allowed
+		`MATCH_ALL(struct_array, MATCH_ANY(struct_array, $[sub_int] > 1))`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1 && MATCH_ALL(struct_array, $[sub_str] == "1"))`,
+
+		// $[field] syntax outside match context
+		`$[sub_int] > 1`,
+		`Int64Field > 0 && $[sub_int] > 1`,
+
+		// Non-existent fields
+		`MATCH_ALL(struct_array, $[non_existent_field] > 1)`,
+		`MATCH_ALL(non_existent_array, $[sub_int] > 1)`,
+
+		// Missing parameters
+		`MATCH_ALL(struct_array)`,
+		`MATCH_ALL()`,
+		`MATCH_ANY(struct_array)`,
+		`MATCH_ANY()`,
+		`MATCH_LEAST(struct_array, $[sub_int] > 1)`, // missing count
+		`MATCH_MOST(struct_array, $[sub_int] > 1)`,  // missing count
+		`MATCH_EXACT(struct_array, $[sub_int] > 1)`, // missing count
+
+		// MATCH_ALL/MATCH_ANY should not have count parameter
+		`MATCH_ALL(struct_array, $[sub_int] > 1, 3)`,
+		`MATCH_ANY(struct_array, $[sub_int] > 1, 2)`,
+
+		// Invalid count values
+		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=0)`,  // count must be positive for MATCH_LEAST
+		`MATCH_LEAST(struct_array, $[sub_int] > 1, threshold=-1)`, // negative count
+		`MATCH_MOST(struct_array, $[sub_int] > 1, threshold=-1)`,  // negative count
+		`MATCH_EXACT(struct_array, $[sub_int] > 1, threshold=-1)`, // negative count
+	}
+
+	for _, expr := range invalidExprs {
+		assertInvalidExpr(t, helper, expr)
+	}
+}

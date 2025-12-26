@@ -46,23 +46,71 @@ ArrayOffsetsSealed::ElementIDRangeOfRow(int32_t row_id) const {
 std::pair<TargetBitmap, TargetBitmap>
 ArrayOffsetsSealed::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
-    const TargetBitmapView& valid_row_bitset) const {
-    int64_t row_count = GetRowCount();
-    int64_t element_count = GetTotalElementCount();
+    const TargetBitmapView& valid_row_bitset,
+    int64_t row_start) const {
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    int64_t element_start = row_to_element_start_[row_start];
+    int64_t element_end = row_to_element_start_[row_start + row_count];
+    int64_t element_count = element_end - element_start;
+
     TargetBitmap element_bitset(element_count);
     TargetBitmap valid_element_bitset(element_count);
 
-    for (int64_t row_id = 0; row_id < row_count; ++row_id) {
-        int64_t start = row_to_element_start_[row_id];
-        int64_t end = row_to_element_start_[row_id + 1];
+    for (int64_t i = 0; i < row_count; ++i) {
+        int64_t row_id = row_start + i;
+        int64_t start = row_to_element_start_[row_id] - element_start;
+        int64_t end = row_to_element_start_[row_id + 1] - element_start;
         if (start < end) {
-            element_bitset.set(start, end - start, row_bitset[row_id]);
-            valid_element_bitset.set(
-                start, end - start, valid_row_bitset[row_id]);
+            element_bitset.set(start, end - start, row_bitset[i]);
+            valid_element_bitset.set(start, end - start, valid_row_bitset[i]);
         }
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+FixedVector<int32_t>
+ArrayOffsetsSealed::RowBitsetToElementOffsets(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= GetRowCount(),
+               "row range out of bounds: row_start={}, row_count={}, "
+               "total_rows={}",
+               row_start,
+               row_count,
+               GetRowCount());
+
+    int64_t selected_rows = row_bitset.count();
+    FixedVector<int32_t> element_offsets;
+    if (selected_rows == 0) {
+        return element_offsets;
+    }
+
+    int64_t avg_elem_per_row =
+        static_cast<int64_t>(element_row_ids_.size()) /
+        (static_cast<int64_t>(row_to_element_start_.size()) - 1);
+
+    element_offsets.reserve(selected_rows * avg_elem_per_row);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (row_bitset[i]) {
+            int64_t row_id = row_start + i;
+            int32_t first_elem = row_to_element_start_[row_id];
+            int32_t last_elem = row_to_element_start_[row_id + 1];
+            for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
+                element_offsets.push_back(elem_id);
+            }
+        }
+    }
+
+    return element_offsets;
 }
 
 std::shared_ptr<ArrayOffsetsSealed>
@@ -193,21 +241,71 @@ ArrayOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
 std::pair<TargetBitmap, TargetBitmap>
 ArrayOffsetsGrowing::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
-    const TargetBitmapView& valid_row_bitset) const {
+    const TargetBitmapView& valid_row_bitset,
+    int64_t row_start) const {
     std::shared_lock lock(mutex_);
 
-    int64_t element_count = element_row_ids_.size();
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed_row_count_);
+
+    int64_t element_start = row_to_element_start_[row_start];
+    int64_t element_end = row_to_element_start_[row_start + row_count];
+    int64_t element_count = element_end - element_start;
+
     TargetBitmap element_bitset(element_count);
     TargetBitmap valid_element_bitset(element_count);
 
-    // Direct access to element_row_ids_, no virtual function calls
-    for (size_t elem_id = 0; elem_id < element_row_ids_.size(); ++elem_id) {
+    for (int64_t elem_id = element_start; elem_id < element_end; ++elem_id) {
         auto row_id = element_row_ids_[elem_id];
-        element_bitset[elem_id] = row_bitset[row_id];
-        valid_element_bitset[elem_id] = valid_row_bitset[row_id];
+        int64_t bitset_idx = row_id - row_start;
+        element_bitset[elem_id - element_start] = row_bitset[bitset_idx];
+        valid_element_bitset[elem_id - element_start] =
+            valid_row_bitset[bitset_idx];
     }
 
     return {std::move(element_bitset), std::move(valid_element_bitset)};
+}
+
+FixedVector<int32_t>
+ArrayOffsetsGrowing::RowBitsetToElementOffsets(
+    const TargetBitmapView& row_bitset, int64_t row_start) const {
+    std::shared_lock lock(mutex_);
+
+    int64_t row_count = row_bitset.size();
+    AssertInfo(row_start >= 0 && row_start + row_count <= committed_row_count_,
+               "row range out of bounds: row_start={}, row_count={}, "
+               "committed_rows={}",
+               row_start,
+               row_count,
+               committed_row_count_);
+
+    int64_t selected_rows = row_bitset.count();
+    FixedVector<int32_t> element_offsets;
+    if (selected_rows == 0) {
+        return element_offsets;
+    }
+    int64_t avg_elem_per_row =
+        static_cast<int64_t>(element_row_ids_.size()) /
+        (static_cast<int64_t>(row_to_element_start_.size()) - 1);
+    element_offsets.reserve(selected_rows * avg_elem_per_row);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (row_bitset[i]) {
+            int64_t row_id = row_start + i;
+            int32_t first_elem = row_to_element_start_[row_id];
+            int32_t last_elem = row_to_element_start_[row_id + 1];
+            for (int32_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
+                element_offsets.push_back(elem_id);
+            }
+        }
+    }
+
+    return element_offsets;
 }
 
 void
