@@ -472,13 +472,15 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 			if err != nil {
 				return err
 			}
+			// Extract only filenames from full paths to save space
+			filenames := metautil.ExtractTextLogFilenames(lo.Keys(uploaded))
 
 			mu.Lock()
 			textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 				FieldID: field.GetFieldID(),
 				Version: 0,
 				BuildID: taskID,
-				Files:   lo.Keys(uploaded),
+				Files:   filenames,
 			}
 			mu.Unlock()
 

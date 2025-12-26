@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
@@ -1189,11 +1190,25 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
+
+	// Reconstruct full paths from filenames
+	// Files stored in TextIndexStats only contain filenames to save space
+	fullPaths := metautil.BuildTextLogPaths(
+		binlog.GetRootPath(),
+		textLogs.GetBuildID(),
+		textLogs.GetVersion(),
+		s.Collection(),
+		s.Partition(),
+		s.ID(),
+		textLogs.GetFieldID(),
+		textLogs.GetFiles(),
+	)
+
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
 		BuildID:      textLogs.GetBuildID(),
-		Files:        textLogs.GetFiles(),
+		Files:        fullPaths,
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
