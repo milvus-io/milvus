@@ -1148,3 +1148,31 @@ message FileResourceInfo {
 message CreateExternalCollectionResponse {
   common.Status status = 1;
 }
+
+message UpdateExternalCollectionRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 taskID = 3;
+  repeated SegmentInfo currentSegments = 4;
+  string externalSource = 5;
+  string externalSpec = 6;
+}
+
+message UpdateExternalCollectionResponse {
+  common.Status status = 1;
+  repeated int64 keptSegments = 2;
+  repeated SegmentInfo updatedSegments = 3;
+  index.JobState state = 4;
+  string fail_reason = 5;
+}
+
+message QueryExternalCollectionRequest {
+  int64 taskID = 1;
+}
+
+message DropExternalCollectionRequest {
+  int64 taskID = 1;
+}
+
+// Note: QueryExternalCollectionRequest and DropExternalCollectionRequest are kept
+// for internal use by the unified task system, but are not exposed as separate RPCs

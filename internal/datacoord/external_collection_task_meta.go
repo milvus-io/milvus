@@ -76,15 +76,19 @@ func (ectm *externalCollectionTaskMeta) reloadFromKV() error {
 }
 
 func (ectm *externalCollectionTaskMeta) AddTask(t *indexpb.UpdateExternalCollectionTask) error {
-	ectm.keyLock.Lock(t.GetTaskID())
-	defer ectm.keyLock.Unlock(t.GetTaskID())
+	// Lock on collectionID to prevent concurrent tasks for the same collection
+	ectm.keyLock.Lock(t.GetCollectionID())
+	defer ectm.keyLock.Unlock(t.GetCollectionID())
 
 	log.Ctx(ectm.ctx).Info("add update external collection task",
 		zap.Int64("taskID", t.GetTaskID()),
 		zap.Int64("collectionID", t.GetCollectionID()))
 
-	if _, ok := ectm.collectionID2Tasks.Get(t.GetCollectionID()); ok {
+	// Check if a task already exists for this collection
+	if existingTask, ok := ectm.collectionID2Tasks.Get(t.GetCollectionID()); ok {
 		log.Warn("update external collection task already exists for collection",
+			zap.Int64("existingTaskID", existingTask.GetTaskID()),
+			zap.Int64("newTaskID", t.GetTaskID()),
 			zap.Int64("collectionID", t.GetCollectionID()))
 		return merr.WrapErrTaskDuplicate(strconv.FormatInt(t.GetCollectionID(), 10))
 	}
@@ -107,16 +111,28 @@ func (ectm *externalCollectionTaskMeta) AddTask(t *indexpb.UpdateExternalCollect
 }
 
 func (ectm *externalCollectionTaskMeta) DropTask(ctx context.Context, taskID int64) error {
-	ectm.keyLock.Lock(taskID)
-	defer ectm.keyLock.Unlock(taskID)
-
-	log.Ctx(ctx).Info("drop update external collection task by taskID", zap.Int64("taskID", taskID))
-
+	// First get the task to find its collectionID
 	t, ok := ectm.tasks.Get(taskID)
 	if !ok {
-		log.Info("remove update external collection task success, task already not exist", zap.Int64("taskID", taskID))
+		log.Ctx(ctx).Info("remove update external collection task success, task already not exist", zap.Int64("taskID", taskID))
 		return nil
 	}
+
+	// Lock on collectionID to serialize with AddTask operations
+	ectm.keyLock.Lock(t.GetCollectionID())
+	defer ectm.keyLock.Unlock(t.GetCollectionID())
+
+	log.Ctx(ctx).Info("drop update external collection task by taskID",
+		zap.Int64("taskID", taskID),
+		zap.Int64("collectionID", t.GetCollectionID()))
+
+	// Double-check task still exists after acquiring lock
+	t, ok = ectm.tasks.Get(taskID)
+	if !ok {
+		log.Ctx(ctx).Info("remove update external collection task success, task already not exist", zap.Int64("taskID", taskID))
+		return nil
+	}
+
 	if err := ectm.catalog.DropUpdateExternalCollectionTask(ctx, taskID); err != nil {
 		log.Warn("drop update external collection task failed",
 			zap.Int64("taskID", taskID),
@@ -128,15 +144,24 @@ func (ectm *externalCollectionTaskMeta) DropTask(ctx context.Context, taskID int
 	ectm.tasks.Remove(taskID)
 	ectm.collectionID2Tasks.Remove(t.GetCollectionID())
 
-	log.Info("remove update external collection task success", zap.Int64("taskID", taskID))
+	log.Info("remove update external collection task success",
+		zap.Int64("taskID", taskID),
+		zap.Int64("collectionID", t.GetCollectionID()))
 	return nil
 }
 
 func (ectm *externalCollectionTaskMeta) UpdateVersion(taskID, nodeID int64) error {
-	ectm.keyLock.Lock(taskID)
-	defer ectm.keyLock.Unlock(taskID)
-
 	t, ok := ectm.tasks.Get(taskID)
+	if !ok {
+		return fmt.Errorf("task %d not found", taskID)
+	}
+
+	// Lock on collectionID for consistency with Add/Drop operations
+	ectm.keyLock.Lock(t.GetCollectionID())
+	defer ectm.keyLock.Unlock(t.GetCollectionID())
+
+	// Double-check task still exists after acquiring lock
+	t, ok = ectm.tasks.Get(taskID)
 	if !ok {
 		return fmt.Errorf("task %d not found", taskID)
 	}
@@ -162,10 +187,17 @@ func (ectm *externalCollectionTaskMeta) UpdateVersion(taskID, nodeID int64) erro
 }
 
 func (ectm *externalCollectionTaskMeta) UpdateTaskState(taskID int64, state indexpb.JobState, failReason string) error {
-	ectm.keyLock.Lock(taskID)
-	defer ectm.keyLock.Unlock(taskID)
-
 	t, ok := ectm.tasks.Get(taskID)
+	if !ok {
+		return fmt.Errorf("task %d not found", taskID)
+	}
+
+	// Lock on collectionID for consistency with Add/Drop operations
+	ectm.keyLock.Lock(t.GetCollectionID())
+	defer ectm.keyLock.Unlock(t.GetCollectionID())
+
+	// Double-check task still exists after acquiring lock
+	t, ok = ectm.tasks.Get(taskID)
 	if !ok {
 		return fmt.Errorf("task %d not found", taskID)
 	}
