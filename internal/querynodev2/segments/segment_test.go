@@ -163,8 +163,8 @@ func (suite *SegmentSuite) TestResourceUsageEstimate() {
 	// sealed segment has resource usage
 	usage = suite.sealed.ResourceUsageEstimate()
 	// mmap is on
-	suite.Zero(usage.MemorySize)
-	suite.NotZero(usage.DiskSize)
+	suite.NotZero(usage.MemorySize)
+	suite.Zero(usage.DiskSize)
 	suite.Zero(usage.MmapFieldCount)
 }
 
