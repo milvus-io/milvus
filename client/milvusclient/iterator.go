@@ -228,11 +228,12 @@ type queryIterator struct {
 	schema *entity.Schema
 
 	// pagination state
-	expr      string // base expression from option
-	pkField   *entity.Field
-	lastPK    any
-	batchSize int
-	limit     int64
+	expr         string   // base expression from option
+	outputFields []string // override output fields(force include pk field)
+	pkField      *entity.Field
+	lastPK       any
+	batchSize    int
+	limit        int64
 
 	// cached results
 	cached ResultSet
@@ -275,6 +276,7 @@ func (it *queryIterator) fetchNextBatch(ctx context.Context) (ResultSet, error) 
 
 	// override expression and limit for pagination
 	req.Expr = it.composeIteratorExpr()
+	req.OutputFields = it.outputFields
 	req.QueryParams = append(req.QueryParams,
 		&commonpb.KeyValuePair{Key: spLimit, Value: strconv.Itoa(it.batchSize)},
 	)
@@ -412,13 +414,14 @@ func newQueryIterator(ctx context.Context, client *Client, option QueryIteratorO
 	}
 
 	iter := &queryIterator{
-		client:    client,
-		option:    option,
-		schema:    collection.Schema,
-		expr:      req.GetExpr(),
-		pkField:   pkField,
-		batchSize: option.BatchSize(),
-		limit:     option.Limit(),
+		client:       client,
+		option:       option,
+		schema:       collection.Schema,
+		expr:         req.GetExpr(),
+		outputFields: outputFields,
+		pkField:      pkField,
+		batchSize:    option.BatchSize(),
+		limit:        option.Limit(),
 	}
 
 	// init: fetch the first batch to validate parameters
