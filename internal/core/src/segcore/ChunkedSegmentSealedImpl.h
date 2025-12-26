@@ -880,7 +880,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         google::protobuf::RepeatedPtrField<T>* dst);
 
     std::unique_ptr<DataArray>
-    fill_with_empty(FieldId field_id, int64_t count) const;
+    fill_with_empty(FieldId field_id,
+                    int64_t count,
+                    int64_t valid_count = 0,
+                    const void* valid_data = nullptr) const;
 
     std::unique_ptr<DataArray>
     get_raw_data(milvus::OpContext* op_ctx,
@@ -888,6 +891,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;
+
+    struct ValidResult {
+        int64_t valid_count = 0;
+        std::unique_ptr<bool[]> valid_data;
+        std::vector<int64_t> valid_offsets;
+    };
+
+    ValidResult
+    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                             FieldId field_id,
+                             const int64_t* seg_offsets,
+                             int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -972,7 +987,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        std::map<int, std::vector<FieldId>>& cg_field_ids_map);
+        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids);
 
     /**
      * @brief Load a single column group at the specified index
@@ -990,6 +1005,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
         int64_t index,
         const std::vector<FieldId>& milvus_field_ids);
+
+    /**
+     * @brief Apply load differences to update segment load information
+     *
+     * This method processes the differences between current and new load states,
+     * updating the segment's loaded fields and indexes accordingly. It handles
+     * incremental updates during segment reopen operations.
+     *
+     * @param segment_load_info The segment load information to be updated
+     * @param load_diff The differences to apply, containing fields and indexes to add/remove
+     */
+    void
+    ApplyLoadDiff(SegmentLoadInfo& segment_load_info, LoadDiff& load_diff);
 
     void
     load_field_data_common(

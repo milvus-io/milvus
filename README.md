@@ -33,7 +33,7 @@ This installs `pymilvus`, the Python SDK for Milvus. Use `MilvusClient` to creat
 from pymilvus import MilvusClient
 ```
 
-* `pymilvus` also includes Milvus Lite for quickstart. To create a local vector database, simply instantiate a client with a local file name for persisting data:
+* You can also try Milvus Lite for quickstart by installing `pymilvus[milvus-lite]`. To create a local vector database, simply instantiate a client with a local file name for persisting data:
 
   ```python
   client = MilvusClient("milvus_demo.db")

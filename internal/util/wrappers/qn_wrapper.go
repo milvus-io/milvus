@@ -176,6 +176,10 @@ func (qn *qnServerWrapper) SyncFileResource(ctx context.Context, in *internalpb.
 	return qn.QueryNode.SyncFileResource(ctx, in)
 }
 
+func (qn *qnServerWrapper) ComputePhraseMatchSlop(ctx context.Context, in *querypb.ComputePhraseMatchSlopRequest, _ ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	return qn.QueryNode.ComputePhraseMatchSlop(ctx, in)
+}
+
 func WrapQueryNodeServerAsClient(qn types.QueryNode) types.QueryNodeClient {
 	return &qnServerWrapper{
 		QueryNode: qn,

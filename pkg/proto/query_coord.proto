@@ -101,6 +101,7 @@ service QueryCoord {
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+  rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
 }
 
@@ -181,9 +182,24 @@ service QueryNode {
     
     // file resource
     rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+
+    rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
+
+message ComputePhraseMatchSlopRequest {
+    common.MsgBase base = 1;
+    string analyzer_params = 2;
+    string query_text = 3;
+    repeated string data_texts = 4;
+}
+
+message ComputePhraseMatchSlopResponse {
+    common.Status status = 1;
+    repeated bool is_match = 2;
+    repeated int64 slops = 3;
+}
 
 message ShowCollectionsRequest {
     common.MsgBase base = 1;

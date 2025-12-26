@@ -116,6 +116,28 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return size_ == 0;
     }
 
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
+
+        // idx_to_offsets_: vector<int32_t>
+        total += idx_to_offsets_.capacity() * sizeof(int32_t);
+
+        // valid_bitset_: TargetBitmap
+        total += valid_bitset_.size_in_bytes();
+
+        if (is_mmap_) {
+            // mmap mode: add mmap size and filepath
+            total += mmap_size_;
+        } else {
+            // memory mode: add data vector
+            total += data_.capacity() * sizeof(IndexStructure<T>);
+        }
+
+        this->cached_byte_size_ = total;
+    }
+
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 

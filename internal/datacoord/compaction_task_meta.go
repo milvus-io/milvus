@@ -89,7 +89,7 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 	for _, task := range compactionTasks {
 		// Compatibility handling: for milvus ≤v2.4, since compaction task has no PreAllocatedSegmentIDs field,
 		// here we just mark the task as failed and wait for the compaction trigger to generate a new one.
-		if task.PreAllocatedSegmentIDs == nil {
+		if !isCompactionTaskFinished(task) && task.PreAllocatedSegmentIDs == nil {
 			log.Warn("PreAllocatedSegmentIDs is nil, mark the task as failed",
 				zap.Int64("taskID", task.GetPlanID()),
 				zap.String("type", task.GetType().String()),

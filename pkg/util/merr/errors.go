@@ -132,9 +132,10 @@ var (
 	ErrNodeStateUnexpected = newMilvusError("node state unexpected", 906, false)
 
 	// IO related
-	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
-	ErrIoFailed      = newMilvusError("IO failed", 1001, false)
-	ErrIoUnexpectEOF = newMilvusError("unexpected EOF", 1002, true)
+	ErrIoKeyNotFound     = newMilvusError("key not found", 1000, false)
+	ErrIoFailed          = newMilvusError("IO failed", 1001, false)
+	ErrIoUnexpectEOF     = newMilvusError("unexpected EOF", 1002, true)
+	ErrIoTooManyRequests = newMilvusError("too many requests", 1003, true)
 
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)

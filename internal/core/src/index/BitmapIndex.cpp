@@ -112,6 +112,7 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
     }
 
     is_built_ = true;
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -168,6 +169,7 @@ BitmapIndex<T>::BuildWithFieldData(
                             proto::schema::DataType_Name(schema_.data_type())));
     }
     is_built_ = true;
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -568,6 +570,7 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         is_mmap_);
 
     is_built_ = true;
+    ComputeByteSize();
 }
 
 template <typename T>

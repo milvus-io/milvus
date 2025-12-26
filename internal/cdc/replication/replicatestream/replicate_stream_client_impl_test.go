@@ -147,6 +147,7 @@ func TestReplicateStreamClient_Replicate_ContextCanceled(t *testing.T) {
 	mockMsg := mock_message.NewMockImmutableMessage(t)
 	err := client.Replicate(mockMsg)
 	assert.NoError(t, err) // Should return nil when context is canceled
+	mockStreamClient.Close()
 }
 
 func TestReplicateStreamClient_Reconnect(t *testing.T) {

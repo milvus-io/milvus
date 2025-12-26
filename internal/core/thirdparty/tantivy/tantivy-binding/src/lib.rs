@@ -32,6 +32,8 @@ mod util_c;
 mod vec_collector;
 
 pub mod analyzer;
+pub mod phrase_match_slop;
+mod phrase_match_slop_c;
 
 use error::Result;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

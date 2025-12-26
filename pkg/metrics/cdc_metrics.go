@@ -33,7 +33,7 @@ const (
 
 	// CDC metric labels
 	CDCLabelTargetCluster     = "target_cluster"
-	CDCLabelSourceChannelName = "source_channel_name"
+	CDCLabelSourceChannelName = WALChannelLabelName
 	CDCLabelTargetChannelName = "target_channel_name"
 	CDCLabelMsgType           = msgTypeLabelName
 	CDCLabelConnectionStatus  = "connection_status"
@@ -87,7 +87,7 @@ var CDCLastReplicatedTimeTick = prometheus.NewGaugeVec(
 		Namespace: milvusNamespace,
 		Subsystem: typeutil.CDCRole,
 		Name:      CDCMetricLastReplicatedTimeTick,
-		Help:      "The time tick of the last replicated message",
+		Help:      "The time tick in seconds of the last replicated message",
 	}, []string{
 		CDCLabelSourceChannelName,
 		CDCLabelTargetChannelName,

@@ -2361,7 +2361,9 @@ def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
         if nullable is False:
             return gen_vectors(nb, dim, vector_data_type=data_type)
         else:
-            raise MilvusException(message=f"gen data failed, vector field does not support nullable")
+            # gen 20% none data for nullable vector field
+            vectors = gen_vectors(nb, dim, vector_data_type=data_type)
+            return [None if i % 2 == 0 and random.random() < 0.4 else vectors[i] for i in range(nb)]
     elif data_type == DataType.ARRAY:
         if isinstance(field, dict):
             max_capacity = field.get('params')['max_capacity']

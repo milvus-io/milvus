@@ -164,6 +164,27 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestBatchRun() {
 	})
 }
 
+func (s *MultiAnalyzerBM25FunctionSuite) TestBatchAnalyze() {
+	s.Run("normal", func() {
+		runner, err := NewBM25FunctionRunner(s.collection, s.function)
+		s.NoError(err)
+		s.NotNil(runner)
+
+		analyzer, ok := runner.(Analyzer)
+		s.True(ok)
+
+		text := []string{"test of analyzer", "test of analyzer"}
+		analyzerName := []string{"english", "default"}
+
+		result, err := analyzer.BatchAnalyze(true, false, text, analyzerName)
+		s.NoError(err)
+
+		s.Equal(2, len(result))
+		s.Equal(2, len(result[0]))
+		s.Equal(3, len(result[1]))
+	})
+}
+
 func TestMultiAnalyzerBm25Function(t *testing.T) {
 	suite.Run(t, new(MultiAnalyzerBM25FunctionSuite))
 }

@@ -136,3 +136,7 @@ func (c *columnStructArray) CompactNullableValues() {
 		field.CompactNullableValues()
 	}
 }
+
+func (c *columnStructArray) ValidCount() int {
+	return c.Len()
+}
