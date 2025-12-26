@@ -1065,6 +1065,10 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  # FactorChangeThreshold defines the minimum relative change in factor to trigger an update.
+  # If the factor change is less than this threshold (e.g., 5%), the update is skipped
+  # to reduce unnecessary proxy updates. Range: (0, 1]
+  factorChangeThreshold: 0.05
   forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
@@ -1135,14 +1139,6 @@ quotaAndLimits:
         # Setting this item to 5 indicates that Milvus only allows data insertion to any collection at the rate of 5 MB/s.
         # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
         max: -1
-      partition:
-        max: -1 # MB/s, default no limit
-    upsertRate:
-      max: -1 # MB/s, default no limit
-      db:
-        max: -1 # MB/s, default no limit
-      collection:
-        max: -1 # MB/s, default no limit
       partition:
         max: -1 # MB/s, default no limit
     deleteRate:
