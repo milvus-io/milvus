@@ -348,6 +348,51 @@ func (_c *MockShardDelegator_GetHighlight_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// GetLatestRequiredMVCCTimeTick provides a mock function with no fields
+func (_m *MockShardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLatestRequiredMVCCTimeTick")
+	}
+
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func() uint64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestRequiredMVCCTimeTick'
+type MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call struct {
+	*mock.Call
+}
+
+// GetLatestRequiredMVCCTimeTick is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetLatestRequiredMVCCTimeTick() *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	return &MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call{Call: _e.mock.On("GetLatestRequiredMVCCTimeTick")}
+}
+
+func (_c *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call) Run(run func()) *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call) Return(_a0 uint64) *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call) RunAndReturn(run func() uint64) *MockShardDelegator_GetLatestRequiredMVCCTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartitionStatsVersions provides a mock function with given fields: ctx
 func (_m *MockShardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int64]int64 {
 	ret := _m.Called(ctx)
