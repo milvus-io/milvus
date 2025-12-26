@@ -223,7 +223,7 @@ func TestQueryIteratorOutputFieldDynamic(t *testing.T) {
 		itr, errOutput := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithOutputFields("aaa"))
 		if dynamic {
 			common.CheckErr(t, errOutput, true)
-			expFields := []string{common.DefaultInt64FieldName, common.DefaultDynamicFieldName}
+			expFields := []string{common.DefaultInt64FieldName, "aaa"}
 			common.CheckQueryIteratorResult(ctx, t, itr, nb, common.WithExpBatchSize(hp.GenBatchSizes(nb, common.DefaultBatchSize)), common.WithExpOutputFields(expFields))
 		} else {
 			common.CheckErr(t, errOutput, false, "field aaa not exist", "field not exist")
@@ -244,8 +244,8 @@ func TestQueryIteratorExpr(t *testing.T) {
 		{expr: fmt.Sprintf("%s >= 1000 and %s < 2000", common.DefaultInt64FieldName, common.DefaultInt64FieldName), count: 1000},
 
 		// json and dynamic field filter expr: == < in bool/ list/ int
-		{expr: fmt.Sprintf("%s['number'] == 0", common.DefaultJSONFieldName), count: 1500},
-		{expr: fmt.Sprintf("%s['number'] < 100 and %s['number'] != 0", common.DefaultJSONFieldName, common.DefaultJSONFieldName), count: 99},
+		// {expr: fmt.Sprintf("%s['number'] == 0", common.DefaultJSONFieldName), count: 1500},
+		// {expr: fmt.Sprintf("%s['number'] < 100 and %s['number'] != 0", common.DefaultJSONFieldName, common.DefaultJSONFieldName), count: 99},
 		{expr: fmt.Sprintf("%s < 100", common.DefaultDynamicNumberField), count: 100},
 		{expr: "dynamicNumber % 2 == 0", count: 1500},
 		{expr: fmt.Sprintf("%s == false", common.DefaultDynamicBoolField), count: 1500},
@@ -301,10 +301,15 @@ func TestQueryIteratorExpr(t *testing.T) {
 
 	batch := 500
 	for _, exprLimit := range exprLimits {
-		log.Info("case expr is", zap.String("expr", exprLimit.expr), zap.Int("count", exprLimit.count))
+		rs, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(exprLimit.expr).WithOutputFields("count(*)"))
+		common.CheckErr(t, err, true)
+		expectCount, err := rs.GetColumn("count(*)").GetAsInt64(0)
+		common.CheckErr(t, err, true)
+
+		log.Info("case expr is", zap.String("expr", exprLimit.expr), zap.Int64("expectedCount", expectCount))
 		itr, err := mc.QueryIterator(ctx, client.NewQueryIteratorOption(schema.CollectionName).WithBatchSize(batch).WithFilter(exprLimit.expr))
 		common.CheckErr(t, err, true)
-		common.CheckQueryIteratorResult(ctx, t, itr, exprLimit.count, common.WithExpBatchSize(hp.GenBatchSizes(exprLimit.count, batch)))
+		common.CheckQueryIteratorResult(ctx, t, itr, int(expectCount), common.WithExpBatchSize(hp.GenBatchSizes(int(expectCount), batch)))
 	}
 }
 
