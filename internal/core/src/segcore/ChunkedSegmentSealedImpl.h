@@ -37,6 +37,7 @@
 #include "parquet/statistics.h"
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/Utils.h"
 #include "folly/concurrency/ConcurrentHashMap.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -1041,6 +1042,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return res;
     }
 
+    // read actual text from LOB file using LOB reference
+    std::string
+    ReadLOBText(milvus::OpContext* op_ctx,
+                const milvus::LOBReference& ref) const;
+
+    // load LOB columns for TEXT fields
+    void
+    load_lob_columns(const LoadFieldDataInfo& load_info);
+
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -1099,6 +1109,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 
     SegmentStats stats_{};
+
+    // LOB metadata: stored during load, no file I/O
+    // lob_file_id -> (LOBFileInfo, field_id, enable_mmap, load_priority)
+    // LOBColumnMeta is defined in segcore/Utils.h
+    folly::Synchronized<std::unordered_map<uint64_t, LOBColumnMeta>>
+        lob_metadata_;
+
+    // LOB columns: lazily created on first access during retrieve
+    // lob_file_id -> ChunkedColumn mapping
+    mutable folly::Synchronized<
+        std::unordered_map<uint64_t, std::shared_ptr<ChunkedColumnInterface>>>
+        lob_columns_;
+
+    // helper to get or create LOB column lazily
+    std::shared_ptr<ChunkedColumnInterface>
+    GetOrCreateLOBColumn(uint64_t lob_file_id) const;
 
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field

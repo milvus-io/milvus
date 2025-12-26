@@ -919,6 +919,9 @@ class InsertRecordGrowing {
             }
             case DataType::VARCHAR:
             case DataType::TEXT: {
+                // TEXT fields store LOB references as strings (16 bytes encoded)
+                // VARCHAR fields store actual string values
+                // actual TEXT data is managed by GrowingLOBManager
                 this->append_data<std::string>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;

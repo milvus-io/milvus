@@ -138,6 +138,13 @@ type writeBufferBase struct {
 	errHandler           func(err error)
 	taskObserverCallback func(t syncmgr.Task, err error) // execute when a sync task finished, should be concurrent safe.
 
+	// LOB manager for large TEXT fields
+	lobManager *storage.LOBManager
+
+	// cache for schema text field check
+	hasTextFieldsOnce  sync.Once
+	hasTextFieldsCache bool
+
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
@@ -174,7 +181,37 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		zap.String("channel", wb.channelName))
 	wb.cpRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
 
+	// initialize LOB manager if enabled
+	if err := wb.initLOBManager(option); err != nil {
+		return nil, errors.Wrap(err, "failed to initialize LOB manager")
+	}
+
 	return wb, nil
+}
+
+func (wb *writeBufferBase) initLOBManager(option *writeBufferOption) error {
+	params := paramtable.Get()
+
+	lobThreshold := params.CommonCfg.LOBSizeThreshold.GetAsInt64()
+	lobLazyWriteMaxSize := params.CommonCfg.LOBLazyWriteMaxSize.GetAsInt64()
+
+	lobMgr, err := storage.NewLOBManager(
+		wb.collectionID,
+		wb.allocator,
+		storage.WithLOBManagerSizeThreshold(lobThreshold),
+		storage.WithLOBManagerLazyWriteMaxSize(lobLazyWriteMaxSize),
+	)
+	if err != nil {
+		return errors.Wrap(err, "failed to create LOB manager")
+	}
+
+	wb.lobManager = lobMgr
+	wb.logger.Info("LOB manager initialized with hybrid mode",
+		zap.Int64("sizeThreshold", lobThreshold),
+		zap.Int64("lazyWriteMaxSize", lobLazyWriteMaxSize),
+	)
+
+	return nil
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
@@ -622,7 +659,9 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
-		WithSyncPack(pack)
+		WithSyncPack(pack).
+		WithLOBManager(wb.lobManager) // pass LOB manager to task
+
 	return task, nil
 }
 
@@ -683,6 +722,13 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 		log.Error("failed to drop channel", zap.Error(err))
 		// TODO change to remove channel in the future
 		panic(err)
+	}
+
+	// close LOB manager
+	if wb.lobManager != nil {
+		if err := wb.lobManager.Close(ctx); err != nil {
+			log.Fatal("failed to close LOB manager", zap.Error(err))
+		}
 	}
 }
 
@@ -760,4 +806,37 @@ func PrepareInsert(collSchema *schemapb.CollectionSchema, pkField *schemapb.Fiel
 	}
 
 	return result, nil
+}
+
+// GetLOBMetadata returns LOB metadata from all segments in this write buffer
+func (wb *writeBufferBase) GetLOBMetadata(segmentID int64) *storage.LOBSegmentMetadata {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	if wb.lobManager == nil {
+		return nil
+	}
+
+	return wb.lobManager.GetSegmentMetadata(segmentID)
+}
+
+// hasTextFields checks if the schema contains any Text type fields (cached)
+func (wb *writeBufferBase) hasTextFields() bool {
+	wb.hasTextFieldsOnce.Do(func() {
+		schema := wb.metaCache.GetSchema(0)
+		if schema == nil {
+			wb.hasTextFieldsCache = false
+			return
+		}
+
+		for _, field := range schema.GetFields() {
+			if field.GetDataType() == schemapb.DataType_Text {
+				wb.hasTextFieldsCache = true
+				return
+			}
+		}
+		wb.hasTextFieldsCache = false
+	})
+
+	return wb.hasTextFieldsCache
 }

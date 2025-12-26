@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -94,6 +95,21 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
 	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
+
+	// process text field with lob data
+	if wb.lobManager != nil && wb.hasTextFields() {
+		schema := wb.metaCache.GetSchema(0)
+		for _, insertData := range inData.data {
+			_, err := wb.lobManager.ProcessInsertData(context.Background(), inData.segmentID, inData.partitionID, schema, insertData)
+			if err != nil {
+				wb.logger.Error("failed to process LOB data",
+					zap.Int64("segmentID", inData.segmentID),
+					zap.Int64("partitionID", inData.partitionID),
+					zap.Error(err))
+				return errors.Wrap(err, "failed to process LOB data")
+			}
+		}
+	}
 
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
 	wb.metaCache.UpdateSegments(metacache.SegmentActions(

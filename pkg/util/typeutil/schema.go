@@ -58,11 +58,19 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		maxLengthPerRowValue, ok := paramsMap[common.MaxLengthKey]
 		if !ok {
-			return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
-		}
-		maxLength, err = strconv.Atoi(maxLengthPerRowValue)
-		if err != nil {
-			return 0, err
+			// for TEXT type, max_length is optional (use a reasonable default for size estimation)
+			// for VARCHAR, max_length is required
+			if fieldSchema.DataType == schemapb.DataType_Text {
+				// use 65536 (64KB) as default for TEXT type estimation, matching LOB threshold
+				maxLength = 65536
+			} else {
+				return 0, fmt.Errorf("the max_length was not specified, field type is %s", fieldSchema.DataType.String())
+			}
+		} else {
+			maxLength, err = strconv.Atoi(maxLengthPerRowValue)
+			if err != nil {
+				return 0, err
+			}
 		}
 		switch policy {
 		case max:
@@ -695,6 +703,11 @@ func IsStringType(dataType schemapb.DataType) bool {
 	default:
 		return false
 	}
+}
+
+// IsTextType returns true if the field is TEXT type (large object / LOB)
+func IsTextType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_Text
 }
 
 func IsArrayContainStringElementType(dataType schemapb.DataType, elementType schemapb.DataType) bool {

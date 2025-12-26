@@ -66,6 +66,20 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
 void
 SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority);
 
+CStatus
+AppendLOBMetadata(CLoadFieldDataInfo c_load_field_data_info,
+                  int64_t field_id,
+                  int64_t size_threshold,
+                  int64_t record_count,
+                  int64_t total_bytes);
+
+CStatus
+AppendLOBFile(CLoadFieldDataInfo c_load_field_data_info,
+              int64_t field_id,
+              const char* file_path,
+              uint64_t lob_file_id,
+              int64_t row_count);
+
 #ifdef __cplusplus
 }
 #endif

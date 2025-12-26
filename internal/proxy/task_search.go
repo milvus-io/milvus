@@ -416,6 +416,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 
+	// check if output fields contain TEXT (LOB) fields
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
+
 	if t.rankParams, err = parseRankParams(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
 		log.Error("parseRankParams failed", zap.Error(err))
 		return err
@@ -433,6 +438,14 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.needRequery = len(t.request.GetOutputFields()) > 0
 	}
 	t.needRequery = t.needRequery || len(t.functionScore.GetAllInputFieldNames()) > 0
+
+	// always enable requery if output fields contain TEXT (LOB) fields
+	// TEXT fields store LOB references in segments, need requery to fetch actual text data
+	if len(textOutputFields) > 0 {
+		t.needRequery = true
+		log.Debug("enable requery for TEXT/LOB fields",
+			zap.Int("textFieldCount", len(textOutputFields)))
+	}
 
 	if !t.functionScore.IsSupportGroup() && t.rankParams.GetGroupByFieldId() >= 0 {
 		return merr.WrapErrParameterInvalidMsg("Current rerank does not support grouping search")
@@ -682,7 +695,13 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
-	t.needRequery = len(vectorOutputFields) > 0
+
+	// check if output fields contain TEXT (LOB) fields
+	textOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
+		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsTextType(field.GetDataType())
+	})
+
+	t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0
 	if t.needRequery {
 		plan.OutputFieldIds = t.functionScore.GetAllInputFieldIDs()
 	} else {

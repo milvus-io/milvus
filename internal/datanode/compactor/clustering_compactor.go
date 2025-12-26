@@ -103,6 +103,11 @@ type clusteringCompactionTask struct {
 	bm25FieldIds []int64
 
 	compactionParams compaction.Params
+
+	// LOB compaction support
+	lobHelper         *LOBCompactionHelper
+	sourceLOBMetadata []*storage.LOBSegmentMetadata
+	textFieldIDs      map[int64]struct{} // TEXT field IDs for LOB tracking
 }
 
 type ClusterBuffer struct {
@@ -111,12 +116,68 @@ type ClusterBuffer struct {
 	clusteringKeyFieldStats *storage.FieldStats
 
 	lock sync.RWMutex
+
+	// textFieldIDs contains the field IDs of TEXT type fields
+	// only these fields need LOB reference tracking
+	textFieldIDs map[int64]struct{}
+
+	// usedLOBFileIDs tracks LOB file IDs actually written to this buffer
+	// map structure: fieldID -> map of lob_file_id -> reference count
+	usedLOBFileIDs map[int64]map[int64]int64
 }
 
 func (b *ClusterBuffer) Write(v *storage.Value) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+
+	b.trackLOBFileIDs(v)
+
 	return b.writer.WriteValue(v)
+}
+
+// trackLOBFileIDs extracts and tracks LOB file IDs from TEXT fields only
+func (b *ClusterBuffer) trackLOBFileIDs(v *storage.Value) {
+	if len(b.textFieldIDs) == 0 || v == nil || v.Value == nil {
+		return
+	}
+
+	valueMap, ok := v.Value.(map[storage.FieldID]interface{})
+	if !ok {
+		return
+	}
+
+	for textFieldID := range b.textFieldIDs {
+		value, exists := valueMap[storage.FieldID(textFieldID)]
+		if !exists {
+			continue
+		}
+
+		strVal, ok := value.(string)
+		if !ok {
+			continue
+		}
+
+		if storage.IsLOBReference([]byte(strVal)) {
+			ref, err := storage.DecodeLOBReference([]byte(strVal))
+			if err != nil {
+				continue
+			}
+
+			if b.usedLOBFileIDs == nil {
+				b.usedLOBFileIDs = make(map[int64]map[int64]int64)
+			}
+			if b.usedLOBFileIDs[textFieldID] == nil {
+				b.usedLOBFileIDs[textFieldID] = make(map[int64]int64)
+			}
+			// increment reference count for this LOB file
+			b.usedLOBFileIDs[textFieldID][int64(ref.LobFileID)]++
+		}
+	}
+}
+
+// GetUsedLOBFileIDs returns the LOB file IDs actually used by this buffer with their reference counts
+func (b *ClusterBuffer) GetUsedLOBFileIDs() map[int64]map[int64]int64 {
+	return b.usedLOBFileIDs
 }
 
 func (b *ClusterBuffer) Flush() error {
@@ -149,11 +210,12 @@ func (b *ClusterBuffer) GetBufferSize() uint64 {
 	return b.writer.GetBufferUncompressed()
 }
 
-func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStats *storage.FieldStats) *ClusterBuffer {
+func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStats *storage.FieldStats, textFieldIDs map[int64]struct{}) *ClusterBuffer {
 	return &ClusterBuffer{
 		id:                      id,
 		writer:                  writer,
 		clusteringKeyFieldStats: clusteringKeyFieldStats,
+		textFieldIDs:            textFieldIDs,
 		lock:                    sync.RWMutex{},
 	}
 }
@@ -165,6 +227,9 @@ func NewClusteringCompactionTask(
 	compactionParams compaction.Params,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
+
+	lobHelper := NewLOBCompactionHelper(compactionParams.StorageConfig)
+
 	return &clusteringCompactionTask{
 		ctx:              ctx,
 		cancel:           cancel,
@@ -176,6 +241,7 @@ func NewClusteringCompactionTask(
 		flushCount:       atomic.NewInt64(0),
 		writtenRowNum:    atomic.NewInt64(0),
 		compactionParams: compactionParams,
+		lobHelper:        lobHelper,
 	}
 }
 
@@ -225,12 +291,17 @@ func (t *clusteringCompactionTask) init() error {
 	if t.plan.Schema == nil {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
+	t.textFieldIDs = make(map[int64]struct{})
 	for _, field := range t.plan.Schema.Fields {
 		if field.GetIsPrimaryKey() && field.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(field.GetDataType()) {
 			pkField = field
 		}
 		if field.GetFieldID() == t.plan.GetClusteringKeyField() {
 			t.clusteringKeyField = field
+		}
+		// collect TEXT field IDs for LOB tracking
+		if field.GetDataType() == schemapb.DataType_Text {
+			t.textFieldIDs[field.GetFieldID()] = struct{}{}
 		}
 	}
 
@@ -249,6 +320,28 @@ func (t *clusteringCompactionTask) init() error {
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
 	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryLimit), zap.Int("worker_pool_size", workerPoolSize))
+
+	if t.lobHelper != nil {
+		t.sourceLOBMetadata = make([]*storage.LOBSegmentMetadata, 0)
+		for _, segBinlog := range t.plan.GetSegmentBinlogs() {
+			lobMeta := t.lobHelper.ConvertProtoLOBMetadata(
+				segBinlog.GetLobMetadata(),
+				segBinlog.GetSegmentID(),
+				t.collectionID,
+				t.partitionID,
+			)
+			if lobMeta != nil && lobMeta.HasLOBFields() {
+				t.sourceLOBMetadata = append(t.sourceLOBMetadata, lobMeta)
+			}
+		}
+
+		if len(t.sourceLOBMetadata) > 0 {
+			log.Info("loaded LOB metadata for clustering compaction",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int("sourceLOBSegments", len(t.sourceLOBMetadata)))
+		}
+	}
+
 	return nil
 }
 
@@ -302,7 +395,44 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 		return nil, err
 	}
 
-	// 5, assemble CompactionPlanResult
+	// 5, attach LOB metadata to output segments (ReferenceOnly mode with filtering)
+	if len(t.sourceLOBMetadata) > 0 {
+		mergedLOBMeta := MergeLOBMetadata(t.sourceLOBMetadata)
+		if mergedLOBMeta != nil && mergedLOBMeta.HasLOBFields() {
+			// attach filtered LOB metadata to each buffer's segments
+			totalAttached := 0
+			for _, buffer := range t.clusterBuffers {
+				usedLOBFileIDs := buffer.GetUsedLOBFileIDs()
+				if len(usedLOBFileIDs) == 0 {
+					continue
+				}
+
+				filteredMeta := FilterLOBMetadataByUsedFiles(mergedLOBMeta, usedLOBFileIDs)
+				if filteredMeta == nil || !filteredMeta.HasLOBFields() {
+					continue
+				}
+
+				protoLOBMeta := t.lobHelper.ConvertToProtoLOBMetadata(filteredMeta)
+				for _, seg := range buffer.GetCompactionSegments() {
+					seg.LobMetadata = protoLOBMeta
+					totalAttached++
+				}
+
+				log.Debug("attached filtered LOB metadata to buffer segments",
+					zap.Int("bufferID", buffer.id),
+					zap.Int("filteredLOBFiles", filteredMeta.TotalLOBFiles),
+					zap.Int("originalLOBFiles", mergedLOBMeta.TotalLOBFiles))
+			}
+
+			log.Info("attached LOB metadata to clustering compaction results",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.Int("outputSegments", len(uploadSegments)),
+				zap.Int("segmentsWithLOB", totalAttached),
+				zap.Int("totalSourceLOBFiles", mergedLOBMeta.TotalLOBFiles))
+		}
+	}
+
+	// 6, assemble CompactionPlanResult
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,
 		PlanID:   t.GetPlanID(),
@@ -350,7 +480,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			return err
 		}
 
-		buffer := newClusterBuffer(id, writer, fieldStats)
+		buffer := newClusterBuffer(id, writer, fieldStats, t.textFieldIDs)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
 			scalarToClusterBufferMap[key] = buffer
@@ -374,7 +504,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			return err
 		}
 
-		nullBuffer = newClusterBuffer(len(buckets), writer, fieldStats)
+		nullBuffer = newClusterBuffer(len(buckets), writer, fieldStats, t.textFieldIDs)
 		t.clusterBuffers = append(t.clusterBuffers, nullBuffer)
 	}
 	t.keyToBufferFunc = func(key interface{}) *ClusterBuffer {
@@ -435,7 +565,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 			return err
 		}
 
-		buffer := newClusterBuffer(id, writer, fieldStats)
+		buffer := newClusterBuffer(id, writer, fieldStats, t.textFieldIDs)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {

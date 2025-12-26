@@ -157,6 +157,16 @@ class SegcoreConfig {
         return enable_geometry_cache_;
     }
 
+    void
+    set_lob_size_threshold(int64_t threshold) {
+        lob_size_threshold_ = threshold;
+    }
+
+    int64_t
+    get_lob_size_threshold() const {
+        return lob_size_threshold_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -176,6 +186,8 @@ class SegcoreConfig {
         knowhere::RefineType::DATA_VIEW;
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
+    inline static int64_t lob_size_threshold_ =
+        65536;  // 64KB (matches Go default)
 };
 
 }  // namespace milvus::segcore

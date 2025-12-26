@@ -430,6 +430,9 @@ message SegmentInfo {
   // we could keep the fullpath since one segment shall only have one active manifest
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
+
+  // lobMetadata is used to track LOB (Large Object) files for fields with large data
+  map<int64, LOBFieldMetadata> lob_metadata = 33;
 }
 
 message SegmentStartPosition {
@@ -456,6 +459,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2Bm25logPaths = 16;
   bool with_full_binlogs = 17; // report with full data for verification.
   string manifest_path = 18; //
+  map<int64, LOBFieldMetadata> lob_metadata = 19; // LOB metadata by field ID
 }
 
 message CheckPoint {
@@ -528,6 +532,23 @@ message JsonKeyStats {
   int64 memory_size = 5;
   int64 buildID = 6;
   int64 json_key_stats_data_format =7;
+}
+
+// LOBFile stores metadata for a single LOB file
+message LOBFile {
+  string file_path = 1;           // relative path to LOB file
+  int64 lob_file_id = 2;          // unique ID for this LOB file
+  int64 row_count = 3;            // number of rows stored in this file (immutable after creation)
+  int64 valid_record_count = 4;   // number of rows actually referenced by this segment (updated during compaction)
+}
+
+// LOBFieldMetadata stores metadata for LOB files of a single field
+message LOBFieldMetadata {
+  int64 field_id = 1;
+  repeated LOBFile lob_files = 2;  // LOB file info with row_count
+  int64 size_threshold = 3;        // size threshold for LOB storage
+  int64 record_count = 4;          // number of records stored as LOB
+  int64 total_bytes = 5;           // total bytes of LOB data
 }
 
 message Binlog {
@@ -688,6 +709,7 @@ message CompactionSegmentBinlogs {
   bool is_sorted = 9;
   int64 storage_version = 10;
   string manifest = 11;
+  map<int64, LOBFieldMetadata> lob_metadata = 12;  // fieldID -> LOB metadata for this segment
 }
 
 message CompactionPlan {
@@ -732,6 +754,7 @@ message CompactionSegment {
   int64 storage_version = 10;
   map<int64, data.TextIndexStats> text_stats_logs = 11;
   string manifest = 12;
+  map<int64, LOBFieldMetadata> lob_metadata = 13;
 }
 
 message CompactionPlanResult {

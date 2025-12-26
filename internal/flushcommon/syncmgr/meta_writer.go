@@ -96,6 +96,39 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		zap.String("vChannelName", pack.channelName),
 	)
 
+	// convert LOB metadata from storage format to protobuf format
+	var protoLobMeta map[int64]*datapb.LOBFieldMetadata
+	if pack.lobMetadata != nil && pack.lobMetadata.HasLOBFields() {
+		protoLobMeta = make(map[int64]*datapb.LOBFieldMetadata)
+
+		for fieldID, fieldMeta := range pack.lobMetadata.LOBFields {
+			// convert LOBFileInfo to proto LOBFile
+			protoLobFiles := make([]*datapb.LOBFile, 0, len(fieldMeta.LOBFiles))
+			for _, f := range fieldMeta.LOBFiles {
+				protoLobFiles = append(protoLobFiles, &datapb.LOBFile{
+					FilePath:         f.FilePath,
+					LobFileId:        f.LobFileID,
+					RowCount:         f.RowCount,
+					ValidRecordCount: f.ValidRecordCount,
+				})
+			}
+			protoLobMeta[fieldID] = &datapb.LOBFieldMetadata{
+				FieldId:       fieldMeta.FieldID,
+				LobFiles:      protoLobFiles,
+				SizeThreshold: fieldMeta.SizeThreshold,
+				RecordCount:   fieldMeta.RecordCount,
+				TotalBytes:    fieldMeta.TotalBytes,
+			}
+		}
+
+		log.Info("SaveBinlogPath with LOB metadata",
+			zap.Int64("SegmentID", pack.segmentID),
+			zap.Int("lobFiles", pack.lobMetadata.TotalLOBFiles),
+			zap.Int64("lobRecords", pack.lobMetadata.TotalLOBRecords),
+			zap.Int64("lobBytes", pack.lobMetadata.TotalLOBBytes),
+		)
+	}
+
 	req := &datapb.SaveBinlogPathsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(0),
@@ -120,6 +153,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 		StorageVersion:  segment.GetStorageVersion(),
 		WithFullBinlogs: true,
 		ManifestPath:    pack.manifestPath,
+		LobMetadata:     protoLobMeta, // add LOB metadata
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)

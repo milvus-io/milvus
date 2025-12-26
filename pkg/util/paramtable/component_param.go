@@ -339,6 +339,12 @@ type commonConfig struct {
 	ClusterID              ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+
+	// LOB (Large Object) storage for TEXT fields
+	LOBSizeThreshold                   ParamItem `refreshable:"true"`
+	LOBLazyWriteMaxSize                ParamItem `refreshable:"true"`
+	LOBMaxFileSize                     ParamItem `refreshable:"true"`
+	LOBCompactionSmartRewriteThreshold ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1350,6 +1356,54 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       false,
 	}
 	p.HybridSearchRequeryPolicy.Init(base.mgr)
+
+	p.LOBSizeThreshold = ParamItem{
+		Key:          "common.lob.sizeThreshold",
+		Version:      "3.0",
+		DefaultValue: "65536",
+		Doc: "Minimum size threshold in bytes for storing TEXT data as LOB (Large Object). " +
+			"TEXT values larger than this threshold will be stored as LOB references. " +
+			"Default: 65536 (64KB)",
+		Export: true,
+	}
+	p.LOBSizeThreshold.Init(base.mgr)
+
+	p.LOBLazyWriteMaxSize = ParamItem{
+		Key:          "common.lob.lazyWriteMaxSize",
+		Version:      "3.0",
+		DefaultValue: "10485760",
+		Doc: "Maximum size in bytes for lazy-mode LOB writes. " +
+			"TEXT values between sizeThreshold and lazyWriteMaxSize are written during segment flush (lazy mode), " +
+			"while larger TEXT values are written immediately (eager mode) to reduce memory pressure. " +
+			"This provides a hybrid approach: small TEXT inline, medium TEXT lazy, large TEXT eager. " +
+			"Default: 10485760 (10MB)",
+		Export: true,
+	}
+	p.LOBLazyWriteMaxSize.Init(base.mgr)
+
+	p.LOBMaxFileSize = ParamItem{
+		Key:          "common.lob.maxFileSize",
+		Version:      "3.0",
+		DefaultValue: "268435456",
+		Doc: "Maximum size in bytes for a single LOB file. " +
+			"When a LOB file reaches this size limit, a new file is created for subsequent writes. " +
+			"This applies to both normal insert operations and compaction SmartRewrite mode. " +
+			"Smaller files are easier to manage during compaction and GC, but too small may increase file count. " +
+			"Default: 268435456 (256MB)",
+		Export: true,
+	}
+	p.LOBMaxFileSize.Init(base.mgr)
+
+	p.LOBCompactionSmartRewriteThreshold = ParamItem{
+		Key:          "common.lob.compaction.smartRewriteThreshold",
+		Version:      "3.0",
+		DefaultValue: "0.20",
+		Doc: "Delete ratio threshold for LOB compaction SmartRewrite mode. " +
+			"At or Above this threshold, LOB files are filtered to remove unused rows and merge small files (SmartRewrite mode). " +
+			"Default: 0.20 (20%)",
+		Export: true,
+	}
+	p.LOBCompactionSmartRewriteThreshold.Init(base.mgr)
 }
 
 type gpuConfig struct {

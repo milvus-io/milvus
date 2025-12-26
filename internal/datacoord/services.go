@@ -676,6 +676,27 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
+	// update LOB metadata if present
+	if req.GetLobMetadata() != nil && len(req.GetLobMetadata()) > 0 {
+		operators = append(operators, UpdateLOBMetadataOperator(req.GetSegmentID(), req.GetLobMetadata()))
+
+		totalFiles := int32(0)
+		totalRecords := int64(0)
+		totalBytes := int64(0)
+		for _, fieldMeta := range req.GetLobMetadata() {
+			totalFiles += int32(len(fieldMeta.GetLobFiles()))
+			totalRecords += fieldMeta.GetRecordCount()
+			totalBytes += fieldMeta.GetTotalBytes()
+		}
+
+		log.Info("SaveBinlogPaths with LOB metadata",
+			zap.Int64("segmentID", req.GetSegmentID()),
+			zap.Int32("lobFiles", totalFiles),
+			zap.Int64("lobRecords", totalRecords),
+			zap.Int64("lobBytes", totalBytes),
+		)
+	}
+
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
@@ -1047,6 +1068,8 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Level:         segment.GetLevel(),
 			IsSorted:      segment.GetIsSorted(),
 			ManifestPath:  segment.GetManifestPath(),
+			StorageVersion: segment.GetStorageVersion(),
+			LobMetadata:    segment.GetLobMetadata(),
 		})
 	}
 

@@ -660,6 +660,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan)
 		log.Warn("unmarshal retrieve result failed", zap.Error(err))
 		return nil, err
 	}
+
 	log.Debug("retrieve segment done", zap.Int("resultNum", len(retrieveResult.Offset)))
 	return retrieveResult, nil
 }
@@ -929,6 +930,10 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 		RowCount:       rowCount,
 		LoadPriority:   s.loadInfo.Load().GetPriority(),
 		StorageVersion: s.loadInfo.Load().GetStorageVersion(),
+		LobMetadata:    s.loadInfo.Load().GetLobMetadata(),
+		CollectionID:   s.Collection(),
+		PartitionID:    s.Partition(),
+		SegmentID:      s.ID(),
 	}
 	for _, field := range fields {
 		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{

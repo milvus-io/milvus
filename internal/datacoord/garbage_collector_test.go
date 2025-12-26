@@ -1810,6 +1810,210 @@ func (s *GarbageCollectorSuite) TestAvoidGCLoadedSegments() {
 	s.NotNil(seg)
 }
 
+func (s *GarbageCollectorSuite) TestIsLOBFileReferencedByOtherSegments() {
+	ctx := context.Background()
+	collectionID := int64(100)
+	partitionID := int64(200)
+
+	// segment 1: dropped segment being GC'd, references LOB files [1001, 1002, 1003]
+	seg1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			State:        commonpb.SegmentState_Dropped,
+			LobMetadata: map[int64]*datapb.LOBFieldMetadata{
+				101: {
+					FieldId:  101,
+					LobFiles: []string{"1001", "1002", "1003"},
+				},
+			},
+		},
+	}
+
+	// segment 2: healthy segment, references LOB files [1001, 1002] (shared with seg1)
+	seg2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           2,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			State:        commonpb.SegmentState_Flushed,
+			LobMetadata: map[int64]*datapb.LOBFieldMetadata{
+				101: {
+					FieldId:  101,
+					LobFiles: []string{"1001", "1002"},
+				},
+			},
+		},
+	}
+
+	// segment 3: healthy segment in different partition, references LOB file [1003]
+	seg3 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           3,
+			CollectionID: collectionID,
+			PartitionID:  partitionID + 1, // different partition
+			State:        commonpb.SegmentState_Flushed,
+			LobMetadata: map[int64]*datapb.LOBFieldMetadata{
+				101: {
+					FieldId:  101,
+					LobFiles: []string{"1003"},
+				},
+			},
+		},
+	}
+
+	s.meta.AddSegment(ctx, seg1)
+	s.meta.AddSegment(ctx, seg2)
+	s.meta.AddSegment(ctx, seg3)
+
+	// test: LOB file 1001 is referenced by seg2 (healthy, same partition)
+	s.True(isLOBFileReferencedByOtherSegments(ctx, s.meta, 1, collectionID, partitionID, 1001))
+
+	// test: LOB file 1002 is referenced by seg2 (healthy, same partition)
+	s.True(isLOBFileReferencedByOtherSegments(ctx, s.meta, 1, collectionID, partitionID, 1002))
+
+	// test: LOB file 1003 is NOT referenced by any healthy segment in same partition
+	// (seg3 has it but is in different partition)
+	s.False(isLOBFileReferencedByOtherSegments(ctx, s.meta, 1, collectionID, partitionID, 1003))
+
+	// test: LOB file 9999 does not exist anywhere
+	s.False(isLOBFileReferencedByOtherSegments(ctx, s.meta, 1, collectionID, partitionID, 9999))
+}
+
+func (s *GarbageCollectorSuite) TestGetLOBFiles() {
+	ctx := context.Background()
+	collectionID := int64(100)
+	partitionID := int64(200)
+
+	gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		cli:              s.cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// segment 1: dropped segment being GC'd, references LOB files [1001, 1002, 1003]
+	seg1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			State:        commonpb.SegmentState_Dropped,
+			LobMetadata: map[int64]*datapb.LOBFieldMetadata{
+				101: {
+					FieldId:  101,
+					LobFiles: []string{"1001", "1002", "1003"},
+				},
+			},
+		},
+	}
+
+	// segment 2: healthy segment, references LOB files [1001, 1002]
+	seg2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           20,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			State:        commonpb.SegmentState_Flushed,
+			LobMetadata: map[int64]*datapb.LOBFieldMetadata{
+				101: {
+					FieldId:  101,
+					LobFiles: []string{"1001", "1002"},
+				},
+			},
+		},
+	}
+
+	s.meta.AddSegment(ctx, seg1)
+	s.meta.AddSegment(ctx, seg2)
+
+	// get LOB files to delete for seg1
+	lobFiles := getLOBFiles(ctx, seg1, gc)
+
+	// only LOB file 1003 should be returned (1001 and 1002 are still referenced by seg2)
+	s.Len(lobFiles, 1)
+
+	// check that 1003 is in the result
+	expectedPath := path.Join(s.cli.RootPath(), "1003")
+	_, exists := lobFiles[expectedPath]
+	s.True(exists, "LOB file 1003 should be in deletion list")
+}
+
+func (s *GarbageCollectorSuite) TestGetLOBFilesNoLobMetadata() {
+	ctx := context.Background()
+
+	gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		cli:              s.cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// segment without LOB metadata
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           100,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Dropped,
+			LobMetadata:  nil,
+		},
+	}
+
+	s.meta.AddSegment(ctx, seg)
+
+	lobFiles := getLOBFiles(ctx, seg, gc)
+	s.Empty(lobFiles)
+}
+
+func (s *GarbageCollectorSuite) TestGetLOBFilesInvalidFileID() {
+	ctx := context.Background()
+
+	gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		cli:              s.cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	// segment with invalid LOB file ID
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           100,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Dropped,
+			LobMetadata: map[int64]*datapb.LOBFieldMetadata{
+				101: {
+					FieldId:  101,
+					LobFiles: []*datapb.LOBFile{
+						{
+							LobFileId: 101,
+							FilePath:  "invalid_id",
+						},
+						{
+							LobFileId: 102,
+							FilePath:  "also_invalid",
+						},
+				},
+			},
+		},
+	}
+
+	s.meta.AddSegment(ctx, seg)
+
+	// should return empty since invalid IDs are skipped
+	lobFiles := getLOBFiles(ctx, seg, gc)
+	s.Empty(lobFiles)
+}
+
 func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
 }

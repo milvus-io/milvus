@@ -404,6 +404,9 @@ message SegmentLoadInfo {
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
     string manifest_path = 24;
+
+    // LOB metadata for TEXT fields with large object storage
+    map<int64, data.LOBFieldMetadata> lob_metadata = 25;
 }
 
 message FieldIndexInfo {
