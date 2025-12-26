@@ -36,7 +36,7 @@ pub struct GrpcTokenStream {
 }
 
 const ENDPOINTKEY: &str = "endpoint";
-const PARAMTERSKEY: &str = "parameters";
+const PARAMETERSKEY: &str = "parameters";
 const TLSKEY: &str = "tls";
 const DEFAULTTOKENSKEY: &str = "default_tokens";
 
@@ -114,7 +114,7 @@ impl GrpcTokenizer {
         };
 
         let mut parameters = vec![];
-        if let Some(val) = params.get(PARAMTERSKEY) {
+        if let Some(val) = params.get(PARAMETERSKEY) {
             if !val.is_array() {
                 return Err(TantivyBindingError::InvalidArgument(format!(
                     "grpc tokenizer parameters must be array"
