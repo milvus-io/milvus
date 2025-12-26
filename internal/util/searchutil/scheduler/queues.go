@@ -168,7 +168,7 @@ func (q *fairPollingTaskQueue) push(group string, task Task) {
 }
 
 // pop pop next ready task.
-func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) (task Task) {
+func (q *fairPollingTaskQueue) pop(queueExpire time.Duration, skipper ...func(t Task) bool) (task Task) {
 	// Return directly if there's no task exists.
 	if q.count == 0 {
 		return
@@ -197,6 +197,9 @@ func (q *fairPollingTaskQueue) pop(queueExpire time.Duration) (task Task) {
 			continue
 		}
 		task = queue.front()
+		if len(skipper) > 0 && skipper[0](task) {
+			continue
+		}
 		queue.pop()
 		q.count--
 		checkpoint = next
