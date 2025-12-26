@@ -96,22 +96,27 @@ func TestWait(t *testing.T) {
 	a := NewFixedSizeAllocator[string](&Resource{100, 100, 100})
 	allocated, _ := a.Allocate("a1", &Resource{100, 100, 100})
 	assert.True(t, allocated)
-	for i := 0; i < 100; i++ {
-		go func(index int) {
+
+	waitCh := make(chan struct{})
+	release := func() {
+		<-waitCh
+		for i := 0; i < 100; i++ {
 			allocated, _ := a.Reallocate("a1", &Resource{-1, -1, -1})
 			assert.Equal(t, true, allocated)
-		}(i)
+		}
 	}
 
+	go release()
+
 	allocated, _ = a.Allocate("a2", &Resource{100, 100, 100})
-	i := 1
+	assert.False(t, allocated)
+	close(waitCh) // start release a1
+
 	for !allocated {
-		a.Wait()
+		a.Wait() // alloc after wait
 		allocated, _ = a.Allocate("a2", &Resource{100, 100, 100})
-		i++
 	}
 	assert.True(t, allocated)
-	assert.True(t, i < 100 && i > 1)
 }
 
 func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
