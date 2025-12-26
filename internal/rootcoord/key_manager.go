@@ -76,14 +76,17 @@ func (km *KeyManager) GetRevokedDatabases() ([]int64, error) {
 }
 
 func (km *KeyManager) getDatabaseByEzID(ezID int64) (*model.Database, error) {
+	// use ezID as dbID to get database
 	db, err := km.meta.GetDatabaseByID(km.ctx, ezID, 0)
 	if err != nil {
+		// fallback to default database(dbID=1)
 		db, err = km.meta.GetDatabaseByID(km.ctx, util.DefaultDBID, 0)
 		if err != nil {
 			return nil, err
 		}
 	}
 
+	// verify the ezID matches the retrieved DB
 	if db.GetProperty(common.EncryptionEzIDKey) != strconv.FormatInt(ezID, 10) {
 		return nil, fmt.Errorf("db for ezID %d not found", ezID)
 	}

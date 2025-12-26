@@ -18,14 +18,17 @@ package rootcoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 )
 
@@ -51,6 +54,16 @@ func TestKeyManager_GetDatabaseByEzID(t *testing.T) {
 		expectedDB := &model.Database{
 			ID:   123,
 			Name: "test_db",
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.EncryptionEzIDKey,
+					Value: "123", // the same as the dbID
+				},
+				{
+					Key:   common.EncryptionEnabledKey,
+					Value: "true",
+				},
+			},
 		}
 
 		meta.EXPECT().GetDatabaseByID(ctx, int64(123), uint64(0)).Return(expectedDB, nil).Once()
@@ -68,12 +81,23 @@ func TestKeyManager_GetDatabaseByEzID(t *testing.T) {
 	t.Run("fallback to default database", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 
+		ezID := int64(19530)
 		defaultDB := &model.Database{
 			ID:   util.DefaultDBID,
 			Name: util.DefaultDBName,
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.EncryptionEzIDKey,
+					Value: strconv.FormatInt(ezID, 10),
+				},
+				{
+					Key:   common.EncryptionEnabledKey,
+					Value: "true",
+				},
+			},
 		}
 
-		meta.EXPECT().GetDatabaseByID(ctx, int64(123), uint64(0)).Return(nil, errors.New("db not found")).Once()
+		meta.EXPECT().GetDatabaseByID(ctx, ezID, uint64(0)).Return(nil, errors.New("db not found")).Once()
 		meta.EXPECT().GetDatabaseByID(ctx, util.DefaultDBID, uint64(0)).Return(defaultDB, nil).Once()
 
 		km := &KeyManager{
@@ -81,7 +105,7 @@ func TestKeyManager_GetDatabaseByEzID(t *testing.T) {
 			meta: meta,
 		}
 
-		db, err := km.getDatabaseByEzID(123)
+		db, err := km.getDatabaseByEzID(ezID)
 		assert.NoError(t, err)
 		assert.Equal(t, defaultDB, db)
 	})
