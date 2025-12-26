@@ -690,7 +690,7 @@ class TestCollectionSearch(TestcaseBase):
             insert_ids = []
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         for vector_field_name in vector_name_list:
-            vector_data_type = cf.get_field_dtype_by_field_name(collection_w, vector_field_name)
+            vector_data_type = cf.get_field_dtype_by_field_name(collection_w.schema, vector_field_name)
             vectors = cf.gen_vectors(nq, dim, vector_data_type)
             res = collection_w.search(vectors[:nq], vector_field_name,
                                       default_search_params, default_limit,
