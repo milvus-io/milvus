@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -119,10 +120,11 @@ type databaseInfo struct {
 // with extra fields mapping and methods
 type schemaInfo struct {
 	*schemapb.CollectionSchema
-	fieldMap             *typeutil.ConcurrentMap[string, int64] // field name to id mapping
-	hasPartitionKeyField bool
-	pkField              *schemapb.FieldSchema
-	schemaHelper         *typeutil.SchemaHelper
+	fieldMap              *typeutil.ConcurrentMap[string, int64] // field name to id mapping
+	hasPartitionKeyField  bool
+	pkField               *schemapb.FieldSchema
+	multiAnalyzerFieldMap *typeutil.ConcurrentMap[int64, int64] // multi analzyer field id to dependent field id mapping
+	schemaHelper          *typeutil.SchemaHelper
 }
 
 func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
@@ -148,11 +150,12 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 	// partial load shall be processed as hint after tiered storage feature
 	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 	return &schemaInfo{
-		CollectionSchema:     schema,
-		fieldMap:             fieldMap,
-		hasPartitionKeyField: hasPartitionkey,
-		pkField:              pkField,
-		schemaHelper:         schemaHelper,
+		CollectionSchema:      schema,
+		fieldMap:              fieldMap,
+		hasPartitionKeyField:  hasPartitionkey,
+		pkField:               pkField,
+		multiAnalyzerFieldMap: typeutil.NewConcurrentMap[int64, int64](),
+		schemaHelper:          schemaHelper,
 	}
 }
 
@@ -169,6 +172,48 @@ func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
 		return nil, merr.WrapErrServiceInternal("pk field not found")
 	}
 	return s.pkField, nil
+}
+
+func (s *schemaInfo) GetMultiAnalyzerNameFieldID(id int64) (int64, error) {
+	if id, ok := s.multiAnalyzerFieldMap.Get(id); ok {
+		return id, nil
+	}
+
+	field, err := s.schemaHelper.GetFieldFromID(id)
+	if err != nil {
+		return 0, err
+	}
+
+	helper := typeutil.CreateFieldSchemaHelper(field)
+
+	params, ok := helper.GetMultiAnalyzerParams()
+	if !ok {
+		s.multiAnalyzerFieldMap.Insert(id, 0)
+		return 0, nil
+	}
+
+	var raw map[string]json.RawMessage
+	err = json.Unmarshal([]byte(params), &raw)
+	if err != nil {
+		return 0, err
+	}
+
+	jsonFieldID, ok := raw["by_field"]
+	if !ok {
+		return 0, merr.WrapErrServiceInternal("multi_analyzer_params missing required 'by_field' key")
+	}
+	var analyzerFieldName string
+	err = json.Unmarshal(jsonFieldID, &analyzerFieldName)
+	if err != nil {
+		return 0, err
+	}
+	analyzerField, err := s.schemaHelper.GetFieldFromName(analyzerFieldName)
+	if err != nil {
+		return 0, err
+	}
+
+	s.multiAnalyzerFieldMap.Insert(id, analyzerField.GetFieldID())
+	return analyzerField.GetFieldID(), nil
 }
 
 // GetLoadFieldIDs returns field id for load field list.

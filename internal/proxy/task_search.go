@@ -602,7 +602,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		if err != nil {
 			return err
 		}
-		err = h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		err = h.addTaskWithSearchText(t.schema, fieldId, fieldName, analyzerName, texts)
 		if err != nil {
 			return err
 		}
