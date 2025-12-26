@@ -50,10 +50,24 @@ class IArrayOffsets {
     ElementIDRangeOfRow(int32_t row_id) const = 0;
 
     // Convert row-level bitsets to element-level bitsets
+    // row_start: starting row index (0-based)
+    // row_bitset.size(): number of rows to process
     virtual std::pair<TargetBitmap, TargetBitmap>
-    RowBitsetToElementBitset(
-        const TargetBitmapView& row_bitset,
-        const TargetBitmapView& valid_row_bitset) const = 0;
+    RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
+                             const TargetBitmapView& valid_row_bitset,
+                             int64_t row_start) const = 0;
+
+    // Convert row-level bitset to element offsets
+    // Returns element IDs for all rows where row_bitset[row_id] is true
+    virtual FixedVector<int32_t>
+    RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
+                              int64_t row_start) const = 0;
+
+    // Convert row offsets to element offsets
+    // Returns element IDs for all specified rows
+    virtual FixedVector<int32_t>
+    RowOffsetsToElementOffsets(
+        const FixedVector<int32_t>& row_offsets) const = 0;
 };
 
 class ArrayOffsetsSealed : public IArrayOffsets {
@@ -93,9 +107,17 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     ElementIDRangeOfRow(int32_t row_id) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
-    RowBitsetToElementBitset(
-        const TargetBitmapView& row_bitset,
-        const TargetBitmapView& valid_row_bitset) const override;
+    RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
+                             const TargetBitmapView& valid_row_bitset,
+                             int64_t row_start) const override;
+
+    FixedVector<int32_t>
+    RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
+                              int64_t row_start) const override;
+
+    FixedVector<int32_t>
+    RowOffsetsToElementOffsets(
+        const FixedVector<int32_t>& row_offsets) const override;
 
     static std::shared_ptr<ArrayOffsetsSealed>
     BuildFromSegment(const void* segment, const FieldMeta& field_meta);
@@ -132,9 +154,17 @@ class ArrayOffsetsGrowing : public IArrayOffsets {
     ElementIDRangeOfRow(int32_t row_id) const override;
 
     std::pair<TargetBitmap, TargetBitmap>
-    RowBitsetToElementBitset(
-        const TargetBitmapView& row_bitset,
-        const TargetBitmapView& valid_row_bitset) const override;
+    RowBitsetToElementBitset(const TargetBitmapView& row_bitset,
+                             const TargetBitmapView& valid_row_bitset,
+                             int64_t row_start) const override;
+
+    FixedVector<int32_t>
+    RowBitsetToElementOffsets(const TargetBitmapView& row_bitset,
+                              int64_t row_start) const override;
+
+    FixedVector<int32_t>
+    RowOffsetsToElementOffsets(
+        const FixedVector<int32_t>& row_offsets) const override;
 
  private:
     struct PendingRow {

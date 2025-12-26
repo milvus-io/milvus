@@ -551,14 +551,15 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     }
 
     if (segment_->type() == SegmentType::Sealed) {
-        auto size = ProcessIndexOneChunk(batch_result,
-                                         batch_valid,
-                                         0,
-                                         *cached_index_chunk_res_,
-                                         coarse_valid_global_,
-                                         processed_rows);
+        auto data_pos = current_index_chunk_pos_;
+        auto size = std::min(
+            std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
+            int64_t(cached_index_chunk_res_->size()));
+
+        batch_result.append(*cached_index_chunk_res_, data_pos, size);
+        batch_valid.append(coarse_valid_global_, data_pos, size);
         processed_rows += size;
-        current_index_chunk_pos_ = current_index_chunk_pos_ + size;
+        current_index_chunk_pos_ += size;
     } else {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =

@@ -351,6 +351,37 @@ class SegmentExpr : public Expr {
                    : batch_size_;
     }
 
+    // Get the next batch size for element-level processing
+    // Returns: (batch_rows, elem_count) where batch_rows is number of rows to process
+    // and elem_count is the total number of elements in those rows
+    std::pair<int64_t, int64_t>
+    GetNextBatchSizeForElementLevel() {
+        auto array_offsets = segment_->GetArrayOffsets(field_id_);
+        AssertInfo(array_offsets != nullptr,
+                   "ArrayOffsets not found for field {}",
+                   field_id_.get());
+
+        int64_t current_rows =
+            segment_->num_rows_until_chunk(field_id_, current_data_chunk_) +
+            current_data_chunk_pos_;
+
+        auto batch_rows = current_rows + batch_size_ >= active_count_
+                              ? active_count_ - current_rows
+                              : batch_size_;
+
+        if (batch_rows == 0) {
+            return {0, 0};
+        }
+
+        // Calculate elem_count based on global row positions
+        auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(current_rows);
+        auto [elem_end, __] =
+            array_offsets->ElementIDRangeOfRow(current_rows + batch_rows);
+        auto elem_count = elem_end - elem_start;
+
+        return {batch_rows, elem_count};
+    }
+
     // used for processing raw data expr for sealed segments.
     // now only used for std::string_view && json
     // TODO: support more types
@@ -848,6 +879,202 @@ class SegmentExpr : public Expr {
         }
     }
 
+    // Process element-level data without offset input
+    // This is the counterpart of ProcessDataChunks for element-level expressions
+    // Iterates over rows in batch, but returns element-level results
+    // The caller must pre-allocate res/valid_res with elem_count size (from GetNextBatchSizeForElementLevel)
+    template <typename ElementType, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessDataChunksForElementLevel(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        static_assert(!std::is_same_v<ElementType, Json>,
+                      "Json element type is not supported for "
+                      "element-level filtering");
+
+        int64_t processed_rows = 0;
+        int64_t processed_elems = 0;
+
+        // Prefetch chunks to reduce cache miss latency
+        if (!prefetched_) {
+            std::vector<int64_t> pf_chunk_ids;
+            pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+                pf_chunk_ids.push_back(i);
+            }
+            segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
+            prefetched_ = true;
+        }
+
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
+            auto data_pos =
+                i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
+            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            size = std::min(size, batch_size_ - processed_rows);
+            if (size == 0)
+                continue;
+
+            auto& skip_index = segment_->GetSkipIndex();
+            if ((!skip_func || !skip_func(skip_index, field_id_, i)) &&
+                (!namespace_skip_func_.has_value() ||
+                 !namespace_skip_func_.value()(i))) {
+                if (segment_->type() == SegmentType::Sealed) {
+                    auto pw = segment_->get_batch_views<ArrayView>(
+                        op_ctx_, field_id_, i, data_pos, size);
+                    auto [data_vec, valid_data] = pw.get();
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data_vec[j].length();
+                        bool is_row_valid = !valid_data.data() || valid_data[j];
+
+                        if (!is_row_valid) {
+                            // Row is invalid, mark all elements as false
+                            for (size_t k = 0; k < elem_count; k++) {
+                                res[processed_elems + k] =
+                                    valid_res[processed_elems + k] = false;
+                            }
+                        } else {
+                            // Row is valid, process array elements
+                            if constexpr (std::is_same_v<ElementType,
+                                                         std::string_view> ||
+                                          std::is_same_v<ElementType,
+                                                         std::string>) {
+                                // String type: extract one by one
+                                for (size_t k = 0; k < elem_count; k++) {
+                                    auto str_view =
+                                        data_vec[j]
+                                            .template get_data<
+                                                std::string_view>(k);
+                                    ElementType str_val(str_view);
+                                    func(&str_val,
+                                         nullptr,
+                                         nullptr,
+                                         1,
+                                         res + processed_elems + k,
+                                         valid_res + processed_elems + k,
+                                         values...);
+                                }
+                            } else {
+                                // Fixed-length type: batch process entire array
+                                auto* elem_data =
+                                    reinterpret_cast<const ElementType*>(
+                                        data_vec[j].data());
+                                func(elem_data,
+                                     nullptr,
+                                     nullptr,
+                                     elem_count,
+                                     res + processed_elems,
+                                     valid_res + processed_elems,
+                                     values...);
+                            }
+                        }
+                        processed_elems += elem_count;
+                    }
+                } else {
+                    // Growing segment: use Array
+                    auto pw =
+                        segment_->chunk_data<Array>(op_ctx_, field_id_, i);
+                    auto chunk = pw.get();
+                    const Array* data = chunk.data() + data_pos;
+                    const bool* valid_data = chunk.valid_data();
+                    if (valid_data != nullptr) {
+                        valid_data += data_pos;
+                    }
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data[j].length();
+                        bool is_row_valid = !valid_data || valid_data[j];
+
+                        if (!is_row_valid) {
+                            // Row is invalid, mark all elements as false
+                            for (size_t k = 0; k < elem_count; k++) {
+                                res[processed_elems + k] =
+                                    valid_res[processed_elems + k] = false;
+                            }
+                        } else {
+                            // Row is valid, process array elements
+                            if constexpr (std::is_same_v<ElementType,
+                                                         std::string_view> ||
+                                          std::is_same_v<ElementType,
+                                                         std::string>) {
+                                // String type: extract one by one
+                                for (size_t k = 0; k < elem_count; k++) {
+                                    auto str_view =
+                                        data[j]
+                                            .template get_data<
+                                                std::string_view>(k);
+                                    ElementType str_val(str_view);
+                                    func(&str_val,
+                                         nullptr,
+                                         nullptr,
+                                         1,
+                                         res + processed_elems + k,
+                                         valid_res + processed_elems + k,
+                                         values...);
+                                }
+                            } else {
+                                // Fixed-length type: batch process entire array
+                                auto* elem_data =
+                                    reinterpret_cast<const ElementType*>(
+                                        data[j].data());
+                                func(elem_data,
+                                     nullptr,
+                                     nullptr,
+                                     elem_count,
+                                     res + processed_elems,
+                                     valid_res + processed_elems,
+                                     values...);
+                            }
+                        }
+                        processed_elems += elem_count;
+                    }
+                }
+            } else {
+                // Chunk is skipped, mark all elements as false
+                if (segment_->type() == SegmentType::Sealed) {
+                    auto pw = segment_->get_batch_views<ArrayView>(
+                        op_ctx_, field_id_, i, data_pos, size);
+                    auto [data_vec, valid_data] = pw.get();
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data_vec[j].length();
+                        for (size_t k = 0; k < elem_count; k++) {
+                            res[processed_elems + k] =
+                                valid_res[processed_elems + k] = false;
+                        }
+                        processed_elems += elem_count;
+                    }
+                } else {
+                    auto pw =
+                        segment_->chunk_data<Array>(op_ctx_, field_id_, i);
+                    auto chunk = pw.get();
+                    const Array* data = chunk.data() + data_pos;
+
+                    for (size_t j = 0; j < static_cast<size_t>(size); j++) {
+                        auto elem_count = data[j].length();
+                        for (size_t k = 0; k < elem_count; k++) {
+                            res[processed_elems + k] =
+                                valid_res[processed_elems + k] = false;
+                        }
+                        processed_elems += elem_count;
+                    }
+                }
+            }
+
+            processed_rows += size;
+            if (processed_rows >= batch_size_) {
+                current_data_chunk_ = i;
+                current_data_chunk_pos_ = data_pos + size;
+                break;
+            }
+        }
+
+        return processed_elems;
+    }
+
     // Template parameter to control whether segment offsets are needed (for GIS functions)
     template <typename T,
               bool NeedSegmentOffsets = false,
@@ -1209,27 +1436,6 @@ class SegmentExpr : public Expr {
         }
     }
 
-    int
-    ProcessIndexOneChunk(TargetBitmap& result,
-                         TargetBitmap& valid_result,
-                         size_t chunk_id,
-                         const TargetBitmap& chunk_res,
-                         const TargetBitmap& chunk_valid_res,
-                         int processed_rows) {
-        auto data_pos =
-            chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
-        auto size = std::min(
-            std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
-            int64_t(chunk_res.size()));
-
-        //        result.insert(result.end(),
-        //                      chunk_res.begin() + data_pos,
-        //                      chunk_res.begin() + data_pos + size);
-        result.append(chunk_res, data_pos, size);
-        valid_result.append(chunk_valid_res, data_pos, size);
-        return size;
-    }
-
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
@@ -1237,72 +1443,84 @@ class SegmentExpr : public Expr {
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
         using Index = index::ScalarIndex<IndexInnerType>;
+
+        AssertInfo(num_index_chunk_ == 1,
+                   "scalar index should have exactly 1 chunk, got {}",
+                   num_index_chunk_);
+
+        // Cache index result (execute only once)
+        if (cached_index_chunk_id_ != 0) {
+            Index* index_ptr = nullptr;
+            PinWrapper<const index::IndexBase*> json_pw;
+            // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
+            std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
+                executor;
+
+            if (field_type_ == DataType::JSON) {
+                auto pointer = milvus::Json::pointer(nested_path_);
+                json_pw = pinned_index_[0];
+                auto json_flat_index =
+                    dynamic_cast<const index::JsonFlatIndex*>(json_pw.get());
+
+                if (json_flat_index) {
+                    auto index_path = json_flat_index->GetNestedPath();
+                    executor = json_flat_index
+                                   ->template create_executor<IndexInnerType>(
+                                       pointer.substr(index_path.size()));
+                    index_ptr = executor.get();
+                } else {
+                    auto json_index =
+                        const_cast<index::IndexBase*>(json_pw.get());
+                    index_ptr = dynamic_cast<Index*>(json_index);
+                }
+            } else {
+                auto scalar_index =
+                    dynamic_cast<const Index*>(pinned_index_[0].get());
+                index_ptr = const_cast<Index*>(scalar_index);
+            }
+
+            cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+                std::move(func(index_ptr, values...)));
+            cached_index_chunk_valid_res_ =
+                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+            cached_index_chunk_id_ = 0;
+            cached_is_nested_index_ = index_ptr->IsNestedIndex();
+        }
+
         TargetBitmap result;
         TargetBitmap valid_result;
-        int processed_rows = 0;
 
-        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            // This cache result help getting result for every batch loop.
-            // It avoids indexing execute for every batch because indexing
-            // executing costs quite much time.
-            if (cached_index_chunk_id_ != i) {
-                Index* index_ptr = nullptr;
-                PinWrapper<const index::IndexBase*> json_pw;
-                PinWrapper<const Index*> pw;
-                // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
-                std::shared_ptr<
-                    index::JsonFlatIndexQueryExecutor<IndexInnerType>>
-                    executor;
+        if (cached_is_nested_index_) {
+            // Nested index: batch by rows, return corresponding elements
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
 
-                if (field_type_ == DataType::JSON) {
-                    auto pointer = milvus::Json::pointer(nested_path_);
+            auto data_pos = current_index_chunk_pos_;
+            auto batch_rows =
+                std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
+                         active_count_ - data_pos);
 
-                    json_pw = pinned_index_[i];
-                    // check if it is a json flat index, if so, create a json flat index query executor
-                    auto json_flat_index =
-                        dynamic_cast<const index::JsonFlatIndex*>(
-                            json_pw.get());
+            // Calculate corresponding element range
+            auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(data_pos);
+            auto [elem_end, __] =
+                array_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
+            auto elem_count = elem_end - elem_start;
 
-                    if (json_flat_index) {
-                        auto index_path = json_flat_index->GetNestedPath();
-                        executor =
-                            json_flat_index
-                                ->template create_executor<IndexInnerType>(
-                                    pointer.substr(index_path.size()));
-                        index_ptr = executor.get();
-                    } else {
-                        auto json_index =
-                            const_cast<index::IndexBase*>(json_pw.get());
-                        index_ptr = dynamic_cast<Index*>(json_index);
-                    }
-                } else {
-                    auto scalar_index =
-                        dynamic_cast<const Index*>(pinned_index_[i].get());
-                    index_ptr = const_cast<Index*>(scalar_index);
-                }
-                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
-                    std::move(func(index_ptr, values...)));
-                auto valid_result = index_ptr->IsNotNull();
-                cached_index_chunk_valid_res_ =
-                    std::make_shared<TargetBitmap>(std::move(valid_result));
-                cached_index_chunk_id_ = i;
-            }
+            result.append(*cached_index_chunk_res_, elem_start, elem_count);
+            valid_result.append(
+                *cached_index_chunk_valid_res_, elem_start, elem_count);
 
-            auto size = ProcessIndexOneChunk(result,
-                                             valid_result,
-                                             i,
-                                             *cached_index_chunk_res_,
-                                             *cached_index_chunk_valid_res_,
-                                             processed_rows);
+            current_index_chunk_pos_ = data_pos + batch_rows;
+        } else {
+            // Normal index: batch by rows
+            auto data_pos = current_index_chunk_pos_;
+            auto size =
+                std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
+                         int64_t(cached_index_chunk_res_->size()));
 
-            if (processed_rows + size >= batch_size_) {
-                current_index_chunk_ = i;
-                current_index_chunk_pos_ = i == current_index_chunk_
-                                               ? current_index_chunk_pos_ + size
-                                               : size;
-                break;
-            }
-            processed_rows += size;
+            result.append(*cached_index_chunk_res_, data_pos, size);
+            valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
+
+            current_index_chunk_pos_ = data_pos + size;
         }
 
         return std::make_shared<ColumnVector>(std::move(result),
@@ -1516,67 +1734,39 @@ class SegmentExpr : public Expr {
         return valid_result;
     }
 
-    int
-    ProcessIndexOneChunkForValid(TargetBitmap& valid_result,
-                                 size_t chunk_id,
-                                 const TargetBitmap& chunk_valid_res,
-                                 int processed_rows) {
-        auto data_pos =
-            chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
-        auto size = std::min(
-            std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
-            int64_t(chunk_valid_res.size()));
-        if (field_type_ == DataType::GEOMETRY &&
-            segment_->type() == SegmentType::Growing) {
-            size = std::min(batch_size_ - processed_rows,
-                            int64_t(chunk_valid_res.size()) - data_pos);
-        }
-        valid_result.append(chunk_valid_res, data_pos, size);
-        return size;
-    }
-
     template <typename T>
     TargetBitmap
     ProcessIndexChunksForValid() {
         using IndexInnerType = std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
         using Index = index::ScalarIndex<IndexInnerType>;
-        int processed_rows = 0;
+
+        AssertInfo(num_index_chunk_ == 1,
+                   "scalar index should have exactly 1 chunk, got {}",
+                   num_index_chunk_);
+
+        // Cache valid result (execute only once)
+        if (cached_index_chunk_id_ != 0) {
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[0].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
+            cached_index_chunk_valid_res_ =
+                std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
+            cached_index_chunk_id_ = 0;
+        }
+
+        // Process current batch
         TargetBitmap valid_result;
         valid_result.set();
 
-        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            // This cache result help getting result for every batch loop.
-            // It avoids indexing execute for every batch because indexing
-            // executing costs quite much time.
-            if (cached_index_chunk_id_ != i) {
-                auto scalar_index =
-                    dynamic_cast<const Index*>(pinned_index_[i].get());
-                auto* index_ptr = const_cast<Index*>(scalar_index);
-                auto execute_sub_batch = [](Index* index_ptr) {
-                    TargetBitmap res = index_ptr->IsNotNull();
-                    return res;
-                };
-                cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
-                    std::move(execute_sub_batch(index_ptr)));
-                cached_index_chunk_id_ = i;
-            }
+        auto data_pos = current_index_chunk_pos_;
+        auto size = std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
+                             int64_t(cached_index_chunk_valid_res_->size()));
 
-            auto size =
-                ProcessIndexOneChunkForValid(valid_result,
-                                             i,
-                                             *cached_index_chunk_valid_res_,
-                                             processed_rows);
+        valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
 
-            if (processed_rows + size >= batch_size_) {
-                current_index_chunk_ = i;
-                current_index_chunk_pos_ = i == current_index_chunk_
-                                               ? current_index_chunk_pos_ + size
-                                               : size;
-                break;
-            }
-            processed_rows += size;
-        }
+        current_index_chunk_pos_ = data_pos + size;
+
         return valid_result;
     }
 
@@ -1588,12 +1778,14 @@ class SegmentExpr : public Expr {
                 IndexInnerType;
         using Index = index::ScalarIndex<IndexInnerType>;
 
-        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[i].get());
-            auto* index_ptr = const_cast<Index*>(scalar_index);
-            func(index_ptr, values...);
-        }
+        // For scalar index, num_index_chunk_ can only be 1
+        AssertInfo(num_index_chunk_ == 1,
+                   "scalar index should have exactly 1 chunk, got {}",
+                   num_index_chunk_);
+
+        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
+        auto* index_ptr = const_cast<Index*>(scalar_index);
+        func(index_ptr, values...);
     }
 
     bool
@@ -1668,8 +1860,11 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
         if (op == OpType::Match || op == OpType::InnerMatch ||
             op == OpType::PostfixMatch) {
-            auto scalar_index = dynamic_cast<const Index*>(
-                pinned_index_[current_index_chunk_].get());
+            AssertInfo(num_index_chunk_ == 1,
+                       "scalar index should have exactly 1 chunk, got {}",
+                       num_index_chunk_);
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[0].get());
             auto* index_ptr = const_cast<Index*>(scalar_index);
             // 1, index support regex query and try use it, then index handles the query;
             // 2, index has raw data, then call index.Reverse_Lookup to handle the query;
@@ -1688,16 +1883,13 @@ class SegmentExpr : public Expr {
                 IndexInnerType;
 
         using Index = index::ScalarIndex<IndexInnerType>;
-        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[i].get());
-            auto* index_ptr = const_cast<Index*>(scalar_index);
-            if (!index_ptr->HasRawData()) {
-                return false;
-            }
-        }
 
-        return true;
+        AssertInfo(num_index_chunk_ == 1,
+                   "scalar index should have exactly 1 chunk, got {}",
+                   num_index_chunk_);
+        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
+        auto* index_ptr = const_cast<Index*>(scalar_index);
+        return index_ptr->HasRawData();
     }
 
     void
@@ -1782,6 +1974,8 @@ class SegmentExpr : public Expr {
     std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
     // Cache for chunk valid res.
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
+    // Cache whether index is nested index
+    bool cached_is_nested_index_{false};
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};

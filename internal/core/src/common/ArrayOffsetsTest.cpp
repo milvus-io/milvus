@@ -114,7 +114,7 @@ TEST_F(ArrayOffsetsTest, SealedRowBitsetToElementBitset) {
                                 valid_row_bitset.size());
 
     auto [elem_bitset, valid_elem_bitset] =
-        offsets.RowBitsetToElementBitset(row_view, valid_view);
+        offsets.RowBitsetToElementBitset(row_view, valid_view, 0);
 
     EXPECT_EQ(elem_bitset.size(), 6);
     // Elements of row 0 (elem 0, 1) should be true
@@ -310,7 +310,7 @@ TEST_F(ArrayOffsetsTest, GrowingRowBitsetToElementBitset) {
                                 valid_row_bitset.size());
 
     auto [elem_bitset, valid_elem_bitset] =
-        offsets.RowBitsetToElementBitset(row_view, valid_view);
+        offsets.RowBitsetToElementBitset(row_view, valid_view, 0);
 
     EXPECT_EQ(elem_bitset.size(), 6);
     EXPECT_TRUE(elem_bitset[0]);

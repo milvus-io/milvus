@@ -104,7 +104,7 @@ PhyVectorSearchNode::GetOutput() {
                                     col_input->size());
 
         auto [element_bitset, valid_element_bitset] =
-            array_offsets->RowBitsetToElementBitset(view, valid_view);
+            array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
 
         query_context_->set_active_element_count(element_bitset.size());
 

@@ -79,7 +79,7 @@ ElementFilterIterator::FetchAndFilterBatch() {
     }
 
     // Step 2: Batch evaluate element-level expression
-    exec::EvalCtx eval_ctx(exec_context_, expr_set_, &element_ids_buffer_);
+    exec::EvalCtx eval_ctx(exec_context_, &element_ids_buffer_);
     std::vector<VectorPtr> results;
 
     // Evaluate the expression set (should contain only element_expr)

@@ -88,7 +88,7 @@ PhyElementFilterBitsNode::GetOutput() {
 
     // Step 3: Convert doc bitset to element offsets
     FixedVector<int32_t> element_offsets =
-        DocBitsetToElementOffsets(doc_bitset);
+        array_offsets->RowBitsetToElementOffsets(doc_bitset, 0);
 
     // Step 4: Evaluate element expression
     auto [expr_result, valid_expr_result] =
@@ -122,38 +122,6 @@ PhyElementFilterBitsNode::GetOutput() {
     return std::make_shared<RowVector>(col_res);
 }
 
-FixedVector<int32_t>
-PhyElementFilterBitsNode::DocBitsetToElementOffsets(
-    const TargetBitmapView& doc_bitset) {
-    auto array_offsets = query_context_->get_array_offsets();
-    AssertInfo(array_offsets != nullptr, "Array offsets not available");
-
-    int64_t doc_count = array_offsets->GetRowCount();
-    AssertInfo(doc_bitset.size() == doc_count,
-               "Doc bitset size mismatch: {} vs {}",
-               doc_bitset.size(),
-               doc_count);
-
-    FixedVector<int32_t> element_offsets;
-    element_offsets.reserve(array_offsets->GetTotalElementCount());
-
-    // For each document that passes the filter, get all its element offsets
-    for (int64_t doc_id = 0; doc_id < doc_count; ++doc_id) {
-        if (doc_bitset[doc_id]) {
-            // Get element range for this document
-            auto [first_elem, last_elem] =
-                array_offsets->ElementIDRangeOfRow(doc_id);
-
-            // Add all element IDs for this document
-            for (int64_t elem_id = first_elem; elem_id < last_elem; ++elem_id) {
-                element_offsets.push_back(static_cast<int32_t>(elem_id));
-            }
-        }
-    }
-
-    return element_offsets;
-}
-
 std::pair<TargetBitmap, TargetBitmap>
 PhyElementFilterBitsNode::EvaluateElementExpression(
     FixedVector<int32_t>& element_offsets) {
@@ -162,10 +130,8 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                           true);
     tracer::AddEvent(fmt::format("input_elements: {}", element_offsets.size()));
 
-    // Use offset interface by passing element_offsets as third parameter
-    EvalCtx eval_ctx(operator_context_->get_exec_context(),
-                     element_exprs_.get(),
-                     &element_offsets);
+    // Use offset interface by passing element_offsets
+    EvalCtx eval_ctx(operator_context_->get_exec_context(), &element_offsets);
 
     std::vector<VectorPtr> results;
     element_exprs_->Eval(0, 1, true, eval_ctx, results);

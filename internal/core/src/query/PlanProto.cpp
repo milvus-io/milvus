@@ -445,7 +445,7 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     if (column_info.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
         Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.data_type()));
+               static_cast<DataType>(column_info.element_type()));
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -470,7 +470,7 @@ ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
     if (column_info.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
         Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.data_type()));
+               static_cast<DataType>(column_info.element_type()));
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -488,7 +488,7 @@ ProtoParser::ParseBinaryRangeExprs(
 
     if (columnInfo.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -510,7 +510,7 @@ ProtoParser::ParseTimestamptzArithCompareExprs(
 
     if (columnInfo.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -531,6 +531,16 @@ ProtoParser::ParseElementFilterExprs(
     ThrowInfo(ExprInvalid,
               "ParseElementFilterExprs should not be called directly. "
               "ElementFilterExpr must be handled at PlanNode level.");
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
+    auto struct_name = expr_pb.struct_name();
+    auto match_type = expr_pb.match_type();
+    auto count = expr_pb.count();
+    auto predicate = this->ParseExprs(expr_pb.predicate());
+    return std::make_shared<expr::MatchExpr>(
+        struct_name, match_type, count, predicate);
 }
 
 expr::TypedExprPtr
@@ -566,7 +576,7 @@ ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     if (left_column_info.is_element_level()) {
         Assert(left_data_type == DataType::ARRAY);
         Assert(left_field.get_element_type() ==
-               static_cast<DataType>(left_column_info.data_type()));
+               static_cast<DataType>(left_column_info.element_type()));
     } else {
         Assert(left_data_type ==
                static_cast<DataType>(left_column_info.data_type()));
@@ -580,7 +590,7 @@ ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     if (right_column_info.is_element_level()) {
         Assert(right_data_type == DataType::ARRAY);
         Assert(right_field.get_element_type() ==
-               static_cast<DataType>(right_column_info.data_type()));
+               static_cast<DataType>(right_column_info.element_type()));
     } else {
         Assert(right_data_type ==
                static_cast<DataType>(right_column_info.data_type()));
@@ -602,7 +612,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
 
     if (columnInfo.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -641,7 +651,7 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
     if (column_info.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
         Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.data_type()));
+               static_cast<DataType>(column_info.element_type()));
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -663,7 +673,7 @@ ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
     if (column_info.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
         Assert(field.get_element_type() ==
-               static_cast<DataType>(column_info.data_type()));
+               static_cast<DataType>(column_info.element_type()));
     } else {
         Assert(data_type == static_cast<DataType>(column_info.data_type()));
     }
@@ -680,7 +690,7 @@ ProtoParser::ParseJsonContainsExprs(
 
     if (columnInfo.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -715,7 +725,7 @@ ProtoParser::ParseGISFunctionFilterExprs(
 
     if (columnInfo.is_element_level()) {
         Assert(data_type == DataType::ARRAY);
-        Assert(field.get_element_type() == (DataType)columnInfo.data_type());
+        Assert(field.get_element_type() == (DataType)columnInfo.element_type());
     } else {
         Assert(data_type == (DataType)columnInfo.data_type());
     }
@@ -808,6 +818,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
             ThrowInfo(ExprInvalid,
                       "ElementFilterExpr should be handled at PlanNode level, "
                       "not in ParseExprs");
+        }
+        case ppe::kMatchExpr: {
+            result = ParseMatchExprs(expr_pb.match_expr());
+            break;
         }
         default: {
             std::string s;
