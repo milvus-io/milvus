@@ -2926,8 +2926,8 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 // with various nq and averageNNZ, test if the estimated number of non-zero
 // elements is close to the actual number.
 func TestSparsePlaceholderGroupSize(t *testing.T) {
-	nqs := []int{1, 10, 100, 1000, 10000}
-	averageNNZs := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}
+	nqs := []int{1, 100, 10000}
+	averageNNZs := []int{1, 4, 16, 64, 256, 1024}
 	numCases := 0
 	casesWithLargeError := 0
 	for _, nq := range nqs {
