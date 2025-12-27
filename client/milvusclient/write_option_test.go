@@ -57,8 +57,31 @@ type DeleteOptionSuite struct {
 func (s *DeleteOptionSuite) TestBasic() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	opt := NewDeleteOption(collectionName)
+	req, err := opt.Request()
+	s.NoError(err)
 
-	s.Equal(collectionName, opt.Request().GetCollectionName())
+	s.Equal(collectionName, req.CollectionName)
+}
+
+func (s *DeleteOptionSuite) TestWithExpr() {
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+	expr := "id > 100"
+	opt := NewDeleteOption(collectionName).WithExpr(expr)
+	req, err := opt.Request()
+	s.NoError(err)
+
+	s.Equal(expr, req.Expr)
+}
+
+func (s *DeleteOptionSuite) TestWithTemplateParam() {
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+	opt := NewDeleteOption(collectionName).WithExpr("id > {v}").WithTemplateParam("v", 100)
+	req, err := opt.Request()
+	s.NoError(err)
+
+	s.Equal("id > {v}", req.Expr)
+	s.Equal(1, len(req.ExprTemplateValues))
+	s.Equal(int64(100), req.ExprTemplateValues["v"].GetInt64Val())
 }
 
 func TestDeleteOption(t *testing.T) {
