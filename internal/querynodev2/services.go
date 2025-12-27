@@ -1326,7 +1326,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
 			TargetVersion:          queryView.GetVersion(),
 			Status: &querypb.LeaderViewStatus{
-				Serviceable: queryView.Serviceable(),
+				Serviceable:             queryView.Serviceable(),
+				CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
 			},
 		})
 		return true
