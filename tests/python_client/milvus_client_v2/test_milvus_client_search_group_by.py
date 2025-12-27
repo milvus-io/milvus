@@ -1,5 +1,5 @@
+import json
 import numpy as np
-from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType
@@ -48,14 +48,12 @@ class TestGroupSearch(TestMilvusClientV2Base):
         self.sparse_vector_index = "SPARSE_INVERTED_INDEX"
         self.binary_vector_index = "BIN_IVF_FLAT"
         self.index_types = [self.float_vector_index, self.bf16_vector_index,
-                            self.sparse_vector_index, self.bf16_vector_index]
-        self.primary_keys = []
+                            self.sparse_vector_index, self.binary_vector_index]
         self.inverted_string_field = inverted_string_field_name
         self.indexed_json_field = indexed_json_field_name
         self.enable_dynamic_field = True
         self.dyna_filed_name1 = dyna_filed_name1
         self.dyna_filed_name2 = dyna_filed_name2
-        self.datas = []
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_collection(self, request):
@@ -126,7 +124,6 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     self.dyna_filed_name1: f"dyna_value_{i}" if random.random() < 0.8 else None,
                     self.dyna_filed_name2: {"number": i, "string": f"string_{i}"} if random.random() < 0.8 else None,
                 }
-                self.datas.append(row)
 
                 # Distribute to partitions based on pk mod 3
                 if i % 3 == 0:
@@ -144,8 +141,6 @@ class TestGroupSearch(TestMilvusClientV2Base):
             if partition2_rows:
                 self.insert(client, self.collection_name, data=partition2_rows, partition_name=self.partition_names[1])
 
-            # Track all inserted data and primary keys
-            self.primary_keys.extend([i + j * nb for i in range(nb)])
         self.flush(client, self.collection_name)
 
         # Create index
@@ -226,10 +221,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
                         group_values = []
                         for k in range(group_size):
                             group_values.append(res1[i][l * group_size + k].fields.get(output_field))
-                        if isinstance(group_values[0], dict):
+                        if group_values and isinstance(group_values[0], dict):
                             group_values = [json.dumps(value) for value in group_values]
                             assert len(set(group_values)) == 1
-                        else:
+                        elif group_values:
                             assert len(set(group_values)) == 1
 
                 # when strict_group_size=false, it shall return results with group counts = limit
@@ -242,10 +237,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     group_values = []
                     for l in range(len(res1[i])):
                         group_values.append(res1[i][l].fields.get(output_field))
-                    if isinstance(group_values[0], dict):
+                    if group_values and isinstance(group_values[0], dict):
                         group_values = [json.dumps(value) for value in group_values]
                         assert len(set(group_values)) == limit
-                    else:
+                    elif group_values:
                         assert len(set(group_values)) == limit
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -385,7 +380,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     "expr": f"{self.primary_field} < 0"}  # make sure return empty results
                 req = AnnSearchRequest(**search_param)
                 req_list.append(req)
-        # 4. hybrid search group by empty resutls
+        # 4. hybrid search group by empty results
         self.hybrid_search(client, self.collection_name, reqs=req_list, ranker=WeightedRanker(0.1, 0.9, 0.3),
                            limit=ct.default_limit, group_by_field=DataType.VARCHAR.name,
                            output_fields=[DataType.VARCHAR.name],
@@ -398,7 +393,6 @@ class TestGroupSearch(TestMilvusClientV2Base):
         verify search group by works with supported binary vector
         """
         client = self._client()
-        collection_info = self.describe_collection(client, self.collection_name)[0]
         search_vectors = cf.gen_vectors(1, dim=self.binary_vector_dim,
                                         vector_data_type=DataType.BINARY_VECTOR)
         search_params = {}
@@ -462,6 +456,7 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     log.info(
                         f"{support_field} on {self.vector_fields[j]}  top1_dismatch_num: {dismatch}, results_num: {results_num}, dismatch_rate: {dismatch / results_num}")
                     baseline = 1 if support_field == DataType.BOOL.name else 0.2  # skip baseline check for boolean
+                    assert results_num > 0, "results_num should be greater than 0"
                     assert dismatch / results_num <= baseline
                     # verify no dup values of the group_by_field in results
                     assert len(grpby_values) == len(set(grpby_values))
@@ -543,6 +538,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_pagination_group_size(self):
+        """
+        verify search group by works with pagination and group_size
+        """
         client = self._client()
         collection_info = self.describe_collection(client, self.collection_name)[0]
         limit = 10
@@ -702,10 +700,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("grpby_nonexist_field", ["nonexit_field", 21])
+    @pytest.mark.parametrize("grpby_nonexist_field", ["nonexist_field", 21])
     def test_search_group_by_non_exit_field_on_dynamic_enabled_collection(self, grpby_nonexist_field):
         """
-        target: test search group by with the non existing field agianst dynamic field enabled collection
+        target: test search group by with the non existing field against dynamic field enabled collection
         method: 1. create a collection with dynamic field enabled
                 2. create index
                 3. search with group by the unsupported fields
@@ -742,7 +740,6 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
         self.float_vector_index = "FLAT"
         self.int8_vector_index = "HNSW"
         self.index_types = [self.float_vector_index, self.int8_vector_index]
-        self.datas = []
 
     @pytest.fixture(scope="class", autouse=True)
     def prepare_collection(self, request):
@@ -771,7 +768,6 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
         # Insert data multiple times with non-duplicated primary keys
         for j in range(insert_times):
             rows = cf.gen_row_data_by_schema(nb, schema=collection_schema)
-            self.datas.extend(rows)
             # Insert into collection
             self.insert(client, self.collection_name, data=rows)
 
@@ -823,7 +819,7 @@ class TestGroupSearchInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("grpby_nonexist_field", ["nonexit_field", 21])
+    @pytest.mark.parametrize("grpby_nonexist_field", ["nonexist_field", 21])
     def test_search_group_by_non_exit_field(self, grpby_nonexist_field):
         """
         target: test search group by with the nonexisting field
