@@ -151,3 +151,79 @@ TEST(RegexMatcherTest, PatternMatchWithNewLine) {
 
     EXPECT_TRUE(matcher(std::string("Hello\n")));
 }
+
+// ============== extract_fixed_prefix_from_pattern Tests ==============
+
+TEST(ExtractFixedPrefixTest, SimplePrefix) {
+    using namespace milvus;
+    // Pattern "abc%" -> prefix "abc"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("abc%"), "abc");
+    // Pattern "abc%def" -> prefix "abc"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("abc%def"), "abc");
+    // Pattern "hello%world%" -> prefix "hello"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("hello%world%"), "hello");
+}
+
+TEST(ExtractFixedPrefixTest, UnderscoreWildcard) {
+    using namespace milvus;
+    // Pattern "a_c" -> prefix "a" (stops at _)
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("a_c"), "a");
+    // Pattern "ab_cd%" -> prefix "ab"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("ab_cd%"), "ab");
+    // Pattern "_abc" -> prefix "" (starts with _)
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("_abc"), "");
+}
+
+TEST(ExtractFixedPrefixTest, NoPrefix) {
+    using namespace milvus;
+    // Pattern "%abc" -> prefix ""
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("%abc"), "");
+    // Pattern "%abc%" -> prefix ""
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("%abc%"), "");
+    // Pattern "%" -> prefix ""
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("%"), "");
+    // Pattern "_" -> prefix ""
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("_"), "");
+}
+
+TEST(ExtractFixedPrefixTest, EscapedPercent) {
+    using namespace milvus;
+    // Pattern "100\%" -> prefix "100%" (escaped % is literal)
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("100\\%"), "100%");
+    // Pattern "a\%b%" -> prefix "a%b"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("a\\%b%"), "a%b");
+    // Pattern "100\%\%" -> prefix "100%%"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("100\\%\\%"), "100%%");
+}
+
+TEST(ExtractFixedPrefixTest, EscapedUnderscore) {
+    using namespace milvus;
+    // Pattern "a\_b" -> prefix "a_b" (escaped _ is literal)
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("a\\_b"), "a_b");
+    // Pattern "a\_b%" -> prefix "a_b"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("a\\_b%"), "a_b");
+    // Pattern "a\_b_c" -> prefix "a_b" (stops at unescaped _)
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("a\\_b_c"), "a_b");
+}
+
+TEST(ExtractFixedPrefixTest, MixedEscape) {
+    using namespace milvus;
+    // Pattern "10\%\_off%" -> prefix "10%_off"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("10\\%\\_off%"), "10%_off");
+    // Pattern "a\%b\_c%d" -> prefix "a%b_c"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("a\\%b\\_c%d"), "a%b_c");
+}
+
+TEST(ExtractFixedPrefixTest, NoWildcard) {
+    using namespace milvus;
+    // Pattern "abc" -> prefix "abc" (no wildcard)
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("abc"), "abc");
+    // Pattern "hello world" -> prefix "hello world"
+    EXPECT_EQ(extract_fixed_prefix_from_pattern("hello world"), "hello world");
+}
+
+TEST(ExtractFixedPrefixTest, EmptyPattern) {
+    using namespace milvus;
+    // Empty pattern -> empty prefix
+    EXPECT_EQ(extract_fixed_prefix_from_pattern(""), "");
+}
