@@ -22,9 +22,17 @@ PGO_PATH := $(PWD)/configs/pgo
 OS := $(shell uname -s)
 mode = Release
 
-use_disk_index = OFF
+# Set disk_index default based on OS
+# macOS (Darwin) does not support aio, so disable disk_index
+ifeq ($(OS),Darwin)
+    use_disk_index = OFF
+else
+    use_disk_index = ON
+endif
+
+# Allow manual override via disk_index variable
 ifdef disk_index
-	use_disk_index = ${disk_index}
+    use_disk_index = ${disk_index}
 endif
 
 use_asan = OFF
