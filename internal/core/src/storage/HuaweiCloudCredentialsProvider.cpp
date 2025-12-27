@@ -21,7 +21,7 @@
 static const char STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG[] =
     "HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider";
 static const int STS_CREDENTIAL_PROVIDER_EXPIRATION_GRACE_PERIOD =
-    7200;  // huawei cloud support 7200s.
+    180 * 1000;  // huawei cloud support 180s.
 namespace Aws {
 namespace Auth {
 
@@ -155,10 +155,13 @@ HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider::Reload() {
             m_region, m_providerId, m_token, m_roleArn, m_sessionName};
 
     auto result = m_client->GetAssumeRoleWithWebIdentityCredentials(request);
-    AWS_LOGSTREAM_TRACE(
+    AWS_LOGSTREAM_DEBUG(
         STS_ASSUME_ROLE_WEB_IDENTITY_LOG_TAG,
         "Successfully retrieved credentials with AWS_ACCESS_KEY: "
-            << result.creds.GetAWSAccessKeyId());
+            << result.creds.GetAWSAccessKeyId()
+            << ", expiration_count_diff_ms: "
+            << (result.creds.GetExpiration() - Aws::Utils::DateTime::Now())
+                   .count());
     m_credentials = result.creds;
 }
 
