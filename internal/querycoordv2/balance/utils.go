@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -33,11 +34,14 @@ import (
 )
 
 const (
-	PlanInfoPrefix = "Balance-Plans:"
-	DistInfoPrefix = "Balance-Dists:"
+	PlanInfoPrefix = "Balance-Plans:" // Prefix for balance plan log messages
+	DistInfoPrefix = "Balance-Dists:" // Prefix for distribution info log messages
 )
 
-func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
+// CreateSegmentTasksFromPlans converts segment assignment plans into executable tasks.
+// Each plan is converted to a task with grow action (load segment) on the target node
+// and reduce action (release segment) on the source node.
+func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []assign.SegmentAssignPlan) []task.Task {
 	ret := make([]task.Task, 0)
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
@@ -92,7 +96,10 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 	return ret
 }
 
-func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []ChannelAssignPlan) []task.Task {
+// CreateChannelTasksFromPlans converts channel assignment plans into executable tasks.
+// Each plan is converted to a task with grow action (subscribe channel) on the target node
+// and reduce action (unsubscribe channel) on the source node.
+func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeout time.Duration, plans []assign.ChannelAssignPlan) []task.Task {
 	ret := make([]task.Task, 0, len(plans))
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
@@ -129,8 +136,9 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 	return ret
 }
 
-func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []SegmentAssignPlan,
-	channelPlans []ChannelAssignPlan,
+// PrintNewBalancePlans logs the newly generated balance plans for debugging and monitoring.
+func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []assign.SegmentAssignPlan,
+	channelPlans []assign.ChannelAssignPlan,
 ) {
 	balanceInfo := fmt.Sprintf("%s new plans:{collectionID:%d, replicaID:%d, ", PlanInfoPrefix, collectionID, replicaID)
 	for _, segmentPlan := range segmentPlans {
@@ -143,6 +151,9 @@ func PrintNewBalancePlans(collectionID int64, replicaID int64, segmentPlans []Se
 	log.Info(balanceInfo)
 }
 
+// PrintCurrentReplicaDist logs the current distribution of segments and channels across nodes
+// in a replica, including both stopping nodes and normal nodes. This is useful for debugging
+// and monitoring the balance state before and after balance operations.
 func PrintCurrentReplicaDist(replica *meta.Replica,
 	stoppingNodesSegments map[int64][]*meta.Segment, nodeSegments map[int64][]*meta.Segment,
 	channelManager *meta.ChannelDistManager, segmentDistMgr *meta.SegmentDistManager,
@@ -208,8 +219,10 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	log.Info(distInfo)
 }
 
-// sortIfChannelAtWALLocated sorts the channels by the weight of the node where the WAL is located.
-// put the channel at the node where the WAL is located to the tail of the channels.
+// sortIfChannelAtWALLocated sorts channels based on WAL location when streaming service is enabled.
+// Channels located at their WAL nodes are placed at the end of the list, making them less likely
+// to be selected for movement. This optimization reduces unnecessary channel migrations when
+// a channel is already at its optimal location for streaming.
 func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
 	if !streamingutil.IsStreamingServiceEnabled() {
 		return channels
