@@ -44,6 +44,7 @@ const (
 type quotaConfig struct {
 	QuotaAndLimitsEnabled      ParamItem `refreshable:"false"`
 	QuotaCenterCollectInterval ParamItem `refreshable:"false"`
+	FactorChangeThreshold      ParamItem `refreshable:"true"`
 	ForceDenyAllDDL            ParamItem `refreshable:"true"`
 	AllocRetryTimes            ParamItem `refreshable:"false"`
 	AllocWaitInterval          ParamItem `refreshable:"false"`
@@ -77,32 +78,24 @@ type quotaConfig struct {
 	DMLLimitEnabled                 ParamItem `refreshable:"true"`
 	DMLMaxInsertRate                ParamItem `refreshable:"true"`
 	DMLMinInsertRate                ParamItem `refreshable:"true"`
-	DMLMaxUpsertRate                ParamItem `refreshable:"true"`
-	DMLMinUpsertRate                ParamItem `refreshable:"true"`
 	DMLMaxDeleteRate                ParamItem `refreshable:"true"`
 	DMLMinDeleteRate                ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRate              ParamItem `refreshable:"true"`
 	DMLMinBulkLoadRate              ParamItem `refreshable:"true"`
 	DMLMaxInsertRatePerDB           ParamItem `refreshable:"true"`
 	DMLMinInsertRatePerDB           ParamItem `refreshable:"true"`
-	DMLMaxUpsertRatePerDB           ParamItem `refreshable:"true"`
-	DMLMinUpsertRatePerDB           ParamItem `refreshable:"true"`
 	DMLMaxDeleteRatePerDB           ParamItem `refreshable:"true"`
 	DMLMinDeleteRatePerDB           ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRatePerDB         ParamItem `refreshable:"true"`
 	DMLMinBulkLoadRatePerDB         ParamItem `refreshable:"true"`
 	DMLMaxInsertRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMinInsertRatePerCollection   ParamItem `refreshable:"true"`
-	DMLMaxUpsertRatePerCollection   ParamItem `refreshable:"true"`
-	DMLMinUpsertRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMaxDeleteRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMinDeleteRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRatePerCollection ParamItem `refreshable:"true"`
 	DMLMinBulkLoadRatePerCollection ParamItem `refreshable:"true"`
 	DMLMaxInsertRatePerPartition    ParamItem `refreshable:"true"`
 	DMLMinInsertRatePerPartition    ParamItem `refreshable:"true"`
-	DMLMaxUpsertRatePerPartition    ParamItem `refreshable:"true"`
-	DMLMinUpsertRatePerPartition    ParamItem `refreshable:"true"`
 	DMLMaxDeleteRatePerPartition    ParamItem `refreshable:"true"`
 	DMLMinDeleteRatePerPartition    ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRatePerPartition  ParamItem `refreshable:"true"`
@@ -199,6 +192,26 @@ seconds, (0 ~ 65536)`,
 		Export: true,
 	}
 	p.QuotaCenterCollectInterval.Init(base.mgr)
+
+	const defaultFactorChangeThreshold = "0.05"
+	p.FactorChangeThreshold = ParamItem{
+		Key:          "quotaAndLimits.factorChangeThreshold",
+		Version:      "2.6.7",
+		DefaultValue: defaultFactorChangeThreshold,
+		Formatter: func(v string) string {
+			threshold := getAsFloat(v)
+			// (0, 1]
+			if threshold <= 0 || threshold > 1 {
+				return defaultFactorChangeThreshold
+			}
+			return v
+		},
+		Doc: `FactorChangeThreshold defines the minimum relative change in factor to trigger an update.
+If the factor change is less than this threshold (e.g., 5%), the update is skipped
+to reduce unnecessary proxy updates. Range: (0, 1]`,
+		Export: true,
+	}
+	p.FactorChangeThreshold.Init(base.mgr)
 
 	p.ForceDenyAllDDL = ParamItem{
 		Key:          "quotaAndLimits.forceDenyAllDDL",
@@ -715,182 +728,6 @@ To use this setting, set quotaAndLimits.dml.enabled to true at the same time.`,
 		},
 	}
 	p.DMLMinInsertRatePerPartition.Init(base.mgr)
-
-	p.DMLMaxUpsertRate = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.max",
-		Version:      "2.3.0",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				rate = megaBytes2Bytes(rate)
-			}
-			// [0, inf)
-			if rate < 0 {
-				return max
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-		Doc:    "MB/s, default no limit",
-		Export: true,
-	}
-	p.DMLMaxUpsertRate.Init(base.mgr)
-
-	p.DMLMinUpsertRate = ParamItem{
-		Key:          "quotaAndLimits.dml.UpsertRate.min",
-		Version:      "2.3.0",
-		DefaultValue: min,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return min
-			}
-			rate := megaBytes2Bytes(getAsFloat(v))
-			// [0, inf)
-			if rate < 0 {
-				return min
-			}
-			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRate.GetAsFloat()) {
-				return min
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-	}
-	p.DMLMinUpsertRate.Init(base.mgr)
-
-	p.DMLMaxUpsertRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.db.max",
-		Version:      "2.4.1",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				rate = megaBytes2Bytes(rate)
-			}
-			// [0, inf)
-			if rate < 0 {
-				return p.DMLMaxUpsertRate.GetValue()
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-		Doc:    "MB/s, default no limit",
-		Export: true,
-	}
-	p.DMLMaxUpsertRatePerDB.Init(base.mgr)
-
-	p.DMLMinUpsertRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.db.min",
-		Version:      "2.4.1",
-		DefaultValue: min,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return min
-			}
-			rate := megaBytes2Bytes(getAsFloat(v))
-			// [0, inf)
-			if rate < 0 {
-				return min
-			}
-			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRatePerDB.GetAsFloat()) {
-				return min
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-	}
-	p.DMLMinUpsertRatePerDB.Init(base.mgr)
-
-	p.DMLMaxUpsertRatePerCollection = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.collection.max",
-		Version:      "2.3.0",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				rate = megaBytes2Bytes(rate)
-			}
-			// [0, inf)
-			if rate < 0 {
-				return p.DMLMaxUpsertRate.GetValue()
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-		Doc:    "MB/s, default no limit",
-		Export: true,
-	}
-	p.DMLMaxUpsertRatePerCollection.Init(base.mgr)
-
-	p.DMLMinUpsertRatePerCollection = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.collection.min",
-		Version:      "2.3.0",
-		DefaultValue: min,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return min
-			}
-			rate := megaBytes2Bytes(getAsFloat(v))
-			// [0, inf)
-			if rate < 0 {
-				return min
-			}
-			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRatePerCollection.GetAsFloat()) {
-				return min
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-	}
-	p.DMLMinUpsertRatePerCollection.Init(base.mgr)
-
-	p.DMLMaxUpsertRatePerPartition = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.partition.max",
-		Version:      "2.4.1",
-		DefaultValue: max,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return max
-			}
-			rate := getAsFloat(v)
-			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
-				rate = megaBytes2Bytes(rate)
-			}
-			// [0, inf)
-			if rate < 0 {
-				return p.DMLMaxUpsertRate.GetValue()
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-		Doc:    "MB/s, default no limit",
-		Export: true,
-	}
-	p.DMLMaxUpsertRatePerPartition.Init(base.mgr)
-
-	p.DMLMinUpsertRatePerPartition = ParamItem{
-		Key:          "quotaAndLimits.dml.upsertRate.partition.min",
-		Version:      "2.4.1",
-		DefaultValue: min,
-		Formatter: func(v string) string {
-			if !p.DMLLimitEnabled.GetAsBool() {
-				return min
-			}
-			rate := megaBytes2Bytes(getAsFloat(v))
-			// [0, inf)
-			if rate < 0 {
-				return min
-			}
-			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRatePerPartition.GetAsFloat()) {
-				return min
-			}
-			return fmt.Sprintf("%f", rate)
-		},
-	}
-	p.DMLMinUpsertRatePerPartition.Init(base.mgr)
 
 	p.DMLMaxDeleteRate = ParamItem{
 		Key:          "quotaAndLimits.dml.deleteRate.max",
