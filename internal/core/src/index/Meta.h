@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "knowhere/comp/index_param.h"
 
 namespace milvus::index {
