@@ -131,35 +131,41 @@ func (suite *RowParserSuite) createAllTypesSchema() *schemapb.CollectionSchema {
 				Name:       "float_vector",
 				DataType:   schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:    22,
 				Name:       "bin_vector",
 				DataType:   schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "16"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:  23,
 				Name:     "sparse_vector",
 				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: suite.hasNullable,
 			},
 			{
 				FieldID:    24,
 				Name:       "f16_vector",
 				DataType:   schemapb.DataType_Float16Vector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:    25,
 				Name:       "bf16_vector",
 				DataType:   schemapb.DataType_BFloat16Vector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:    26,
 				Name:       "int8_vector",
 				DataType:   schemapb.DataType_Int8Vector,
 				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				Nullable:   suite.hasNullable,
 			},
 			{
 				FieldID:          27,
@@ -648,6 +654,12 @@ func (suite *RowParserSuite) TestValid() {
 	suite.runValid(&testCase{name: "A/N/D nullable field varchar is nil", content: suite.genAllTypesRowData("varchar", suite.nullKey)})
 	suite.runValid(&testCase{name: "A/N/D nullable field json is nil", content: suite.genAllTypesRowData("json", suite.nullKey)})
 	suite.runValid(&testCase{name: "A/N/D nullable field array_int8 is nil", content: suite.genAllTypesRowData("array_int8", suite.nullKey)})
+	suite.runValid(&testCase{name: "A/N/D nullable field float_vector is nil", content: suite.genAllTypesRowData("float_vector", suite.nullKey)})
+	suite.runValid(&testCase{name: "A/N/D nullable field bin_vector is nil", content: suite.genAllTypesRowData("bin_vector", suite.nullKey)})
+	suite.runValid(&testCase{name: "A/N/D nullable field sparse_vector is nil", content: suite.genAllTypesRowData("sparse_vector", suite.nullKey)})
+	suite.runValid(&testCase{name: "A/N/D nullable field f16_vector is nil", content: suite.genAllTypesRowData("f16_vector", suite.nullKey)})
+	suite.runValid(&testCase{name: "A/N/D nullable field bf16_vector is nil", content: suite.genAllTypesRowData("bf16_vector", suite.nullKey)})
+	suite.runValid(&testCase{name: "A/N/D nullable field int8_vector is nil", content: suite.genAllTypesRowData("int8_vector", suite.nullKey)})
 
 	// Test struct array parsing
 	suite.runValid(&testCase{name: "A/N/D struct array valid", content: suite.genAllTypesRowData("x", "2")})
@@ -699,13 +711,6 @@ func (suite *RowParserSuite) TestParseError() {
 
 	// auto-generated pk no need to provide
 	content["id"] = "1"
-	header, _ = suite.genRowContent(schema, content)
-	parser, err = NewRowParser(schema, header, suite.nullKey)
-	suite.Error(err)
-	suite.Nil(parser)
-
-	// field value missed
-	content = suite.genAllTypesRowData("x", "2", "float_vector")
 	header, _ = suite.genRowContent(schema, content)
 	parser, err = NewRowParser(schema, header, suite.nullKey)
 	suite.Error(err)

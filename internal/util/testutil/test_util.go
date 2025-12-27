@@ -110,11 +110,76 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 	if err != nil {
 		return nil, err
 	}
+	// Pre-generate validData for nullable fields to determine sparse storage size
+	validDataMap := make(map[int64][]bool)
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	for _, f := range allFields {
 		if f.GetAutoID() || f.IsFunctionOutput {
 			continue
 		}
+		if f.GetNullable() {
+			if len(nullPercent) > 1 {
+				return nil, merr.WrapErrParameterInvalidMsg("the length of nullPercent is wrong")
+			}
+			var validData []bool
+			if len(nullPercent) == 0 || nullPercent[0] == 50 {
+				validData = testutils.GenerateBoolArray(rows)
+			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
+				validData = make([]bool, rows)
+			} else if len(nullPercent) == 1 && nullPercent[0] == 0 {
+				validData = make([]bool, rows)
+				for i := range validData {
+					validData[i] = true
+				}
+			} else {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support the number of nullPercent(%d)", nullPercent))
+			}
+			validDataMap[f.FieldID] = validData
+		}
+	}
+
+	// Helper function to check if a type is a vector type (uses sparse storage)
+	isVectorType := func(dataType schemapb.DataType) bool {
+		switch dataType {
+		case schemapb.DataType_BinaryVector,
+			schemapb.DataType_FloatVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_SparseFloatVector,
+			schemapb.DataType_Int8Vector:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// Helper function to count valid rows
+	countValidRows := func(validData []bool) int {
+		if len(validData) == 0 {
+			return rows
+		}
+		count := 0
+		for _, v := range validData {
+			if v {
+				count++
+			}
+		}
+		return count
+	}
+
+	for _, f := range allFields {
+		if f.GetAutoID() || f.IsFunctionOutput {
+			continue
+		}
+		validData := validDataMap[f.FieldID]
+		// Vector types use sparse storage (only valid rows), scalar types use dense storage (all rows)
+		var dataRows int
+		if isVectorType(f.GetDataType()) {
+			dataRows = countValidRows(validData)
+		} else {
+			dataRows = rows
+		}
+
 		switch f.GetDataType() {
 		case schemapb.DataType_Bool:
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateBoolArray(rows))
@@ -135,54 +200,47 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 			if err != nil {
 				return nil, err
 			}
-			insertData.Data[f.FieldID] = &storage.BinaryVectorFieldData{
-				Data: testutils.GenerateBinaryVectors(rows, int(dim)),
-				Dim:  int(dim),
-			}
+			// For nullable vectors, use sparse storage (only generate valid rows)
+			insertData.Data[f.FieldID].(*storage.BinaryVectorFieldData).Data = testutils.GenerateBinaryVectors(dataRows, int(dim))
+			insertData.Data[f.FieldID].(*storage.BinaryVectorFieldData).Dim = int(dim)
 		case schemapb.DataType_FloatVector:
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			insertData.Data[f.GetFieldID()] = &storage.FloatVectorFieldData{
-				Data: testutils.GenerateFloatVectors(rows, int(dim)),
-				Dim:  int(dim),
-			}
+			// For nullable vectors, use sparse storage (only generate valid rows)
+			insertData.Data[f.GetFieldID()].(*storage.FloatVectorFieldData).Data = testutils.GenerateFloatVectors(dataRows, int(dim))
+			insertData.Data[f.GetFieldID()].(*storage.FloatVectorFieldData).Dim = int(dim)
 		case schemapb.DataType_Float16Vector:
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			insertData.Data[f.FieldID] = &storage.Float16VectorFieldData{
-				Data: testutils.GenerateFloat16Vectors(rows, int(dim)),
-				Dim:  int(dim),
-			}
+			// For nullable vectors, use sparse storage (only generate valid rows)
+			insertData.Data[f.FieldID].(*storage.Float16VectorFieldData).Data = testutils.GenerateFloat16Vectors(dataRows, int(dim))
+			insertData.Data[f.FieldID].(*storage.Float16VectorFieldData).Dim = int(dim)
 		case schemapb.DataType_BFloat16Vector:
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			insertData.Data[f.FieldID] = &storage.BFloat16VectorFieldData{
-				Data: testutils.GenerateBFloat16Vectors(rows, int(dim)),
-				Dim:  int(dim),
-			}
+			// For nullable vectors, use sparse storage (only generate valid rows)
+			insertData.Data[f.FieldID].(*storage.BFloat16VectorFieldData).Data = testutils.GenerateBFloat16Vectors(dataRows, int(dim))
+			insertData.Data[f.FieldID].(*storage.BFloat16VectorFieldData).Dim = int(dim)
 		case schemapb.DataType_SparseFloatVector:
-			data, dim := testutils.GenerateSparseFloatVectorsData(rows)
-			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
-				SparseFloatArray: schemapb.SparseFloatArray{
-					Contents: data,
-					Dim:      dim,
-				},
-			}
+			// For nullable vectors, use sparse storage (only generate valid rows)
+			data, dim := testutils.GenerateSparseFloatVectorsData(dataRows)
+			sparseData := insertData.Data[f.FieldID].(*storage.SparseFloatVectorFieldData)
+			sparseData.Contents = data
+			sparseData.Dim = dim
 		case schemapb.DataType_Int8Vector:
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			insertData.Data[f.FieldID] = &storage.Int8VectorFieldData{
-				Data: testutils.GenerateInt8Vectors(rows, int(dim)),
-				Dim:  int(dim),
-			}
+			// For nullable vectors, use sparse storage (only generate valid rows)
+			insertData.Data[f.FieldID].(*storage.Int8VectorFieldData).Data = testutils.GenerateInt8Vectors(dataRows, int(dim))
+			insertData.Data[f.FieldID].(*storage.Int8VectorFieldData).Dim = int(dim)
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateStringArray(rows))
 		case schemapb.DataType_JSON:
@@ -220,23 +278,10 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 		default:
 			panic(fmt.Sprintf("unsupported data type: %s", f.GetDataType().String()))
 		}
+		// Apply pre-generated validData for nullable fields
 		if f.GetNullable() {
-			if len(nullPercent) > 1 {
-				return nil, merr.WrapErrParameterInvalidMsg("the length of nullPercent is wrong")
-			}
-			if len(nullPercent) == 0 || nullPercent[0] == 50 {
-				insertData.Data[f.FieldID].AppendValidDataRows(testutils.GenerateBoolArray(rows))
-			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
-				insertData.Data[f.FieldID].AppendValidDataRows(make([]bool, rows))
-			} else if len(nullPercent) == 1 && nullPercent[0] == 0 {
-				validData := make([]bool, rows)
-				for i := range validData {
-					validData[i] = true
-				}
-				insertData.Data[f.FieldID].AppendValidDataRows(validData)
-			} else {
-				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support the number of nullPercent(%d)", nullPercent))
-			}
+			validData := validDataMap[f.FieldID]
+			insertData.Data[f.FieldID].AppendValidDataRows(validData)
 		}
 	}
 	return insertData, nil
@@ -304,25 +349,34 @@ func CreateFieldWithDefaultValue(dataType schemapb.DataType, id int64, nullable 
 	return field, nil
 }
 
-func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType arrow.DataType) (arrow.Array, error) {
+func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType arrow.DataType, validData []bool) (arrow.Array, error) {
 	if arrowType == nil || arrowType.ID() == arrow.STRING {
 		// build sparse vector as JSON-format string
 		builder := array.NewStringBuilder(mem)
-		rows := len(contents)
-		jsonBytesData := make([][]byte, 0)
-		for i := 0; i < rows; i++ {
-			rowVecData := contents[i]
-			mapData := typeutil.SparseFloatBytesToMap(rowVecData)
-			// convert to JSON format
-			jsonBytes, err := json.Marshal(mapData)
-			if err != nil {
-				return nil, err
-			}
-			jsonBytesData = append(jsonBytesData, jsonBytes)
+		// For sparse storage: iterate over logical rows, use physical index for contents
+		var logicalRows int
+		if len(validData) > 0 {
+			logicalRows = len(validData)
+		} else {
+			logicalRows = len(contents)
 		}
-		builder.AppendValues(lo.Map(jsonBytesData, func(bs []byte, _ int) string {
-			return string(bs)
-		}), nil)
+		physicalIdx := 0
+		for i := 0; i < logicalRows; i++ {
+			isValid := len(validData) == 0 || validData[i]
+			if isValid {
+				rowVecData := contents[physicalIdx]
+				mapData := typeutil.SparseFloatBytesToMap(rowVecData)
+				// convert to JSON format
+				jsonBytes, err := json.Marshal(mapData)
+				if err != nil {
+					return nil, err
+				}
+				builder.Append(string(jsonBytes))
+				physicalIdx++
+			} else {
+				builder.AppendNull()
+			}
+		}
 		return builder.NewStringArray(), nil
 	} else if arrowType.ID() == arrow.STRUCT {
 		// build sparse vector as parquet struct
@@ -399,15 +453,27 @@ func BuildSparseVectorData(mem *memory.GoAllocator, contents [][]byte, arrowType
 			return nil, merr.WrapErrImportFailed(msg)
 		}
 
-		for i := 0; i < len(contents); i++ {
-			builder.Append(true)
-			indicesBuilder.Append(true)
-			valuesBuilder.Append(true)
-			rowVecData := contents[i]
-			elemCount := len(rowVecData) / 8
-			for j := 0; j < elemCount; j++ {
-				appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
-				appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
+		// For sparse storage: iterate over logical rows, use physical index for contents
+		var logicalRows int
+		if len(validData) > 0 {
+			logicalRows = len(validData)
+		} else {
+			logicalRows = len(contents)
+		}
+		physicalIdx := 0
+		for i := 0; i < logicalRows; i++ {
+			isValid := len(validData) == 0 || validData[i]
+			builder.Append(isValid)
+			indicesBuilder.Append(isValid)
+			valuesBuilder.Append(isValid)
+			if isValid {
+				rowVecData := contents[physicalIdx]
+				elemCount := len(rowVecData) / 8
+				for j := 0; j < elemCount; j++ {
+					appendIndexFunc(common.Endian.Uint32(rowVecData[j*8:]))
+					appendValueFunc(math.Float32frombits(common.Endian.Uint32(rowVecData[j*8+4:])))
+				}
+				physicalIdx++
 			}
 		}
 		return builder.NewStructArray(), nil
@@ -490,82 +556,183 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_BinaryVector:
 			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			valueBuilder := builder.ValueBuilder().(*array.Uint8Builder)
 			dim := insertData.Data[fieldID].(*storage.BinaryVectorFieldData).Dim
 			binVecData := insertData.Data[fieldID].(*storage.BinaryVectorFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.BinaryVectorFieldData).ValidData
 			rowBytes := dim / 8
-			rows := len(binVecData) / rowBytes
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0)
-			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(i*rowBytes))
-				valid = append(valid, true)
+			// For sparse storage: logicalRows from validData, physicalRows from data
+			var logicalRows int
+			if len(validData) > 0 {
+				logicalRows = len(validData)
+			} else {
+				logicalRows = len(binVecData) / rowBytes
 			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(binVecData, nil)
+			offsets := make([]int32, 0, logicalRows+1)
+			valid := make([]bool, 0, logicalRows)
+			currOffset := int32(0)
+			physicalIdx := 0 // Track physical index in sparse data
+			for i := 0; i < logicalRows; i++ {
+				offsets = append(offsets, currOffset)
+				if len(validData) > 0 && !validData[i] {
+					valid = append(valid, false)
+				} else {
+					// Use physical index for sparse storage
+					start := physicalIdx * rowBytes
+					end := start + rowBytes
+					valueBuilder.AppendValues(binVecData[start:end], nil)
+					currOffset += int32(rowBytes)
+					valid = append(valid, true)
+					physicalIdx++ // Increment only for valid rows
+				}
+			}
+			offsets = append(offsets, currOffset)
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_FloatVector:
 			builder := array.NewListBuilder(mem, &arrow.Float32Type{})
+			valueBuilder := builder.ValueBuilder().(*array.Float32Builder)
 			dim := insertData.Data[fieldID].(*storage.FloatVectorFieldData).Dim
 			floatVecData := insertData.Data[fieldID].(*storage.FloatVectorFieldData).Data
-			rows := len(floatVecData) / dim
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(i*dim))
-				valid = append(valid, true)
+			validData := insertData.Data[fieldID].(*storage.FloatVectorFieldData).ValidData
+			// For sparse storage: logicalRows from validData, physicalRows from data
+			var logicalRows int
+			if len(validData) > 0 {
+				logicalRows = len(validData)
+			} else {
+				logicalRows = len(floatVecData) / dim
 			}
-			builder.ValueBuilder().(*array.Float32Builder).AppendValues(floatVecData, nil)
+			offsets := make([]int32, 0, logicalRows+1)
+			valid := make([]bool, 0, logicalRows)
+			currOffset := int32(0)
+			physicalIdx := 0 // Track physical index in sparse data
+			for i := 0; i < logicalRows; i++ {
+				offsets = append(offsets, currOffset)
+				if len(validData) > 0 && !validData[i] {
+					valid = append(valid, false)
+				} else {
+					// Use physical index for sparse storage
+					start := physicalIdx * dim
+					end := start + dim
+					valueBuilder.AppendValues(floatVecData[start:end], nil)
+					currOffset += int32(dim)
+					valid = append(valid, true)
+					physicalIdx++ // Increment only for valid rows
+				}
+			}
+			offsets = append(offsets, currOffset)
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_Float16Vector:
 			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			valueBuilder := builder.ValueBuilder().(*array.Uint8Builder)
 			dim := insertData.Data[fieldID].(*storage.Float16VectorFieldData).Dim
 			float16VecData := insertData.Data[fieldID].(*storage.Float16VectorFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.Float16VectorFieldData).ValidData
 			rowBytes := dim * 2
-			rows := len(float16VecData) / rowBytes
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(i*rowBytes))
-				valid = append(valid, true)
+			// For sparse storage: logicalRows from validData, physicalRows from data
+			var logicalRows int
+			if len(validData) > 0 {
+				logicalRows = len(validData)
+			} else {
+				logicalRows = len(float16VecData) / rowBytes
 			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(float16VecData, nil)
+			offsets := make([]int32, 0, logicalRows+1)
+			valid := make([]bool, 0, logicalRows)
+			currOffset := int32(0)
+			physicalIdx := 0 // Track physical index in sparse data
+			for i := 0; i < logicalRows; i++ {
+				offsets = append(offsets, currOffset)
+				if len(validData) > 0 && !validData[i] {
+					valid = append(valid, false)
+				} else {
+					// Use physical index for sparse storage
+					start := physicalIdx * rowBytes
+					end := start + rowBytes
+					valueBuilder.AppendValues(float16VecData[start:end], nil)
+					currOffset += int32(rowBytes)
+					valid = append(valid, true)
+					physicalIdx++ // Increment only for valid rows
+				}
+			}
+			offsets = append(offsets, currOffset)
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_BFloat16Vector:
 			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			valueBuilder := builder.ValueBuilder().(*array.Uint8Builder)
 			dim := insertData.Data[fieldID].(*storage.BFloat16VectorFieldData).Dim
 			bfloat16VecData := insertData.Data[fieldID].(*storage.BFloat16VectorFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.BFloat16VectorFieldData).ValidData
 			rowBytes := dim * 2
-			rows := len(bfloat16VecData) / rowBytes
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(i*rowBytes))
-				valid = append(valid, true)
+			// For sparse storage: logicalRows from validData, physicalRows from data
+			var logicalRows int
+			if len(validData) > 0 {
+				logicalRows = len(validData)
+			} else {
+				logicalRows = len(bfloat16VecData) / rowBytes
 			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(bfloat16VecData, nil)
+			offsets := make([]int32, 0, logicalRows+1)
+			valid := make([]bool, 0, logicalRows)
+			currOffset := int32(0)
+			physicalIdx := 0 // Track physical index in sparse data
+			for i := 0; i < logicalRows; i++ {
+				offsets = append(offsets, currOffset)
+				if len(validData) > 0 && !validData[i] {
+					valid = append(valid, false)
+				} else {
+					// Use physical index for sparse storage
+					start := physicalIdx * rowBytes
+					end := start + rowBytes
+					valueBuilder.AppendValues(bfloat16VecData[start:end], nil)
+					currOffset += int32(rowBytes)
+					valid = append(valid, true)
+					physicalIdx++ // Increment only for valid rows
+				}
+			}
+			offsets = append(offsets, currOffset)
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_SparseFloatVector:
 			contents := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
-			arr, err := BuildSparseVectorData(mem, contents, nil)
+			validData := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).ValidData
+			arr, err := BuildSparseVectorData(mem, contents, nil, validData)
 			if err != nil {
 				return nil, err
 			}
 			columns = append(columns, arr)
 		case schemapb.DataType_Int8Vector:
 			builder := array.NewListBuilder(mem, &arrow.Int8Type{})
+			valueBuilder := builder.ValueBuilder().(*array.Int8Builder)
 			dim := insertData.Data[fieldID].(*storage.Int8VectorFieldData).Dim
 			int8VecData := insertData.Data[fieldID].(*storage.Int8VectorFieldData).Data
-			rows := len(int8VecData) / dim
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(i*dim))
-				valid = append(valid, true)
+			validData := insertData.Data[fieldID].(*storage.Int8VectorFieldData).ValidData
+			// For sparse storage: logicalRows from validData, physicalRows from data
+			var logicalRows int
+			if len(validData) > 0 {
+				logicalRows = len(validData)
+			} else {
+				logicalRows = len(int8VecData) / dim
 			}
-			builder.ValueBuilder().(*array.Int8Builder).AppendValues(int8VecData, nil)
+			offsets := make([]int32, 0, logicalRows+1)
+			valid := make([]bool, 0, logicalRows)
+			currOffset := int32(0)
+			physicalIdx := 0 // Track physical index in sparse data
+			for i := 0; i < logicalRows; i++ {
+				offsets = append(offsets, currOffset)
+				if len(validData) > 0 && !validData[i] {
+					valid = append(valid, false)
+				} else {
+					// Use physical index for sparse storage
+					start := physicalIdx * dim
+					end := start + dim
+					valueBuilder.AppendValues(int8VecData[start:end], nil)
+					currOffset += int32(dim)
+					valid = append(valid, true)
+					physicalIdx++ // Increment only for valid rows
+				}
+			}
+			offsets = append(offsets, currOffset)
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_JSON:
