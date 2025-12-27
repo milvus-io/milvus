@@ -94,7 +94,8 @@ struct VectorizedRef {
     }
 
     // The following functions just forward parameters to the reference code,
-    //   generated for a particular platform.
+    //   generated for a particular platform. Alternatively, they may fully
+    //   reimplement the code.
     // The reference 'platform' is just a default platform.
 
     template <typename ElementT>
@@ -156,6 +157,16 @@ struct VectorizedRef {
                    const size_t start_left,
                    const size_t start_right,
                    const size_t size) {
+        return false;
+    }
+
+    template <typename ElementT>
+    static inline bool
+    forward_op_set_indices(ElementT* const __restrict data,
+                           const size_t start,
+                           const size_t n,
+                           const uint32_t* const __restrict indices,
+                           const size_t n_indices) {
         return false;
     }
 };
