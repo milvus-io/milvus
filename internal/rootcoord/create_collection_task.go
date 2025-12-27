@@ -176,6 +176,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := typeutil.ValidateExternalCollectionSchema(schema); err != nil {
+		return err
+	}
+
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName, NamespaceFieldName}) {
 		log.Ctx(ctx).Error("schema contains system field",
 			zap.String("RowIDFieldName", RowIDFieldName),
@@ -314,6 +318,10 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 	}
 	if !has || !enabled {
 		return nil
+	}
+
+	if typeutil.IsExternalCollection(schema) {
+		return merr.WrapErrParameterInvalidMsg("external collection does not support namespace field")
 	}
 
 	if hasIsolation {
