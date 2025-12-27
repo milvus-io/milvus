@@ -2331,6 +2331,82 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		assert.NoError(t, merr.CheckRPCCall(resp, err))
 		assert.False(t, resp.GetFlushed())
 	})
+
+	t.Run("test legacy FlushAllTs provided and flushed", func(t *testing.T) {
+		server := createTestGetFlushAllStateServer()
+
+		// Mock ListDatabases
+		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
+			Status:  merr.Success(),
+			DbNames: []string{"test-db"},
+		}, nil).Build()
+		defer mockListDatabases.UnPatch()
+
+		// Mock ShowCollections
+		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
+			Status:          merr.Success(),
+			CollectionIds:   []int64{100},
+			CollectionNames: []string{"collection1"},
+		}, nil).Build()
+		defer mockShowCollections.UnPatch()
+
+		// Mock DescribeCollectionInternal
+		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			VirtualChannelNames: []string{"channel1"},
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
+
+		// Setup channel checkpoint with timestamp >= deprecated FlushAllTs
+		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
+
+		req := &milvuspb.GetFlushAllStateRequest{
+			FlushAllTs: 15000, // deprecated field
+		}
+
+		resp, err := server.GetFlushAllState(context.Background(), req)
+
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.True(t, resp.GetFlushed())
+	})
+
+	t.Run("test legacy FlushAllTs provided and not flushed", func(t *testing.T) {
+		server := createTestGetFlushAllStateServer()
+
+		// Mock ListDatabases
+		mockListDatabases := mockey.Mock(mockey.GetMethod(server.broker, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{
+			Status:  merr.Success(),
+			DbNames: []string{"test-db"},
+		}, nil).Build()
+		defer mockListDatabases.UnPatch()
+
+		// Mock ShowCollections
+		mockShowCollections := mockey.Mock(mockey.GetMethod(server.broker, "ShowCollections")).Return(&milvuspb.ShowCollectionsResponse{
+			Status:          merr.Success(),
+			CollectionIds:   []int64{100},
+			CollectionNames: []string{"collection1"},
+		}, nil).Build()
+		defer mockShowCollections.UnPatch()
+
+		// Mock DescribeCollectionInternal
+		mockDescribeCollection := mockey.Mock(mockey.GetMethod(server.broker, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			VirtualChannelNames: []string{"channel1"},
+		}, nil).Build()
+		defer mockDescribeCollection.UnPatch()
+
+		// Setup channel checkpoint with timestamp < deprecated FlushAllTs
+		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 10000}
+
+		req := &milvuspb.GetFlushAllStateRequest{
+			FlushAllTs: 15000, // deprecated field
+		}
+
+		resp, err := server.GetFlushAllState(context.Background(), req)
+
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.False(t, resp.GetFlushed())
+	})
 }
 
 func getWatchKV(t *testing.T) kv.WatchKV {
