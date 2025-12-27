@@ -90,7 +90,9 @@ all_scalar_data_types = [
     DataType.DOUBLE,
     DataType.VARCHAR,
     DataType.ARRAY,
-    DataType.JSON
+    DataType.JSON, 
+    DataType.GEOMETRY,
+    DataType.TIMESTAMPTZ
     ]
 
 default_field_name_map = {
@@ -326,6 +328,9 @@ sparse_metrics = ["IP", "BM25"]
 # all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
 
 
+varchar_supported_index_types = ["STL_SORT", "TRIE", "INVERTED", "AUTOINDEX", ""]
+numeric_supported_index_types = ["STL_SORT", "INVERTED", "AUTOINDEX", ""]
+
 default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": default_L0_metric}
 default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
 default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
@@ -371,6 +376,13 @@ all_expr_fields = [default_int8_field_name, default_int16_field_name,
                    default_int32_array_field_name, default_int64_array_field_name,
                    default_bool_array_field_name, default_float_array_field_name,
                    default_double_array_field_name, default_string_array_field_name]
+
+not_supported_json_cast_types = [DataType.INT8.name, DataType.INT16.name, DataType.INT32.name,
+                                              DataType.INT64.name, DataType.FLOAT.name,
+                                              DataType.ARRAY.name, DataType.FLOAT_VECTOR.name,
+                                              DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name,
+                                              DataType.BINARY_VECTOR.name,
+                                              DataType.SPARSE_FLOAT_VECTOR.name, DataType.INT8_VECTOR.name]
 
 class CheckTasks:
     """ The name of the method used to check the result """
