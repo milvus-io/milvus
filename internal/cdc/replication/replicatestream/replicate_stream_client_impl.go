@@ -168,8 +168,11 @@ func (r *replicateStreamClient) Replicate(msg message.ImmutableMessage) error {
 	case <-r.ctx.Done():
 		return nil
 	default:
-		// TODO: Should be done at streamingnode, but after move it into streamingnode, the metric need to be adjusted.
 		if msg.MessageType().IsSelfControlled() {
+			// If no messages are being replicated, update the last replicated time tick.
+			if r.pendingMessages.Len() == 0 {
+				r.metrics.UpdateLastReplicatedTimeTick(msg.TimeTick())
+			}
 			return ErrReplicateIgnored
 		}
 		r.metrics.StartReplicate(msg)
