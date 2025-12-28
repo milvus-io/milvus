@@ -32,19 +32,19 @@ func TestGetQuotaConfigMap(t *testing.T) {
 	paramtable.Init()
 	{
 		m := GetQuotaConfigMap(internalpb.RateScope_Cluster)
-		assert.Equal(t, 12, len(m))
-	}
-	{
-		m := GetQuotaConfigMap(internalpb.RateScope_Database)
 		assert.Equal(t, 11, len(m))
 	}
 	{
+		m := GetQuotaConfigMap(internalpb.RateScope_Database)
+		assert.Equal(t, 10, len(m))
+	}
+	{
 		m := GetQuotaConfigMap(internalpb.RateScope_Collection)
-		assert.Equal(t, 7, len(m))
+		assert.Equal(t, 6, len(m))
 	}
 	{
 		m := GetQuotaConfigMap(internalpb.RateScope_Partition)
-		assert.Equal(t, 6, len(m))
+		assert.Equal(t, 5, len(m))
 	}
 	{
 		m := GetQuotaConfigMap(internalpb.RateScope(1000))
