@@ -1716,3 +1716,369 @@ TEST_F(SealedMatchExprTestNoIndex, MatchWithOtherExpr) {
         << "Should have at least some matching rows";
     std::cout << "==============================" << std::endl;
 }
+
+// ==================== Parameterized Test for Different Int Types ====================
+// This tests that int8_t/int16_t/int32_t are correctly handled in ProcessDataChunksForElementLevel
+
+struct IntTypeTestParam {
+    DataType int_type;
+    std::string type_name;
+};
+
+class SealedMatchExprIntTypeTest
+    : public ::testing::TestWithParam<IntTypeTestParam> {
+ protected:
+    void
+    SetUp() override {
+        saved_batch_size_ = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+
+        auto param = GetParam();
+        int_type_ = param.int_type;
+
+        schema_ = std::make_shared<Schema>();
+        vec_fid_ = schema_->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+        int64_fid_ = schema_->AddDebugField("id", DataType::INT64);
+        schema_->set_primary_field_id(int64_fid_);
+
+        // Add struct array sub-fields with the parameterized int type
+        sub_str_fid_ = schema_->AddDebugArrayField(
+            "struct_array[sub_str]", DataType::VARCHAR, false);
+        sub_int_fid_ = schema_->AddDebugArrayField(
+            "struct_array[sub_int]", int_type_, false);
+
+        GenerateTestData();
+        seg_ = CreateSealedWithFieldDataLoaded(schema_, generated_data_);
+        // No index loaded - test brute force path (ProcessDataChunksForElementLevel)
+    }
+
+    void
+    TearDown() override {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size_);
+    }
+
+    void
+    GenerateTestData() {
+        std::default_random_engine rng(42);
+        std::vector<std::string> str_choices = {"aaa", "bbb", "ccc"};
+        std::uniform_int_distribution<> str_dist(0, 2);
+        // Use small range for int8 compatibility: [-50, 50]
+        std::uniform_int_distribution<> int_dist(-50, 50);
+
+        auto insert_data = std::make_unique<InsertRecordProto>();
+
+        // Generate vector field
+        std::vector<float> vec_data(N_ * 4);
+        std::normal_distribution<float> vec_dist(0, 1);
+        for (auto& v : vec_data) {
+            v = vec_dist(rng);
+        }
+        auto vec_array = CreateDataArrayFrom(
+            vec_data.data(), nullptr, N_, schema_->operator[](vec_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        // Generate id field
+        std::vector<int64_t> id_data(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            id_data[i] = i;
+        }
+        auto id_array = CreateDataArrayFrom(
+            id_data.data(), nullptr, N_, schema_->operator[](int64_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        // Generate struct_array[sub_str]
+        std::vector<milvus::proto::schema::ScalarField> sub_str_data(N_);
+        sub_str_arrays_.resize(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            boost::container::vector<std::string> arr;
+            for (int j = 0; j < array_len_; ++j) {
+                std::string val = str_choices[str_dist(rng)];
+                sub_str_data[i].mutable_string_data()->add_data(val);
+                arr.push_back(val);
+            }
+            sub_str_arrays_[i] = std::move(arr);
+        }
+        auto sub_str_array =
+            CreateDataArrayFrom(sub_str_data.data(),
+                                nullptr,
+                                N_,
+                                schema_->operator[](sub_str_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(
+            sub_str_array.release());
+
+        // Generate struct_array[sub_int] - store as int32 in proto (will be cast)
+        std::vector<milvus::proto::schema::ScalarField> sub_int_data(N_);
+        sub_int_arrays_.resize(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            boost::container::vector<int32_t> arr;
+            for (int j = 0; j < array_len_; ++j) {
+                int32_t val = int_dist(rng);
+                sub_int_data[i].mutable_int_data()->add_data(val);
+                arr.push_back(val);
+            }
+            sub_int_arrays_[i] = std::move(arr);
+        }
+        auto sub_int_array =
+            CreateDataArrayFrom(sub_int_data.data(),
+                                nullptr,
+                                N_,
+                                schema_->operator[](sub_int_fid_));
+        insert_data->mutable_fields_data()->AddAllocated(
+            sub_int_array.release());
+
+        insert_data->set_num_rows(N_);
+
+        generated_data_.schema_ = schema_;
+        generated_data_.raw_ = insert_data.release();
+        for (size_t i = 0; i < N_; ++i) {
+            generated_data_.row_ids_.push_back(i);
+            generated_data_.timestamps_.push_back(i);
+        }
+    }
+
+    int
+    CountMatchingElements(int64_t row_idx,
+                          const std::string& target_str,
+                          int32_t target_int) const {
+        int count = 0;
+        size_t len = std::min(sub_str_arrays_[row_idx].size(),
+                              sub_int_arrays_[row_idx].size());
+        for (size_t j = 0; j < len; ++j) {
+            bool str_match = (sub_str_arrays_[row_idx][j] == target_str);
+            bool int_match = (sub_int_arrays_[row_idx][j] > target_int);
+            if (str_match && int_match) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    std::string
+    GetElementTypeString() const {
+        switch (int_type_) {
+            case DataType::INT8:
+                return "Int8";
+            case DataType::INT16:
+                return "Int16";
+            case DataType::INT32:
+                return "Int32";
+            default:
+                return "Unknown";
+        }
+    }
+
+    std::string
+    CreateRetrievePlanText(const std::string& match_type,
+                           int64_t count,
+                           const std::string& target_str,
+                           int32_t target_int) {
+        return boost::str(boost::format(R"(query: <
+            predicates: <
+                match_expr: <
+                    struct_name: "struct_array"
+                    match_type: %1%
+                    count: %2%
+                    predicate: <
+                        binary_expr: <
+                            op: LogicalAnd
+                            left: <
+                                unary_range_expr: <
+                                    column_info: <
+                                        field_id: %3%
+                                        data_type: Array
+                                        element_type: VarChar
+                                        nested_path: "sub_str"
+                                        is_element_level: true
+                                    >
+                                    op: Equal
+                                    value: <
+                                        string_val: "%5%"
+                                    >
+                                >
+                            >
+                            right: <
+                                unary_range_expr: <
+                                    column_info: <
+                                        field_id: %4%
+                                        data_type: Array
+                                        element_type: %7%
+                                        nested_path: "sub_int"
+                                        is_element_level: true
+                                    >
+                                    op: GreaterThan
+                                    value: <
+                                        int64_val: %6%
+                                    >
+                                >
+                            >
+                        >
+                    >
+                >
+            >
+        >
+        output_field_ids: %8%)") %
+                          match_type % count % sub_str_fid_.get() %
+                          sub_int_fid_.get() % target_str % target_int %
+                          GetElementTypeString() % int64_fid_.get());
+    }
+
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    ExecuteRetrieve(const std::string& raw_plan) {
+        proto::plan::PlanNode plan_node;
+        auto ok =
+            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+        EXPECT_TRUE(ok) << "Failed to parse plan";
+
+        auto plan = ProtoParser(schema_).CreateRetrievePlan(plan_node);
+        EXPECT_NE(plan, nullptr);
+
+        return seg_->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    }
+
+    std::set<int64_t>
+    ComputeExpectedRows(const std::string& target_str,
+                        int32_t target_int,
+                        int64_t threshold,
+                        std::function<bool(int, int, int64_t)> verify_func) {
+        std::set<int64_t> expected;
+        for (size_t i = 0; i < N_; ++i) {
+            int match_count = CountMatchingElements(i, target_str, target_int);
+            if (verify_func(match_count, array_len_, threshold)) {
+                expected.insert(static_cast<int64_t>(i));
+            }
+        }
+        return expected;
+    }
+
+    DataType int_type_;
+    std::shared_ptr<Schema> schema_;
+    FieldId vec_fid_;
+    FieldId int64_fid_;
+    FieldId sub_str_fid_;
+    FieldId sub_int_fid_;
+
+    std::vector<boost::container::vector<std::string>> sub_str_arrays_;
+    std::vector<boost::container::vector<int32_t>> sub_int_arrays_;
+
+    GeneratedData generated_data_;
+    SegmentSealedUPtr seg_;
+
+    static constexpr size_t N_ = 1000;
+    static constexpr int array_len_ = 5;
+    int64_t saved_batch_size_{0};
+};
+
+TEST_P(SealedMatchExprIntTypeTest, MatchAnyBruteForce) {
+    auto param = GetParam();
+    std::string target_str = "aaa";
+    int32_t target_int = 0;  // Use 0 as threshold for more matches
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchAny", 0, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    auto expected_rows = ComputeExpectedRows(
+        target_str,
+        target_int,
+        0,
+        [](int match_count, int /*element_count*/, int64_t /*threshold*/) {
+            return match_count > 0;
+        });
+
+    std::set<int64_t> actual_rows;
+    for (const auto& offset : result->offset()) {
+        actual_rows.insert(offset);
+    }
+
+    std::cout << "=== MatchAny BruteForce (" << param.type_name
+              << ") ===" << std::endl;
+    std::cout << "Expected rows: " << expected_rows.size() << std::endl;
+    std::cout << "Actual rows: " << actual_rows.size() << std::endl;
+
+    // Check for mismatches
+    std::vector<int64_t> missing_rows;
+    for (auto row : expected_rows) {
+        if (actual_rows.find(row) == actual_rows.end()) {
+            missing_rows.push_back(row);
+        }
+    }
+
+    std::vector<int64_t> extra_rows;
+    for (auto row : actual_rows) {
+        if (expected_rows.find(row) == expected_rows.end()) {
+            extra_rows.push_back(row);
+        }
+    }
+
+    if (!missing_rows.empty()) {
+        std::cout << "Missing rows (first 10): ";
+        for (size_t i = 0; i < std::min(missing_rows.size(), size_t(10)); ++i) {
+            std::cout << missing_rows[i] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    if (!extra_rows.empty()) {
+        std::cout << "Extra rows (first 10): ";
+        for (size_t i = 0; i < std::min(extra_rows.size(), size_t(10)); ++i) {
+            std::cout << extra_rows[i] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    EXPECT_TRUE(missing_rows.empty())
+        << param.type_name << " has " << missing_rows.size()
+        << " false negatives";
+    EXPECT_TRUE(extra_rows.empty()) << param.type_name << " has "
+                                    << extra_rows.size() << " false positives";
+    EXPECT_EQ(expected_rows.size(), actual_rows.size())
+        << param.type_name << " row count mismatch";
+
+    std::cout << "==============================" << std::endl;
+}
+
+TEST_P(SealedMatchExprIntTypeTest, MatchLeastBruteForce) {
+    auto param = GetParam();
+    std::string target_str = "aaa";
+    int32_t target_int = 0;
+    int64_t threshold = 2;
+
+    auto raw_plan =
+        CreateRetrievePlanText("MatchLeast", threshold, target_str, target_int);
+    auto result = ExecuteRetrieve(raw_plan);
+
+    auto expected_rows = ComputeExpectedRows(
+        target_str,
+        target_int,
+        threshold,
+        [](int match_count, int /*element_count*/, int64_t threshold) {
+            return match_count >= threshold;
+        });
+
+    std::set<int64_t> actual_rows;
+    for (const auto& offset : result->offset()) {
+        actual_rows.insert(offset);
+    }
+
+    std::cout << "=== MatchLeast(2) BruteForce (" << param.type_name
+              << ") ===" << std::endl;
+    std::cout << "Expected rows: " << expected_rows.size() << std::endl;
+    std::cout << "Actual rows: " << actual_rows.size() << std::endl;
+
+    EXPECT_EQ(expected_rows.size(), actual_rows.size())
+        << param.type_name << " row count mismatch";
+
+    std::cout << "==============================" << std::endl;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    IntTypes,
+    SealedMatchExprIntTypeTest,
+    ::testing::Values(IntTypeTestParam{DataType::INT8, "INT8"},
+                      IntTypeTestParam{DataType::INT16, "INT16"},
+                      IntTypeTestParam{DataType::INT32, "INT32"}),
+    [](const ::testing::TestParamInfo<IntTypeTestParam>& info) {
+        return info.param.type_name;
+    });

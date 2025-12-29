@@ -975,17 +975,43 @@ class SegmentExpr : public Expr {
                                          values...);
                                 }
                             } else {
-                                // Fixed-length type: batch process entire array
-                                auto* elem_data =
-                                    reinterpret_cast<const ElementType*>(
+                                // Fixed-length numeric types
+                                // Note: int8_t/int16_t are stored as int32_t in Array
+                                using StorageType = std::conditional_t<
+                                    std::is_same_v<ElementType, int8_t> ||
+                                        std::is_same_v<ElementType, int16_t>,
+                                    int32_t,
+                                    ElementType>;
+
+                                auto* raw_data =
+                                    reinterpret_cast<const StorageType*>(
                                         data_vec[j].data());
-                                func(elem_data,
-                                     nullptr,
-                                     nullptr,
-                                     elem_count,
-                                     res + processed_elems,
-                                     valid_res + processed_elems,
-                                     values...);
+
+                                if constexpr (std::is_same_v<StorageType,
+                                                             ElementType>) {
+                                    // Types match, batch process
+                                    func(raw_data,
+                                         nullptr,
+                                         nullptr,
+                                         elem_count,
+                                         res + processed_elems,
+                                         valid_res + processed_elems,
+                                         values...);
+                                } else {
+                                    // int8_t/int16_t: need conversion
+                                    for (size_t k = 0; k < elem_count; k++) {
+                                        ElementType val =
+                                            static_cast<ElementType>(
+                                                raw_data[k]);
+                                        func(&val,
+                                             nullptr,
+                                             nullptr,
+                                             1,
+                                             res + processed_elems + k,
+                                             valid_res + processed_elems + k,
+                                             values...);
+                                    }
+                                }
                             }
                         }
                         processed_elems += elem_count;
@@ -1033,17 +1059,43 @@ class SegmentExpr : public Expr {
                                          values...);
                                 }
                             } else {
-                                // Fixed-length type: batch process entire array
-                                auto* elem_data =
-                                    reinterpret_cast<const ElementType*>(
+                                // Fixed-length numeric types
+                                // Note: int8_t/int16_t are stored as int32_t in Array
+                                using StorageType = std::conditional_t<
+                                    std::is_same_v<ElementType, int8_t> ||
+                                        std::is_same_v<ElementType, int16_t>,
+                                    int32_t,
+                                    ElementType>;
+
+                                auto* raw_data =
+                                    reinterpret_cast<const StorageType*>(
                                         data[j].data());
-                                func(elem_data,
-                                     nullptr,
-                                     nullptr,
-                                     elem_count,
-                                     res + processed_elems,
-                                     valid_res + processed_elems,
-                                     values...);
+
+                                if constexpr (std::is_same_v<StorageType,
+                                                             ElementType>) {
+                                    // Types match, batch process
+                                    func(raw_data,
+                                         nullptr,
+                                         nullptr,
+                                         elem_count,
+                                         res + processed_elems,
+                                         valid_res + processed_elems,
+                                         values...);
+                                } else {
+                                    // int8_t/int16_t: need conversion
+                                    for (size_t k = 0; k < elem_count; k++) {
+                                        ElementType val =
+                                            static_cast<ElementType>(
+                                                raw_data[k]);
+                                        func(&val,
+                                             nullptr,
+                                             nullptr,
+                                             1,
+                                             res + processed_elems + k,
+                                             valid_res + processed_elems + k,
+                                             values...);
+                                    }
+                                }
                             }
                         }
                         processed_elems += elem_count;
