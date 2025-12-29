@@ -1,5 +1,7 @@
 package objectstorage
 
+import "github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+
 // Config for setting params used by chunk manager client.
 type Config struct {
 	Address              string
@@ -18,10 +20,13 @@ type Config struct {
 	RequestTimeoutMs     int64
 	GcpCredentialJSON    string
 	GcpNativeWithoutAuth bool // used for Unit Testing
+	ReadRetryAttempts    uint
 }
 
 func NewDefaultConfig() *Config {
-	return &Config{}
+	return &Config{
+		ReadRetryAttempts: paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
+	}
 }
 
 // Option is used to Config the retry function.

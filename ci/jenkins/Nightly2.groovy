@@ -96,7 +96,7 @@ pipeline {
                 axes {
                     axis {
                         name 'milvus_deployment_option'
-                        values 'distributed-pulsar-mmap', 'distributed-kafka', 'distributed-woodpecker', 'standalone-authentication-mmap'
+                        values 'distributed-pulsar-mmap', 'distributed-kafka', 'distributed-woodpecker'
                     }
                 }
                 stages {

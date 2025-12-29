@@ -141,6 +141,10 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Stats
 	}
 
+	if action.Type() == ActionTypeReopen {
+		loadScope = querypb.LoadScope_Reopen
+	}
+
 	if task.Source() == utils.LeaderChecker {
 		loadScope = querypb.LoadScope_Delta
 	}

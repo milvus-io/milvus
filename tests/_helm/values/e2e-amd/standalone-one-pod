@@ -36,6 +36,10 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    quotaAndLimits:
+      flushRate:
+        collection:
+          max: 4
 image:
   all:
     pullPolicy: Always

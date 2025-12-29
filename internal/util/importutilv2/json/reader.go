@@ -60,6 +60,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read json file failed, path=%s, err=%s", path, err.Error()))
 	}
+	retryableReader := common.NewRetryableReader(ctx, path, r)
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
@@ -67,11 +68,11 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	reader := &reader{
 		ctx:           ctx,
 		cm:            cm,
-		cmr:           r,
+		cmr:           retryableReader,
 		schema:        schema,
 		fileSize:      atomic.NewInt64(0),
 		filePath:      path,
-		dec:           json.NewDecoder(r),
+		dec:           json.NewDecoder(retryableReader),
 		bufferSize:    bufferSize,
 		count:         count,
 		isLinesFormat: isLinesFormat,

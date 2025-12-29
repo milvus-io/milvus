@@ -35,6 +35,7 @@ const (
 	ActionTypeUpdate
 	ActionTypeStatsUpdate
 	ActionTypeDropIndex
+	ActionTypeReopen
 )
 
 var ActionTypeName = map[ActionType]string{
@@ -42,6 +43,8 @@ var ActionTypeName = map[ActionType]string{
 	ActionTypeReduce:      "Reduce",
 	ActionTypeUpdate:      "Update",
 	ActionTypeStatsUpdate: "StatsUpdate",
+	ActionTypeDropIndex:   "DropIndex",
+	ActionTypeReopen:      "Reopen",
 }
 
 func (t ActionType) String() string {

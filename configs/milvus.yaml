@@ -520,14 +520,14 @@ queryNode:
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
     vectorField: true # Enable mmap for loading vector data
-    vectorIndex: false # Enable mmap for loading vector index
-    scalarField: false # Enable mmap for loading scalar data
-    scalarIndex: false # Enable mmap for loading scalar index
+    vectorIndex: true # Enable mmap for loading vector index
+    scalarField: true # Enable mmap for loading scalar data
+    scalarIndex: true # Enable mmap for loading scalar index
     jsonShredding: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
-    growingMmapEnabled: false
+    growingMmapEnabled: true
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
@@ -666,7 +666,7 @@ dataCoord:
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
-    taskPrioritizer: default
+    taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap

@@ -142,6 +142,10 @@ func (m *GrpcQueryNodeClient) RunAnalyzer(ctx context.Context, in *querypb.RunAn
 	return &milvuspb.RunAnalyzerResponse{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) ComputePhraseMatchSlop(ctx context.Context, in *querypb.ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	return &querypb.ComputePhraseMatchSlopResponse{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	return &querypb.ValidateAnalyzerResponse{}, m.Err
 }
