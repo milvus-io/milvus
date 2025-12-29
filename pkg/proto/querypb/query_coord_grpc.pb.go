@@ -60,6 +60,7 @@ const (
 	QueryCoord_CheckQueryNodeDistribution_FullMethodName = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
 	QueryCoord_UpdateLoadConfig_FullMethodName           = "/milvus.proto.query.QueryCoord/UpdateLoadConfig"
 	QueryCoord_RunAnalyzer_FullMethodName                = "/milvus.proto.query.QueryCoord/RunAnalyzer"
+	QueryCoord_ComputePhraseMatchSlop_FullMethodName     = "/milvus.proto.query.QueryCoord/ComputePhraseMatchSlop"
 	QueryCoord_ValidateAnalyzer_FullMethodName           = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
 )
 
@@ -109,6 +110,7 @@ type QueryCoordClient interface {
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
+	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 }
 
@@ -463,6 +465,15 @@ func (c *queryCoordClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerReque
 	return out, nil
 }
 
+func (c *queryCoordClient) ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error) {
+	out := new(ComputePhraseMatchSlopResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_ComputePhraseMatchSlop_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error) {
 	out := new(ValidateAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_ValidateAnalyzer_FullMethodName, in, out, opts...)
@@ -518,6 +529,7 @@ type QueryCoordServer interface {
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
+	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 }
 
@@ -638,6 +650,9 @@ func (UnimplementedQueryCoordServer) UpdateLoadConfig(context.Context, *UpdateLo
 }
 func (UnimplementedQueryCoordServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
+}
+func (UnimplementedQueryCoordServer) ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ComputePhraseMatchSlop not implemented")
 }
 func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
@@ -1338,6 +1353,24 @@ func _QueryCoord_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_ComputePhraseMatchSlop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ComputePhraseMatchSlopRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).ComputePhraseMatchSlop(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_ComputePhraseMatchSlop_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).ComputePhraseMatchSlop(ctx, req.(*ComputePhraseMatchSlopRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryCoord_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ValidateAnalyzerRequest)
 	if err := dec(in); err != nil {
@@ -1516,6 +1549,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _QueryCoord_RunAnalyzer_Handler,
 		},
 		{
+			MethodName: "ComputePhraseMatchSlop",
+			Handler:    _QueryCoord_ComputePhraseMatchSlop_Handler,
+		},
+		{
 			MethodName: "ValidateAnalyzer",
 			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
 		},
@@ -1525,37 +1562,38 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	QueryNode_GetComponentStates_FullMethodName   = "/milvus.proto.query.QueryNode/GetComponentStates"
-	QueryNode_GetTimeTickChannel_FullMethodName   = "/milvus.proto.query.QueryNode/GetTimeTickChannel"
-	QueryNode_GetStatisticsChannel_FullMethodName = "/milvus.proto.query.QueryNode/GetStatisticsChannel"
-	QueryNode_WatchDmChannels_FullMethodName      = "/milvus.proto.query.QueryNode/WatchDmChannels"
-	QueryNode_UnsubDmChannel_FullMethodName       = "/milvus.proto.query.QueryNode/UnsubDmChannel"
-	QueryNode_LoadSegments_FullMethodName         = "/milvus.proto.query.QueryNode/LoadSegments"
-	QueryNode_ReleaseCollection_FullMethodName    = "/milvus.proto.query.QueryNode/ReleaseCollection"
-	QueryNode_LoadPartitions_FullMethodName       = "/milvus.proto.query.QueryNode/LoadPartitions"
-	QueryNode_ReleasePartitions_FullMethodName    = "/milvus.proto.query.QueryNode/ReleasePartitions"
-	QueryNode_ReleaseSegments_FullMethodName      = "/milvus.proto.query.QueryNode/ReleaseSegments"
-	QueryNode_GetSegmentInfo_FullMethodName       = "/milvus.proto.query.QueryNode/GetSegmentInfo"
-	QueryNode_SyncReplicaSegments_FullMethodName  = "/milvus.proto.query.QueryNode/SyncReplicaSegments"
-	QueryNode_GetStatistics_FullMethodName        = "/milvus.proto.query.QueryNode/GetStatistics"
-	QueryNode_Search_FullMethodName               = "/milvus.proto.query.QueryNode/Search"
-	QueryNode_SearchSegments_FullMethodName       = "/milvus.proto.query.QueryNode/SearchSegments"
-	QueryNode_Query_FullMethodName                = "/milvus.proto.query.QueryNode/Query"
-	QueryNode_QueryStream_FullMethodName          = "/milvus.proto.query.QueryNode/QueryStream"
-	QueryNode_QuerySegments_FullMethodName        = "/milvus.proto.query.QueryNode/QuerySegments"
-	QueryNode_QueryStreamSegments_FullMethodName  = "/milvus.proto.query.QueryNode/QueryStreamSegments"
-	QueryNode_ShowConfigurations_FullMethodName   = "/milvus.proto.query.QueryNode/ShowConfigurations"
-	QueryNode_GetMetrics_FullMethodName           = "/milvus.proto.query.QueryNode/GetMetrics"
-	QueryNode_GetDataDistribution_FullMethodName  = "/milvus.proto.query.QueryNode/GetDataDistribution"
-	QueryNode_SyncDistribution_FullMethodName     = "/milvus.proto.query.QueryNode/SyncDistribution"
-	QueryNode_Delete_FullMethodName               = "/milvus.proto.query.QueryNode/Delete"
-	QueryNode_DeleteBatch_FullMethodName          = "/milvus.proto.query.QueryNode/DeleteBatch"
-	QueryNode_UpdateSchema_FullMethodName         = "/milvus.proto.query.QueryNode/UpdateSchema"
-	QueryNode_RunAnalyzer_FullMethodName          = "/milvus.proto.query.QueryNode/RunAnalyzer"
-	QueryNode_GetHighlight_FullMethodName         = "/milvus.proto.query.QueryNode/GetHighlight"
-	QueryNode_DropIndex_FullMethodName            = "/milvus.proto.query.QueryNode/DropIndex"
-	QueryNode_ValidateAnalyzer_FullMethodName     = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
-	QueryNode_SyncFileResource_FullMethodName     = "/milvus.proto.query.QueryNode/SyncFileResource"
+	QueryNode_GetComponentStates_FullMethodName     = "/milvus.proto.query.QueryNode/GetComponentStates"
+	QueryNode_GetTimeTickChannel_FullMethodName     = "/milvus.proto.query.QueryNode/GetTimeTickChannel"
+	QueryNode_GetStatisticsChannel_FullMethodName   = "/milvus.proto.query.QueryNode/GetStatisticsChannel"
+	QueryNode_WatchDmChannels_FullMethodName        = "/milvus.proto.query.QueryNode/WatchDmChannels"
+	QueryNode_UnsubDmChannel_FullMethodName         = "/milvus.proto.query.QueryNode/UnsubDmChannel"
+	QueryNode_LoadSegments_FullMethodName           = "/milvus.proto.query.QueryNode/LoadSegments"
+	QueryNode_ReleaseCollection_FullMethodName      = "/milvus.proto.query.QueryNode/ReleaseCollection"
+	QueryNode_LoadPartitions_FullMethodName         = "/milvus.proto.query.QueryNode/LoadPartitions"
+	QueryNode_ReleasePartitions_FullMethodName      = "/milvus.proto.query.QueryNode/ReleasePartitions"
+	QueryNode_ReleaseSegments_FullMethodName        = "/milvus.proto.query.QueryNode/ReleaseSegments"
+	QueryNode_GetSegmentInfo_FullMethodName         = "/milvus.proto.query.QueryNode/GetSegmentInfo"
+	QueryNode_SyncReplicaSegments_FullMethodName    = "/milvus.proto.query.QueryNode/SyncReplicaSegments"
+	QueryNode_GetStatistics_FullMethodName          = "/milvus.proto.query.QueryNode/GetStatistics"
+	QueryNode_Search_FullMethodName                 = "/milvus.proto.query.QueryNode/Search"
+	QueryNode_SearchSegments_FullMethodName         = "/milvus.proto.query.QueryNode/SearchSegments"
+	QueryNode_Query_FullMethodName                  = "/milvus.proto.query.QueryNode/Query"
+	QueryNode_QueryStream_FullMethodName            = "/milvus.proto.query.QueryNode/QueryStream"
+	QueryNode_QuerySegments_FullMethodName          = "/milvus.proto.query.QueryNode/QuerySegments"
+	QueryNode_QueryStreamSegments_FullMethodName    = "/milvus.proto.query.QueryNode/QueryStreamSegments"
+	QueryNode_ShowConfigurations_FullMethodName     = "/milvus.proto.query.QueryNode/ShowConfigurations"
+	QueryNode_GetMetrics_FullMethodName             = "/milvus.proto.query.QueryNode/GetMetrics"
+	QueryNode_GetDataDistribution_FullMethodName    = "/milvus.proto.query.QueryNode/GetDataDistribution"
+	QueryNode_SyncDistribution_FullMethodName       = "/milvus.proto.query.QueryNode/SyncDistribution"
+	QueryNode_Delete_FullMethodName                 = "/milvus.proto.query.QueryNode/Delete"
+	QueryNode_DeleteBatch_FullMethodName            = "/milvus.proto.query.QueryNode/DeleteBatch"
+	QueryNode_UpdateSchema_FullMethodName           = "/milvus.proto.query.QueryNode/UpdateSchema"
+	QueryNode_RunAnalyzer_FullMethodName            = "/milvus.proto.query.QueryNode/RunAnalyzer"
+	QueryNode_GetHighlight_FullMethodName           = "/milvus.proto.query.QueryNode/GetHighlight"
+	QueryNode_DropIndex_FullMethodName              = "/milvus.proto.query.QueryNode/DropIndex"
+	QueryNode_ValidateAnalyzer_FullMethodName       = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
+	QueryNode_SyncFileResource_FullMethodName       = "/milvus.proto.query.QueryNode/SyncFileResource"
+	QueryNode_ComputePhraseMatchSlop_FullMethodName = "/milvus.proto.query.QueryNode/ComputePhraseMatchSlop"
 )
 
 // QueryNodeClient is the client API for QueryNode service.
@@ -1597,6 +1635,7 @@ type QueryNodeClient interface {
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
 }
 
 type queryNodeClient struct {
@@ -1932,6 +1971,15 @@ func (c *queryNodeClient) SyncFileResource(ctx context.Context, in *internalpb.S
 	return out, nil
 }
 
+func (c *queryNodeClient) ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error) {
+	out := new(ComputePhraseMatchSlopResponse)
+	err := c.cc.Invoke(ctx, QueryNode_ComputePhraseMatchSlop_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryNodeServer is the server API for QueryNode service.
 // All implementations should embed UnimplementedQueryNodeServer
 // for forward compatibility
@@ -1971,6 +2019,7 @@ type QueryNodeServer interface {
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
 	// file resource
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
 }
 
 // UnimplementedQueryNodeServer should be embedded to have forward compatible implementations.
@@ -2069,6 +2118,9 @@ func (UnimplementedQueryNodeServer) ValidateAnalyzer(context.Context, *ValidateA
 }
 func (UnimplementedQueryNodeServer) SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SyncFileResource not implemented")
+}
+func (UnimplementedQueryNodeServer) ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ComputePhraseMatchSlop not implemented")
 }
 
 // UnsafeQueryNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -2646,6 +2698,24 @@ func _QueryNode_SyncFileResource_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_ComputePhraseMatchSlop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ComputePhraseMatchSlopRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).ComputePhraseMatchSlop(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_ComputePhraseMatchSlop_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).ComputePhraseMatchSlop(ctx, req.(*ComputePhraseMatchSlopRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryNode_ServiceDesc is the grpc.ServiceDesc for QueryNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2768,6 +2838,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SyncFileResource",
 			Handler:    _QueryNode_SyncFileResource_Handler,
+		},
+		{
+			MethodName: "ComputePhraseMatchSlop",
+			Handler:    _QueryNode_ComputePhraseMatchSlop_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

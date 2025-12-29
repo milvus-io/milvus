@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"syscall"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -64,6 +65,8 @@ type RemoteChunkManager struct {
 	//	ctx        context.Context
 	bucketName string
 	rootPath   string
+
+	readRetryAttempts uint
 }
 
 var _ ChunkManager = (*RemoteChunkManager)(nil)
@@ -82,9 +85,10 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 		return nil, err
 	}
 	mcm := &RemoteChunkManager{
-		client:     client,
-		bucketName: c.BucketName,
-		rootPath:   strings.TrimLeft(c.RootPath, "/"),
+		client:            client,
+		bucketName:        c.BucketName,
+		rootPath:          strings.TrimLeft(c.RootPath, "/"),
+		readRetryAttempts: c.ReadRetryAttempts,
 	}
 	log.Info("remote chunk manager init success.", zap.String("remote", c.CloudProvider), zap.String("bucketname", c.BucketName), zap.String("root", mcm.RootPath()))
 	return mcm, nil
@@ -93,9 +97,10 @@ func NewRemoteChunkManager(ctx context.Context, c *objectstorage.Config) (*Remot
 // NewRemoteChunkManagerForTesting is used for testing.
 func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath string) *RemoteChunkManager {
 	mcm := &RemoteChunkManager{
-		client:     &MinioObjectStorage{c},
-		bucketName: bucket,
-		rootPath:   rootPath,
+		client:            &MinioObjectStorage{c},
+		bucketName:        bucket,
+		rootPath:          rootPath,
+		readRetryAttempts: 10,
 	}
 	return mcm
 }
@@ -133,13 +138,21 @@ func (mcm *RemoteChunkManager) Reader(ctx context.Context, filePath string) (Fil
 }
 
 func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
-	objectInfo, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
-	if err != nil {
-		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
-		return 0, err
-	}
-
-	return objectInfo, nil
+	var objectInfo int64
+	var err error
+	err = retry.Handle(ctx, func() (bool, error) {
+		objectInfo, err = mcm.getObjectSize(ctx, mcm.bucketName, filePath)
+		if err == nil {
+			return false, nil
+		}
+		log.Warn("failed to get object size", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
+		err = checkObjectStorageError(filePath, err)
+		if merr.IsRetryableErr(err) {
+			return true, err
+		}
+		return false, err
+	}, retry.Attempts(mcm.readRetryAttempts))
+	return objectInfo, err
 }
 
 // Write writes the data to minio storage.
@@ -212,7 +225,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		}
 		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(size))
 		return nil
-	}, retry.Attempts(3), retry.RetryErr(merr.IsRetryableErr))
+	}, retry.Attempts(mcm.readRetryAttempts), retry.RetryErr(merr.IsRetryableErr))
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +413,10 @@ func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, obj
 	return err
 }
 
+func ToMilvusIoError(fileName string, err error) error {
+	return checkObjectStorageError(fileName, err)
+}
+
 func checkObjectStorageError(fileName string, err error) error {
 	if err == nil {
 		return nil
@@ -410,17 +427,31 @@ func checkObjectStorageError(fileName string, err error) error {
 		if err.ErrorCode == string(bloberror.BlobNotFound) {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		}
+		if err.ErrorCode == string(bloberror.ServerBusy) {
+			return merr.WrapErrIoTooManyRequests(fileName, err)
+		}
 		return merr.WrapErrIoFailed(fileName, err)
 	case minio.ErrorResponse:
 		if err.Code == "NoSuchKey" {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
+		}
+		if err.Code == "SlowDown" || err.Code == "TooManyRequestsException" {
+			return merr.WrapErrIoTooManyRequests(fileName, err)
 		}
 		return merr.WrapErrIoFailed(fileName, err)
 	case *googleapi.Error:
 		if err.Code == http.StatusNotFound {
 			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
 		}
+		if err.Code == http.StatusTooManyRequests {
+			return merr.WrapErrIoTooManyRequests(fileName, err)
+		}
 		return merr.WrapErrIoFailed(fileName, err)
+	}
+	// syscall.ECONNRESET is typically triggered by rate limiting, with errors such as: `read tcp xxxxx:xx->xxxxxx:xxxxx: read: connection reset by peer`
+	// so we need to wrap it as ErrIoTooManyRequests and trigger retry.
+	if errors.Is(err, syscall.ECONNRESET) {
+		return merr.WrapErrIoTooManyRequests(fileName, err)
 	}
 	if err == io.ErrUnexpectedEOF {
 		return merr.WrapErrIoUnexpectEOF(fileName, err)

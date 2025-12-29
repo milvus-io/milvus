@@ -200,7 +200,6 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto schema = segment_->get_schema();
     auto field_meta =
         schema.GetFirstArrayFieldInStruct(expr_->get_struct_name());
-
     auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
     AssertInfo(array_offsets != nullptr, "Array offsets not available");
 
@@ -237,105 +236,6 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     TargetBitmapView bitset_view(col_vec->GetRawData(), col_vec->size());
 
     VectorPtr match_result;
-    inputs_[0]->Eval(eval_ctx, match_result);
-    auto match_result_col_vec =
-        std::dynamic_pointer_cast<ColumnVector>(match_result);
-    AssertInfo(match_result_col_vec != nullptr,
-               "Match result should be ColumnVector");
-    AssertInfo(match_result_col_vec->IsBitmap(),
-               "Match result should be bitmap");
-    TargetBitmapView match_result_bitset_view(
-        match_result_col_vec->GetRawData(), match_result_col_vec->size());
-    TargetBitmapView match_result_valid_view(
-        match_result_col_vec->GetValidRawData(), match_result_col_vec->size());
-
-    bool all_valid = match_result_valid_view.all();
-    auto match_type = expr_->get_match_type();
-    int64_t threshold = expr_->get_count();
-
-    auto dispatch = [&]<bool all_valid_v>() {
-        switch (match_type) {
-            case MatchType::MatchAny:
-                DispatchMatchProcessing<MatchType::MatchAny, all_valid_v>(
-                    has_offset_input_,
-                    batch_rows,
-                    current_pos_,
-                    elem_start,
-                    input,
-                    array_offsets.get(),
-                    match_result_bitset_view,
-                    match_result_valid_view,
-                    bitset_view,
-                    threshold);
-                break;
-            case MatchType::MatchAll:
-                DispatchMatchProcessing<MatchType::MatchAll, all_valid_v>(
-                    has_offset_input_,
-                    batch_rows,
-                    current_pos_,
-                    elem_start,
-                    input,
-                    array_offsets.get(),
-                    match_result_bitset_view,
-                    match_result_valid_view,
-                    bitset_view,
-                    threshold);
-                break;
-            case MatchType::MatchLeast:
-                DispatchMatchProcessing<MatchType::MatchLeast, all_valid_v>(
-                    has_offset_input_,
-                    batch_rows,
-                    current_pos_,
-                    elem_start,
-                    input,
-                    array_offsets.get(),
-                    match_result_bitset_view,
-                    match_result_valid_view,
-                    bitset_view,
-                    threshold);
-                break;
-            case MatchType::MatchMost:
-                DispatchMatchProcessing<MatchType::MatchMost, all_valid_v>(
-                    has_offset_input_,
-                    batch_rows,
-                    current_pos_,
-                    elem_start,
-                    input,
-                    array_offsets.get(),
-                    match_result_bitset_view,
-                    match_result_valid_view,
-                    bitset_view,
-                    threshold);
-                break;
-            case MatchType::MatchExact:
-                DispatchMatchProcessing<MatchType::MatchExact, all_valid_v>(
-                    has_offset_input_,
-                    batch_rows,
-                    current_pos_,
-                    elem_start,
-                    input,
-                    array_offsets.get(),
-                    match_result_bitset_view,
-                    match_result_valid_view,
-                    bitset_view,
-                    threshold);
-                break;
-            default:
-                ThrowInfo(OpTypeInvalid,
-                          "Unsupported match type: {}",
-                          static_cast<int>(match_type));
-        }
-    };
-
-    if (all_valid) {
-        dispatch.template operator()<true>();
-    } else {
-        dispatch.template operator()<false>();
-    }
-
-    if (!has_offset_input_) {
-        current_pos_ += batch_rows;
-    }
 }
 
 }  // namespace exec

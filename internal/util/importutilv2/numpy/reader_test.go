@@ -36,10 +36,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -47,28 +47,12 @@ const (
 	dim = 8
 )
 
-type mockReader struct {
-	io.Reader
-	io.Closer
-	io.ReaderAt
-	io.Seeker
-	size int64
-}
-
-func (mr *mockReader) Size() (int64, error) {
-	return mr.size, nil
-}
-
 type ReaderSuite struct {
 	suite.Suite
 
 	numRows     int
 	pkDataType  schemapb.DataType
 	vecDataType schemapb.DataType
-}
-
-func (suite *ReaderSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
 func (suite *ReaderSuite) SetupTest() {
@@ -220,10 +204,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		reader, err := createReader(fieldData, dataType)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-			Closer: io.NopCloser(reader),
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 		cm.EXPECT().Size(mock.Anything, files[fieldID]).Return(128, nil)
 	}
 
@@ -317,9 +298,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		reader, err := createReader(fieldData, dataType)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
@@ -394,9 +373,7 @@ func (suite *ReaderSuite) runNullable(dt schemapb.DataType, hasFile bool) {
 		dataType := fieldIDToField[fieldID].GetDataType()
 		reader, err := createReader(fieldData, dataType)
 		suite.NoError(err)
-		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-			Reader: reader,
-		}, nil)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(importcommon.CustomMockReader(reader), nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
@@ -456,18 +433,18 @@ func (suite *ReaderSuite) TestStringPK() {
 }
 
 func (suite *ReaderSuite) TestVector() {
-	suite.vecDataType = schemapb.DataType_BinaryVector
-	suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_FloatVector
-	suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_Float16Vector
-	suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_BFloat16Vector
-	suite.run(schemapb.DataType_Int32)
-	// suite.vecDataType = schemapb.DataType_SparseFloatVector
-	// suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_Int8Vector
-	suite.run(schemapb.DataType_Int32)
+	dataTypes := []schemapb.DataType{
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
+	}
+
+	for _, dataType := range dataTypes {
+		suite.vecDataType = dataType
+		suite.run(schemapb.DataType_Int32)
+	}
 }
 
 func TestNumpyCreateReaders(t *testing.T) {

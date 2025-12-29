@@ -57,6 +57,29 @@ StringIndexMarisa::Size() {
     return total_size_;
 }
 
+void
+StringIndexMarisa::ComputeByteSize() {
+    StringIndex::ComputeByteSize();
+    int64_t total = cached_byte_size_;
+
+    // Size of the trie structure (marisa trie uses io_size() for serialized/memory size)
+    total += trie_.io_size();
+
+    // str_ids_: vector<int64_t>
+    total += str_ids_.capacity() * sizeof(int64_t);
+
+    // str_ids_to_offsets_: map<size_t, vector<size_t>>
+    for (const auto& [key, vec] : str_ids_to_offsets_) {
+        total += sizeof(size_t);                   // key
+        total += vec.capacity() * sizeof(size_t);  // vector capacity
+        total += sizeof(std::vector<size_t>);      // vector object overhead
+    }
+    // Map node overhead (rough estimate: ~40 bytes per node for std::map)
+    total += str_ids_to_offsets_.size() * 40;
+
+    cached_byte_size_ = total;
+}
+
 int64_t
 StringIndexMarisa::CalculateTotalSize() const {
     int64_t size = 0;
@@ -135,6 +158,7 @@ StringIndexMarisa::BuildWithFieldData(
 
     built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void
@@ -161,6 +185,7 @@ StringIndexMarisa::Build(size_t n,
 
     built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 BinarySet
@@ -247,6 +272,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     fill_offsets();
     built_ = true;
     total_size_ = CalculateTotalSize();
+    ComputeByteSize();
 }
 
 void

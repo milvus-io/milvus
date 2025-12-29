@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// Chooses qualified L0 segments to do L0 compaction
 type l0CompactionPolicy struct {
 	meta *meta
 
@@ -110,8 +111,8 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 		} else {
 			activeL0Views = append(activeL0Views, labelViews...)
 		}
-
 	}
+
 	if len(activeL0Views) > 0 {
 		events[TriggerTypeLevelZeroViewChange] = activeL0Views
 	}
@@ -120,27 +121,6 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 		events[TriggerTypeLevelZeroViewIDLE] = idleL0Views
 	}
 	return
-}
-
-func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView, triggerID UniqueID) []CompactionView {
-	partChanView := make(map[string]*LevelZeroSegmentsView) // "part-chan" as key
-	for _, view := range levelZeroSegments {
-		key := view.label.Key()
-		if _, ok := partChanView[key]; !ok {
-			partChanView[key] = &LevelZeroSegmentsView{
-				label:                     view.label,
-				segments:                  []*SegmentView{view},
-				earliestGrowingSegmentPos: policy.meta.GetEarliestStartPositionOfGrowingSegments(view.label),
-				triggerID:                 triggerID,
-			}
-		} else {
-			partChanView[key].Append(view)
-		}
-	}
-
-	return lo.Map(lo.Values(partChanView), func(view *LevelZeroSegmentsView, _ int) CompactionView {
-		return view
-	})
 }
 
 func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64) ([]CompactionView, int64, error) {
@@ -168,6 +148,32 @@ func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, coll
 	}
 	views := policy.groupL0ViewsByPartChan(collectionID, GetViewsByInfo(allL0Segments...), newTriggerID)
 	return views, newTriggerID, nil
+}
+
+func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView, triggerID UniqueID) []CompactionView {
+	partChanView := make(map[string]*LevelZeroCompactionView) // "part-chan" as key
+	for _, segView := range levelZeroSegments {
+		key := segView.label.Key()
+		if _, ok := partChanView[key]; !ok {
+			earliestGrowingStartPos := policy.meta.GetEarliestStartPositionOfGrowingSegments(segView.label)
+			partChanView[key] = &LevelZeroCompactionView{
+				label:           segView.label,
+				l0Segments:      []*SegmentView{},
+				latestDeletePos: earliestGrowingStartPos,
+				triggerID:       triggerID,
+			}
+		}
+
+		l0View := partChanView[key]
+		// Only choose segments with position less than or equal to the earliest growing segment position
+		if segView.dmlPos.GetTimestamp() <= l0View.latestDeletePos.GetTimestamp() {
+			l0View.Append(segView)
+		}
+	}
+
+	return lo.Map(lo.Values(partChanView), func(view *LevelZeroCompactionView, _ int) CompactionView {
+		return view
+	})
 }
 
 type activeCollection struct {

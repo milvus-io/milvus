@@ -2307,7 +2307,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 
 	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
-		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter or MATCH_ALL/MATCH_ANY/MATCH_LEAST/MATCH_MOST", fieldName)
+		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
 	}
 
 	// Construct full field name for struct array field
@@ -2401,7 +2401,7 @@ func (v *ParserVisitor) VisitMatchAny(ctx *parser.MatchAnyContext) interface{} {
 }
 
 // VisitMatchLeast handles MATCH_LEAST expressions
-// Syntax: MATCH_LEAST(structArrayField, $[intField] == 1 && $[strField] == "aaa", N)
+// Syntax: MATCH_LEAST(structArrayField, $[intField] == 1 && $[strField] == "aaa", threshold=N)
 // At least N elements must match the predicate
 func (v *ParserVisitor) VisitMatchLeast(ctx *parser.MatchLeastContext) interface{} {
 	structArrayFieldName := ctx.Identifier().GetText()
@@ -2419,7 +2419,7 @@ func (v *ParserVisitor) VisitMatchLeast(ctx *parser.MatchLeastContext) interface
 }
 
 // VisitMatchMost handles MATCH_MOST expressions
-// Syntax: MATCH_MOST(structArrayField, $[intField] == 1 && $[strField] == "aaa", N)
+// Syntax: MATCH_MOST(structArrayField, $[intField] == 1 && $[strField] == "aaa", threshold=N)
 // At most N elements must match the predicate
 func (v *ParserVisitor) VisitMatchMost(ctx *parser.MatchMostContext) interface{} {
 	structArrayFieldName := ctx.Identifier().GetText()
@@ -2437,7 +2437,7 @@ func (v *ParserVisitor) VisitMatchMost(ctx *parser.MatchMostContext) interface{}
 }
 
 // VisitMatchExact handles MATCH_EXACT expressions
-// Syntax: MATCH_EXACT(structArrayField, $[intField] == 1 && $[strField] == "aaa", N)
+// Syntax: MATCH_EXACT(structArrayField, $[intField] == 1 && $[strField] == "aaa", threshold=N)
 // Exactly N elements must match the predicate
 func (v *ParserVisitor) VisitMatchExact(ctx *parser.MatchExactContext) interface{} {
 	structArrayFieldName := ctx.Identifier().GetText()

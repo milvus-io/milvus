@@ -405,6 +405,8 @@ func NewGetCollectionStatsOption(collectionName string) *getCollectionStatsOptio
 
 type AddCollectionFieldOption interface {
 	Request() *milvuspb.AddCollectionFieldRequest
+	// Validate validates the option before sending request
+	Validate() error
 }
 
 type addCollectionFieldOption struct {
@@ -418,6 +420,15 @@ func (c *addCollectionFieldOption) Request() *milvuspb.AddCollectionFieldRequest
 		CollectionName: c.collectionName,
 		Schema:         bs,
 	}
+}
+
+// Validate validates the option before sending request
+func (c *addCollectionFieldOption) Validate() error {
+	// Vector fields must be nullable when adding to existing collection
+	if c.fieldSch.DataType.IsVectorType() && !c.fieldSch.Nullable {
+		return fmt.Errorf("adding vector field to existing collection requires nullable=true, field name = %s", c.fieldSch.Name)
+	}
+	return nil
 }
 
 func NewAddCollectionFieldOption(collectionName string, field *entity.Field) *addCollectionFieldOption {

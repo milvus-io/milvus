@@ -191,9 +191,18 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         return Count();
     }
 
-    int64_t
-    ByteSize() const {
-        return wrapper_->index_size_bytes();
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
+
+        // Tantivy index size
+        total += wrapper_->index_size_bytes();
+
+        // null_offset_: vector<size_t>
+        total += null_offset_.capacity() * sizeof(size_t);
+
+        this->cached_byte_size_ = total;
     }
 
     bool

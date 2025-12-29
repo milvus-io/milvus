@@ -143,6 +143,22 @@ class RTreeIndex : public ScalarIndex<T> {
         return Count();
     }
 
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
+
+        // null_offset_ vector
+        total += null_offset_.capacity() * sizeof(size_t);
+
+        // wrapper_ (RTreeIndexWrapper)
+        if (wrapper_) {
+            total += wrapper_->ByteSize();
+        }
+
+        this->cached_byte_size_ = total;
+    }
+
     // GIS-specific query methods
     /**
      * @brief Query candidates based on spatial operation

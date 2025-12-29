@@ -46,6 +46,7 @@ type Column interface {
 	SetNullable(bool)
 	ValidateNullable() error
 	CompactNullableValues()
+	ValidCount() int
 }
 
 var errFieldDataTypeNotMatch = errors.New("FieldData type not matched")
@@ -239,10 +240,39 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		data := x.FloatVector.GetData()
 		dim := int(vectors.GetDim())
+
+		if len(validData) > 0 {
+			if end < 0 {
+				end = len(validData)
+			}
+			vector := make([][]float32, 0, end-begin)
+			dataIdx := 0
+			for i := 0; i < begin; i++ {
+				if validData[i] {
+					dataIdx++
+				}
+			}
+			for i := begin; i < end; i++ {
+				if validData[i] {
+					v := make([]float32, dim)
+					copy(v, data[dataIdx*dim:(dataIdx+1)*dim])
+					vector = append(vector, v)
+					dataIdx++
+				} else {
+					vector = append(vector, nil)
+				}
+			}
+			col := NewColumnFloatVector(fd.GetFieldName(), dim, vector)
+			col.withValidData(validData[begin:end])
+			col.nullable = true
+			col.sparseMode = true
+			return col, nil
+		}
+
 		if end < 0 {
 			end = len(data) / dim
 		}
-		vector := make([][]float32, 0, end-begin) // shall not have remanunt
+		vector := make([][]float32, 0, end-begin)
 		for i := begin; i < end; i++ {
 			v := make([]float32, dim)
 			copy(v, data[i*dim:(i+1)*dim])
@@ -262,6 +292,35 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		dim := int(vectors.GetDim())
 		blen := dim / 8
+
+		if len(validData) > 0 {
+			if end < 0 {
+				end = len(validData)
+			}
+			vector := make([][]byte, 0, end-begin)
+			dataIdx := 0
+			for i := 0; i < begin; i++ {
+				if validData[i] {
+					dataIdx++
+				}
+			}
+			for i := begin; i < end; i++ {
+				if validData[i] {
+					v := make([]byte, blen)
+					copy(v, data[dataIdx*blen:(dataIdx+1)*blen])
+					vector = append(vector, v)
+					dataIdx++
+				} else {
+					vector = append(vector, nil)
+				}
+			}
+			col := NewColumnBinaryVector(fd.GetFieldName(), dim, vector)
+			col.withValidData(validData[begin:end])
+			col.nullable = true
+			col.sparseMode = true
+			return col, nil
+		}
+
 		if end < 0 {
 			end = len(data) / blen
 		}
@@ -281,13 +340,43 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		data := x.Float16Vector
 		dim := int(vectors.GetDim())
+		bytePerRow := dim * 2
+
+		if len(validData) > 0 {
+			if end < 0 {
+				end = len(validData)
+			}
+			vector := make([][]byte, 0, end-begin)
+			dataIdx := 0
+			for i := 0; i < begin; i++ {
+				if validData[i] {
+					dataIdx++
+				}
+			}
+			for i := begin; i < end; i++ {
+				if validData[i] {
+					v := make([]byte, bytePerRow)
+					copy(v, data[dataIdx*bytePerRow:(dataIdx+1)*bytePerRow])
+					vector = append(vector, v)
+					dataIdx++
+				} else {
+					vector = append(vector, nil)
+				}
+			}
+			col := NewColumnFloat16Vector(fd.GetFieldName(), dim, vector)
+			col.withValidData(validData[begin:end])
+			col.nullable = true
+			col.sparseMode = true
+			return col, nil
+		}
+
 		if end < 0 {
-			end = len(data) / dim / 2
+			end = len(data) / bytePerRow
 		}
 		vector := make([][]byte, 0, end-begin)
 		for i := begin; i < end; i++ {
-			v := make([]byte, dim*2)
-			copy(v, data[i*dim*2:(i+1)*dim*2])
+			v := make([]byte, bytePerRow)
+			copy(v, data[i*bytePerRow:(i+1)*bytePerRow])
 			vector = append(vector, v)
 		}
 		return NewColumnFloat16Vector(fd.GetFieldName(), dim, vector), nil
@@ -300,13 +389,43 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		data := x.Bfloat16Vector
 		dim := int(vectors.GetDim())
-		if end < 0 {
-			end = len(data) / dim / 2
+		bytePerRow := dim * 2
+
+		if len(validData) > 0 {
+			if end < 0 {
+				end = len(validData)
+			}
+			vector := make([][]byte, 0, end-begin)
+			dataIdx := 0
+			for i := 0; i < begin; i++ {
+				if validData[i] {
+					dataIdx++
+				}
+			}
+			for i := begin; i < end; i++ {
+				if validData[i] {
+					v := make([]byte, bytePerRow)
+					copy(v, data[dataIdx*bytePerRow:(dataIdx+1)*bytePerRow])
+					vector = append(vector, v)
+					dataIdx++
+				} else {
+					vector = append(vector, nil)
+				}
+			}
+			col := NewColumnBFloat16Vector(fd.GetFieldName(), dim, vector)
+			col.withValidData(validData[begin:end])
+			col.nullable = true
+			col.sparseMode = true
+			return col, nil
 		}
-		vector := make([][]byte, 0, end-begin) // shall not have remanunt
+
+		if end < 0 {
+			end = len(data) / bytePerRow
+		}
+		vector := make([][]byte, 0, end-begin)
 		for i := begin; i < end; i++ {
-			v := make([]byte, dim*2)
-			copy(v, data[i*dim*2:(i+1)*dim*2])
+			v := make([]byte, bytePerRow)
+			copy(v, data[i*bytePerRow:(i+1)*bytePerRow])
 			vector = append(vector, v)
 		}
 		return NewColumnBFloat16Vector(fd.GetFieldName(), dim, vector), nil
@@ -317,6 +436,37 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 			return nil, errFieldDataTypeNotMatch
 		}
 		data := sparseVectors.Contents
+
+		if len(validData) > 0 {
+			if end < 0 {
+				end = len(validData)
+			}
+			vectors := make([]entity.SparseEmbedding, 0, end-begin)
+			dataIdx := 0
+			for i := 0; i < begin; i++ {
+				if validData[i] {
+					dataIdx++
+				}
+			}
+			for i := begin; i < end; i++ {
+				if validData[i] {
+					vector, err := entity.DeserializeSliceSparseEmbedding(data[dataIdx])
+					if err != nil {
+						return nil, err
+					}
+					vectors = append(vectors, vector)
+					dataIdx++
+				} else {
+					vectors = append(vectors, nil)
+				}
+			}
+			col := NewColumnSparseVectors(fd.GetFieldName(), vectors)
+			col.withValidData(validData[begin:end])
+			col.nullable = true
+			col.sparseMode = true
+			return col, nil
+		}
+
 		if end < 0 {
 			end = len(data)
 		}
@@ -339,11 +489,41 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		}
 		data := x.Int8Vector
 		dim := int(vectors.GetDim())
+
+		if len(validData) > 0 {
+			if end < 0 {
+				end = len(validData)
+			}
+			vector := make([][]int8, 0, end-begin)
+			dataIdx := 0
+			for i := 0; i < begin; i++ {
+				if validData[i] {
+					dataIdx++
+				}
+			}
+			for i := begin; i < end; i++ {
+				if validData[i] {
+					v := make([]int8, dim)
+					for j := 0; j < dim; j++ {
+						v[j] = int8(data[dataIdx*dim+j])
+					}
+					vector = append(vector, v)
+					dataIdx++
+				} else {
+					vector = append(vector, nil)
+				}
+			}
+			col := NewColumnInt8Vector(fd.GetFieldName(), dim, vector)
+			col.withValidData(validData[begin:end])
+			col.nullable = true
+			col.sparseMode = true
+			return col, nil
+		}
+
 		if end < 0 {
 			end = len(data) / dim
 		}
-		vector := make([][]int8, 0, end-begin) // shall not have remanunt
-		// TODO caiyd: has better way to convert []byte to []int8 ?
+		vector := make([][]int8, 0, end-begin)
 		for i := begin; i < end; i++ {
 			v := make([]int8, dim)
 			for j := 0; j < dim; j++ {

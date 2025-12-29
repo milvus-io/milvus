@@ -117,11 +117,24 @@ class StringIndexSort : public StringIndex {
     const TargetBitmap
     PrefixMatch(const std::string_view prefix) override;
 
+    bool
+    SupportPatternMatch() const override {
+        return true;
+    }
+
+    const TargetBitmap
+    PatternMatch(const std::string& pattern, proto::plan::OpType op) override;
+
     std::optional<std::string>
     Reverse_Lookup(size_t offset) const override;
 
     int64_t
     Size() override;
+
+    // Computes and caches the total memory usage in bytes.
+    // For mmap mode, this includes both memory-resident structures and mmap size.
+    void
+    ComputeByteSize() override;
 
  protected:
     int64_t
@@ -191,6 +204,11 @@ class StringIndexSortImpl {
     virtual const TargetBitmap
     PrefixMatch(const std::string_view prefix, size_t total_num_rows) = 0;
 
+    virtual const TargetBitmap
+    PatternMatch(const std::string& pattern,
+                 proto::plan::OpType op,
+                 size_t total_num_rows) = 0;
+
     virtual std::optional<std::string>
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
@@ -199,6 +217,10 @@ class StringIndexSortImpl {
 
     virtual int64_t
     Size() = 0;
+
+    // Returns the memory usage in bytes for this impl
+    virtual int64_t
+    ByteSize() const = 0;
 };
 
 class StringIndexSortMemoryImpl : public StringIndexSortImpl {
@@ -264,6 +286,11 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     const TargetBitmap
     PrefixMatch(const std::string_view prefix, size_t total_num_rows) override;
 
+    const TargetBitmap
+    PatternMatch(const std::string& pattern,
+                 proto::plan::OpType op,
+                 size_t total_num_rows) override;
+
     std::optional<std::string>
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
@@ -273,10 +300,23 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     int64_t
     Size() override;
 
+    int64_t
+    ByteSize() const override;
+
  private:
     // Helper method for binary search
     size_t
     FindValueIndex(const std::string& value) const;
+
+    // Helper to find the range of unique values that start with a prefix
+    std::pair<size_t, size_t>
+    FindPrefixRange(const std::string& prefix) const;
+
+    // Check if value matches pattern based on op type
+    bool
+    MatchValue(const std::string& value,
+               const std::string& pattern,
+               proto::plan::OpType op) const;
 
     void
     BuildFromMap(std::map<std::string, PostingList>&& unique_map,
@@ -378,6 +418,11 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     const TargetBitmap
     PrefixMatch(const std::string_view prefix, size_t total_num_rows) override;
 
+    const TargetBitmap
+    PatternMatch(const std::string& pattern,
+                 proto::plan::OpType op,
+                 size_t total_num_rows) override;
+
     std::optional<std::string>
     Reverse_Lookup(size_t offset,
                    size_t total_num_rows,
@@ -387,10 +432,19 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     int64_t
     Size() override;
 
+    int64_t
+    ByteSize() const override;
+
  private:
     // Binary search for a value
     size_t
     FindValueIndex(const std::string& value) const;
+
+    // Check if value matches pattern based on op type
+    bool
+    MatchValue(const std::string& value,
+               const std::string& pattern,
+               proto::plan::OpType op) const;
 
     // Binary search helpers
     size_t
@@ -398,6 +452,10 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
 
     size_t
     UpperBound(const std::string_view& value) const;
+
+    // Find the range [start, end) of unique values that start with a prefix
+    std::pair<size_t, size_t>
+    FindPrefixRange(const std::string& prefix) const;
 
     MmapEntry
     GetEntry(size_t idx) const {

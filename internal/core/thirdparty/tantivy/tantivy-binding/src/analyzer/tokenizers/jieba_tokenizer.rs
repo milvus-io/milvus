@@ -1,13 +1,14 @@
 use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
+use log::warn;
 use serde_json as json;
 use std::fs;
 use std::io::BufReader;
 use std::{borrow::Cow, path::PathBuf};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
-use crate::analyzer::options;
+use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 
 lazy_static! {
@@ -56,6 +57,7 @@ impl TokenStream for JiebaTokenStream {
 
 fn get_jieba_dict(
     params: &json::Map<String, json::Value>,
+    helper: &mut FileResourcePathHelper,
 ) -> Result<(Vec<String>, Option<String>, Option<PathBuf>)> {
     let mut words = Vec::<String>::new();
     let mut user_dict = None;
@@ -101,7 +103,7 @@ fn get_jieba_dict(
 
     match params.get("extra_dict_file") {
         Some(v) => {
-            let path = options::get_resource_path(v, "jieba extra dict file")?;
+            let path = get_resource_path(helper, v, "jieba extra dict file")?;
             user_dict = Some(path)
         }
         _ => {}
@@ -156,8 +158,11 @@ impl<'a> JiebaTokenizer<'a> {
         }
     }
 
-    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<JiebaTokenizer<'a>> {
-        let (words, system_dict, user_dict) = get_jieba_dict(params)?;
+    pub fn from_json(
+        params: &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<JiebaTokenizer<'a>> {
+        let (words, system_dict, user_dict) = get_jieba_dict(params, helper)?;
 
         let mut tokenizer =
             system_dict.map_or(Ok(jieba_rs::Jieba::empty()), |name| match name.as_str() {
@@ -242,8 +247,11 @@ impl Tokenizer for JiebaTokenizer<'static> {
 #[cfg(test)]
 mod tests {
     use serde_json as json;
+    use std::sync::Arc;
 
     use super::JiebaTokenizer;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+
     use tantivy::tokenizer::TokenStream;
     use tantivy::tokenizer::Tokenizer;
 
@@ -255,7 +263,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("结巴分词器");
@@ -280,7 +289,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("milvus结巴分词器中文测试");
@@ -303,7 +313,8 @@ mod tests {
         let json_param = json::from_str::<json::Map<String, json::Value>>(&params);
         assert!(json_param.is_ok());
 
-        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let tokenizer = JiebaTokenizer::from_json(&json_param.unwrap(), &mut helper);
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("milvus結巴分詞器中文測試");

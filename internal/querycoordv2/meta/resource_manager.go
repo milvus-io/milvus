@@ -797,16 +797,18 @@ func (rm *ResourceManager) selectNodeForRedundantRecover(sourceRG *ResourceGroup
 // assignIncomingNodeWithNodeCheck assign node to resource group with node status check.
 func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(ctx context.Context, node int64) (string, error) {
 	// node is on stopping or stopped, remove it from incoming node set.
-	if rm.nodeMgr.Get(node) == nil {
+	nodeInfo := rm.nodeMgr.Get(node)
+	if nodeInfo == nil {
 		rm.incomingNode.Remove(node)
 		return "", errors.New("node is not online")
 	}
-	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
+
+	if nodeInfo.IsStoppingState() {
 		rm.incomingNode.Remove(node)
 		return "", errors.New("node has been stopped")
 	}
 
-	rgName, err := rm.assignIncomingNode(ctx, node)
+	rgName, err := rm.assignIncomingNode(ctx, nodeInfo)
 	if err != nil {
 		return "", err
 	}
@@ -816,7 +818,9 @@ func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(ctx context.Context, 
 }
 
 // assignIncomingNode assign node to resource group.
-func (rm *ResourceManager) assignIncomingNode(ctx context.Context, node int64) (string, error) {
+func (rm *ResourceManager) assignIncomingNode(ctx context.Context, nodeInfo *session.NodeInfo) (string, error) {
+	node := nodeInfo.ID()
+
 	// If node already assign to rg.
 	rg := rm.getResourceGroupByNodeID(node)
 	if rg != nil {
@@ -827,16 +831,53 @@ func (rm *ResourceManager) assignIncomingNode(ctx context.Context, node int64) (
 		return rg.GetName(), nil
 	}
 
+	if err := rm.createResourceGroupIfNotExists(ctx, nodeInfo); err != nil {
+		return "", err
+	}
+
 	// select a resource group to assign incoming node.
-	rg = rm.mustSelectAssignIncomingNodeTargetRG(node)
+	rg = rm.mustSelectAssignIncomingNodeTargetRG(nodeInfo)
 	if err := rm.transferNode(ctx, rg.GetName(), node); err != nil {
 		return "", errors.Wrap(err, "at finally assign to default resource group")
 	}
 	return rg.GetName(), nil
 }
 
+// createResourceGroupIfNotExists create resource group if not exists.
+func (rm *ResourceManager) createResourceGroupIfNotExists(ctx context.Context, nodeInfo *session.NodeInfo) error {
+	rgName := nodeInfo.ResourceGroupName()
+	nodeID := nodeInfo.ID()
+	if rgName == "" {
+		return nil
+	}
+	if _, ok := rm.groups[rgName]; ok {
+		return nil
+	}
+	if err := rm.updateResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		rgName: {
+			Requests: &rgpb.ResourceGroupLimit{
+				NodeNum: 0,
+			},
+			Limits: &rgpb.ResourceGroupLimit{
+				NodeNum: defaultResourceGroupCapacity,
+			},
+		},
+	}); err != nil {
+		log.Warn("failed to create resource group from session of new incoming node", zap.String("rgName", rgName), zap.Int64("nodeID", nodeID), zap.Error(err))
+		return err
+	}
+	log.Info("create resource group from session of new incoming node", zap.String("rgName", rgName), zap.Int64("nodeID", nodeID))
+	return nil
+}
+
 // mustSelectAssignIncomingNodeTargetRG select resource group for assign incoming node.
-func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(nodeID int64) *ResourceGroup {
+func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG(nodeInfo *session.NodeInfo) *ResourceGroup {
+	if nodeInfo.ResourceGroupName() != "" {
+		// rg will be created if not exists by createResourceGroupIfNotExists
+		return rm.groups[nodeInfo.ResourceGroupName()]
+	}
+
+	nodeID := nodeInfo.ID()
 	// First, Assign it to rg with the most missing nodes at high priority.
 	if rg := rm.findMaxRGWithGivenFilter(
 		func(rg *ResourceGroup) bool {
@@ -1018,6 +1059,12 @@ func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error
 	// If rg is not empty, it's not deletable.
 	if rm.groups[rgName].GetConfig().GetLimits().GetNodeNum() != 0 {
 		return merr.WrapErrParameterInvalid("not empty resource group", rgName, "resource group's limits node num is not 0")
+	}
+
+	for _, nodeInfo := range rm.nodeMgr.GetAll() {
+		if nodeInfo.ResourceGroupName() == rgName {
+			return merr.WrapErrParameterInvalid("not empty resource group", fmt.Sprintf("node %d is still in the resource group", nodeInfo.ID()))
+		}
 	}
 
 	// If rg is used by other rg, it's not deletable.

@@ -24,3 +24,8 @@ func FieldComponent(component string) zap.Field {
 func FieldMessage(msg zapcore.ObjectMarshaler) zap.Field {
 	return zap.Object("message", msg)
 }
+
+// FieldMessages returns a zap array field with the messages.
+func FieldMessages[T zapcore.ObjectMarshaler](msgs []T) zap.Field {
+	return zap.Objects("messages", msgs)
+}

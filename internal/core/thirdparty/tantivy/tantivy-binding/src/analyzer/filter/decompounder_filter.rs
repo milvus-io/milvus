@@ -1,5 +1,6 @@
 use super::filter::FilterBuilder;
 use super::util::read_line_file;
+use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use tantivy::tokenizer::SplitCompoundWords;
@@ -8,7 +9,10 @@ const WORD_LIST_KEY: &str = "word_list";
 const WORD_LIST_FILE_KEY: &str = "word_list_file";
 
 impl FilterBuilder for SplitCompoundWords {
-    fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
+    fn from_json(
+        params: &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<Self> {
         let mut dict = Vec::<String>::new();
         if let Some(value) = params.get(WORD_LIST_KEY) {
             if !value.is_array() {
@@ -29,7 +33,12 @@ impl FilterBuilder for SplitCompoundWords {
         }
 
         if let Some(file_params) = params.get(WORD_LIST_FILE_KEY) {
-            read_line_file(&mut dict, file_params, "decompounder word list file")?;
+            read_line_file(
+                helper,
+                &mut dict,
+                file_params,
+                "decompounder word list file",
+            )?;
         }
 
         if dict.is_empty() {
@@ -49,13 +58,17 @@ impl FilterBuilder for SplitCompoundWords {
 
 #[cfg(test)]
 mod tests {
-    use super::SplitCompoundWords;
-    use crate::analyzer::filter::FilterBuilder;
-    use crate::analyzer::tokenizers::standard_builder;
-    use crate::log::init_log;
-    use serde_json as json;
     use std::collections::HashSet;
     use std::path::Path;
+    use std::sync::Arc;
+
+    use serde_json as json;
+
+    use super::SplitCompoundWords;
+    use crate::analyzer::filter::FilterBuilder;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+    use crate::analyzer::tokenizers::standard_builder;
+    use crate::log::init_log;
 
     #[test]
     fn test_decompounder_filter_with_file() {
@@ -74,7 +87,8 @@ mod tests {
         );
         let json_params = json::from_str::<json::Value>(&params).unwrap();
         // let filter = SplitCompoundWords::from_dictionary(vec!["bank", "note"]);
-        let filter = SplitCompoundWords::from_json(json_params.as_object().unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = SplitCompoundWords::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());
         let mut analyzer = builder.build();

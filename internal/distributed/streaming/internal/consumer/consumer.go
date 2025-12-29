@@ -23,6 +23,9 @@ type ConsumerOptions struct {
 
 	// Handler is the message handler used to handle message after recv from consumer.
 	MessageHandler message.Handler
+
+	// IgnorePauseConsumption is the flag to ignore the consumption pause of the consumer.
+	IgnorePauseConsumption bool
 }
 
 // ResumableConsumer is the interface for consuming message to log service.

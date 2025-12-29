@@ -520,14 +520,14 @@ queryNode:
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
     vectorField: true # Enable mmap for loading vector data
-    vectorIndex: false # Enable mmap for loading vector index
-    scalarField: false # Enable mmap for loading scalar data
-    scalarIndex: false # Enable mmap for loading scalar index
+    vectorIndex: true # Enable mmap for loading vector index
+    scalarField: true # Enable mmap for loading scalar data
+    scalarIndex: true # Enable mmap for loading scalar index
     jsonShredding: true # Enable mmap for loading json stats
     # Enable memory mapping (mmap) to optimize the handling of growing raw data.
     # By activating this feature, the memory overhead associated with newly added or modified data will be significantly minimized.
     # However, this optimization may come at the cost of a slight decrease in query latency for the affected data segments.
-    growingMmapEnabled: false
+    growingMmapEnabled: true
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   lazyload:
@@ -666,7 +666,7 @@ dataCoord:
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
-    taskPrioritizer: default
+    taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
@@ -1065,6 +1065,10 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  # FactorChangeThreshold defines the minimum relative change in factor to trigger an update.
+  # If the factor change is less than this threshold (e.g., 5%), the update is skipped
+  # to reduce unnecessary proxy updates. Range: (0, 1]
+  factorChangeThreshold: 0.05
   forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
@@ -1135,14 +1139,6 @@ quotaAndLimits:
         # Setting this item to 5 indicates that Milvus only allows data insertion to any collection at the rate of 5 MB/s.
         # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
         max: -1
-      partition:
-        max: -1 # MB/s, default no limit
-    upsertRate:
-      max: -1 # MB/s, default no limit
-      db:
-        max: -1 # MB/s, default no limit
-      collection:
-        max: -1 # MB/s, default no limit
       partition:
         max: -1 # MB/s, default no limit
     deleteRate:
@@ -1483,3 +1479,4 @@ function:
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
+    concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included

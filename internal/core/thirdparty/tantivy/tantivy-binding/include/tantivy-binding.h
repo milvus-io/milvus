@@ -497,7 +497,9 @@ const char *tantivy_token_stream_get_token(void *token_stream);
 
 TantivyToken tantivy_token_stream_get_detailed_token(void *token_stream);
 
-RustResult tantivy_create_analyzer(const char *analyzer_params);
+RustResult tantivy_create_analyzer(const char *analyzer_params, const char *extra_info);
+
+RustResult tantivy_validate_analyzer(const char *analyzer_params, const char *extra_info);
 
 void *tantivy_clone_analyzer(void *ptr);
 
@@ -506,5 +508,10 @@ void tantivy_free_analyzer(void *tokenizer);
 RustResult tantivy_set_analyzer_options(const char *params);
 
 bool tantivy_index_exist(const char *path);
+
+RustResult tantivy_compute_phrase_match_slop(const char *tokenizer_params,
+                                             const char *query,
+                                             const char *data,
+                                             uint32_t *slop);
 
 }  // extern "C"

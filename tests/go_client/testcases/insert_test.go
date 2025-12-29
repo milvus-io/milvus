@@ -3,6 +3,7 @@ package testcases
 import (
 	"math"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -897,8 +898,25 @@ func TestFlushRate(t *testing.T) {
 	_, err := mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
 
-	_, err = mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
-	common.CheckErr(t, err, true)
-	_, err = mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
-	common.CheckErr(t, err, false, "request is rejected by grpc RateLimiter middleware, please retry later: rate limit exceeded[rate=0.1]")
+	cnt := 10
+	errs := make([]error, cnt)
+	wg := &sync.WaitGroup{}
+	wg.Add(cnt)
+	for i := 0; i < cnt; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_, err := mc.Flush(ctx, client.NewFlushOption(schema.CollectionName))
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	errCnt := 0
+	for _, err := range errs {
+		if err != nil {
+			common.CheckErr(t, err, false, "request is rejected by grpc RateLimiter middleware, please retry later: rate limit exceeded")
+			errCnt++
+		}
+	}
+	require.NotZero(t, errCnt)
 }

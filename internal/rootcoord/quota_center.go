@@ -101,7 +101,6 @@ var ddlRateTypes = typeutil.NewSet(
 
 var dmlRateTypes = typeutil.NewSet(
 	internalpb.RateType_DMLInsert,
-	internalpb.RateType_DMLUpsert,
 	internalpb.RateType_DMLDelete,
 	internalpb.RateType_DMLBulkLoad,
 )
@@ -164,11 +163,18 @@ type QuotaCenter struct {
 	// TODO many metrics information only have collection id currently, it can be removed after db id add into all metrics.
 	collectionIDToDBID *typeutil.ConcurrentMap[int64, int64] // collection id ->  db id
 
+	collectionProps map[int64]map[string]string // collection id -> collection properties
+
 	rateLimiter *rlinternal.RateLimiterTree
 
 	tsoAllocator tso.Allocator
 
 	rateAllocateStrategy RateAllocateStrategy
+
+	// Cache previous collection rates (baseLimit * factor) to avoid unnecessary updates
+	// If rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
+	// Key format: "collectionID-rateType"
+	prevRates map[string]float64
 
 	stopOnce sync.Once
 	stopChan chan struct{}
@@ -190,8 +196,10 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 		meta:                 meta,
 		readableCollections:  make(map[int64]map[int64][]int64, 0),
 		writableCollections:  make(map[int64]map[int64][]int64, 0),
+		collectionProps:      make(map[int64]map[string]string),
 		rateLimiter:          rlinternal.NewRateLimiterTree(initInfLimiter(internalpb.RateScope_Cluster, allOps)),
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
+		prevRates:            make(map[string]float64),
 		stopChan:             make(chan struct{}),
 	}
 	q.clearMetrics()
@@ -373,6 +381,7 @@ func (q *QuotaCenter) clearMetrics() {
 	q.collectionIDToDBID = typeutil.NewConcurrentMap[int64, int64]()
 	q.collections = typeutil.NewConcurrentMap[string, int64]()
 	q.dbs = typeutil.NewConcurrentMap[string, int64]()
+	q.collectionProps = make(map[int64]map[string]string)
 }
 
 func updateNumEntitiesLoaded(current map[int64]int64, qn *metricsinfo.QueryNodeCollectionMetrics) map[int64]int64 {
@@ -860,8 +869,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	collectionFactors := make(map[int64]float64)
 	updateCollectionFactor := func(factors map[int64]float64) {
 		for collection, factor := range factors {
-			_, ok := collectionFactors[collection]
-			if !ok || collectionFactors[collection] > factor {
+			currentFactor, ok := collectionFactors[collection]
+			if !ok || currentFactor > factor {
 				collectionFactors[collection] = factor
 			}
 		}
@@ -883,8 +892,11 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	ttCollections := make([]int64, 0)
 	memoryCollections := make([]int64, 0)
 
+	// Get factorChangeThreshold
+	factorChangeThreshold := Params.QuotaConfig.FactorChangeThreshold.GetAsFloat()
+
 	for collection, factor := range collectionFactors {
-		metrics.RootCoordRateLimitRatio.WithLabelValues(fmt.Sprint(collection)).Set(1 - factor)
+		metrics.RootCoordRateLimitRatio.WithLabelValues(strconv.FormatInt(collection, 10)).Set(1 - factor)
 		if factor <= 0 {
 			if _, ok := ttFactors[collection]; ok && factor == ttFactors[collection] {
 				// factor comes from ttFactor
@@ -907,22 +919,32 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		limiter := collectionLimiter.GetLimiters()
 		for _, rt := range []internalpb.RateType{
 			internalpb.RateType_DMLInsert,
-			internalpb.RateType_DMLUpsert,
 			internalpb.RateType_DMLDelete,
 		} {
 			v, ok := limiter.Get(rt)
-			if ok {
-				if v.Limit() != Inf {
-					v.SetLimit(v.Limit() * Limit(factor))
+			if !ok || v.Limit() == Inf {
+				continue
+			}
+
+			// Check if rate change is significant enough to trigger an update
+			// Calculate newRate = baseLimit * factor for each rate type and compare with previous rate
+			// If the rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
+			newRate := float64(v.Limit() * Limit(factor))
+			rateKey := strconv.FormatInt(collection, 10) + "-" + strconv.FormatInt(int64(rt), 10)
+			prevRate, ok := q.prevRates[rateKey]
+			if ok && prevRate > 0 {
+				relativeChange := math.Abs(newRate-prevRate) / prevRate
+				if relativeChange < factorChangeThreshold {
+					continue
 				}
 			}
+			v.SetLimit(Limit(newRate))
+			q.prevRates[rateKey] = newRate
 		}
 
 		collectionProps := q.getCollectionLimitProperties(collection)
 		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionInsertRateMinKey),
 			internalpb.RateType_DMLInsert, collectionLimiter)
-		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionUpsertRateMinKey),
-			internalpb.RateType_DMLUpsert, collectionLimiter)
 		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMinKey),
 			internalpb.RateType_DMLDelete, collectionLimiter)
 		if factor < 1.0 {
@@ -963,8 +985,8 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 	collectionsMaxDelay := make(map[int64]time.Duration)
 	updateCollectionDelay := func(delay time.Duration, collections []int64) {
 		for _, collection := range collections {
-			_, ok := collectionsMaxDelay[collection]
-			if !ok || collectionsMaxDelay[collection] < delay {
+			currentDelay, ok := collectionsMaxDelay[collection]
+			if !ok || currentDelay < delay {
 				collectionsMaxDelay[collection] = delay
 			}
 		}
@@ -1053,8 +1075,8 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 	collectionFactor := make(map[int64]float64)
 	updateCollectionFactor := func(factor float64, collections []int64) {
 		for _, collection := range collections {
-			_, ok := collectionFactor[collection]
-			if !ok || collectionFactor[collection] > factor {
+			currentFactor, ok := collectionFactor[collection]
+			if !ok || currentFactor > factor {
 				collectionFactor[collection] = factor
 			}
 		}
@@ -1130,8 +1152,8 @@ func (q *QuotaCenter) getGrowingSegmentsSizeFactor() map[int64]float64 {
 	collectionFactor := make(map[int64]float64)
 	updateCollectionFactor := func(factor float64, collections []int64) {
 		for _, collection := range collections {
-			_, ok := collectionFactor[collection]
-			if !ok || collectionFactor[collection] > factor {
+			currentFactor, ok := collectionFactor[collection]
+			if !ok || currentFactor > factor {
 				collectionFactor[collection] = factor
 			}
 		}
@@ -1285,15 +1307,22 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 		}
 	}
 
+	collectionRateTypes := getRateTypes(internalpb.RateScope_Collection, allOps)
 	initLimiters := func(sourceCollections map[int64]map[int64][]int64) {
 		for dbID, collections := range sourceCollections {
 			for collectionID, partitionIDs := range collections {
-				getCollectionLimitVal := func(rateType internalpb.RateType) Limit {
-					limitVal, err := q.getCollectionMaxLimit(rateType, collectionID)
+				collectionLimitVals := make(map[internalpb.RateType]Limit, collectionRateTypes.Len())
+				collectionRateTypes.Range(func(rt internalpb.RateType) bool {
+					limitVal, err := q.getCollectionMaxLimit(rt, collectionID)
 					if err != nil {
-						return Limit(quota.GetQuotaValue(internalpb.RateScope_Collection, rateType, Params))
+						limitVal = Limit(quota.GetQuotaValue(internalpb.RateScope_Collection, rt, Params))
 					}
-					return limitVal
+					collectionLimitVals[rt] = limitVal
+					return true
+				})
+
+				getCollectionLimitVal := func(rateType internalpb.RateType) Limit {
+					return collectionLimitVals[rateType]
 				}
 				q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 					newParamLimiterFunc(internalpb.RateScope_Database, allOps),
@@ -1325,8 +1354,6 @@ func (q *QuotaCenter) getCollectionMaxLimit(rt internalpb.RateType, collectionID
 	switch rt {
 	case internalpb.RateType_DMLInsert:
 		return Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionInsertRateMaxKey)), nil
-	case internalpb.RateType_DMLUpsert:
-		return Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionUpsertRateMaxKey)), nil
 	case internalpb.RateType_DMLDelete:
 		return Limit(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMaxKey)), nil
 	case internalpb.RateType_DMLBulkLoad:
@@ -1342,6 +1369,11 @@ func (q *QuotaCenter) getCollectionMaxLimit(rt internalpb.RateType, collectionID
 
 func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]string {
 	log := log.Ctx(context.Background()).WithRateGroup("rootcoord.QuotaCenter", 1.0, 60.0)
+
+	if props, ok := q.collectionProps[collection]; ok {
+		return props
+	}
+
 	collectionInfo, err := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collection)
 	if err != nil {
 		log.RatedWarn(10, "failed to get rate limit properties from collection meta",
@@ -1354,6 +1386,8 @@ func (q *QuotaCenter) getCollectionLimitProperties(collection int64) map[string]
 	for _, pair := range collectionInfo.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
 	}
+
+	q.collectionProps[collection] = properties
 
 	return properties
 }
@@ -1600,31 +1634,28 @@ func (q *QuotaCenter) recordMetrics() {
 		return true
 	})
 
-	record := func(errorCode commonpb.ErrorCode) {
-		rlinternal.TraverseRateLimiterTree(q.rateLimiter.GetRootLimiters(), nil,
-			func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
-				if errCode == errorCode {
-					var name string
-					switch node.Level() {
-					case internalpb.RateScope_Cluster:
-						name = "cluster"
-					case internalpb.RateScope_Database:
-						name = "db_" + dbIDs[node.GetID()]
-					case internalpb.RateScope_Collection:
-						name = "collection_" + collectionIDs[node.GetID()]
-					default:
-						return false
-					}
-					metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), name).Set(1.0)
-					metrics.RootCoordForceDenyWritingCounter.Inc()
+	rlinternal.TraverseRateLimiterTree(q.rateLimiter.GetRootLimiters(), nil,
+		func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+			if errCode == commonpb.ErrorCode_MemoryQuotaExhausted ||
+				errCode == commonpb.ErrorCode_DiskQuotaExhausted ||
+				errCode == commonpb.ErrorCode_TimeTickLongDelay {
+				var name string
+				switch node.Level() {
+				case internalpb.RateScope_Cluster:
+					name = "cluster"
+				case internalpb.RateScope_Database:
+					name = "db_" + dbIDs[node.GetID()]
+				case internalpb.RateScope_Collection:
+					name = "collection_" + collectionIDs[node.GetID()]
+				default:
 					return false
 				}
-				return true
-			})
-	}
-	record(commonpb.ErrorCode_MemoryQuotaExhausted)
-	record(commonpb.ErrorCode_DiskQuotaExhausted)
-	record(commonpb.ErrorCode_TimeTickLongDelay)
+				metrics.RootCoordQuotaStates.WithLabelValues(errCode.String(), name).Set(1.0)
+				metrics.RootCoordForceDenyWritingCounter.Inc()
+				return false
+			}
+			return true
+		})
 }
 
 func (q *QuotaCenter) diskAllowance(collection UniqueID) float64 {

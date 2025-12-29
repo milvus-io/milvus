@@ -374,6 +374,19 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				appender := &nullDefaultAppender[*schemapb.ScalarField]{}
 				err = appender.AppendNull(fieldData, rowNum)
 			}
+		case schemapb.DataType_FloatVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_SparseFloatVector,
+			schemapb.DataType_Int8Vector:
+			if nullable {
+				for i := 0; i < rowNum; i++ {
+					if err = fieldData.AppendRow(nil); err != nil {
+						return err
+					}
+				}
+			}
 		default:
 			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
 		}
@@ -424,6 +437,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
+	log.Info("start to run embedding function")
 	if err := RunDenseEmbedding(task, data); err != nil {
 		return err
 	}
@@ -435,14 +449,18 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 }
 
 func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
+	log.Info("start to run dense embedding")
 	schema := task.GetSchema()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
+	log.Info("allowNonBM25Outputs", zap.Any("allowNonBM25Outputs", allowNonBM25Outputs))
 	fieldIDs := lo.Keys(data.Data)
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
 	if err != nil {
 		return err
 	}
+	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
 	if embedding.HasNonBM25Functions(schema.Functions, []int64{}) {
+		log.Info("has non bm25 functions")
 		extraInfo := &models.ModelExtraInfo{
 			ClusterID: task.req.ClusterID,
 			DBName:    task.req.Schema.DbName,
@@ -454,11 +472,13 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 		if err := exec.ProcessBulkInsert(context.Background(), data); err != nil {
 			return err
 		}
+		log.Info("end to run dense embedding")
 	}
 	return nil
 }
 
 func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
+	log.Info("start to run bm25 function")
 	fns := task.GetSchema().GetFunctions()
 	for _, fn := range fns {
 		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)

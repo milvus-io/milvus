@@ -243,7 +243,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
 	}
-	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), zap.Any("flushAllMsgs", flushAllMsgs))
+	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), log.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
 		Status:       merr.Success(),
 		FlushAllMsgs: flushAllMsgs,
@@ -1046,6 +1046,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			NumOfRows:     rowCount,
 			Level:         segment.GetLevel(),
 			IsSorted:      segment.GetIsSorted(),
+			ManifestPath:  segment.GetManifestPath(),
 		})
 	}
 
@@ -1260,7 +1261,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
-	log.Info("received manual compaction")
+	log.Info("received manual compaction", zap.Any("request", req))
 
 	resp := &milvuspb.ManualCompactionResponse{
 		Status: merr.Success(),
@@ -1279,8 +1280,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	if req.GetMajorCompaction() || req.GetL0Compaction() {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction())
+	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction(), req.GetTargetSize())
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1306,7 +1307,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	}
 
 	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
-		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
+		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("targetSize", req.GetTargetSize()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
@@ -1549,33 +1550,68 @@ OUTER:
 				return resp, nil
 			}
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
-				channelCP := s.meta.GetChannelCheckpoint(channel)
-				pchannel := funcutil.ToPhysicalChannel(channel)
-				flushAllTs, ok := req.GetFlushAllTss()[pchannel]
-				if !ok || flushAllTs == 0 {
-					log.Warn("FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
-					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel))
+				if len(req.GetFlushAllTss()) > 0 {
+					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(log, channel, req.GetFlushAllTss())
+					if err != nil {
+						resp.Status = merr.Status(err)
+						return resp, nil
+					}
+					if !ok {
+						allFlushed = false
+						break OUTER
+					}
+				} else if req.GetFlushAllTs() != 0 {
+					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
+					if !s.verifyFlushAllStateByLegacyFlushAllTs(log, channel, req.GetFlushAllTs()) {
+						allFlushed = false
+						break OUTER
+					}
+				} else {
+					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTss or FlushAllTs is required"))
 					return resp, nil
-				}
-				if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-					allFlushed = false
-					log.RatedInfo(10, "channel unflushed",
-						zap.String("vchannel", channel),
-						zap.Uint64("flushAllTs", flushAllTs),
-						zap.Uint64("channelCP", channelCP.GetTimestamp()),
-					)
-					break OUTER
 				}
 			}
 		}
 	}
 
 	if allFlushed {
-		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()))
+		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()), zap.Uint64("FlushAllTs", req.GetFlushAllTs()))
 	}
 
 	resp.Flushed = allFlushed
 	return resp, nil
+}
+
+func (s *Server) verifyFlushAllStateByChannelFlushAllTs(logger *log.MLogger, channel string, flushAllTss map[string]uint64) (bool, error) {
+	channelCP := s.meta.GetChannelCheckpoint(channel)
+	pchannel := funcutil.ToPhysicalChannel(channel)
+	flushAllTs, ok := flushAllTss[pchannel]
+	if !ok || flushAllTs == 0 {
+		logger.Warn("FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
+		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
+	}
+	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+		logger.RatedInfo(10, "channel unflushed",
+			zap.String("vchannel", channel),
+			zap.Uint64("flushAllTs", flushAllTs),
+			zap.Uint64("channelCP", channelCP.GetTimestamp()),
+		)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(logger *log.MLogger, channel string, flushAllTs uint64) bool {
+	channelCP := s.meta.GetChannelCheckpoint(channel)
+	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+		logger.RatedInfo(10, "channel unflushed",
+			zap.String("vchannel", channel),
+			zap.Uint64("flushAllTs", flushAllTs),
+			zap.Uint64("channelCP", channelCP.GetTimestamp()),
+		)
+		return false
+	}
+	return true
 }
 
 // Deprecated

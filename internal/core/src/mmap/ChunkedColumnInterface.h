@@ -17,6 +17,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
+#include "common/OffsetMapping.h"
 #include "common/bson_view.h"
 namespace milvus {
 
@@ -131,6 +132,35 @@ class ChunkedColumnInterface {
     virtual const std::vector<int64_t>&
     GetNumRowsUntilChunk() const = 0;
 
+    const FixedVector<bool>&
+    GetValidData() const {
+        return valid_data_;
+    }
+
+    const std::vector<int64_t>&
+    GetValidCountPerChunk() const {
+        return valid_count_per_chunk_;
+    }
+
+    const OffsetMapping&
+    GetOffsetMapping() const {
+        return offset_mapping_;
+    }
+
+    virtual void
+    BuildValidRowIds(milvus::OpContext* op_ctx) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "BuildValidRowIds not supported for this column type");
+    }
+
+    // Build offset mapping from valid_data
+    void
+    BuildOffsetMapping() {
+        if (!valid_data_.empty()) {
+            offset_mapping_.Build(valid_data_.data(), valid_data_.size());
+        }
+    }
+
     virtual void
     BulkValueAt(milvus::OpContext* op_ctx,
                 std::function<void(const char*, size_t)> fn,
@@ -237,6 +267,10 @@ class ChunkedColumnInterface {
     }
 
  protected:
+    FixedVector<bool> valid_data_;
+    std::vector<int64_t> valid_count_per_chunk_;
+    OffsetMapping offset_mapping_;
+
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
         AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");

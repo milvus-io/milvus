@@ -18,7 +18,12 @@ package integration
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"hash/crc32"
 	"time"
+
+	"github.com/spaolacci/murmur3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -241,4 +246,194 @@ func GenerateSparseFloatArray(numRows int) *schemapb.SparseFloatArray {
 
 func GenerateHashKeys(numRows int) []uint32 {
 	return testutils.GenerateHashKeys(numRows)
+}
+
+// GenerateChannelBalancedPrimaryKeys generates primary keys that are evenly distributed across channels.
+// It supports both Int64 and VarChar primary key types.
+// For Int64: uses murmur3 hash (same as typeutil.Hash32Int64)
+// For VarChar: uses crc32 hash (same as typeutil.HashString2Uint32)
+// startPK specifies where to begin searching for PKs.
+// Returns the FieldData and the next startPK for subsequent calls.
+func GenerateChannelBalancedPrimaryKeys(fieldName string, fieldType schemapb.DataType, numRows int, numChannels int, startPK int64) (*schemapb.FieldData, int64) {
+	switch fieldType {
+	case schemapb.DataType_Int64:
+		pks, nextPK := GenerateBalancedInt64PKs(numRows, numChannels, startPK)
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: pks,
+						},
+					},
+				},
+			},
+		}, nextPK
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		pks, nextIndex := GenerateBalancedVarCharPKs(numRows, numChannels, int(startPK))
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: pks,
+						},
+					},
+				},
+			},
+		}, int64(nextIndex)
+	default:
+		panic(fmt.Sprintf("not supported primary key type: %s", fieldType))
+	}
+}
+
+// GenerateBalancedInt64PKs generates int64 primary keys that are evenly distributed across channels.
+// This ensures each channel receives exactly numRows/numChannels items based on PK hash values.
+// The function searches for PKs that hash to each channel to achieve exact distribution.
+// startPK specifies where to begin searching for PKs.
+// Returns the generated PKs and the next startPK for subsequent calls.
+func GenerateBalancedInt64PKs(numRows int, numChannels int, startPK int64) ([]int64, int64) {
+	if numChannels <= 0 {
+		numChannels = 1
+	}
+
+	// Calculate how many items each channel should receive
+	baseCount := numRows / numChannels
+	remainder := numRows % numChannels
+
+	// Collect PKs for each channel
+	channelPKs := make([][]int64, numChannels)
+	targetCounts := make([]int, numChannels)
+	for ch := 0; ch < numChannels; ch++ {
+		targetCounts[ch] = baseCount
+		if ch < remainder {
+			targetCounts[ch]++
+		}
+		channelPKs[ch] = make([]int64, 0, targetCounts[ch])
+	}
+
+	// Search for PKs that hash to each channel
+	var lastPK int64
+	for pk := startPK; ; pk++ {
+		lastPK = pk
+		// Calculate which channel this PK would go to
+		hash := hashInt64ForChannel(pk)
+		ch := int(hash % uint32(numChannels))
+
+		if len(channelPKs[ch]) < targetCounts[ch] {
+			channelPKs[ch] = append(channelPKs[ch], pk)
+
+			// Check if all channels have enough PKs
+			done := true
+			for ch := 0; ch < numChannels; ch++ {
+				if len(channelPKs[ch]) < targetCounts[ch] {
+					done = false
+					break
+				}
+			}
+			if done {
+				break
+			}
+		}
+	}
+
+	// Combine all PKs
+	result := make([]int64, 0, numRows)
+	for ch := 0; ch < numChannels; ch++ {
+		result = append(result, channelPKs[ch]...)
+	}
+
+	return result, lastPK + 1
+}
+
+// hashInt64ForChannel computes the hash value for channel assignment.
+// This mirrors the logic in typeutil.Hash32Int64 and HashPK2Channels.
+func hashInt64ForChannel(v int64) uint32 {
+	// Must match the behavior of typeutil.Hash32Int64
+	// which uses common.Endian (binary.LittleEndian)
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, uint64(v))
+
+	// Use murmur3 hash (same as typeutil.Hash32Bytes)
+	h := murmur3.New32()
+	h.Write(b)
+	return h.Sum32() & 0x7fffffff
+}
+
+// GenerateBalancedVarCharPKs generates varchar primary keys that are evenly distributed across channels.
+// This ensures each channel receives exactly numRows/numChannels items based on PK hash values.
+// The function searches for PKs that hash to each channel to achieve exact distribution.
+// startIndex specifies where to begin searching for PKs (used in "pk_<index>" format).
+// Returns the generated PKs and the next startIndex for subsequent calls.
+func GenerateBalancedVarCharPKs(numRows int, numChannels int, startIndex int) ([]string, int) {
+	if numChannels <= 0 {
+		numChannels = 1
+	}
+
+	// Calculate how many items each channel should receive
+	baseCount := numRows / numChannels
+	remainder := numRows % numChannels
+
+	// Collect PKs for each channel
+	channelPKs := make([][]string, numChannels)
+	targetCounts := make([]int, numChannels)
+	for ch := 0; ch < numChannels; ch++ {
+		targetCounts[ch] = baseCount
+		if ch < remainder {
+			targetCounts[ch]++
+		}
+		channelPKs[ch] = make([]string, 0, targetCounts[ch])
+	}
+
+	// Search for PKs that hash to each channel
+	var lastIndex int
+	for i := startIndex; ; i++ {
+		lastIndex = i
+		// Generate a unique string PK
+		pk := fmt.Sprintf("pk_%d", i)
+
+		// Calculate which channel this PK would go to
+		hash := hashVarCharForChannel(pk)
+		ch := int(hash % uint32(numChannels))
+
+		if len(channelPKs[ch]) < targetCounts[ch] {
+			channelPKs[ch] = append(channelPKs[ch], pk)
+
+			// Check if all channels have enough PKs
+			done := true
+			for ch := 0; ch < numChannels; ch++ {
+				if len(channelPKs[ch]) < targetCounts[ch] {
+					done = false
+					break
+				}
+			}
+			if done {
+				break
+			}
+		}
+	}
+
+	// Combine all PKs
+	result := make([]string, 0, numRows)
+	for ch := 0; ch < numChannels; ch++ {
+		result = append(result, channelPKs[ch]...)
+	}
+
+	return result, lastIndex + 1
+}
+
+// hashVarCharForChannel computes the hash value for channel assignment of varchar PKs.
+// This mirrors the logic in typeutil.HashString2Uint32 and HashPK2Channels.
+func hashVarCharForChannel(v string) uint32 {
+	// Must match the behavior of typeutil.HashString2Uint32
+	// which uses crc32.ChecksumIEEE with substring limit of 100 chars
+	subString := v
+	if len(v) > 100 {
+		subString = v[:100]
+	}
+	return crc32.ChecksumIEEE([]byte(subString))
 }
