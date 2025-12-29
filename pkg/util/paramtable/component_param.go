@@ -4440,7 +4440,7 @@ otherwise parse as boolean value to determine if the segment search concurrent l
 		Version:      "2.6.8",
 		DefaultValue: "0.3",
 		Doc: `CPU usage low water mark threshold to limit segment search concurrent limit per task,
-when CPU usage is less than this threshold, the concurrent limit will be equal to hardware.CPUNum * segmentSQLimitMxaConcurrencyRatio`,
+when CPU usage is less than this threshold, the concurrent limit will be equal to hardware.CPUNum * segmentSQConcurrencyLimitCPUUsageLwmThreshold`,
 		Export: false,
 	}
 	p.SchedulePolicySegmentSQConcurrencyLimitCPUUsageLwmThreshold.Init(base.mgr)
