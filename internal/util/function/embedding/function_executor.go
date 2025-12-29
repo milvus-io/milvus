@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -68,6 +69,8 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 			return nil, err
 		}
 		return f, nil
+	case schemapb.FunctionType_MinHash:
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown functionRunner type %s", schema.GetType().String())
 	}
@@ -76,6 +79,12 @@ func createFunction(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSc
 // Since bm25 and embedding are implemented in different ways, the bm25 function is not verified here.
 func ValidateFunctions(schema *schemapb.CollectionSchema, extraInfo *models.ModelExtraInfo) error {
 	for _, fSchema := range schema.Functions {
+		if fSchema.GetType() == schemapb.FunctionType_MinHash {
+			err := function.ValidateMinHashFunction(schema, fSchema)
+			if err != nil {
+				return err
+			}
+		}
 		f, err := createFunction(schema, fSchema, extraInfo)
 		if err != nil {
 			return err

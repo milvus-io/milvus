@@ -901,9 +901,10 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
 
-        // get index params for bm25 brute force
+        // get index params for bm25 and minhash brute force
         std::map<std::string, std::string> index_info;
-        if (search_info.metric_type_ == knowhere::metric::BM25) {
+        if (search_info.metric_type_ == knowhere::metric::BM25 ||
+            search_info.metric_type_ == knowhere::metric::MHJACCARD) {
             index_info =
                 col_index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
         }
