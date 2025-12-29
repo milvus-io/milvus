@@ -361,9 +361,26 @@ class SegmentExpr : public Expr {
                    "ArrayOffsets not found for field {}",
                    field_id_.get());
 
-        int64_t current_rows =
-            segment_->num_rows_until_chunk(field_id_, current_data_chunk_) +
-            current_data_chunk_pos_;
+        // Use index path or data path based on whether index is being used
+        auto current_chunk = SegmentExpr::CanUseIndex() && use_index_
+                                 ? current_index_chunk_
+                                 : current_data_chunk_;
+        auto current_chunk_pos = SegmentExpr::CanUseIndex() && use_index_
+                                     ? current_index_chunk_pos_
+                                     : current_data_chunk_pos_;
+
+        int64_t current_rows = 0;
+        if (SegmentExpr::CanUseIndex() && use_index_ &&
+            segment_->type() == SegmentType::Sealed) {
+            // For sealed segment with index, position is already global
+            current_rows = current_chunk_pos;
+        } else if (segment_->is_chunked()) {
+            current_rows =
+                segment_->num_rows_until_chunk(field_id_, current_chunk) +
+                current_chunk_pos;
+        } else {
+            current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
+        }
 
         auto batch_rows = current_rows + batch_size_ >= active_count_
                               ? active_count_ - current_rows
