@@ -1204,6 +1204,9 @@ TEST(chunk, test_create_group_chunk_with_mmap) {
 
     // Create group chunk with mmap
     std::string mmap_file = "/tmp/test_group_chunk_mmap.bin";
+    if (boost::filesystem::exists(mmap_file)) {
+        boost::filesystem::remove(mmap_file);
+    }
     auto chunks =
         create_group_chunk(field_ids, field_metas, array_vecs, mmap_file);
 
@@ -1232,9 +1235,14 @@ TEST(chunk, test_create_group_chunk_with_mmap) {
         EXPECT_FLOAT_EQ(value, float_data[i]);
     }
 
+    // Verify file exists
+    EXPECT_TRUE(boost::filesystem::exists(mmap_file));
+
     // Clean up mmap file
     chunks.clear();
-    boost::filesystem::remove(mmap_file);
+
+    // Verify file is removed by ChunkMmapGuard
+    EXPECT_FALSE(boost::filesystem::exists(mmap_file));
 }
 
 TEST(chunk, test_create_group_chunk_nullable_fields) {
