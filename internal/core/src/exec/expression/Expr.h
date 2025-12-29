@@ -382,9 +382,7 @@ class SegmentExpr : public Expr {
             current_rows = current_chunk * size_per_chunk_ + current_chunk_pos;
         }
 
-        auto batch_rows = current_rows + batch_size_ >= active_count_
-                              ? active_count_ - current_rows
-                              : batch_size_;
+        auto batch_rows = std::min(batch_size_, active_count_ - current_rows);
 
         if (batch_rows == 0) {
             return {0, 0};
@@ -1564,9 +1562,7 @@ class SegmentExpr : public Expr {
             auto array_offsets = segment_->GetArrayOffsets(field_id_);
 
             auto data_pos = current_index_chunk_pos_;
-            auto batch_rows =
-                std::min(std::min(size_per_chunk_ - data_pos, batch_size_),
-                         active_count_ - data_pos);
+            auto batch_rows = std::min(batch_size_, active_count_ - data_pos);
 
             // Calculate corresponding element range
             auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(data_pos);

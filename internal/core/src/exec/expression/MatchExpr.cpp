@@ -218,14 +218,12 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         elem_start = 0;
     } else {
         // Sequential batch mode
-        batch_rows =
-            std::min(std::min(size_per_chunk_ - current_pos_, batch_size_),
-                     active_count_ - current_pos_);
+        batch_rows = std::min(batch_size_, active_count_ - current_pos_);
         auto [start, _] = array_offsets->ElementIDRangeOfRow(current_pos_);
         elem_start = start;
     }
 
-    if (batch_rows == 0) {
+    if (batch_rows <= 0) {
         result = nullptr;
         return;
     }

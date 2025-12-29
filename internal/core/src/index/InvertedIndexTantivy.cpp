@@ -753,7 +753,6 @@ InvertedIndexTantivy<T>::build_index_for_array_nested(
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                null_offset_.push_back(offset);
                 // Skip null arrays - no elements to add
                 continue;
             }
@@ -777,7 +776,6 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                null_offset_.push_back(offset);
                 // Skip null arrays - no elements to add
                 continue;
             }
