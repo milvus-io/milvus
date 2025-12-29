@@ -1,6 +1,7 @@
 use super::filter::FilterBuilder;
 use super::stop_words::fetch_language_stop_words;
 use super::util::*;
+use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use tantivy::tokenizer::StopWordFilter;
@@ -28,14 +29,17 @@ pub(crate) fn get_stop_words_list(str_list: Vec<String>) -> Vec<String> {
 }
 
 impl FilterBuilder for StopWordFilter {
-    fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
+    fn from_json(
+        params: &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<Self> {
         let mut dict = Vec::<String>::new();
         if let Some(value) = params.get(STOP_WORDS_LIST_KEY) {
             dict = get_stop_words_list(get_string_list(value, "stop_words")?);
         }
 
         if let Some(file_params) = params.get(STOP_WORDS_FILE_KEY) {
-            read_line_file(&mut dict, file_params, "stop words dict file")?;
+            read_line_file(helper, &mut dict, file_params, "stop words dict file")?;
         }
 
         Ok(StopWordFilter::remove(dict))
@@ -46,11 +50,13 @@ impl FilterBuilder for StopWordFilter {
 mod tests {
     use super::StopWordFilter;
     use crate::analyzer::filter::FilterBuilder;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
     use crate::analyzer::tokenizers::standard_builder;
     use crate::log::init_log;
     use serde_json as json;
     use std::collections::HashSet;
     use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn test_stop_words_filter_with_file() {
@@ -69,7 +75,8 @@ mod tests {
         );
 
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let filter = StopWordFilter::from_json(json_params.as_object().unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = StopWordFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
 
         let builder = standard_builder().filter(filter.unwrap());

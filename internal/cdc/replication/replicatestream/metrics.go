@@ -28,6 +28,7 @@ import (
 )
 
 type ReplicateMetrics interface {
+	UpdateLastReplicatedTimeTick(ts uint64)
 	StartReplicate(msg message.ImmutableMessage)
 	OnSent(msg message.ImmutableMessage)
 	OnConfirmed(msg message.ImmutableMessage)
@@ -51,6 +52,13 @@ func NewReplicateMetrics(replicateInfo *streamingpb.ReplicatePChannelMeta) Repli
 		replicateInfo: replicateInfo,
 		msgsMetrics:   typeutil.NewConcurrentMap[string, msgMetrics](),
 	}
+}
+
+func (m *replicateMetrics) UpdateLastReplicatedTimeTick(ts uint64) {
+	metrics.CDCLastReplicatedTimeTick.WithLabelValues(
+		m.replicateInfo.GetSourceChannelName(),
+		m.replicateInfo.GetTargetChannelName(),
+	).Set(tsoutil.PhysicalTimeSeconds(ts))
 }
 
 func (m *replicateMetrics) StartReplicate(msg message.ImmutableMessage) {
@@ -88,10 +96,7 @@ func (m *replicateMetrics) OnConfirmed(msg message.ImmutableMessage) {
 		m.replicateInfo.GetTargetChannelName(),
 	).Observe(float64(replicateDuration.Milliseconds()))
 
-	metrics.CDCLastReplicatedTimeTick.WithLabelValues(
-		m.replicateInfo.GetSourceChannelName(),
-		m.replicateInfo.GetTargetChannelName(),
-	).Set(tsoutil.PhysicalTimeSeconds(msg.TimeTick()))
+	m.UpdateLastReplicatedTimeTick(msg.TimeTick())
 }
 
 func (m *replicateMetrics) OnInitiate() {

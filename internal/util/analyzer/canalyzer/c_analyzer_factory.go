@@ -13,9 +13,11 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -23,8 +25,8 @@ import (
 const (
 	LinderaDictURLKey = "lindera_download_urls"
 	ResourceMapKey    = "resource_map"
-	DictPathKey       = "local_dict_path"
 	ResourcePathKey   = "resource_path"
+	StorageNameKey    = "storage_name"
 )
 
 var initOnce sync.Once
@@ -39,7 +41,7 @@ func UpdateParams() {
 	cfg := paramtable.Get()
 	params := map[string]any{}
 	params[LinderaDictURLKey] = cfg.FunctionCfg.LinderaDownloadUrls.GetValue()
-	params[DictPathKey] = cfg.FunctionCfg.LocalResourcePath.GetValue()
+	params[ResourcePathKey] = pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
 
 	bytes, err := json.Marshal(params)
 	if err != nil {
@@ -55,12 +57,31 @@ func UpdateParams() {
 	}
 }
 
-func NewAnalyzer(param string) (interfaces.Analyzer, error) {
+func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {
+	bytes, err := json.Marshal(map[string]any{"resource_map": resourceMap})
+	if err != nil {
+		return errors.Wrap(err, "marshal global resource info failed")
+	}
+
+	paramPtr := C.CString(string(bytes))
+	defer C.free(unsafe.Pointer(paramPtr))
+
+	status := C.set_tokenizer_option(paramPtr)
+	if err := HandleCStatus(&status, "failed to update global resource info"); err != nil {
+		return errors.Wrap(err, "update global resource info failed")
+	}
+	return nil
+}
+
+func NewAnalyzer(param string, extraInfo string) (interfaces.Analyzer, error) {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
+	extraInfoPtr := C.CString(extraInfo)
+	defer C.free(unsafe.Pointer(extraInfoPtr))
+
 	var ptr C.CTokenizer
-	status := C.create_tokenizer(paramPtr, &ptr)
+	status := C.create_tokenizer(paramPtr, extraInfoPtr, &ptr)
 	if err := HandleCStatus(&status, "failed to create analyzer"); err != nil {
 		return nil, err
 	}
@@ -68,13 +89,21 @@ func NewAnalyzer(param string) (interfaces.Analyzer, error) {
 	return NewCAnalyzer(ptr), nil
 }
 
-func ValidateAnalyzer(param string) error {
+func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
-	status := C.validate_tokenizer(paramPtr)
-	if err := HandleCStatus(&status, "failed to create tokenizer"); err != nil {
-		return err
+	extraInfoPtr := C.CString(extraInfo)
+	defer C.free(unsafe.Pointer(extraInfoPtr))
+
+	result := C.validate_tokenizer(paramPtr, extraInfoPtr)
+	if err := HandleCStatus(&result.status, "failed to validate tokenizer"); err != nil {
+		return nil, err
 	}
-	return nil
+
+	cIds := unsafe.Slice((*int64)(unsafe.Pointer(result.resource_ids)), result.resource_ids_count)
+	goIds := make([]int64, len(cIds))
+	copy(goIds, cIds)
+	C.free(unsafe.Pointer(result.resource_ids))
+	return goIds, nil
 }
