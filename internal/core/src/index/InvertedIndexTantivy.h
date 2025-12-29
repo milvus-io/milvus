@@ -348,7 +348,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // and can read and insert concurrently.
     bool is_growing_{false};
 
-    // `is_nested_index_` can only be true for array data tpye. When it's true,
+    // `is_nested_index_` can only be true for array data type. When it's true,
     // every element in the array is treated as a separate document in the index.
     bool is_nested_index_{false};
 };
