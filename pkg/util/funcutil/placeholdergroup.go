@@ -195,8 +195,9 @@ func floatVectorToByteVector(vector []float32) []byte {
 
 func flattenedBinaryVectorsToByteVectors(flattenedVectors []byte, dimension int) [][]byte {
 	result := make([][]byte, 0)
-	for i := 0; i < len(flattenedVectors); i += dimension / 8 {
-		result = append(result, flattenedVectors[i:i+dimension/8])
+	vectorBytes := dimension / 8
+	for i := 0; i < len(flattenedVectors); i += vectorBytes {
+		result = append(result, flattenedVectors[i:i+vectorBytes])
 	}
 	return result
 }

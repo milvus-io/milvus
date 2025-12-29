@@ -1025,6 +1025,56 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, 
 	return avgdl, nil
 }
 
+func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest) error {
+	pb := &commonpb.PlaceholderGroup{}
+	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
+
+	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
+		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search")
+	}
+
+	holder := pb.Placeholders[0]
+	if holder.Type != commonpb.PlaceholderType_VarChar {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String()))
+	}
+
+	texts := funcutil.GetVarCharFromPlaceholder(holder)
+	datas := []any{texts}
+	functionRunner, ok := sd.functionRunners[req.GetFieldId()]
+	if !ok {
+		return fmt.Errorf("functionRunner not found for field: %d", req.GetFieldId())
+	}
+
+	output, err := functionRunner.BatchRun(datas...)
+	if err != nil {
+		return err
+	}
+	if len(output) == 0 {
+		return errors.New("MinHash embedding failed: runner returned empty output")
+	}
+
+	fieldData, ok := output[0].(*schemapb.FieldData)
+	if !ok {
+		return errors.New("MinHash embedding failed: MinHash functionRunner return unknown data")
+	}
+
+	vectorField := fieldData.GetVectors()
+	if vectorField == nil {
+		return errors.New("MinHash embedding failed: output is not a vector field")
+	}
+
+	binaryVector := vectorField.GetBinaryVector()
+	if binaryVector == nil {
+		return errors.New("MinHash embedding failed: output is not a binary vector")
+	}
+
+	req.PlaceholderGroup, err = funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (sd *shardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
 	workers := sd.workerManager.GetAllWorkers()
 	for _, worker := range workers {
