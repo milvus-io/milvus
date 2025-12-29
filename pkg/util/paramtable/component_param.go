@@ -335,6 +335,8 @@ type commonConfig struct {
 	ClusterID              ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+	QNFileResourceMode        ParamItem `refreshable:"true"`
+	DNFileResourceMode        ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1298,6 +1300,24 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.HybridSearchRequeryPolicy.Init(base.mgr)
+
+	p.QNFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.queryNode",
+		Version:      "2.6.8",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for query node, options: [sync, close]. Default is sync.",
+		Export:       true,
+	}
+	p.QNFileResourceMode.Init(base.mgr)
+
+	p.DNFileResourceMode = ParamItem{
+		Key:          "common.fileResource.mode.dataNode",
+		Version:      "2.6.8",
+		DefaultValue: "sync",
+		Doc:          "File resource mode for data node, options: [sync, ref, close]. Default is sync.",
+		Export:       true,
+	}
+	p.DNFileResourceMode.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2503,8 +2523,6 @@ type queryCoordConfig struct {
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
 
-	FileResourceMode ParamItem `refreshable:"false"`
-
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 }
 
@@ -2516,13 +2534,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		DefaultValue: "5",
 	}
 	p.RetryNum.Init(base.mgr)
-
-	p.FileResourceMode = ParamItem{
-		Key:          "queryCoord.fileResource.mode",
-		Version:      "2.6.3",
-		DefaultValue: "sync",
-	}
-	p.FileResourceMode.Init(base.mgr)
 
 	p.RetryInterval = ParamItem{
 		Key:          "queryCoord.task.retryinterval",
@@ -4700,7 +4711,6 @@ type dataCoordConfig struct {
 	JSONStatsWriteBatchSize          ParamItem `refreshable:"true"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
-	FileResourceMode      ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -4712,13 +4722,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
-
-	p.FileResourceMode = ParamItem{
-		Key:          "dataCoord.fileResource.mode",
-		Version:      "2.6.3",
-		DefaultValue: "sync",
-	}
-	p.FileResourceMode.Init(base.mgr)
 
 	p.LegacyVersionWithoutRPCWatch = ParamItem{
 		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",

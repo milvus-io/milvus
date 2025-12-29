@@ -1563,7 +1563,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 }
 
 func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
+	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -1650,7 +1650,7 @@ func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 	resourceSet := typeutil.NewSet[int64]()
 
 	for _, info := range req.AnalyzerInfos {
-		ids, err := analyzer.ValidateAnalyzer(info.GetParams())
+		ids, err := analyzer.ValidateAnalyzer(info.GetParams(), "")
 		if err != nil {
 			if info.GetName() != "" {
 				return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err))}, nil
@@ -1767,7 +1767,7 @@ func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.Syn
 	}
 	defer node.lifetime.Done()
 
-	err := fileresource.Sync(req.GetResources())
+	err := fileresource.Sync(req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}

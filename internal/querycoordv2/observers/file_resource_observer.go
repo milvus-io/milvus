@@ -99,7 +99,7 @@ func (m *FileResourceObserver) syncLoop() {
 }
 
 func (m *FileResourceObserver) Start() {
-	if fileresource.IsSyncMode(paramtable.Get().QueryCoordCfg.FileResourceMode.GetValue()) {
+	if fileresource.IsSyncMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()) {
 		m.once.Do(func() {
 			m.wg.Add(1)
 			go m.syncLoop()

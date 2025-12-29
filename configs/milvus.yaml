@@ -1043,6 +1043,10 @@ common:
   enablePosixMode: false # Specifies whether to run in POSIX mode for enhanced file system compatibility
   usingJSONShreddingForQuery: true # Indicates whether to use json stats when query
   clusterID: 0 # cluster id
+  fileResource:
+    mode:
+      queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
+      dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

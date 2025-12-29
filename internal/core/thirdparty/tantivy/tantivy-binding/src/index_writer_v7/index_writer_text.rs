@@ -26,8 +26,9 @@ impl IndexWriterWrapperImpl {
     pub(crate) fn create_text_writer(
         field_name: &str,
         path: &str,
-        tokenizer_name: &str,
-        tokenizer_params: &str,
+        analyzer_name: &str,
+        analyzer_params: &str,
+        analyzer_extra_info: &str,
         num_threads: usize,
         overall_memory_budget_in_bytes: usize,
         in_ram: bool,
@@ -37,15 +38,15 @@ impl IndexWriterWrapperImpl {
             field_name
         );
 
-        let tokenizer = create_analyzer(tokenizer_params, "")?;
+        let analyzer = create_analyzer(analyzer_params, analyzer_extra_info)?;
 
-        let (schema, field) = build_text_schema(field_name, tokenizer_name);
+        let (schema, field) = build_text_schema(field_name, analyzer_name);
         let index = if in_ram {
             Index::create_in_ram(schema)
         } else {
             Index::create_in_dir(path, schema).unwrap()
         };
-        index.tokenizers().register(tokenizer_name, tokenizer);
+        index.tokenizers().register(analyzer_name, analyzer);
         let index_writer = index
             .writer_with_num_threads(num_threads, overall_memory_budget_in_bytes)
             .unwrap();

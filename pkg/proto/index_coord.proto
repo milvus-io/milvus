@@ -328,6 +328,7 @@ message StatsTask {
     int64 target_segmentID = 10;
     index.StatsSubJob subJobType = 11;
     bool canRecycle = 12;
+    repeated internal.FileResourceInfo file_resources = 13;
 }
 
 message UpdateExternalCollectionTask {

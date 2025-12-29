@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -50,6 +52,7 @@ import (
 
 type sortCompactionTask struct {
 	binlogIO    io.BinlogIO
+	cm          storage.ChunkManager
 	currentTime time.Time
 
 	plan *datapb.CompactionPlan
@@ -80,7 +83,7 @@ var _ Compactor = (*sortCompactionTask)(nil)
 
 func NewSortCompactionTask(
 	ctx context.Context,
-	binlogIO io.BinlogIO,
+	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 	compactionParams compaction.Params,
 	sortByFieldIDs []int64,
@@ -89,7 +92,8 @@ func NewSortCompactionTask(
 	return &sortCompactionTask{
 		ctx:              ctx1,
 		cancel:           cancel,
-		binlogIO:         binlogIO,
+		binlogIO:         io.NewBinlogIO(cm),
+		cm:               cm,
 		plan:             plan,
 		tr:               timerecord.NewTimeRecorder("sort compaction"),
 		currentTime:      time.Now(),
@@ -451,6 +455,19 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 
 	eg, egCtx := errgroup.WithContext(ctx)
 
+	var analyzerExtraInfo string
+	if len(t.plan.GetFileResources()) > 0 {
+		err := fileresource.GlobalFileManager.Download(ctx, t.cm, t.plan.GetFileResources()...)
+		if err != nil {
+			return nil, err
+		}
+		defer fileresource.GlobalFileManager.Release(t.plan.GetFileResources()...)
+		analyzerExtraInfo, err = analyzer.BuildExtraResourceInfo(t.compactionParams.StorageConfig.GetRootPath(), t.plan.GetFileResources())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	for _, field := range t.plan.GetSchema().GetFields() {
 		field := field
 		h := typeutil.CreateFieldSchemaHelper(field)
@@ -477,6 +494,10 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 				CurrentScalarIndexVersion: t.plan.GetCurrentScalarIndexVersion(),
 				StorageVersion:            t.storageVersion,
 				Manifest:                  t.manifest,
+			}
+
+			if len(analyzerExtraInfo) > 0 {
+				buildIndexParams.AnalyzerExtraInfo = analyzerExtraInfo
 			}
 
 			if t.storageVersion == storage.StorageV2 {

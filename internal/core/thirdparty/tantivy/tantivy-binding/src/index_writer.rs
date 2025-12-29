@@ -287,6 +287,7 @@ mod tests {
                 dir.path().to_str().unwrap(),
                 "default",
                 "",
+                "",
                 1,
                 50_000_000,
                 false,

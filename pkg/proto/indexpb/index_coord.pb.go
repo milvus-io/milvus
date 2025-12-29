@@ -2715,18 +2715,19 @@ type StatsTask struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	CollectionID    int64       `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	PartitionID     int64       `protobuf:"varint,2,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
-	SegmentID       int64       `protobuf:"varint,3,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
-	InsertChannel   string      `protobuf:"bytes,4,opt,name=insert_channel,json=insertChannel,proto3" json:"insert_channel,omitempty"`
-	TaskID          int64       `protobuf:"varint,5,opt,name=taskID,proto3" json:"taskID,omitempty"`
-	Version         int64       `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
-	NodeID          int64       `protobuf:"varint,7,opt,name=nodeID,proto3" json:"nodeID,omitempty"`
-	State           JobState    `protobuf:"varint,8,opt,name=state,proto3,enum=milvus.proto.index.JobState" json:"state,omitempty"`
-	FailReason      string      `protobuf:"bytes,9,opt,name=fail_reason,json=failReason,proto3" json:"fail_reason,omitempty"`
-	TargetSegmentID int64       `protobuf:"varint,10,opt,name=target_segmentID,json=targetSegmentID,proto3" json:"target_segmentID,omitempty"`
-	SubJobType      StatsSubJob `protobuf:"varint,11,opt,name=subJobType,proto3,enum=milvus.proto.index.StatsSubJob" json:"subJobType,omitempty"`
-	CanRecycle      bool        `protobuf:"varint,12,opt,name=canRecycle,proto3" json:"canRecycle,omitempty"`
+	CollectionID    int64                          `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	PartitionID     int64                          `protobuf:"varint,2,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
+	SegmentID       int64                          `protobuf:"varint,3,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	InsertChannel   string                         `protobuf:"bytes,4,opt,name=insert_channel,json=insertChannel,proto3" json:"insert_channel,omitempty"`
+	TaskID          int64                          `protobuf:"varint,5,opt,name=taskID,proto3" json:"taskID,omitempty"`
+	Version         int64                          `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
+	NodeID          int64                          `protobuf:"varint,7,opt,name=nodeID,proto3" json:"nodeID,omitempty"`
+	State           JobState                       `protobuf:"varint,8,opt,name=state,proto3,enum=milvus.proto.index.JobState" json:"state,omitempty"`
+	FailReason      string                         `protobuf:"bytes,9,opt,name=fail_reason,json=failReason,proto3" json:"fail_reason,omitempty"`
+	TargetSegmentID int64                          `protobuf:"varint,10,opt,name=target_segmentID,json=targetSegmentID,proto3" json:"target_segmentID,omitempty"`
+	SubJobType      StatsSubJob                    `protobuf:"varint,11,opt,name=subJobType,proto3,enum=milvus.proto.index.StatsSubJob" json:"subJobType,omitempty"`
+	CanRecycle      bool                           `protobuf:"varint,12,opt,name=canRecycle,proto3" json:"canRecycle,omitempty"`
+	FileResources   []*internalpb.FileResourceInfo `protobuf:"bytes,13,rep,name=file_resources,json=fileResources,proto3" json:"file_resources,omitempty"`
 }
 
 func (x *StatsTask) Reset() {
@@ -2843,6 +2844,13 @@ func (x *StatsTask) GetCanRecycle() bool {
 		return x.CanRecycle
 	}
 	return false
+}
+
+func (x *StatsTask) GetFileResources() []*internalpb.FileResourceInfo {
+	if x != nil {
+		return x.FileResources
+	}
+	return nil
 }
 
 type UpdateExternalCollectionTask struct {
@@ -3405,7 +3413,7 @@ var file_index_coord_proto_rawDesc = []byte{
 	0x69, 0x65, 0x6c, 0x64, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x07, 0x66, 0x69,
 	0x65, 0x6c, 0x64, 0x49, 0x44, 0x12, 0x1d, 0x0a, 0x0a, 0x66, 0x69, 0x6c, 0x65, 0x5f, 0x70, 0x61,
 	0x74, 0x68, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x09, 0x66, 0x69, 0x6c, 0x65, 0x50,
-	0x61, 0x74, 0x68, 0x73, 0x22, 0xc1, 0x03, 0x0a, 0x09, 0x53, 0x74, 0x61, 0x74, 0x73, 0x54, 0x61,
+	0x61, 0x74, 0x68, 0x73, 0x22, 0x91, 0x04, 0x0a, 0x09, 0x53, 0x74, 0x61, 0x74, 0x73, 0x54, 0x61,
 	0x73, 0x6b, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e,
 	0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63,
 	0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12, 0x20, 0x0a, 0x0b, 0x70, 0x61, 0x72, 0x74, 0x69, 0x74,
@@ -3433,7 +3441,12 @@ var file_index_coord_proto_rawDesc = []byte{
 	0x2e, 0x53, 0x74, 0x61, 0x74, 0x73, 0x53, 0x75, 0x62, 0x4a, 0x6f, 0x62, 0x52, 0x0a, 0x73, 0x75,
 	0x62, 0x4a, 0x6f, 0x62, 0x54, 0x79, 0x70, 0x65, 0x12, 0x1e, 0x0a, 0x0a, 0x63, 0x61, 0x6e, 0x52,
 	0x65, 0x63, 0x79, 0x63, 0x6c, 0x65, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x63, 0x61,
-	0x6e, 0x52, 0x65, 0x63, 0x79, 0x63, 0x6c, 0x65, 0x22, 0xaf, 0x02, 0x0a, 0x1c, 0x55, 0x70, 0x64,
+	0x6e, 0x52, 0x65, 0x63, 0x79, 0x63, 0x6c, 0x65, 0x12, 0x4e, 0x0a, 0x0e, 0x66, 0x69, 0x6c, 0x65,
+	0x5f, 0x72, 0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x73, 0x18, 0x0d, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x27, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2e, 0x46, 0x69, 0x6c, 0x65, 0x52, 0x65, 0x73,
+	0x6f, 0x75, 0x72, 0x63, 0x65, 0x49, 0x6e, 0x66, 0x6f, 0x52, 0x0d, 0x66, 0x69, 0x6c, 0x65, 0x52,
+	0x65, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x73, 0x22, 0xaf, 0x02, 0x0a, 0x1c, 0x55, 0x70, 0x64,
 	0x61, 0x74, 0x65, 0x45, 0x78, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x43, 0x6f, 0x6c, 0x6c, 0x65,
 	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x6f, 0x6c,
 	0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52,
@@ -3617,12 +3630,13 @@ var file_index_coord_proto_goTypes = []interface{}{
 	(*commonpb.Status)(nil),                       // 41: milvus.proto.common.Status
 	(*internalpb.InitParams)(nil),                 // 42: milvus.proto.internal.InitParams
 	(schemapb.DataType)(0),                        // 43: milvus.proto.schema.DataType
-	(*internalpb.ShowConfigurationsRequest)(nil),  // 44: milvus.proto.internal.ShowConfigurationsRequest
-	(*milvuspb.GetMetricsRequest)(nil),            // 45: milvus.proto.milvus.GetMetricsRequest
-	(*milvuspb.CheckHealthRequest)(nil),           // 46: milvus.proto.milvus.CheckHealthRequest
-	(*internalpb.ShowConfigurationsResponse)(nil), // 47: milvus.proto.internal.ShowConfigurationsResponse
-	(*milvuspb.GetMetricsResponse)(nil),           // 48: milvus.proto.milvus.GetMetricsResponse
-	(*milvuspb.CheckHealthResponse)(nil),          // 49: milvus.proto.milvus.CheckHealthResponse
+	(*internalpb.FileResourceInfo)(nil),           // 44: milvus.proto.internal.FileResourceInfo
+	(*internalpb.ShowConfigurationsRequest)(nil),  // 45: milvus.proto.internal.ShowConfigurationsRequest
+	(*milvuspb.GetMetricsRequest)(nil),            // 46: milvus.proto.milvus.GetMetricsRequest
+	(*milvuspb.CheckHealthRequest)(nil),           // 47: milvus.proto.milvus.CheckHealthRequest
+	(*internalpb.ShowConfigurationsResponse)(nil), // 48: milvus.proto.internal.ShowConfigurationsResponse
+	(*milvuspb.GetMetricsResponse)(nil),           // 49: milvus.proto.milvus.GetMetricsResponse
+	(*milvuspb.CheckHealthResponse)(nil),          // 50: milvus.proto.milvus.CheckHealthResponse
 }
 var file_index_coord_proto_depIdxs = []int32{
 	37, // 0: milvus.proto.index.IndexInfo.type_params:type_name -> milvus.proto.common.KeyValuePair
@@ -3660,37 +3674,38 @@ var file_index_coord_proto_depIdxs = []int32{
 	1,  // 32: milvus.proto.index.AnalyzeTask.state:type_name -> milvus.proto.index.JobState
 	1,  // 33: milvus.proto.index.StatsTask.state:type_name -> milvus.proto.index.JobState
 	2,  // 34: milvus.proto.index.StatsTask.subJobType:type_name -> milvus.proto.index.StatsSubJob
-	1,  // 35: milvus.proto.index.UpdateExternalCollectionTask.state:type_name -> milvus.proto.index.JobState
-	17, // 36: milvus.proto.index.GetIndexInfoResponse.SegmentInfoEntry.value:type_name -> milvus.proto.index.SegmentInfo
-	13, // 37: milvus.proto.index.IndexCoord.CreateIndex:input_type -> milvus.proto.index.CreateIndexRequest
-	14, // 38: milvus.proto.index.IndexCoord.AlterIndex:input_type -> milvus.proto.index.AlterIndexRequest
-	8,  // 39: milvus.proto.index.IndexCoord.GetIndexState:input_type -> milvus.proto.index.GetIndexStateRequest
-	10, // 40: milvus.proto.index.IndexCoord.GetSegmentIndexState:input_type -> milvus.proto.index.GetSegmentIndexStateRequest
-	15, // 41: milvus.proto.index.IndexCoord.GetIndexInfos:input_type -> milvus.proto.index.GetIndexInfoRequest
-	19, // 42: milvus.proto.index.IndexCoord.DropIndex:input_type -> milvus.proto.index.DropIndexRequest
-	20, // 43: milvus.proto.index.IndexCoord.DescribeIndex:input_type -> milvus.proto.index.DescribeIndexRequest
-	27, // 44: milvus.proto.index.IndexCoord.GetIndexStatistics:input_type -> milvus.proto.index.GetIndexStatisticsRequest
-	22, // 45: milvus.proto.index.IndexCoord.GetIndexBuildProgress:input_type -> milvus.proto.index.GetIndexBuildProgressRequest
-	44, // 46: milvus.proto.index.IndexCoord.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
-	45, // 47: milvus.proto.index.IndexCoord.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
-	46, // 48: milvus.proto.index.IndexCoord.CheckHealth:input_type -> milvus.proto.milvus.CheckHealthRequest
-	41, // 49: milvus.proto.index.IndexCoord.CreateIndex:output_type -> milvus.proto.common.Status
-	41, // 50: milvus.proto.index.IndexCoord.AlterIndex:output_type -> milvus.proto.common.Status
-	9,  // 51: milvus.proto.index.IndexCoord.GetIndexState:output_type -> milvus.proto.index.GetIndexStateResponse
-	12, // 52: milvus.proto.index.IndexCoord.GetSegmentIndexState:output_type -> milvus.proto.index.GetSegmentIndexStateResponse
-	18, // 53: milvus.proto.index.IndexCoord.GetIndexInfos:output_type -> milvus.proto.index.GetIndexInfoResponse
-	41, // 54: milvus.proto.index.IndexCoord.DropIndex:output_type -> milvus.proto.common.Status
-	21, // 55: milvus.proto.index.IndexCoord.DescribeIndex:output_type -> milvus.proto.index.DescribeIndexResponse
-	28, // 56: milvus.proto.index.IndexCoord.GetIndexStatistics:output_type -> milvus.proto.index.GetIndexStatisticsResponse
-	23, // 57: milvus.proto.index.IndexCoord.GetIndexBuildProgress:output_type -> milvus.proto.index.GetIndexBuildProgressResponse
-	47, // 58: milvus.proto.index.IndexCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
-	48, // 59: milvus.proto.index.IndexCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
-	49, // 60: milvus.proto.index.IndexCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
-	49, // [49:61] is the sub-list for method output_type
-	37, // [37:49] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	44, // 35: milvus.proto.index.StatsTask.file_resources:type_name -> milvus.proto.internal.FileResourceInfo
+	1,  // 36: milvus.proto.index.UpdateExternalCollectionTask.state:type_name -> milvus.proto.index.JobState
+	17, // 37: milvus.proto.index.GetIndexInfoResponse.SegmentInfoEntry.value:type_name -> milvus.proto.index.SegmentInfo
+	13, // 38: milvus.proto.index.IndexCoord.CreateIndex:input_type -> milvus.proto.index.CreateIndexRequest
+	14, // 39: milvus.proto.index.IndexCoord.AlterIndex:input_type -> milvus.proto.index.AlterIndexRequest
+	8,  // 40: milvus.proto.index.IndexCoord.GetIndexState:input_type -> milvus.proto.index.GetIndexStateRequest
+	10, // 41: milvus.proto.index.IndexCoord.GetSegmentIndexState:input_type -> milvus.proto.index.GetSegmentIndexStateRequest
+	15, // 42: milvus.proto.index.IndexCoord.GetIndexInfos:input_type -> milvus.proto.index.GetIndexInfoRequest
+	19, // 43: milvus.proto.index.IndexCoord.DropIndex:input_type -> milvus.proto.index.DropIndexRequest
+	20, // 44: milvus.proto.index.IndexCoord.DescribeIndex:input_type -> milvus.proto.index.DescribeIndexRequest
+	27, // 45: milvus.proto.index.IndexCoord.GetIndexStatistics:input_type -> milvus.proto.index.GetIndexStatisticsRequest
+	22, // 46: milvus.proto.index.IndexCoord.GetIndexBuildProgress:input_type -> milvus.proto.index.GetIndexBuildProgressRequest
+	45, // 47: milvus.proto.index.IndexCoord.ShowConfigurations:input_type -> milvus.proto.internal.ShowConfigurationsRequest
+	46, // 48: milvus.proto.index.IndexCoord.GetMetrics:input_type -> milvus.proto.milvus.GetMetricsRequest
+	47, // 49: milvus.proto.index.IndexCoord.CheckHealth:input_type -> milvus.proto.milvus.CheckHealthRequest
+	41, // 50: milvus.proto.index.IndexCoord.CreateIndex:output_type -> milvus.proto.common.Status
+	41, // 51: milvus.proto.index.IndexCoord.AlterIndex:output_type -> milvus.proto.common.Status
+	9,  // 52: milvus.proto.index.IndexCoord.GetIndexState:output_type -> milvus.proto.index.GetIndexStateResponse
+	12, // 53: milvus.proto.index.IndexCoord.GetSegmentIndexState:output_type -> milvus.proto.index.GetSegmentIndexStateResponse
+	18, // 54: milvus.proto.index.IndexCoord.GetIndexInfos:output_type -> milvus.proto.index.GetIndexInfoResponse
+	41, // 55: milvus.proto.index.IndexCoord.DropIndex:output_type -> milvus.proto.common.Status
+	21, // 56: milvus.proto.index.IndexCoord.DescribeIndex:output_type -> milvus.proto.index.DescribeIndexResponse
+	28, // 57: milvus.proto.index.IndexCoord.GetIndexStatistics:output_type -> milvus.proto.index.GetIndexStatisticsResponse
+	23, // 58: milvus.proto.index.IndexCoord.GetIndexBuildProgress:output_type -> milvus.proto.index.GetIndexBuildProgressResponse
+	48, // 59: milvus.proto.index.IndexCoord.ShowConfigurations:output_type -> milvus.proto.internal.ShowConfigurationsResponse
+	49, // 60: milvus.proto.index.IndexCoord.GetMetrics:output_type -> milvus.proto.milvus.GetMetricsResponse
+	50, // 61: milvus.proto.index.IndexCoord.CheckHealth:output_type -> milvus.proto.milvus.CheckHealthResponse
+	50, // [50:62] is the sub-list for method output_type
+	38, // [38:50] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_index_coord_proto_init() }

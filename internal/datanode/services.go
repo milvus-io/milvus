@@ -220,12 +220,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		return merr.Status(err), err
 	}
 	var task compactor.Compactor
-	binlogIO := io.NewBinlogIO(cm)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
 			taskCtx,
-			binlogIO,
+			io.NewBinlogIO(cm),
 			cm,
 			req,
 			compactionParams,
@@ -240,7 +239,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		}
 		task = compactor.NewMixCompactionTask(
 			taskCtx,
-			binlogIO,
+			io.NewBinlogIO(cm),
 			req,
 			compactionParams,
 			[]int64{pk.GetFieldID()},
@@ -251,7 +250,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		}
 		task = compactor.NewClusteringCompactionTask(
 			taskCtx,
-			binlogIO,
+			io.NewBinlogIO(cm),
 			req,
 			compactionParams,
 		)
@@ -265,7 +264,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		}
 		task = compactor.NewSortCompactionTask(
 			taskCtx,
-			binlogIO,
+			cm,
 			req,
 			compactionParams,
 			[]int64{pk.GetFieldID()},
@@ -281,7 +280,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		}
 		task = compactor.NewSortCompactionTask(
 			taskCtx,
-			binlogIO,
+			cm,
 			req,
 			compactionParams,
 			[]int64{partitionkey.GetFieldID(), pk.GetFieldID()},
@@ -992,7 +991,7 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 		return merr.Status(merr.ErrServiceNotReady), nil
 	}
 
-	err := fileresource.Sync(req.GetResources())
+	err := fileresource.Sync(req.GetVersion(), req.GetResources())
 	if err != nil {
 		return merr.Status(err), nil
 	}
