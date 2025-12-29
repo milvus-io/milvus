@@ -455,7 +455,6 @@ func (s *DeleteRunnerSuite) TestInitFailure() {
 		s.mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		s.mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 			Return(s.collectionID, nil)
-		s.mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
 		s.mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock GetCollectionSchema err"))
 

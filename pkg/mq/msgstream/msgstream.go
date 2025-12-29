@@ -286,13 +286,11 @@ type MsgStream interface {
 	Chan() <-chan *ConsumeMsgPack
 	GetUnmarshalDispatcher() UnmarshalDispatcher
 	// Seek consume message from the specified position
-	// includeCurrentMsg indicates whether to consume the current message, and in the milvus system, it should be always false
+	// includeCurrentMsg indicates whether to consume the current message.
 	Seek(ctx context.Context, msgPositions []*MsgPosition, includeCurrentMsg bool) error
 
 	GetLatestMsgID(channel string) (MessageID, error)
 	CheckTopicValid(channel string) error
-
-	ForceEnableProduce(can bool)
 }
 
 func GetTimestamp(msg TsMsg) uint64 {

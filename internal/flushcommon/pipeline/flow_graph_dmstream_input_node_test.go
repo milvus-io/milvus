@@ -104,9 +104,6 @@ func (mtm *mockTtMsgStream) CheckTopicValid(channel string) error {
 	return nil
 }
 
-func (mtm *mockTtMsgStream) ForceEnableProduce(can bool) {
-}
-
 func TestNewDmInputNode(t *testing.T) {
 	assert.Panics(t, func() {
 		newDmInputNode(&nodeConfig{

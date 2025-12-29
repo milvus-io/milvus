@@ -54,17 +54,16 @@ type mqMsgStream struct {
 	consumers        map[string]mqwrapper.Consumer
 	consumerChannels []string
 
-	repackFunc         RepackFunc
-	unmarshal          UnmarshalDispatcher
-	receiveBuf         chan *ConsumeMsgPack
-	closeRWMutex       *sync.RWMutex
-	streamCancel       func()
-	bufSize            int64
-	producerLock       *sync.RWMutex
-	consumerLock       *sync.Mutex
-	closed             int32
-	onceChan           sync.Once
-	forceEnableProduce atomic.Value
+	repackFunc   RepackFunc
+	unmarshal    UnmarshalDispatcher
+	receiveBuf   chan *ConsumeMsgPack
+	closeRWMutex *sync.RWMutex
+	streamCancel func()
+	bufSize      int64
+	producerLock *sync.RWMutex
+	consumerLock *sync.Mutex
+	closed       int32
+	onceChan     sync.Once
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -98,9 +97,7 @@ func NewMqMsgStream(initCtx context.Context,
 		closeRWMutex: &sync.RWMutex{},
 		closed:       0,
 	}
-	ctxLog := log.Ctx(initCtx)
-	stream.forceEnableProduce.Store(false)
-	ctxLog.Info("Msg Stream state", zap.Bool("can_produce", stream.isEnabledProduce()))
+	log.Ctx(initCtx).Info("Msg Stream initialized")
 
 	return stream, nil
 }
@@ -250,19 +247,7 @@ func (ms *mqMsgStream) GetProduceChannels() []string {
 	return ms.producerChannels
 }
 
-func (ms *mqMsgStream) ForceEnableProduce(can bool) {
-	ms.forceEnableProduce.Store(can)
-}
-
-func (ms *mqMsgStream) isEnabledProduce() bool {
-	return ms.forceEnableProduce.Load().(bool)
-}
-
 func (ms *mqMsgStream) Produce(ctx context.Context, msgPack *MsgPack) error {
-	if !ms.isEnabledProduce() {
-		log.Ctx(ms.ctx).Warn("can't produce the msg in the backup instance", zap.Stack("stack"))
-		return merr.ErrDenyProduceMsg
-	}
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		log.Ctx(ms.ctx).Debug("Warning: Receive empty msgPack")
 		return nil
@@ -338,14 +323,7 @@ func (ms *mqMsgStream) Broadcast(ctx context.Context, msgPack *MsgPack) (map[str
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		return ids, errors.New("empty msgs")
 	}
-	// Only allow to create collection msg in backup instance
-	// However, there may be a problem of ts disorder here, but because the start position of the collection only uses offsets, not time, there is no problem for the time being
-	isCreateCollectionMsg := len(msgPack.Msgs) == 1 && msgPack.Msgs[0].Type() == commonpb.MsgType_CreateCollection
 
-	if !ms.isEnabledProduce() && !isCreateCollectionMsg {
-		log.Ctx(ms.ctx).Warn("can't broadcast the msg in the backup instance", zap.Stack("stack"))
-		return ids, merr.ErrDenyProduceMsg
-	}
 	for _, v := range msgPack.Msgs {
 		spanCtx, sp := MsgSpanFromCtx(v.TraceCtx(), v)
 

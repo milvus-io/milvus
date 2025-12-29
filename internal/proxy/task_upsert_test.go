@@ -502,7 +502,6 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
 		}, nil)
-		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)

@@ -308,9 +308,6 @@ func (w WpMsgStream) CheckTopicValid(channel string) error {
 	return nil
 }
 
-func (w WpMsgStream) ForceEnableProduce(can bool) {
-}
-
 // NewWpmsFactory creates a new message stream factory based on woodpecker
 func NewWpmsFactory(cfg *paramtable.ServiceParam) Factory {
 	// TODO should not be used in mq wrapper

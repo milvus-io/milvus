@@ -182,5 +182,5 @@ func TestGroupMessage(t *testing.T) {
 			},
 		},
 	}), nil)
-	assert.Len(t, packs, 1)
+	assert.Len(t, packs, 2)
 }

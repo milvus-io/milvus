@@ -405,11 +405,6 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.Anything,
 	).Return(&collectionInfo{schema: info}, nil)
 
-	cache.On("GetDatabaseInfo",
-		mock.Anything,
-		mock.Anything,
-	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil)
-
 	globalMetaCache = cache
 
 	err = task.PreExecute(context.Background())
@@ -557,11 +552,6 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.Anything,
 		mock.Anything,
 	).Return(&collectionInfo{schema: info}, nil)
-	cache.On("GetDatabaseInfo",
-		mock.Anything,
-		mock.Anything,
-	).Return(&databaseInfo{properties: []*commonpb.KeyValuePair{}}, nil)
-
 	globalMetaCache = cache
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
@@ -589,7 +579,6 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
 		}, nil)
-		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		err := it.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)

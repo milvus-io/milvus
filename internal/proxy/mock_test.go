@@ -314,9 +314,6 @@ func (ms *simpleMockMsgStream) CheckTopicValid(topic string) error {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) ForceEnableProduce(enabled bool) {
-}
-
 func newSimpleMockMsgStream() *simpleMockMsgStream {
 	return &simpleMockMsgStream{
 		msgChan:  make(chan *msgstream.ConsumeMsgPack, 1024),

@@ -10,10 +10,9 @@ import (
 
 type mockMsgStream struct {
 	msgstream.MsgStream
-	asProducer         func([]string)
-	setRepack          func(repackFunc msgstream.RepackFunc)
-	close              func()
-	forceEnableProduce func(bool)
+	asProducer func([]string)
+	setRepack  func(repackFunc msgstream.RepackFunc)
+	close      func()
 }
 
 func (m *mockMsgStream) AsProducer(ctx context.Context, producers []string) {
@@ -31,12 +30,6 @@ func (m *mockMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {
 func (m *mockMsgStream) Close() {
 	if m.close != nil {
 		m.close()
-	}
-}
-
-func (m *mockMsgStream) ForceEnableProduce(enabled bool) {
-	if m.forceEnableProduce != nil {
-		m.forceEnableProduce(enabled)
 	}
 }
 
