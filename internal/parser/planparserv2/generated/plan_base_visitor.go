@@ -11,6 +11,10 @@ func (v *BasePlanVisitor) VisitString(ctx *StringContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitMatchAny(ctx *MatchAnyContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -59,6 +63,10 @@ func (v *BasePlanVisitor) VisitPhraseMatch(ctx *PhraseMatchContext) interface{} 
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitMatchLeast(ctx *MatchLeastContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitArrayLength(ctx *ArrayLengthContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -83,6 +91,10 @@ func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitMatchAll(ctx *MatchAllContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitSTIsValid(ctx *STIsValidContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -103,6 +115,10 @@ func (v *BasePlanVisitor) VisitSTOverlaps(ctx *STOverlapsContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitMatchMost(ctx *MatchMostContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitJSONIdentifier(ctx *JSONIdentifierContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -112,6 +128,10 @@ func (v *BasePlanVisitor) VisitRandomSample(ctx *RandomSampleContext) interface{
 }
 
 func (v *BasePlanVisitor) VisitParens(ctx *ParensContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitMatchExact(ctx *MatchExactContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
