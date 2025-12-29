@@ -1,10 +1,14 @@
 use super::filter::FilterBuilder;
+use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use tantivy::tokenizer::{Language, Stemmer};
 
 impl FilterBuilder for Stemmer {
-    fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
+    fn from_json(
+        params: &json::Map<String, json::Value>,
+        _: &mut FileResourcePathHelper,
+    ) -> Result<Self> {
         let value = params.get("language");
         if value.is_none() || !value.unwrap().is_string() {
             return Err(TantivyBindingError::InternalError(

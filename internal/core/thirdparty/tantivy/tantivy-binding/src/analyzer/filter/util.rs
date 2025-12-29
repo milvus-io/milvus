@@ -1,4 +1,5 @@
 use crate::analyzer::options::get_resource_path;
+use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::io::BufRead;
@@ -26,11 +27,12 @@ pub fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> 
 }
 
 pub(crate) fn read_line_file(
+    helper: &mut FileResourcePathHelper,
     dict: &mut Vec<String>,
     params: &json::Value,
     key: &str,
 ) -> Result<()> {
-    let path = get_resource_path(params, key)?;
+    let path = get_resource_path(helper, params, key)?;
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(file);
     for line in reader.lines() {

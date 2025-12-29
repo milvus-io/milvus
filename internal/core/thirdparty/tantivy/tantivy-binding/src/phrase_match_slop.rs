@@ -1,4 +1,5 @@
 use crate::analyzer::create_analyzer_by_json;
+use crate::analyzer::options::get_global_file_resource_helper;
 use serde_json::{self, Value};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -38,7 +39,9 @@ pub fn compute_phrase_match_slop(
         .ok_or("Tokenizer params must be a JSON object")?;
 
     // 2. Create Analyzer
-    let mut analyzer = create_analyzer_by_json(params_obj)
+    // TODO: support build helper from extra_info
+    let mut helper = get_global_file_resource_helper();
+    let mut analyzer = create_analyzer_by_json(params_obj, &mut helper)
         .map_err(|e| format!("Failed to create analyzer: {:?}", e))?;
 
     // 3. Tokenize Query

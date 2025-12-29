@@ -374,6 +374,19 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				appender := &nullDefaultAppender[*schemapb.ScalarField]{}
 				err = appender.AppendNull(fieldData, rowNum)
 			}
+		case schemapb.DataType_FloatVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_SparseFloatVector,
+			schemapb.DataType_Int8Vector:
+			if nullable {
+				for i := 0; i < rowNum; i++ {
+					if err = fieldData.AppendRow(nil); err != nil {
+						return err
+					}
+				}
+			}
 		default:
 			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
 		}

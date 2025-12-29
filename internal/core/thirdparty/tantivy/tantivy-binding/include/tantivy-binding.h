@@ -497,7 +497,9 @@ const char *tantivy_token_stream_get_token(void *token_stream);
 
 TantivyToken tantivy_token_stream_get_detailed_token(void *token_stream);
 
-RustResult tantivy_create_analyzer(const char *analyzer_params);
+RustResult tantivy_create_analyzer(const char *analyzer_params, const char *extra_info);
+
+RustResult tantivy_validate_analyzer(const char *analyzer_params, const char *extra_info);
 
 void *tantivy_clone_analyzer(void *ptr);
 
