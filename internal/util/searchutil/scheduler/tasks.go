@@ -118,6 +118,8 @@ type taskWrapper struct {
 
 // Done notify the task finished.
 func (t *taskWrapper) Done(err error) {
-	t.callbackWhenDone()
+	if t.callbackWhenDone != nil {
+		t.callbackWhenDone()
+	}
 	t.Task.Done(err)
 }

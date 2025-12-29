@@ -39,22 +39,22 @@ func TestConcurrentLimiter(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		limiter.UpdateLimit(hardware.SystemMetrics{
+		l.UpdateLimit(hardware.SystemMetrics{
 			CPUNum:          cpu,
 			AverageCPUUsage: threshold.hwmThreshold,
 		})
-		assert.Equal(t, threshold.hwmConcurrencyLimit, limiter.GetCurrentConcurrent())
+		assert.Equal(t, threshold.hwmConcurrencyLimit, l.GetCurrentConcurrent())
 
-		limiter.UpdateLimit(hardware.SystemMetrics{
+		l.UpdateLimit(hardware.SystemMetrics{
 			CPUNum:          cpu,
 			AverageCPUUsage: threshold.lwmThreshold,
 		})
-		assert.Equal(t, threshold.lwmConcurrencyLimit, limiter.GetCurrentConcurrent())
+		assert.Equal(t, threshold.lwmConcurrencyLimit, l.GetCurrentConcurrent())
 
-		limiter.UpdateLimit(hardware.SystemMetrics{
+		l.UpdateLimit(hardware.SystemMetrics{
 			CPUNum:          cpu,
 			AverageCPUUsage: (threshold.lwmThreshold + threshold.hwmThreshold) / 2,
 		})
-		assert.Equal(t, (threshold.lwmConcurrencyLimit+threshold.hwmConcurrencyLimit)/2, limiter.GetCurrentConcurrent())
+		assert.Equal(t, (threshold.lwmConcurrencyLimit+threshold.hwmConcurrencyLimit)/2, l.GetCurrentConcurrent())
 	}
 }

@@ -196,10 +196,12 @@ func (q *fairPollingTaskQueue) pop(queueExpire time.Duration, skipper ...func(t 
 			checkpoint = next
 			continue
 		}
-		task = queue.front()
-		if len(skipper) > 0 && skipper[0](task) {
+		newTask := queue.front()
+		if len(skipper) > 0 && skipper[0](newTask) {
+			checkpoint = next
 			continue
 		}
+		task = newTask
 		queue.pop()
 		q.count--
 		checkpoint = next
