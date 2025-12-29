@@ -1160,12 +1160,9 @@ class SegmentExpr : public Expr {
     // Specialized method for ngram post-filter: processes all data in batches
     // - Starts from position 0
     // - Does NOT modify segment state variables (current_data_chunk_, etc.)
-    // - Calls get_batch_views in batches of batch_size_ to avoid performance issues
     template <typename T, typename FUNC>
     int64_t
-    ProcessAllDataChunkBatched(FUNC func,
-                               TargetBitmapView res,
-                               TargetBitmapView valid_res) {
+    ProcessAllDataChunkBatched(FUNC func, TargetBitmapView res) {
         static_assert(std::is_same_v<T, std::string_view> ||
                           std::is_same_v<T, Json> ||
                           std::is_same_v<T, ArrayView>,
@@ -1189,14 +1186,9 @@ class SegmentExpr : public Expr {
 
                 auto pw = segment_->get_batch_views<T>(
                     op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
-                auto [data_vec, valid_data] = pw.get();
+                auto data_vec = std::move(pw.get().first);
 
-                func(data_vec.data(),
-                     valid_data.data(),
-                     nullptr,
-                     batch_size,
-                     res + processed_size,
-                     valid_res + processed_size);
+                func(data_vec.data(), batch_size, res + processed_size);
 
                 chunk_offset += batch_size;
                 processed_size += batch_size;
