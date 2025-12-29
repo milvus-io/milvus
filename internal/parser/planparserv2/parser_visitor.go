@@ -2000,6 +2000,15 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
+// VisitTimestamptzCompareForward handles comparison expressions where the column
+// is on the left side of the operator.
+// Syntax example: column > '2025-01-01' [ + INTERVAL 'P1D' ]
+//
+// Optimization Logic:
+//  1. Quick Path: If no INTERVAL is provided, it generates a UnaryRangeExpr
+//     to enable index-based scan performance in Milvus.
+//  2. Slow Path: If an INTERVAL exists, it generates a TimestamptzArithCompareExpr
+//     for specialized arithmetic evaluation.
 func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCompareForwardContext) interface{} {
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().Accept(v)
@@ -2010,53 +2019,70 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
 	}
 
-	arithOp := planpb.ArithOpType_Unknown
-	interval := &planpb.Interval{}
-	if ctx.GetOp1() != nil {
-		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
-		rawIntervalStr := ctx.GetInterval_string().GetText()
-		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
-		if err != nil {
-			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
-		}
-		interval, err = parseISODuration(unquotedIntervalStr)
-		if err != nil {
-			return err
-		}
-	}
+	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 	rawCompareStr := ctx.GetCompare_string().GetText()
 	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
 	if err != nil {
 		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
 	}
-
-	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
-
 	timestamptzInt64, err := timestamptz.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
 		return err
 	}
 
-	newExpr := &planpb.Expr{
-		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
-			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
-				TimestamptzColumn: toColumnInfo(colExpr),
-				ArithOp:           arithOp,
-				Interval:          interval,
-				CompareOp:         compareOp,
-				CompareValue: &planpb.GenericValue{
-					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+	if ctx.GetOp1() == nil {
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_UnaryRangeExpr{
+					UnaryRangeExpr: &planpb.UnaryRangeExpr{
+						ColumnInfo: toColumnInfo(colExpr),
+						Op:         compareOp,
+						Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64}},
+					},
 				},
 			},
-		},
+			dataType: schemapb.DataType_Bool,
+		}
+	}
+
+	arithOp := arithExprMap[ctx.GetOp1().GetTokenType()]
+	rawIntervalStr := ctx.GetInterval_string().GetText()
+	unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+	if err != nil {
+		return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+	}
+	interval, err := parseISODuration(unquotedIntervalStr)
+	if err != nil {
+		return err
 	}
 
 	return &ExprWithType{
-		expr:     newExpr,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+				TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+					TimestamptzColumn: toColumnInfo(colExpr),
+					ArithOp:           arithOp,
+					Interval:          interval,
+					CompareOp:         compareOp,
+					CompareValue:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64}},
+				},
+			},
+		},
 		dataType: schemapb.DataType_Bool,
 	}
 }
 
+// VisitTimestamptzCompareReverse handles comparison expressions where the column
+// is on the right side of the operator.
+// Syntax example: '2025-01-01' [ + INTERVAL 'P1D' ] > column
+//
+// Optimization and Normalization Logic:
+//  1. Operator Reversal: The comparison operator is flipped (e.g., '>' to '<')
+//     to normalize the expression into a column-centric format.
+//  2. Quick Path: For simple comparisons without INTERVAL, it generates a
+//     UnaryRangeExpr with the reversed operator to leverage indexing.
+//  3. Slow Path: For complex expressions involving INTERVAL, it produces a
+//     TimestamptzArithCompareExpr with the reversed operator.
 func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCompareReverseContext) interface{} {
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().GetText()
@@ -2067,21 +2093,6 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
 	}
 
-	arithOp := planpb.ArithOpType_Unknown
-	interval := &planpb.Interval{}
-	if ctx.GetOp1() != nil {
-		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
-		rawIntervalStr := ctx.GetInterval_string().GetText()
-		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
-		if err != nil {
-			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
-		}
-		interval, err = parseISODuration(unquotedIntervalStr)
-		if err != nil {
-			return err
-		}
-	}
-
 	rawCompareStr := ctx.GetCompare_string().GetText()
 	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
 	if err != nil {
@@ -2089,9 +2100,7 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 	}
 
 	originalCompareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
-
 	compareOp := reverseCompareOp(originalCompareOp)
-
 	if compareOp == planpb.OpType_Invalid && originalCompareOp != planpb.OpType_Invalid {
 		return fmt.Errorf("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
 	}
@@ -2101,22 +2110,48 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 		return err
 	}
 
-	newExpr := &planpb.Expr{
-		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
-			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
-				TimestamptzColumn: toColumnInfo(colExpr),
-				ArithOp:           arithOp,
-				Interval:          interval,
-				CompareOp:         compareOp,
-				CompareValue: &planpb.GenericValue{
-					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+	// Quick Path: No arithmetic operation. Use UnaryRangeExpr for index optimization.
+	if ctx.GetOp1() == nil {
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_UnaryRangeExpr{
+					UnaryRangeExpr: &planpb.UnaryRangeExpr{
+						ColumnInfo: toColumnInfo(colExpr),
+						Op:         compareOp,
+						Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64}},
+					},
 				},
 			},
-		},
+			dataType: schemapb.DataType_Bool,
+		}
+	}
+
+	// Slow Path: Handle arithmetic with TimestamptzArithCompareExpr.
+	arithOp := arithExprMap[ctx.GetOp1().GetTokenType()]
+	rawIntervalStr := ctx.GetInterval_string().GetText()
+	unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+	if err != nil {
+		return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+	}
+	interval, err := parseISODuration(unquotedIntervalStr)
+	if err != nil {
+		return err
 	}
 
 	return &ExprWithType{
-		expr:     newExpr,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+				TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+					TimestamptzColumn: toColumnInfo(colExpr),
+					ArithOp:           arithOp,
+					Interval:          interval,
+					CompareOp:         compareOp,
+					CompareValue: &planpb.GenericValue{
+						Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+					},
+				},
+			},
+		},
 		dataType: schemapb.DataType_Bool,
 	}
 }
