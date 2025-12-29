@@ -560,8 +560,8 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(totalMemorySlot)
 	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(indexStatsUsedCpu)
 	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(indexedStatsUsedMemory)
-	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsedCpu").Set(compactionUsedCpu)
-	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsedMemory").Set(compactionUsedMemory)
+	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(compactionUsedCpu)
+	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(compactionUsedMemory)
 	metrics.DataNodeCPUSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(importUsedCpu)
 	metrics.DataNodeMemorySlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(importUsedMemory)
 

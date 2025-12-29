@@ -168,7 +168,7 @@ func (e *executor) Slots() int64 {
 	return e.usingSlots
 }
 
-// Slots returns the used slots for compaction
+// SlotsV2 returns the used CPU and memory slots for compaction
 func (e *executor) SlotsV2() (float64, float64) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

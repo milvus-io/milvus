@@ -633,7 +633,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
 					MaxSize:                1073741824,
 					CpuSlot:                1,
-					MemorySlot:             float64(1073741824) / 1024 / 1024 / 1024 * 2,
+					MemorySlot:             2.0, // 1 GiB segment size * 2 memory multiplier
 					JsonParams:             params,
 				},
 			},

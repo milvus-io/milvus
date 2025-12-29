@@ -398,16 +398,6 @@ func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) (float64, float
 	return cpuSlot / 8, memorySlot
 }
 
-func IsVectorField(meta *meta, collID, fieldID int64) bool {
-	coll := meta.GetCollection(collID)
-	for _, field := range coll.Schema.GetFields() {
-		if field.GetFieldID() == fieldID {
-			return typeutil.IsVectorType(field.GetDataType())
-		}
-	}
-	return false
-}
-
 func enableSortCompaction() bool {
 	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
 }

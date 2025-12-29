@@ -5949,7 +5949,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.ScalarIndexTaskMemoryFactor.Init(base.mgr)
 
 	p.VectorIndexTaskMemoryFactor = ParamItem{
-		Key:          "dataCoord.VectorIndexTaskMemoryFactor",
+		Key:          "dataCoord.vectorIndexTaskMemoryFactor",
 		Version:      "2.6.5",
 		DefaultValue: "4",
 		Doc:          "The memory expansion multiple of each segment when performing vector index tasks",
@@ -5961,13 +5961,13 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.mixCompactionMemoryFactor",
 		Version:      "2.6.5",
 		DefaultValue: "2",
-		Doc:          "The memory expansion multiple of each segment when performing vector index tasks",
+		Doc:          "The memory expansion multiple of each segment when performing mix compaction tasks",
 		Export:       false,
 	}
 	p.MixCompactionMemoryFactor.Init(base.mgr)
 
 	p.StatsTaskCPUFactor = ParamItem{
-		Key:          "dataCoord.statsTaskCpuFactor",
+		Key:          "dataCoord.statsTaskCPUFactor",
 		Version:      "2.6.5",
 		DefaultValue: "1",
 		Doc:          "Estimated number of CPU cores used by each stats task during execution",
@@ -5976,7 +5976,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.StatsTaskCPUFactor.Init(base.mgr)
 
 	p.ScalarIndexTaskCPUFactor = ParamItem{
-		Key:          "dataCoord.scalarIndexTaskCpuFactor",
+		Key:          "dataCoord.scalarIndexTaskCPUFactor",
 		Version:      "2.6.5",
 		DefaultValue: "2",
 		Doc:          "Estimated number of CPU cores used by each scalar index task during execution",
@@ -5985,9 +5985,9 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.ScalarIndexTaskCPUFactor.Init(base.mgr)
 
 	p.VectorIndexTaskCPUFactor = ParamItem{
-		Key:          "dataCoord.vectorIndexTaskCpuFactor",
+		Key:          "dataCoord.vectorIndexTaskCPUFactor",
 		Version:      "2.6.5",
-		DefaultValue: "8",
+		DefaultValue: "32",
 		Doc:          "Estimated number of CPU cores used by each vector index task during execution",
 		Export:       false,
 	}
@@ -5997,7 +5997,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.mixCompactionCPUFactor",
 		Version:      "2.6.5",
 		DefaultValue: "1",
-		Doc:          "Estimated number of CPU cores used by each vector index task during execution",
+		Doc:          "Estimated number of CPU cores used by each mix compaction task during execution",
 		Export:       false,
 	}
 	p.MixCompactionCPUFactor.Init(base.mgr)

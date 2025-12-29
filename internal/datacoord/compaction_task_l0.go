@@ -64,7 +64,7 @@ func (t *l0CompactionTask) GetTaskState() taskcommon.State {
 
 func (t *l0CompactionTask) GetTaskSlot() (float64, float64) {
 	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-	slot := float64(t.GetTaskProto().GetTotalRows() / int64(batchSize))
+	slot := float64(t.GetTaskProto().GetTotalRows()) / float64(batchSize)
 	return slot, slot
 }
 

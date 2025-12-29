@@ -293,6 +293,9 @@ func (sched *TaskScheduler) indexBuildLoop() {
 			return
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
+			if t == nil {
+				continue
+			}
 			go func(t Task) {
 				sched.processTask(t, sched.TaskQueue)
 			}(t)
