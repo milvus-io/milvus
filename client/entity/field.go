@@ -201,6 +201,9 @@ const (
 	FieldTypeSparseVector FieldType = 104
 	// FieldTypeInt8Vector field type int8 vector
 	FieldTypeInt8Vector FieldType = 105
+
+	// FieldTypeStruct field type struct
+	FieldTypeStruct FieldType = 201
 )
 
 // Field represent field schema in milvus
@@ -219,6 +222,7 @@ type Field struct {
 	ElementType     FieldType
 	DefaultValue    *schemapb.ValueField
 	Nullable        bool
+	StructSchema    *StructSchema
 }
 
 // ProtoMessage generates corresponding FieldSchema
@@ -440,6 +444,11 @@ func (f *Field) WithEnableMatch(enable bool) *Field {
 	return f
 }
 
+func (f *Field) WithStructSchema(schema *StructSchema) *Field {
+	f.StructSchema = schema
+	return f
+}
+
 // ReadProto parses FieldSchema
 func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.ID = p.GetFieldID()
@@ -457,5 +466,19 @@ func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.DefaultValue = p.GetDefaultValue()
 	f.Nullable = p.GetNullable()
 
+	return f
+}
+
+// StructArrayField represents a struct array field
+type StructSchema struct {
+	Fields []*Field
+}
+
+func NewStructSchema() *StructSchema {
+	return &StructSchema{}
+}
+
+func (f *StructSchema) WithField(field *Field) *StructSchema {
+	f.Fields = append(f.Fields, field)
 	return f
 }
