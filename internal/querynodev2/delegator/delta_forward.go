@@ -101,7 +101,11 @@ func (sd *shardDelegator) addL0ForGrowing(ctx context.Context, segment segments.
 func (sd *shardDelegator) addL0GrowingBF(ctx context.Context, segment segments.Segment) error {
 	bufferedForwarder := NewBufferedForwarder(paramtable.Get().QueryNodeCfg.ForwardBatchSize.GetAsInt64(),
 		func(pks storage.PrimaryKeys, tss []uint64) error {
-			return segment.Delete(ctx, pks, tss)
+			dd, err := storage.NewDeltaDataWithData(pks, tss)
+			if err != nil {
+				return err
+			}
+			return segment.LoadDeltaData(ctx, dd)
 		})
 
 	if err := sd.rangeHitL0Deletions(segment.Partition(), segment, func(pk storage.PrimaryKey, ts uint64) error {
