@@ -20,9 +20,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -39,5 +42,12 @@ func (t *flushAllTask) Execute(ctx context.Context) error {
 		FlushAllMsgs: resp.GetFlushAllMsgs(),
 		ClusterInfo:  resp.GetClusterInfo(),
 	}
+
+	// Assign the flush all ts to the result for compatibility.
+	// Use the max time tick of the flush all messages as the flush all ts.
+	t.result.FlushAllTs = lo.MaxBy(message.MilvusMessagesToImmutableMessages(lo.Values(resp.GetFlushAllMsgs())), func(a, b message.ImmutableMessage) bool {
+		return a.TimeTick() > b.TimeTick()
+	}).TimeTick()
+
 	return nil
 }

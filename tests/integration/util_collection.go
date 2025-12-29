@@ -29,21 +29,34 @@ type CreateCollectionConfig struct {
 	ResourceGroups   []string
 }
 
-func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectionName string, rowNum, dim int) error {
+type PrimaryKeyConfig struct {
+	FieldName   string
+	FieldType   schemapb.DataType
+	NumChannels int
+	StartPK     int64 // Starting PK value (default 1 if not specified)
+}
+
+// InsertAndFlush inserts data and flushes.
+// Returns the next startPK for subsequent calls and any error.
+func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectionName string, rowNum, dim int, pkConfig *PrimaryKeyConfig) (int64, error) {
+	startPK := pkConfig.StartPK
+	if startPK == 0 {
+		startPK = 1 // Default to 1 if not specified
+	}
+
+	pkColumn, nextPK := GenerateChannelBalancedPrimaryKeys(pkConfig.FieldName, pkConfig.FieldType, rowNum, pkConfig.NumChannels, startPK)
 	fVecColumn := NewFloatVectorFieldData(FloatVecField, rowNum, dim)
-	hashKeys := GenerateHashKeys(rowNum)
 	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
-		HashKeys:       hashKeys,
+		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
 		NumRows:        uint32(rowNum),
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !merr.Ok(insertResult.Status) {
-		return merr.Error(insertResult.Status)
+		return 0, merr.Error(insertResult.Status)
 	}
 
 	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
@@ -51,11 +64,11 @@ func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectio
 		CollectionNames: []string{collectionName},
 	})
 	if err := merr.CheckRPCCall(flushResp.GetStatus(), err); err != nil {
-		return err
+		return 0, err
 	}
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	if !has || segmentIDs == nil {
-		return merr.Error(&commonpb.Status{
+		return 0, merr.Error(&commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    "failed to get segment IDs",
 		})
@@ -63,17 +76,17 @@ func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectio
 	ids := segmentIDs.GetData()
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	if !has {
-		return merr.Error(&commonpb.Status{
+		return 0, merr.Error(&commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    "failed to get flush timestamp",
 		})
 	}
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	return nil
+	return nextPK, nil
 }
 
 func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context, cfg *CreateCollectionConfig) {
-	schema := ConstructSchema(cfg.CollectionName, cfg.Dim, true)
+	schema := ConstructSchema(cfg.CollectionName, cfg.Dim, false)
 	s.CreateCollection(ctx, cfg, schema)
 }
 
@@ -107,8 +120,15 @@ func (s *MiniClusterSuite) CreateCollection(ctx context.Context, cfg *CreateColl
 	s.True(merr.Ok(showCollectionsResp.Status))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
+	nextStartPK := int64(1)
 	for i := 0; i < cfg.SegmentNum; i++ {
-		err = s.InsertAndFlush(ctx, cfg.DBName, cfg.CollectionName, cfg.RowNumPerSegment, cfg.Dim)
+		var err error
+		nextStartPK, err = s.InsertAndFlush(ctx, cfg.DBName, cfg.CollectionName, cfg.RowNumPerSegment, cfg.Dim, &PrimaryKeyConfig{
+			FieldName:   Int64Field,
+			FieldType:   schemapb.DataType_Int64,
+			NumChannels: cfg.ChannelNum,
+			StartPK:     nextStartPK,
+		})
 		s.NoError(err)
 	}
 

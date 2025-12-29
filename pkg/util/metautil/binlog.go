@@ -92,3 +92,39 @@ func JoinIDPath(ids ...typeutil.UniqueID) string {
 	}
 	return path.Join(idStr...)
 }
+
+// ExtractTextLogFilenames extracts only filenames from full paths to save space.
+// It takes a slice of full paths and returns a slice of filenames.
+func ExtractTextLogFilenames(files []string) []string {
+	filenames := make([]string, 0, len(files))
+	for _, fullPath := range files {
+		idx := strings.LastIndex(fullPath, pathSep)
+		if idx < 0 {
+			filenames = append(filenames, fullPath)
+		} else {
+			filenames = append(filenames, fullPath[idx+1:])
+		}
+	}
+	return filenames
+}
+
+// BuildTextLogPaths reconstructs full paths from filenames for text index logs.
+// Files stored in TextIndexStats only contain filenames to save space.
+func BuildTextLogPaths(rootPath string, buildID, version, collectionID, partitionID, segmentID, fieldID typeutil.UniqueID, filenames []string) []string {
+	prefix := path.Join(
+		rootPath,
+		common.TextIndexPath,
+		strconv.FormatInt(buildID, 10),
+		strconv.FormatInt(version, 10),
+		strconv.FormatInt(collectionID, 10),
+		strconv.FormatInt(partitionID, 10),
+		strconv.FormatInt(segmentID, 10),
+		strconv.FormatInt(fieldID, 10),
+	)
+
+	fullPaths := make([]string, 0, len(filenames))
+	for _, filename := range filenames {
+		fullPaths = append(fullPaths, path.Join(prefix, filename))
+	}
+	return fullPaths
+}
