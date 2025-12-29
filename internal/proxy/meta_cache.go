@@ -404,7 +404,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		collectionName = collection.Schema.GetName()
 	}
 	if database == "" {
-		log.Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
+		log.Ctx(ctx).Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
 	}
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
 	if err != nil {
@@ -418,7 +418,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
 	// Compatibility logic: if the rootcoord version is lower(requestTime = 0), update the cache directly.
 	if collection.GetRequestTime() < curVersion && collection.GetRequestTime() != 0 {
-		log.Debug("describe collection timestamp less than version, don't update cache",
+		log.Ctx(ctx).Debug("describe collection timestamp less than version, don't update cache",
 			zap.String("collectionName", collectionName),
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
 		return &collectionInfo{
@@ -560,31 +560,6 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 			metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 			return collInfo, nil
 		}
-		collInfo, err := m.UpdateByID(ctx, database, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo, nil
-	}
-
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-	return collInfo, nil
-}
-
-// GetCollectionInfo returns the collection information related to provided collection name
-// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
-// TODO: may cause data race of this implementation, should be refactored in future.
-func (m *MetaCache) getFullCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error) {
-	collInfo, ok := m.getCollection(database, collectionName, collectionID)
-
-	method := "GetCollectionInfo"
-	// if collInfo.collID != collectionID, means that the cache is not trustable
-	// try to get collection according to collectionID
-	if !ok || collInfo.collID != collectionID {
-		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-
 		collInfo, err := m.UpdateByID(ctx, database, collectionID)
 		if err != nil {
 			return nil, err
