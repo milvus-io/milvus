@@ -29,7 +29,8 @@ type Task interface {
 	GetTaskID() int64
 	GetTaskType() taskcommon.Type
 	GetTaskState() taskcommon.State
-	GetTaskSlot() int64
+	// GetTaskSlot returns (cpuSlot, memorySlot) representing the resource requirements for this task.
+	GetTaskSlot() (float64, float64)
 	SetTaskTime(timeType taskcommon.TimeType, time time.Time)
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64
