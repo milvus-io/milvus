@@ -289,16 +289,16 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
     }
 }
 
-template <typename T>
+template <typename T, typename Predicate>
 inline void
 handle_batch(const T* data,
-             const int size,
+             const int64_t size,
              TargetBitmapView res,
-             std::function<bool(const T&)> predicate) {
+             Predicate&& predicate) {
     auto next_off_option = res.find_first();
     while (next_off_option.has_value()) {
         auto next_off = next_off_option.value();
-        if (next_off >= size) {
+        if (next_off >= static_cast<size_t>(size)) {
             return;
         }
         if (!predicate(data[next_off])) {
@@ -308,13 +308,12 @@ handle_batch(const T* data,
     }
 }
 
-template <typename T>
+template <typename T, typename Predicate>
 std::optional<TargetBitmap>
-NgramInvertedIndex::ExecuteQueryWithPredicate(
-    const std::string& literal,
-    exec::SegmentExpr* segment,
-    std::function<bool(const T&)> predicate,
-    bool need_post_filter) {
+NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
+                                              exec::SegmentExpr* segment,
+                                              Predicate&& predicate,
+                                              bool need_post_filter) {
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
 
@@ -326,21 +325,18 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(
         TargetBitmap valid(res.size(), true);
         TargetBitmapView valid_res(valid.data(), valid.size());
 
-        auto execute_batch =
-            [&predicate](
-                const T* data,
-                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
-                const bool* _valid_data,
-                const int32_t* _offsets,
-                const int size,
-                TargetBitmapView res,
-                // the same with `valid_data`
-                TargetBitmapView _valid_res) {
-                handle_batch(data, size, res, predicate);
-            };
+        auto execute_batch = [&predicate](const T* data,
+                                          const bool* _valid_data,
+                                          const int32_t* _offsets,
+                                          const int64_t size,
+                                          TargetBitmapView res,
+                                          TargetBitmapView _valid_res) {
+            handle_batch(data, size, res, predicate);
+        };
 
-        segment->ProcessAllDataChunk<T>(
-            execute_batch, std::nullptr_t{}, res, valid_res);
+        segment->template ProcessAllDataChunkBatched<T>(
+            execute_batch, res, valid_res);
+
         final_result_count = bitset.count();
     }
 
@@ -426,41 +422,33 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
             return matcher(data_val);
         };
 
-        auto execute_batch_json =
-            [&predicate](
-                const milvus::Json* data,
-                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
-                const bool* _valid_data,
-                const int32_t* _offsets,
-                const int size,
-                TargetBitmapView res,
-                // the same with `valid_data`
-                TargetBitmapView _valid_res,
-                std::string val) {
-                handle_batch<milvus::Json>(data, size, res, predicate);
-            };
+        auto execute_batch_json = [&predicate](const milvus::Json* data,
+                                               const bool* _valid_data,
+                                               const int32_t* _offsets,
+                                               const int64_t size,
+                                               TargetBitmapView res,
+                                               TargetBitmapView _valid_res) {
+            handle_batch<milvus::Json>(data, size, res, predicate);
+        };
 
-        segment->ProcessAllDataChunk<milvus::Json>(
-            execute_batch_json, std::nullptr_t{}, res, valid_res, literal);
+        segment->template ProcessAllDataChunkBatched<milvus::Json>(
+            execute_batch_json, res, valid_res);
     } else {
         auto predicate = [&matcher](const std::string_view& data) {
             return matcher(data);
         };
 
-        auto execute_batch =
-            [&predicate](
-                const std::string_view* data,
-                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
-                const bool* _valid_data,
-                const int32_t* _offsets,
-                const int size,
-                TargetBitmapView res,
-                // the same with `valid_data`
-                TargetBitmapView _valid_res) {
-                handle_batch<std::string_view>(data, size, res, predicate);
-            };
-        segment->ProcessAllDataChunk<std::string_view>(
-            execute_batch, std::nullptr_t{}, res, valid_res);
+        auto execute_batch = [&predicate](const std::string_view* data,
+                                          const bool* _valid_data,
+                                          const int32_t* _offsets,
+                                          const int64_t size,
+                                          TargetBitmapView res,
+                                          TargetBitmapView _valid_res) {
+            handle_batch<std::string_view>(data, size, res, predicate);
+        };
+
+        segment->template ProcessAllDataChunkBatched<std::string_view>(
+            execute_batch, res, valid_res);
     }
 
     auto final_result_count = bitset.count();
