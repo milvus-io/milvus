@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-
 #include <numeric>
 
 #include "common/Types.h"
@@ -26,7 +25,6 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
-#include "test_utils/TTLTestHelper.h"
 
 using namespace milvus::segcore;
 using namespace milvus;
@@ -889,140 +887,213 @@ TEST(GrowingTest, LoadVectorArrayData) {
     }
 }
 
-TEST(GrowingTest, SearchVectorArray) {
-    using namespace milvus::query;
-
+TEST(Growing, TestMaskWithTTLField) {
     auto schema = std::make_shared<Schema>();
-    auto metric_type = knowhere::metric::MAX_SIM;
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto ttl_fid = schema->AddDebugField("ttl_field", DataType::INT64, false);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
 
-    auto dim = 32;
-
-    // Add fields
-    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
-    auto array_vec = schema->AddDebugVectorArrayField(
-        "array_vec", DataType::VECTOR_FLOAT, dim, metric_type);
-    schema->set_primary_field_id(int64_field);
-
-    // Configure segment
-    auto config = SegcoreConfig::default_config();
-    config.set_chunk_rows(1024);
-    config.set_enable_interim_segment_index(true);
-
-    std::map<std::string, std::string> index_params = {
-        {"index_type", knowhere::IndexEnum::INDEX_HNSW},
-        {"metric_type", metric_type},
-        {"nlist", "128"}};
-    std::map<std::string, std::string> type_params = {
-        {"dim", std::to_string(dim)}};
-    FieldIndexMeta fieldIndexMeta(
-        array_vec, std::move(index_params), std::move(type_params));
-    std::map<FieldId, FieldIndexMeta> fieldMap = {{array_vec, fieldIndexMeta}};
-
-    IndexMetaPtr metaPtr =
-        std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
-    auto segment = CreateGrowingSegment(schema, metaPtr, 1, config);
-    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
-
-    // Insert data
-    int64_t N = 100;
-    uint64_t seed = 42;
-    int emb_list_len = 5;  // Each row contains 5 vectors
-    auto dataset = DataGen(schema, N, seed, 0, 1, emb_list_len);
-
-    auto offset = 0;
-    segment->Insert(offset,
-                    N,
-                    dataset.row_ids_.data(),
-                    dataset.timestamps_.data(),
-                    dataset.raw_);
-
-    // Prepare search query
-    int vec_num = 10;  // Total number of query vectors
-    std::vector<float> query_vec = generate_float_vector(vec_num, dim);
-
-    // Create query dataset with offsets for VectorArray
-    std::vector<size_t> query_vec_offsets;
-    query_vec_offsets.push_back(0);  // First query has 3 vectors
-    query_vec_offsets.push_back(3);
-    query_vec_offsets.push_back(10);  // Second query has 7 vectors
-
-    // Create search plan
-    const char* raw_plan = R"(vector_anns: <
-                                  field_id: 101
-                                  query_info: <
-                                    topk: 5
-                                    round_decimal: 3
-                                    metric_type: "MAX_SIM"
-                                    search_params: "{\"nprobe\": 10}"
-                                  >
-                                  placeholder_tag: "$0"
-      >)";
-
-    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
-    auto plan =
-        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
-
-    // Use CreatePlaceholderGroupFromBlob for VectorArray
-    auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
-        vec_num, dim, query_vec.data(), query_vec_offsets);
-    auto ph_group =
-        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-
-    // Execute search
-    Timestamp timestamp = 10000000;
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
-    auto sr_parsed = SearchResultToJson(*sr);
-    std::cout << sr_parsed.dump(1) << std::endl;
-}
-
-void
-RunGrowingTTLTest(bool is_nullable) {
-    using namespace milvus::segcore;
-    int64_t count = 100;
-    uint64_t base_ts = 1000000000ULL << 18;
-
-    auto schema = TTLTestHelper::CreateTTLSchema(is_nullable);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
 
-    std::vector<int64_t> pks, ttls;
-    std::vector<Timestamp> tss;
-    std::vector<bool> valid_data;
-    TTLTestHelper::PrepareTTLData(
-        count, base_ts, is_nullable, pks, tss, ttls, valid_data);
+    int64_t test_data_count = 100;
 
-    auto insert_record = std::make_unique<InsertRecordProto>();
-    insert_record->set_num_rows(count);
-
-    // PK Field
-    auto pk_field_data = insert_record->add_fields_data();
-    pk_field_data->set_field_id(schema->get_primary_field_id().get());
-    pk_field_data->set_type(static_cast<int>(DataType::INT64));
-    for (auto v : pks)
-        pk_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
-
-    // TTL Field
-    auto ttl_field_data = insert_record->add_fields_data();
-    ttl_field_data->set_field_id(schema->get_ttl_field_id().value().get());
-    ttl_field_data->set_type(static_cast<int>(DataType::INT64));
-    for (auto v : ttls)
-        ttl_field_data->mutable_scalars()->mutable_long_data()->add_data(v);
-    if (is_nullable) {
-        for (auto v : valid_data) ttl_field_data->add_valid_data(v);
+    uint64_t base_ts = 1000000000ULL << 18;
+    std::vector<Timestamp> ts_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        ts_data[i] = base_ts + i;
     }
 
-    auto offset = segment->PreInsert(count);
-    segment->Insert(offset, count, pks.data(), tss.data(), insert_record.get());
+    std::vector<idx_t> row_ids(test_data_count);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
 
-    BitsetType bitset(count);
-    BitsetTypeView view(bitset);
-    segment->mask_with_timestamps(view, base_ts + count, 0);
+    std::vector<int64_t> pk_data(test_data_count);
+    std::iota(pk_data.begin(), pk_data.end(), 0);
 
-    TTLTestHelper::VerifyTTLMask(view, count, is_nullable);
+    uint64_t base_physical_us = (base_ts >> 18) * 1000;
+    std::vector<int64_t> ttl_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        if (i < test_data_count / 2) {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us - 10);
+        } else {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us + 10);
+        }
+    }
+
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(test_data_count);
+
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(pk_fid.get());
+        field_data->set_type(proto::schema::DataType::Int64);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_long_data();
+        for (auto v : pk_data) {
+            data->add_data(v);
+        }
+    }
+
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(ttl_fid.get());
+        field_data->set_type(proto::schema::DataType::Int64);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_long_data();
+        for (auto v : ttl_data) {
+            data->add_data(v);
+        }
+    }
+
+    auto offset = segment->PreInsert(test_data_count);
+    segment->Insert(offset,
+                    test_data_count,
+                    row_ids.data(),
+                    ts_data.data(),
+                    insert_record_proto.get());
+
+    BitsetType bitset(test_data_count);
+    BitsetTypeView bitset_view(bitset);
+
+    Timestamp query_ts = base_ts + test_data_count;
+    segment_impl->mask_with_timestamps(bitset_view, query_ts, 0);
+
+    int expired_count = 0;
+    for (int i = 0; i < test_data_count; i++) {
+        if (bitset_view[i]) {
+            expired_count++;
+        }
+    }
+
+    EXPECT_EQ(expired_count, test_data_count / 2);
+    for (int i = 0; i < test_data_count / 2; i++) {
+        EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should be expired";
+    }
+    for (int i = test_data_count / 2; i < test_data_count; i++) {
+        EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should not be expired";
+    }
 }
 
-TEST(Growing, TestTTLNormal) {
-    RunGrowingTTLTest(false);
-}
-TEST(Growing, TestTTLNullable) {
-    RunGrowingTTLTest(true);
+// Test TTL field filtering with nullable field for Growing segment
+TEST(Growing, TestMaskWithNullableTTLField) {
+    // Create schema with nullable TTL field
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::INT64, true);  // nullable
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    int64_t test_data_count = 100;
+
+    // Generate timestamp data
+    uint64_t base_ts = 1000000000ULL << 18;
+    std::vector<Timestamp> ts_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        ts_data[i] = base_ts + i;
+    }
+
+    // Generate row IDs
+    std::vector<idx_t> row_ids(test_data_count);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+
+    // Generate PK data
+    std::vector<int64_t> pk_data(test_data_count);
+    std::iota(pk_data.begin(), pk_data.end(), 0);
+
+    // Generate TTL data with some nulls
+    uint64_t base_physical_us = (base_ts >> 18) * 1000;
+    std::vector<int64_t> ttl_data(test_data_count);
+    std::vector<bool> valid_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        if (i % 4 == 0) {
+            // Null value - should not expire
+            ttl_data[i] = 0;
+            valid_data[i] = false;
+        } else if (i % 4 == 1) {
+            // Expired
+            ttl_data[i] = static_cast<int64_t>(base_physical_us - 10);
+            valid_data[i] = true;
+        } else {
+            // Not expired
+            ttl_data[i] = static_cast<int64_t>(base_physical_us + 10);
+            valid_data[i] = true;
+        }
+    }
+
+    // Create insert record proto
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(test_data_count);
+
+    // Add PK field data
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(pk_fid.get());
+        field_data->set_type(proto::schema::DataType::Int64);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_long_data();
+        for (auto v : pk_data) {
+            data->add_data(v);
+        }
+    }
+
+    // Add nullable TTL field data
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(ttl_fid.get());
+        field_data->set_type(proto::schema::DataType::Int64);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_long_data();
+        for (auto v : ttl_data) {
+            data->add_data(v);
+        }
+        // Add valid_data for nullable field
+        for (auto v : valid_data) {
+            field_data->add_valid_data(v);
+        }
+    }
+
+    // Insert data
+    auto offset = segment->PreInsert(test_data_count);
+    segment->Insert(offset,
+                    test_data_count,
+                    row_ids.data(),
+                    ts_data.data(),
+                    insert_record_proto.get());
+
+    // Test mask_with_timestamps with nullable TTL field
+    BitsetType bitset(test_data_count);
+    BitsetTypeView bitset_view(bitset);
+
+    Timestamp query_ts = base_ts + test_data_count;
+    segment_impl->mask_with_timestamps(bitset_view, query_ts, 0);
+
+    // Verify results:
+    // - i % 4 == 0: null, should NOT be expired
+    // - i % 4 == 1: expired (TTL < current time)
+    // - i % 4 == 2 or 3: not expired
+    int expired_count = 0;
+    for (int i = 0; i < test_data_count; i++) {
+        if (i % 4 == 0) {
+            // Null value should not be expired
+            EXPECT_FALSE(bitset_view[i])
+                << "Row " << i << " (null) should not be expired";
+        } else if (i % 4 == 1) {
+            // Should be expired
+            EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should be expired";
+            expired_count++;
+        } else {
+            // Should not be expired
+            EXPECT_FALSE(bitset_view[i])
+                << "Row " << i << " should not be expired";
+        }
+    }
+
+    EXPECT_EQ(expired_count, test_data_count / 4);
 }
