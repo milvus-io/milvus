@@ -184,6 +184,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
         case DataType::FLOAT: {
             result = ExecRangeVisitorImpl<float>(context);
             break;
