@@ -43,6 +43,9 @@
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
 #include "log/Log.h"
+#include "storage/HuaweiCloudCredentialsProvider.h"
+#include "storage/AliyunCredentialsProvider.h"
+#include "storage/TencentCloudCredentialsProvider.h"
 
 namespace milvus::storage {
 
@@ -271,6 +274,10 @@ class AliyunChunkManager : public MinioChunkManager {
     GetName() const {
         return "AliyunChunkManager";
     }
+
+    static std::shared_ptr<
+        Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>
+    GetAliyunSTSAssumeRoleWebIdentityCredentialsProvider();
 };
 
 class TencentCloudChunkManager : public MinioChunkManager {
@@ -280,6 +287,10 @@ class TencentCloudChunkManager : public MinioChunkManager {
     GetName() const {
         return "TencentCloudChunkManager";
     }
+
+    static std::shared_ptr<
+        Aws::Auth::TencentCloudSTSAssumeRoleWebIdentityCredentialsProvider>
+    GetTencentCloudSTSAssumeRoleWebIdentityCredentialsProvider();
 };
 
 class HuaweiCloudChunkManager : public MinioChunkManager {
@@ -289,6 +300,10 @@ class HuaweiCloudChunkManager : public MinioChunkManager {
     GetName() const {
         return "HuaweiCloudChunkManager";
     }
+
+    static std::shared_ptr<
+        Aws::Auth::HuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider>
+    GetHuaweiCloudSTSAssumeRoleWebIdentityCredentialsProvider();
 };
 
 using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;
