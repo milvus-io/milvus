@@ -3057,7 +3057,8 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             'consistency_level': 0, 
             'properties': {'timezone': 'UTC'},
             'num_partitions': 1, 
-            'enable_dynamic_field': True
+            'enable_dynamic_field': True,
+            'enable_namespace': False
         }
         # Get actual description
         res = self.describe_collection(client, collection_name)[0]
