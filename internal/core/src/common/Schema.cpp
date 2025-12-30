@@ -27,7 +27,6 @@
 #include "SystemProperty.h"
 #include "arrow/util/key_value_metadata.h"
 #include "common/Consts.h"
-#include "common/Chunk.h"
 #include "milvus-storage/common/constants.h"
 #include "pb/common.pb.h"
 #include "protobuf_utils.h"

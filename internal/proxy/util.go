@@ -2689,15 +2689,6 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	return uint64(ttl)
 }
 
-func getTTLField(pairs []*commonpb.KeyValuePair) string {
-	for _, pair := range pairs {
-		if pair.Key == common.CollectionTTLFieldKey {
-			return pair.Value
-		}
-	}
-	return ""
-}
-
 // reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
 // It works with both QueryResults and SearchResults by operating on the common data structures
 func reconstructStructFieldDataCommon(

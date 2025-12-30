@@ -702,7 +702,7 @@ func getExpirQuantilesIndexByRatio(ratio float64, percentilesLen int) int {
 		return 0
 	}
 	step := 0.2
-	idx := int(ratio/step) - 1
+	idx := int((ratio+0.01)/step) - 1 // add 0.01 to avoid rounding error
 	if idx < 0 {
 		idx = 0
 	}

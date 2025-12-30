@@ -634,7 +634,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 					MaxSize:                1073741824,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 					JsonParams:             params,
-					TtlFieldID:             common.InvalidFieldID,
 				},
 			},
 		},
