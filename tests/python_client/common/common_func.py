@@ -632,7 +632,8 @@ def gen_digits_by_length(length=8):
     return "".join(random.choice(string.digits) for _ in range(length))
 
 
-def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_primary=False, nullable=False, **kwargs):
+def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_primary=False,
+                     nullable=False, skip_wrapper=False, **kwargs):
     """
     Generate a field schema based on the field type.
     
@@ -641,6 +642,9 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
         name: Field name (uses default if None)
         description: Field description
         is_primary: Whether this is a primary field
+        nullable: Whether this field is nullable
+        skip_wrapper: whether to call FieldSchemaWrapper, in gen_row_data case,
+                      it logs too much if calling the wrapper
         **kwargs: Additional parameters like max_length, max_capacity, etc.
     
     Returns:
@@ -660,7 +664,8 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
             kwargs['max_capacity'] = ct.default_max_capacity
     if is_primary is True:
         nullable = False
-    field = FieldSchema(
+
+    field, _ = ApiFieldSchemaWrapper().init_field_schema(
         name=name, 
         dtype=field_type, 
         description=description,
@@ -668,6 +673,15 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
         nullable=nullable,
         **kwargs
     )
+    if skip_wrapper is True:
+        field = FieldSchema(
+            name=name,
+            dtype=field_type,
+            description=description,
+            is_primary=is_primary,
+            nullable=nullable,
+            **kwargs
+        )
     return field
 
 
@@ -1955,7 +1969,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
             for name in desired_dynamic_field_names:
                 data_types = [DataType.JSON, DataType.INT64, DataType.FLOAT, DataType.VARCHAR, DataType.BOOL, DataType.ARRAY]
                 data_type = data_types[random.randint(0, len(data_types) - 1)]
-                dynamic_field = gen_scalar_field(data_type, nullable=True)
+                dynamic_field = gen_scalar_field(data_type, nullable=True, skip_wrapper=True)
                 tmp[name] = gen_data_by_collection_field(dynamic_field)
 
         data.append(tmp)
