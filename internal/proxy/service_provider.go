@@ -140,6 +140,16 @@ func cloneStructArrayFields(fields []*schemapb.StructArrayFieldSchema) []*schema
 func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (resp *milvuspb.DescribeCollectionResponse, err error) {
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.GetDbName()),
+		zap.String("collection", request.GetCollectionName()),
+		zap.Int64("collectionID", request.GetCollectionID()),
+		zap.Uint64("timestamp", request.GetTimeStamp()),
+	)
+
+	log.Debug("DescribeCollection received")
+
 	resp = &milvuspb.DescribeCollectionResponse{
 		Status:         merr.Success(),
 		CollectionName: request.CollectionName,
@@ -227,6 +237,11 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	resp.Aliases = c.aliases
 	resp.Properties = c.properties
 
+	log.Debug("DescribeCollection done",
+		zap.Int64("collectionID", resp.GetCollectionID()),
+		zap.Any("schema", resp.GetSchema()),
+	)
+
 	return resp, nil
 }
 
@@ -280,8 +295,6 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 	log.Debug("DescribeCollection done",
 		zap.Uint64("BeginTS", dct.BeginTs()),
 		zap.Uint64("EndTS", dct.EndTs()),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
 	)
 
 	return dct.result, nil
