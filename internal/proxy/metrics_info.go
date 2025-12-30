@@ -67,7 +67,6 @@ func getQuotaMetrics(node *Proxy) (*metricsinfo.ProxyQuotaMetrics, error) {
 		}
 	}
 	getRateMetric(internalpb.RateType_DMLInsert.String())
-	getRateMetric(internalpb.RateType_DMLUpsert.String())
 	getRateMetric(internalpb.RateType_DMLDelete.String())
 	getRateMetric(internalpb.RateType_DQLSearch.String())
 	getSubLabelRateMetric(internalpb.RateType_DQLSearch.String())

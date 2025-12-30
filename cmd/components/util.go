@@ -28,6 +28,7 @@ func exitWhenStopTimeout(stop func() error, timeout time.Duration) error {
 			zap.String("component", paramtable.GetRole()),
 			zap.Duration("cost", time.Since(start)),
 			zap.Error(err))
+		log.Cleanup()
 		os.Exit(1)
 	}
 	return err

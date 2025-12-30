@@ -260,6 +260,12 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	for _, segments := range collectionSegments {
 		numSegments += len(segments)
 		for _, segment := range segments {
+			// Convert old text log paths (full paths) to filenames to save memory
+			// This handles backward compatibility during recovery
+			for _, textStatsLog := range segment.GetTextStatsLogs() {
+				textStatsLog.Files = metautil.ExtractTextLogFilenames(textStatsLog.GetFiles())
+			}
+
 			// segments from catalog.ListSegments will not have logPath
 			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 			metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted())).Inc()
@@ -495,7 +501,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 			coll, ok := m.collections.Get(segment.GetCollectionID())
 			if ok {
-				collIDStr := fmt.Sprint(segment.GetCollectionID())
+				collIDStr := strconv.FormatInt(segment.GetCollectionID(), 10)
 				coll2DbName[collIDStr] = coll.DatabaseName
 				if _, ok := storedBinlogSize[collIDStr]; !ok {
 					storedBinlogSize[collIDStr] = make(map[string]int64)
@@ -536,7 +542,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 		coll, ok := m.collections.Get(collectionID)
 		if ok {
 			for state, rows := range statesRows {
-				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), coll.Schema.GetName(), state.String()).Set(float64(rows))
+				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10), coll.Schema.GetName(), state.String()).Set(float64(rows))
 			}
 		}
 	}
@@ -545,7 +551,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	for collectionID, entriesNum := range collectionL0RowCounts {
 		coll, ok := m.collections.Get(collectionID)
 		if ok {
-			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID)).Set(float64(entriesNum))
+			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
 		}
 	}
 
