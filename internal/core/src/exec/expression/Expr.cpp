@@ -20,6 +20,7 @@
 #include "common/Tracer.h"
 #include "exec/expression/AlwaysTrueExpr.h"
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
+#include "exec/expression/BinaryArithOpEvalRangeExprWithFields.h"
 #include "exec/expression/BinaryRangeExpr.h"
 #include "exec/expression/CallExpr.h"
 #include "exec/expression/ColumnExpr.h"
@@ -204,6 +205,18 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+    } else if (auto casted_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::BinaryArithOpEvalRangeExprWithFields>(
+                   expr)) {
+        result = std::make_shared<PhyBinaryArithOpEvalRangeExprWithFields>(
+            compiled_inputs,
+            casted_expr,
+            "PhyBinaryArithOpEvalRangeExprWithFields",
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size(),
+            context->get_query_timestamp());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TimestamptzArithCompareExpr>(expr)) {
         result = std::make_shared<PhyTimestamptzArithCompareExpr>(

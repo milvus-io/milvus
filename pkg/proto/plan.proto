@@ -241,6 +241,17 @@ message BinaryArithOpEvalRangeExpr {
   string value_template_variable_name = 7;
 }
 
+// Expression for arithmetic operations between two columns: (col1 arith col2) op value
+// Example: price * quantity > 100
+message BinaryArithOpEvalRangeExprWithFields {
+  ColumnInfo left_column_info = 1;  // left column (e.g., price)
+  ColumnInfo right_column_info = 2; // right column (e.g., quantity)
+  ArithOpType arith_op = 3;         // arithmetic operation (e.g., Mul)
+  OpType op = 4;                    // comparison operation (e.g., GreaterThan)
+  GenericValue value = 5;           // value to compare against (e.g., 100)
+  string value_template_variable_name = 6;
+}
+
 message RandomSampleExpr {
   float sample_factor = 1;
   Expr predicate = 2;
@@ -310,6 +321,7 @@ message Expr {
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
     ElementFilterExpr element_filter_expr = 19;
     MatchExpr match_expr = 21;
+    BinaryArithOpEvalRangeExprWithFields binary_arith_op_eval_range_expr_with_fields = 22;
   };
   bool is_template = 20;
 }

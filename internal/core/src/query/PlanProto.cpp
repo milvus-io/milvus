@@ -664,6 +664,45 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseBinaryArithOpEvalRangeExprsWithFields(
+    const proto::plan::BinaryArithOpEvalRangeExprWithFields& expr_pb) {
+    auto& left_column_info = expr_pb.left_column_info();
+    auto left_field_id = FieldId(left_column_info.field_id());
+    auto& left_field = schema->operator[](left_field_id);
+    auto left_data_type = left_field.get_data_type();
+
+    if (left_column_info.is_element_level()) {
+        Assert(left_data_type == DataType::ARRAY);
+        Assert(left_field.get_element_type() ==
+               static_cast<DataType>(left_column_info.element_type()));
+    } else {
+        Assert(left_data_type ==
+               static_cast<DataType>(left_column_info.data_type()));
+    }
+
+    auto& right_column_info = expr_pb.right_column_info();
+    auto right_field_id = FieldId(right_column_info.field_id());
+    auto& right_field = schema->operator[](right_field_id);
+    auto right_data_type = right_field.get_data_type();
+
+    if (right_column_info.is_element_level()) {
+        Assert(right_data_type == DataType::ARRAY);
+        Assert(right_field.get_element_type() ==
+               static_cast<DataType>(right_column_info.element_type()));
+    } else {
+        Assert(right_data_type ==
+               static_cast<DataType>(right_column_info.data_type()));
+    }
+
+    return std::make_shared<expr::BinaryArithOpEvalRangeExprWithFields>(
+        left_column_info,
+        right_column_info,
+        expr_pb.op(),
+        expr_pb.arith_op(),
+        expr_pb.value());
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
     auto& column_info = expr_pb.info();
     auto field_id = FieldId(column_info.field_id());
@@ -773,6 +812,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         case ppe::kBinaryArithOpEvalRangeExpr: {
             result = ParseBinaryArithOpEvalRangeExprs(
                 expr_pb.binary_arith_op_eval_range_expr());
+            break;
+        }
+        case ppe::kBinaryArithOpEvalRangeExprWithFields: {
+            result = ParseBinaryArithOpEvalRangeExprsWithFields(
+                expr_pb.binary_arith_op_eval_range_expr_with_fields());
             break;
         }
         case ppe::kExistsExpr: {

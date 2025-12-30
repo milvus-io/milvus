@@ -316,6 +316,22 @@ func combineArrayLengthExpr(op planpb.OpType, arithOp planpb.ArithOpType, column
 	}, nil
 }
 
+func combineBinaryArithExprWithFields(op planpb.OpType, arithOp planpb.ArithOpType, leftColumnInfo *planpb.ColumnInfo, rightColumnInfo *planpb.ColumnInfo, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
+	return &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithOpEvalRangeExprWithFields{
+			BinaryArithOpEvalRangeExprWithFields: &planpb.BinaryArithOpEvalRangeExprWithFields{
+				LeftColumnInfo:            leftColumnInfo,
+				RightColumnInfo:           rightColumnInfo,
+				ArithOp:                   arithOp,
+				Op:                        op,
+				Value:                     valueExpr.GetValue(),
+				ValueTemplateVariableName: valueExpr.GetTemplateVariableName(),
+			},
+		},
+		IsTemplate: isTemplateExpr(valueExpr),
+	}, nil
+}
+
 func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, arithExprDataType schemapb.DataType, valueExpr *planpb.ValueExpr) (*planpb.Expr, error) {
 	leftExpr, leftValue := arithExpr.Left.GetColumnExpr(), arithExpr.Left.GetValueExpr()
 	rightExpr, rightValue := arithExpr.Right.GetColumnExpr(), arithExpr.Right.GetValueExpr()
@@ -326,7 +342,9 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 	if leftExpr != nil && rightExpr != nil {
 		// a + b == 3
-		return nil, errors.New("not supported to do arithmetic operations between multiple fields")
+		// a * b > 100
+		// Support arithmetic operations between two fields
+		return combineBinaryArithExprWithFields(op, arithOp, leftExpr.GetInfo(), rightExpr.GetInfo(), valueExpr)
 	}
 
 	if leftValue != nil && rightValue != nil {
