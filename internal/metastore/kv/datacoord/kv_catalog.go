@@ -381,11 +381,11 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 		noBinlogsSegment, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
-		segBytes, err := proto.Marshal(noBinlogsSegment)
+		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
 		if err != nil {
 			return fmt.Errorf("failed to marshal segment: %d, err: %w", s.GetID(), err)
 		}
-		kvs[key] = string(segBytes)
+		kvs[key] = segBytes
 	}
 
 	saveFn := func(partialKvs map[string]string) error {
