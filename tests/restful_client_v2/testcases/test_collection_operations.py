@@ -793,30 +793,6 @@ class TestCreateCollectionNegative(TestBase):
         assert rsp['code'] == 1100
         assert "partition key field not support nullable" in rsp['message']
 
-    def test_create_collections_with_vector_nullable(self):
-        """
-        vector field not support nullable
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "schema": {
-                "fields": [
-                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"},
-                     "nullable": True}
-                ]
-            }
-        }
-        logging.info(f"create collection {name} with payload: {payload}")
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 1100
-        assert "vector type not support null" in rsp['message']
-
     def test_create_collections_with_primary_default(self):
         """
         primary key field not support defaultValue

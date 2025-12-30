@@ -566,22 +566,6 @@ class TestDeleteOperation(TestcaseBase):
         assert len(inter) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_delete_expr_repeated_values(self):
-        """
-        target: test delete with repeated values
-        method: 1.insert data with unique primary keys
-                2.delete with repeated values: 'id in [0, 0]'
-        expected: delete one entity
-        """
-        # init collection with nb default data
-        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True)[0]
-        expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
-        del_res, _ = collection_w.delete(expr)
-        assert del_res.delete_count == 3
-        collection_w.num_entities
-        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_delete_duplicate_primary_keys(self):
         """
         target: test delete from duplicate primary keys
@@ -1433,7 +1417,7 @@ class TestDeleteString(TestcaseBase):
             self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
         expr = f'{ct.default_string_field_name} in ["0", "0", "0"]'
         del_res, _ = collection_w.delete(expr)
-        assert del_res.delete_count == 3
+        assert del_res.delete_count == 1
         collection_w.num_entities
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
@@ -1939,7 +1923,7 @@ class TestDeleteString(TestcaseBase):
         # delete
         string_expr = "varchar in [\"\", \"\"]"
         del_res, _ = collection_w.delete(string_expr)
-        assert del_res.delete_count == 2
+        assert del_res.delete_count == 1
 
         # load and query with id
         collection_w.load()

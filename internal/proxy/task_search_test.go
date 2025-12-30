@@ -4709,7 +4709,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarCharWithIsolat
 		schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
 		schemaInfo := newSchemaInfo(schema)
 		s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
-		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support OR")
+		s.ErrorContains(task.PreExecute(s.ctx), "partition key isolation does not support IN")
 	}
 }
 
@@ -4920,6 +4920,8 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 		},
 	}
 
+	schemaInfo := newSchemaInfo(schema)
+
 	placeholder := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{{
 			Type:   commonpb.PlaceholderType_VarChar,
@@ -4932,9 +4934,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("lexical highlight success", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -4954,9 +4954,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("Lexical highlight with custom tags", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -4977,9 +4975,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("lexical highlight with wrong metric type", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema:        schemaInfo,
 			SearchRequest: &internalpb.SearchRequest{},
 			request:       &milvuspb.SearchRequest{},
 		}
@@ -4995,9 +4991,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("lexical highlight with invalid pre_tags type", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5021,10 +5015,9 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 			},
 		}
 
+		schemaInfo := newSchemaInfo(schemaWithoutBM25)
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schemaWithoutBM25,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5038,9 +5031,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("highlight without highlight search text", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5054,9 +5045,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("highlight with invalid highlight search key", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{
@@ -5070,9 +5059,7 @@ func TestSearchTask_AddHighlightTask(t *testing.T) {
 
 	t.Run("highlight with unknown type", func(t *testing.T) {
 		task := &searchTask{
-			schema: &schemaInfo{
-				CollectionSchema: schema,
-			},
+			schema: schemaInfo,
 		}
 
 		highlighter := &commonpb.Highlighter{

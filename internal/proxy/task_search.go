@@ -602,7 +602,7 @@ func (t *searchTask) createLexicalHighlighter(highlighter *commonpb.Highlighter,
 		if err != nil {
 			return err
 		}
-		err = h.addTaskWithSearchText(fieldId, fieldName, analyzerName, texts)
+		err = h.addTaskWithSearchText(t.schema, fieldId, fieldName, analyzerName, texts)
 		if err != nil {
 			return err
 		}
@@ -763,7 +763,7 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 
 	searchInfo.planInfo.QueryFieldId = annField.GetFieldID()
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlan(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore())
+	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.schemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr})
 	if planErr != nil {
 		log.Ctx(t.ctx).Warn("failed to create query plan", zap.Error(planErr),
 			zap.String("dsl", dsl), // may be very large if large term passed.

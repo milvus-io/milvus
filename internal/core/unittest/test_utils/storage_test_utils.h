@@ -157,13 +157,13 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
     int64_t row_count = 0;
     for (auto i = 0; i < field_datas.size(); ++i) {
         auto& field_data = field_datas[i];
-        row_count += field_data->Length();
+        row_count += field_data->get_num_rows();
         auto file = "./data/test/" + std::to_string(collection_id) + "/" +
                     std::to_string(partition_id) + "/" +
                     std::to_string(segment_id) + "/" +
                     std::to_string(field_id) + "/" + std::to_string(i);
         files.push_back(file);
-        row_counts.push_back(field_data->Length());
+        row_counts.push_back(field_data->get_num_rows());
         auto payload_reader =
             std::make_shared<milvus::storage::PayloadReader>(field_data);
         auto insert_data = std::make_shared<InsertData>(payload_reader);

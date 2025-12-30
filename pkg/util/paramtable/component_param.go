@@ -48,7 +48,7 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 
-	DefaultSessionTTL        = 10 // s
+	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -853,7 +853,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.SessionTTL = ParamItem{
 		Key:          "common.session.ttl",
 		Version:      "2.0.0",
-		DefaultValue: "30",
+		DefaultValue: "15",
 		Doc:          "ttl value when session granting a lease to register service",
 		Export:       true,
 	}
@@ -3332,8 +3332,9 @@ type queryNodeConfig struct {
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
 
 	// tsafe
-	MaxTimestampLag ParamItem `refreshable:"true"`
-	DowngradeTsafe  ParamItem `refreshable:"true"`
+	MaxTimestampLag           ParamItem `refreshable:"true"`
+	DowngradeTsafe            ParamItem `refreshable:"true"`
+	CatchUpStreamingDataTsLag ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -4298,6 +4299,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       false,
 	}
 	p.DowngradeTsafe.Init(base.mgr)
+
+	p.CatchUpStreamingDataTsLag = ParamItem{
+		Key:          "queryNode.delegator.catchUpStreamingDataTsLag",
+		Version:      "2.6.8",
+		DefaultValue: "1s",
+		Doc:          "Tolerable lag for delegator to be considered caught up with streaming data",
+	}
+	p.CatchUpStreamingDataTsLag.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
@@ -6457,6 +6466,9 @@ if this parameter <= 0, will set it as 10`,
 }
 
 type streamingConfig struct {
+	// scanner
+	WALScannerPauseConsumption ParamItem `refreshable:"true"`
+
 	// balancer
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
@@ -6512,6 +6524,27 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	// scanner
+	p.WALScannerPauseConsumption = ParamItem{
+		Key:     "streaming.walScanner.pauseConsumption",
+		Version: "2.6.8",
+		Doc: `Whether to pause the scanner from consuming WAL messages, false by default.
+
+This parameter can be used as a temporary mitigation when a StreamingNode
+enters a crash loop and fails to execute UpdateReplicateConfigure (Primary-Secondary switchover) 
+due to bugs. Pausing scanner consumption prevents the crash from being 
+repeatedly triggered during the node's startup and recovery phase.
+
+In such recovery scenarios, set this value to "true". After UpdateReplicateConfigure
+completes successfully or the StreamingNode returns to a healthy state, 
+this value should be set back to "false" to resume normal message processing.
+
+This configuration is applied dynamically and does not require restarting the cluster.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.WALScannerPauseConsumption.Init(base.mgr)
+
 	// balancer
 	p.WALBalancerTriggerInterval = ParamItem{
 		Key:     "streaming.walBalancer.triggerInterval",

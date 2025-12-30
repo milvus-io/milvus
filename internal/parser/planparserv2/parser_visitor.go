@@ -192,7 +192,7 @@ func (v *ParserVisitor) VisitString(ctx *parser.StringContext) interface{} {
 }
 
 func checkDirectComparisonBinaryField(columnInfo *planpb.ColumnInfo) error {
-	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 {
+	if typeutil.IsArrayType(columnInfo.GetDataType()) && len(columnInfo.GetNestedPath()) == 0 && !columnInfo.GetIsElementLevel() {
 		return errors.New("can not comparisons array fields directly")
 	}
 	return nil
@@ -664,6 +664,10 @@ func isElementFilterExpr(expr *ExprWithType) bool {
 	return expr.expr.GetElementFilterExpr() != nil
 }
 
+func isMatchExpr(expr *ExprWithType) bool {
+	return expr.expr.GetMatchExpr() != nil
+}
+
 const EPSILON = 1e-10
 
 func (v *ParserVisitor) VisitRandomSample(ctx *parser.RandomSampleContext) interface{} {
@@ -715,7 +719,10 @@ func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
 	}
 
 	dataType := columnInfo.GetDataType()
-	if typeutil.IsArrayType(dataType) && len(columnInfo.GetNestedPath()) != 0 {
+	// Use element type for IN operation in two cases:
+	// 1. Array with nested path (e.g., arr[0] IN [1, 2, 3])
+	// 2. Array with element level flag (e.g., $[intField] IN [1, 2] in MATCH_ALL/ElementFilter)
+	if typeutil.IsArrayType(dataType) && (len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
 		dataType = columnInfo.GetElementType()
 	}
 
@@ -2092,6 +2099,15 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 	}
 }
 
+// VisitTimestamptzCompareForward handles comparison expressions where the column
+// is on the left side of the operator.
+// Syntax example: column > '2025-01-01' [ + INTERVAL 'P1D' ]
+//
+// Optimization Logic:
+//  1. Quick Path: If no INTERVAL is provided, it generates a UnaryRangeExpr
+//     to enable index-based scan performance in Milvus.
+//  2. Slow Path: If an INTERVAL exists, it generates a TimestamptzArithCompareExpr
+//     for specialized arithmetic evaluation.
 func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCompareForwardContext) interface{} {
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().Accept(v)
@@ -2102,53 +2118,70 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
 	}
 
-	arithOp := planpb.ArithOpType_Unknown
-	interval := &planpb.Interval{}
-	if ctx.GetOp1() != nil {
-		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
-		rawIntervalStr := ctx.GetInterval_string().GetText()
-		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
-		if err != nil {
-			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
-		}
-		interval, err = parseISODuration(unquotedIntervalStr)
-		if err != nil {
-			return err
-		}
-	}
+	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
 	rawCompareStr := ctx.GetCompare_string().GetText()
 	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
 	if err != nil {
 		return fmt.Errorf("can not convert compare string: %s", rawCompareStr)
 	}
-
-	compareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
-
 	timestamptzInt64, err := timestamptz.ValidateAndReturnUnixMicroTz(unquotedCompareStr, v.args.Timezone)
 	if err != nil {
 		return err
 	}
 
-	newExpr := &planpb.Expr{
-		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
-			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
-				TimestamptzColumn: toColumnInfo(colExpr),
-				ArithOp:           arithOp,
-				Interval:          interval,
-				CompareOp:         compareOp,
-				CompareValue: &planpb.GenericValue{
-					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+	if ctx.GetOp1() == nil {
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_UnaryRangeExpr{
+					UnaryRangeExpr: &planpb.UnaryRangeExpr{
+						ColumnInfo: toColumnInfo(colExpr),
+						Op:         compareOp,
+						Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64}},
+					},
 				},
 			},
-		},
+			dataType: schemapb.DataType_Bool,
+		}
+	}
+
+	arithOp := arithExprMap[ctx.GetOp1().GetTokenType()]
+	rawIntervalStr := ctx.GetInterval_string().GetText()
+	unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+	if err != nil {
+		return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+	}
+	interval, err := parseISODuration(unquotedIntervalStr)
+	if err != nil {
+		return err
 	}
 
 	return &ExprWithType{
-		expr:     newExpr,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+				TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+					TimestamptzColumn: toColumnInfo(colExpr),
+					ArithOp:           arithOp,
+					Interval:          interval,
+					CompareOp:         compareOp,
+					CompareValue:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64}},
+				},
+			},
+		},
 		dataType: schemapb.DataType_Bool,
 	}
 }
 
+// VisitTimestamptzCompareReverse handles comparison expressions where the column
+// is on the right side of the operator.
+// Syntax example: '2025-01-01' [ + INTERVAL 'P1D' ] > column
+//
+// Optimization and Normalization Logic:
+//  1. Operator Reversal: The comparison operator is flipped (e.g., '>' to '<')
+//     to normalize the expression into a column-centric format.
+//  2. Quick Path: For simple comparisons without INTERVAL, it generates a
+//     UnaryRangeExpr with the reversed operator to leverage indexing.
+//  3. Slow Path: For complex expressions involving INTERVAL, it produces a
+//     TimestamptzArithCompareExpr with the reversed operator.
 func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCompareReverseContext) interface{} {
 	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
 	identifier := ctx.Identifier().GetText()
@@ -2159,21 +2192,6 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 		return fmt.Errorf("field '%s' is not a timestamptz datatype", identifier)
 	}
 
-	arithOp := planpb.ArithOpType_Unknown
-	interval := &planpb.Interval{}
-	if ctx.GetOp1() != nil {
-		arithOp = arithExprMap[ctx.GetOp1().GetTokenType()]
-		rawIntervalStr := ctx.GetInterval_string().GetText()
-		unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
-		if err != nil {
-			return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
-		}
-		interval, err = parseISODuration(unquotedIntervalStr)
-		if err != nil {
-			return err
-		}
-	}
-
 	rawCompareStr := ctx.GetCompare_string().GetText()
 	unquotedCompareStr, err := convertEscapeSingle(rawCompareStr)
 	if err != nil {
@@ -2181,9 +2199,7 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 	}
 
 	originalCompareOp := cmpOpMap[ctx.GetOp2().GetTokenType()]
-
 	compareOp := reverseCompareOp(originalCompareOp)
-
 	if compareOp == planpb.OpType_Invalid && originalCompareOp != planpb.OpType_Invalid {
 		return fmt.Errorf("unsupported comparison operator for reverse Timestamptz: %s", ctx.GetOp2().GetText())
 	}
@@ -2193,22 +2209,48 @@ func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCo
 		return err
 	}
 
-	newExpr := &planpb.Expr{
-		Expr: &planpb.Expr_TimestamptzArithCompareExpr{
-			TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
-				TimestamptzColumn: toColumnInfo(colExpr),
-				ArithOp:           arithOp,
-				Interval:          interval,
-				CompareOp:         compareOp,
-				CompareValue: &planpb.GenericValue{
-					Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+	// Quick Path: No arithmetic operation. Use UnaryRangeExpr for index optimization.
+	if ctx.GetOp1() == nil {
+		return &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_UnaryRangeExpr{
+					UnaryRangeExpr: &planpb.UnaryRangeExpr{
+						ColumnInfo: toColumnInfo(colExpr),
+						Op:         compareOp,
+						Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64}},
+					},
 				},
 			},
-		},
+			dataType: schemapb.DataType_Bool,
+		}
+	}
+
+	// Slow Path: Handle arithmetic with TimestamptzArithCompareExpr.
+	arithOp := arithExprMap[ctx.GetOp1().GetTokenType()]
+	rawIntervalStr := ctx.GetInterval_string().GetText()
+	unquotedIntervalStr, err := convertEscapeSingle(rawIntervalStr)
+	if err != nil {
+		return fmt.Errorf("can not convert interval string: %s", rawIntervalStr)
+	}
+	interval, err := parseISODuration(unquotedIntervalStr)
+	if err != nil {
+		return err
 	}
 
 	return &ExprWithType{
-		expr:     newExpr,
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_TimestamptzArithCompareExpr{
+				TimestamptzArithCompareExpr: &planpb.TimestamptzArithCompareExpr{
+					TimestamptzColumn: toColumnInfo(colExpr),
+					ArithOp:           arithOp,
+					Interval:          interval,
+					CompareOp:         compareOp,
+					CompareValue: &planpb.GenericValue{
+						Val: &planpb.GenericValue_Int64Val{Int64Val: timestamptzInt64},
+					},
+				},
+			},
+		},
 		dataType: schemapb.DataType_Bool,
 	}
 }
@@ -2298,9 +2340,9 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	// Remove "$[" prefix and "]" suffix
 	fieldName := tokenText[2 : len(tokenText)-1]
 
-	// Check if we're inside an ElementFilter context
+	// Check if we're inside an ElementFilter or MATCH_* context
 	if v.currentStructArrayField == "" {
-		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter", fieldName)
+		return fmt.Errorf("$[%s] syntax can only be used inside ElementFilter or MATCH_*", fieldName)
 	}
 
 	// Construct full field name for struct array field
@@ -2311,7 +2353,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 		return fmt.Errorf("array field not found: %s, error: %s", fullFieldName, err)
 	}
 
-	// In element-level context, data_type should be the element type
+	// In element-level context, use Array as storage type, element type for operations
 	elementType := field.GetElementType()
 
 	return &ExprWithType{
@@ -2320,12 +2362,12 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 				ColumnExpr: &planpb.ColumnExpr{
 					Info: &planpb.ColumnInfo{
 						FieldId:         field.FieldID,
-						DataType:        elementType, // Use element type, not storage type
+						DataType:        schemapb.DataType_Array, // Storage type is Array
 						IsPrimaryKey:    field.IsPrimaryKey,
 						IsAutoID:        field.AutoID,
 						IsPartitionKey:  field.IsPartitionKey,
 						IsClusteringKey: field.IsClusteringKey,
-						ElementType:     elementType,
+						ElementType:     elementType, // Element type for operations
 						Nullable:        field.GetNullable(),
 						IsElementLevel:  true, // Mark as element-level access
 					},
@@ -2335,4 +2377,114 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 		dataType:      elementType, // Expression evaluates to element type
 		nodeDependent: true,
 	}
+}
+
+// parseMatchExpr is a helper function for parsing match expressions
+// matchType: the type of match operation (MatchAll, MatchAny, MatchLeast, MatchMost)
+// count: for MatchLeast/MatchMost, the count parameter (N); for MatchAll/MatchAny, this is ignored (0)
+func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx parser.IExprContext, matchType planpb.MatchType, count int64, funcName string) interface{} {
+	// Check for nested match expression - not allowed
+	if v.currentStructArrayField != "" {
+		return fmt.Errorf("nested %s is not supported, already inside match expression for field: %s", funcName, v.currentStructArrayField)
+	}
+
+	// Set current context for element expression parsing
+	v.currentStructArrayField = structArrayFieldName
+	defer func() { v.currentStructArrayField = "" }()
+
+	// Parse the predicate expression
+	predicate := exprCtx.Accept(v)
+	if err := getError(predicate); err != nil {
+		return fmt.Errorf("cannot parse predicate expression: %s, error: %s", exprCtx.GetText(), err)
+	}
+
+	predicateExpr := getExpr(predicate)
+	if predicateExpr == nil {
+		return fmt.Errorf("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
+	}
+
+	// Build MatchExpr proto
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_MatchExpr{
+				MatchExpr: &planpb.MatchExpr{
+					StructName: structArrayFieldName,
+					Predicate:  predicateExpr.expr,
+					MatchType:  matchType,
+					Count:      count,
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+// VisitMatchAll handles MATCH_ALL expressions
+// Syntax: MATCH_ALL(structArrayField, $[intField] == 1 && $[strField] == "aaa")
+// All elements must match the predicate
+func (v *ParserVisitor) VisitMatchAll(ctx *parser.MatchAllContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchAll, 0, "MATCH_ALL")
+}
+
+// VisitMatchAny handles MATCH_ANY expressions
+// Syntax: MATCH_ANY(structArrayField, $[intField] == 1 && $[strField] == "aaa")
+// At least one element must match the predicate
+func (v *ParserVisitor) VisitMatchAny(ctx *parser.MatchAnyContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchAny, 0, "MATCH_ANY")
+}
+
+// VisitMatchLeast handles MATCH_LEAST expressions
+// Syntax: MATCH_LEAST(structArrayField, $[intField] == 1 && $[strField] == "aaa", threshold=N)
+// At least N elements must match the predicate
+func (v *ParserVisitor) VisitMatchLeast(ctx *parser.MatchLeastContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+
+	countStr := ctx.IntegerConstant().GetText()
+	count, err := strconv.ParseInt(countStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid count in MATCH_LEAST: %s", countStr)
+	}
+	if count <= 0 {
+		return fmt.Errorf("count in MATCH_LEAST must be positive, got: %d", count)
+	}
+
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchLeast, count, "MATCH_LEAST")
+}
+
+// VisitMatchMost handles MATCH_MOST expressions
+// Syntax: MATCH_MOST(structArrayField, $[intField] == 1 && $[strField] == "aaa", threshold=N)
+// At most N elements must match the predicate
+func (v *ParserVisitor) VisitMatchMost(ctx *parser.MatchMostContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+
+	countStr := ctx.IntegerConstant().GetText()
+	count, err := strconv.ParseInt(countStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid count in MATCH_MOST: %s", countStr)
+	}
+	if count < 0 {
+		return fmt.Errorf("count in MATCH_MOST cannot be negative, got: %d", count)
+	}
+
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchMost, count, "MATCH_MOST")
+}
+
+// VisitMatchExact handles MATCH_EXACT expressions
+// Syntax: MATCH_EXACT(structArrayField, $[intField] == 1 && $[strField] == "aaa", threshold=N)
+// Exactly N elements must match the predicate
+func (v *ParserVisitor) VisitMatchExact(ctx *parser.MatchExactContext) interface{} {
+	structArrayFieldName := ctx.Identifier().GetText()
+
+	countStr := ctx.IntegerConstant().GetText()
+	count, err := strconv.ParseInt(countStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid count in MATCH_EXACT: %s", countStr)
+	}
+	if count < 0 {
+		return fmt.Errorf("count in MATCH_EXACT cannot be negative, got: %d", count)
+	}
+
+	return v.parseMatchExpr(structArrayFieldName, ctx.Expr(), planpb.MatchType_MatchExact, count, "MATCH_EXACT")
 }

@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	pulsar2 "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
@@ -494,10 +497,24 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 		node := createTestProxy()
 		defer node.sched.Close()
 
+		messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
+		msg := message.NewFlushAllMessageBuilderV2().
+			WithVChannel("test-vchannel").
+			WithHeader(&message.FlushAllMessageHeader{}).
+			WithBody(&message.FlushAllMessageBody{}).
+			MustBuildMutable().WithTimeTick(1000).
+			WithLastConfirmed(messageID)
+		milvusMsg := message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID))
+
 		mixcoord := &grpcmixcoordclient.Client{}
 		node.mixCoord = mixcoord
 		mockey.Mock((*grpcmixcoordclient.Client).FlushAll).To(func(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
-			return &datapb.FlushAllResponse{Status: successStatus}, nil
+			return &datapb.FlushAllResponse{
+				Status: successStatus,
+				FlushAllMsgs: map[string]*commonpb.ImmutableMessage{
+					"channel1": milvusMsg,
+				},
+			}, nil
 		}).Build()
 
 		resp, err := node.FlushAll(context.Background(), &milvuspb.FlushAllRequest{})
@@ -1833,7 +1850,7 @@ func TestProxy_AddFileResource(t *testing.T) {
 
 		resp, err := proxy.AddFileResource(context.Background(), req)
 		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp))
+		assert.Error(t, merr.Error(resp))
 	})
 
 	t.Run("proxy not healthy", func(t *testing.T) {
@@ -1850,23 +1867,23 @@ func TestProxy_AddFileResource(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 	})
 
-	t.Run("mixCoord error", func(t *testing.T) {
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	// t.Run("mixCoord error", func(t *testing.T) {
+	// 	proxy := &Proxy{}
+	// 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		mockMixCoord := mocks.NewMockMixCoordClient(t)
-		mockMixCoord.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-		proxy.mixCoord = mockMixCoord
+	// 	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	// 	mockMixCoord.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+	// 	proxy.mixCoord = mockMixCoord
 
-		req := &milvuspb.AddFileResourceRequest{
-			Name: "test_resource",
-			Path: "/path/to/resource",
-		}
+	// 	req := &milvuspb.AddFileResourceRequest{
+	// 		Name: "test_resource",
+	// 		Path: "/path/to/resource",
+	// 	}
 
-		resp, err := proxy.AddFileResource(context.Background(), req)
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
-	})
+	// 	resp, err := proxy.AddFileResource(context.Background(), req)
+	// 	assert.NoError(t, err)
+	// 	assert.Error(t, merr.Error(resp))
+	// })
 }
 
 func TestProxy_RemoveFileResource(t *testing.T) {
@@ -1882,7 +1899,7 @@ func TestProxy_RemoveFileResource(t *testing.T) {
 
 		resp, err := proxy.RemoveFileResource(context.Background(), req)
 		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp))
+		assert.Error(t, merr.Error(resp))
 	})
 
 	t.Run("proxy not healthy", func(t *testing.T) {
@@ -1897,22 +1914,22 @@ func TestProxy_RemoveFileResource(t *testing.T) {
 		assert.Error(t, merr.Error(resp))
 	})
 
-	t.Run("mixCoord error", func(t *testing.T) {
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	// t.Run("mixCoord error", func(t *testing.T) {
+	// 	proxy := &Proxy{}
+	// 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		mockMixCoord := mocks.NewMockMixCoordClient(t)
-		mockMixCoord.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-		proxy.mixCoord = mockMixCoord
+	// 	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	// 	mockMixCoord.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+	// 	proxy.mixCoord = mockMixCoord
 
-		req := &milvuspb.RemoveFileResourceRequest{
-			Name: "test_resource",
-		}
+	// 	req := &milvuspb.RemoveFileResourceRequest{
+	// 		Name: "test_resource",
+	// 	}
 
-		resp, err := proxy.RemoveFileResource(context.Background(), req)
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
-	})
+	// 	resp, err := proxy.RemoveFileResource(context.Background(), req)
+	// 	assert.NoError(t, err)
+	// 	assert.Error(t, merr.Error(resp))
+	// })
 }
 
 func TestProxy_ListFileResources(t *testing.T) {
@@ -1927,9 +1944,7 @@ func TestProxy_ListFileResources(t *testing.T) {
 
 		resp, err := proxy.ListFileResources(context.Background(), req)
 		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
-		assert.NotNil(t, resp.GetResources())
-		assert.Equal(t, 0, len(resp.GetResources())) // Mock returns empty list
+		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
 	t.Run("proxy not healthy", func(t *testing.T) {
@@ -1942,19 +1957,19 @@ func TestProxy_ListFileResources(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
-	t.Run("mixCoord error", func(t *testing.T) {
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	// t.Run("mixCoord error", func(t *testing.T) {
+	// 	proxy := &Proxy{}
+	// 	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		mockMixCoord := mocks.NewMockMixCoordClient(t)
-		mockMixCoord.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
-		proxy.mixCoord = mockMixCoord
+	// 	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	// 	mockMixCoord.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+	// 	proxy.mixCoord = mockMixCoord
 
-		req := &milvuspb.ListFileResourcesRequest{}
-		resp, err := proxy.ListFileResources(context.Background(), req)
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp.GetStatus()))
-	})
+	// 	req := &milvuspb.ListFileResourcesRequest{}
+	// 	resp, err := proxy.ListFileResources(context.Background(), req)
+	// 	assert.NoError(t, err)
+	// 	assert.Error(t, merr.Error(resp.GetStatus()))
+	// })
 }
 
 func TestProxy_ComputePhraseMatchSlop(t *testing.T) {

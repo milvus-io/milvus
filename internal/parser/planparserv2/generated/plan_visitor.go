@@ -10,6 +10,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#String.
 	VisitString(ctx *StringContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#MatchAny.
+	VisitMatchAny(ctx *MatchAnyContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
 
@@ -46,6 +49,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#PhraseMatch.
 	VisitPhraseMatch(ctx *PhraseMatchContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#MatchLeast.
+	VisitMatchLeast(ctx *MatchLeastContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#ArrayLength.
 	VisitArrayLength(ctx *ArrayLengthContext) interface{}
 
@@ -64,6 +70,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Range.
 	VisitRange(ctx *RangeContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#MatchAll.
+	VisitMatchAll(ctx *MatchAllContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#STIsValid.
 	VisitSTIsValid(ctx *STIsValidContext) interface{}
 
@@ -79,6 +88,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#STOverlaps.
 	VisitSTOverlaps(ctx *STOverlapsContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#MatchMost.
+	VisitMatchMost(ctx *MatchMostContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#JSONIdentifier.
 	VisitJSONIdentifier(ctx *JSONIdentifierContext) interface{}
 
@@ -87,6 +99,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Parens.
 	VisitParens(ctx *ParensContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#MatchExact.
+	VisitMatchExact(ctx *MatchExactContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#JSONContainsAll.
 	VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{}

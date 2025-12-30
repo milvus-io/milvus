@@ -1,4 +1,4 @@
-use crate::analyzer::options::get_resource_path;
+use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
@@ -199,30 +199,16 @@ impl SynonymDict {
     }
 }
 
-fn read_synonyms_file(builder: &mut SynonymDictBuilder, params: &json::Value) -> Result<()> {
-    let path = get_resource_path(params, "synonyms dict file")?;
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(row_data) = line {
-            builder.add_row(&row_data)?;
-        } else {
-            return Err(TantivyBindingError::InternalError(format!(
-                "read synonyms dict file failed, error: {}",
-                line.unwrap_err().to_string()
-            )));
-        }
-    }
-    Ok(())
-}
-
 #[derive(Clone)]
 pub struct SynonymFilter {
     dict: Arc<SynonymDict>,
 }
 
 impl SynonymFilter {
-    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<SynonymFilter> {
+    pub fn from_json(
+        params: &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<SynonymFilter> {
         let expand = params.get("expand").map_or(Ok(true), |v| {
             v.as_bool().ok_or(TantivyBindingError::InvalidArgument(
                 "create synonym filter failed, `expand` must be bool".to_string(),
@@ -246,7 +232,19 @@ impl SynonymFilter {
         }
 
         if let Some(file_params) = params.get("synonyms_file") {
-            read_synonyms_file(&mut builder, file_params)?;
+            let path = get_resource_path(helper, file_params, "synonyms dict file")?;
+            let file = std::fs::File::open(path)?;
+            let reader = std::io::BufReader::new(file);
+            for line in reader.lines() {
+                if let Ok(row_data) = line {
+                    builder.add_row(&row_data)?;
+                } else {
+                    return Err(TantivyBindingError::InternalError(format!(
+                        "read synonyms dict file failed, error: {}",
+                        line.unwrap_err().to_string()
+                    )));
+                }
+            }
         }
 
         Ok(SynonymFilter {
@@ -350,11 +348,14 @@ impl<T: TokenStream> TokenStream for SynonymFilterStream<T> {
 #[cfg(test)]
 mod tests {
     use super::SynonymFilter;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
     use crate::analyzer::tokenizers::standard_builder;
     use crate::log::init_log;
+
     use serde_json as json;
     use std::collections::HashSet;
     use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn test_synonym_filter() {
@@ -365,7 +366,8 @@ mod tests {
             "synonyms": ["trans => translate, \\=>", "\\\\test, test, tests"]
         }"#;
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let filter = SynonymFilter::from_json(json_params.as_object().unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = SynonymFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());
         let mut analyzer = builder.build();
@@ -402,7 +404,8 @@ mod tests {
             }}"#
         );
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let filter = SynonymFilter::from_json(json_params.as_object().unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = SynonymFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());
         let mut analyzer = builder.build();

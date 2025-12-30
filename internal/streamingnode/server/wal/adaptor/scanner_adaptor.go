@@ -2,9 +2,11 @@ package adaptor
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -12,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
@@ -19,9 +22,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-var _ wal.Scanner = (*scannerAdaptorImpl)(nil)
+var (
+	_               wal.Scanner = (*scannerAdaptorImpl)(nil)
+	consumerCounter atomic.Int64
+)
 
 // newRecoveryScannerAdaptor creates a new recovery scanner adaptor.
 func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
@@ -36,8 +43,9 @@ func newRecoveryScannerAdaptor(l walimpls.ROWALImpls,
 		zap.String("startMessageID", startMessageID.String()),
 	)
 	readOption := wal.ReadOption{
-		DeliverPolicy:  options.DeliverPolicyStartFrom(startMessageID),
-		MesasgeHandler: adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
+		DeliverPolicy:          options.DeliverPolicyStartFrom(startMessageID),
+		MesasgeHandler:         adaptor.ChanMessageHandler(make(chan message.ImmutableMessage)),
+		IgnorePauseConsumption: true,
 	}
 
 	s := &scannerAdaptorImpl{
@@ -198,6 +206,7 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 
 // consumeEventLoop consumes the message from the message channel and handle it.
 func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMessage) error {
+	s.waitUntilStartConsumption()
 	for {
 		var upstream <-chan message.ImmutableMessage
 		if s.pendingQueue.Len() > 16 {
@@ -221,6 +230,37 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 		}
 		if handleResult.Incoming != nil {
 			s.handleUpstream(handleResult.Incoming)
+		}
+	}
+}
+
+// waitUntilStartConsumption is used to wait until the consumption is started.
+func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
+	s.metrics.PauseConsumption()
+	defer s.metrics.ResumeConsumption()
+
+	pauseConsumption := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool()
+	if !s.readOption.IgnorePauseConsumption && pauseConsumption {
+		resumeChan := make(chan struct{}, 1)
+		watchKey := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.Key
+		handler := config.NewHandler(fmt.Sprintf("%s-%d", watchKey, consumerCounter.Inc()), func(event *config.Event) {
+			pause := paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool()
+			if !pause {
+				select {
+				case resumeChan <- struct{}{}:
+				default:
+				}
+			}
+		})
+		paramtable.Get().Watch(watchKey, handler)
+		defer paramtable.Get().Unwatch(watchKey, handler)
+
+		s.logger.Info("pause consumption...")
+		select {
+		case <-resumeChan:
+			s.logger.Info("continue to consume messages")
+		case <-s.Context().Done():
+			s.logger.Info("pause consumption is canceled")
 		}
 	}
 }

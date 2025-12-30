@@ -433,18 +433,18 @@ func (suite *ReaderSuite) TestStringPK() {
 }
 
 func (suite *ReaderSuite) TestVector() {
-	suite.vecDataType = schemapb.DataType_BinaryVector
-	suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_FloatVector
-	suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_Float16Vector
-	suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_BFloat16Vector
-	suite.run(schemapb.DataType_Int32)
-	// suite.vecDataType = schemapb.DataType_SparseFloatVector
-	// suite.run(schemapb.DataType_Int32)
-	suite.vecDataType = schemapb.DataType_Int8Vector
-	suite.run(schemapb.DataType_Int32)
+	dataTypes := []schemapb.DataType{
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
+	}
+
+	for _, dataType := range dataTypes {
+		suite.vecDataType = dataType
+		suite.run(schemapb.DataType_Int32)
+	}
 }
 
 func TestNumpyCreateReaders(t *testing.T) {

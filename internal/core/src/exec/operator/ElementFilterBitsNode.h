@@ -77,9 +77,6 @@ class PhyElementFilterBitsNode : public Operator {
     }
 
  private:
-    FixedVector<int32_t>
-    DocBitsetToElementOffsets(const TargetBitmapView& doc_bitset);
-
     std::pair<TargetBitmap, TargetBitmap>
     EvaluateElementExpression(FixedVector<int32_t>& element_offsets);
 

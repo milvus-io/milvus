@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <memory>
 
 #include "common/FieldMeta.h"
+#include "milvus-storage/column_groups.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/MmapManager.h"
@@ -152,12 +154,18 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
     // Get current indexed field IDs
     std::set<int64_t> current_index_ids;
     for (auto const& index_info : GetIndexInfos()) {
+        if (index_info.index_file_paths_size() == 0) {
+            continue;
+        }
         current_index_ids.insert(index_info.indexid());
     }
 
     std::set<int64_t> new_index_ids;
     // Find indexes to load: indexes in new_info but not in current
     for (const auto& new_index_info : new_info.GetIndexInfos()) {
+        if (new_index_info.index_file_paths_size() == 0) {
+            continue;
+        }
         new_index_ids.insert(new_index_info.indexid());
         if (current_index_ids.find(new_index_info.indexid()) ==
             current_index_ids.end()) {
@@ -168,6 +176,9 @@ SegmentLoadInfo::ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info) {
 
     // Find indexes to drop: fields that have indexes in current but not in new_info
     for (const auto& index_info : GetIndexInfos()) {
+        if (index_info.index_file_paths_size() == 0) {
+            continue;
+        }
         if (new_index_ids.find(index_info.indexid()) == new_index_ids.end()) {
             diff.indexes_to_drop.insert(FieldId(index_info.fieldid()));
         }
@@ -180,7 +191,14 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     std::map<int64_t, int64_t> current_fields;
     for (int i = 0; i < GetBinlogPathCount(); i++) {
         auto& field_binlog = GetBinlogPath(i);
-        for (auto child_id : field_binlog.child_fields()) {
+        std::vector<int64_t> child_fields(field_binlog.child_fields().begin(),
+                                          field_binlog.child_fields().end());
+        // v1 or legacy, group id == field id
+        if (child_fields.empty()) {
+            child_fields.emplace_back(field_binlog.fieldid());
+        }
+
+        for (auto child_id : child_fields) {
             current_fields[child_id] = field_binlog.fieldid();
         }
     }
@@ -189,7 +207,14 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
     for (int i = 0; i < new_info.GetBinlogPathCount(); i++) {
         auto& new_field_binlog = new_info.GetBinlogPath(i);
         std::vector<FieldId> ids_to_load;
-        for (auto child_id : new_field_binlog.child_fields()) {
+        std::vector<int64_t> child_fields(
+            new_field_binlog.child_fields().begin(),
+            new_field_binlog.child_fields().end());
+        // v1 or legacy, group id == field id
+        if (child_fields.empty()) {
+            child_fields.emplace_back(new_field_binlog.fieldid());
+        }
+        for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
             auto iter = current_fields.find(new_field_binlog.fieldid());
             // Find binlogs to load: fields in new_info match current
@@ -234,6 +259,7 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     std::map<int64_t, int> new_field_ids;
     for (int i = 0; i < new_column_group->size(); i++) {
         auto cg = new_column_group->get_column_group(i);
+        std::vector<FieldId> fields;
         for (const auto& column : cg->columns) {
             auto field_id = std::stoll(column);
             new_field_ids.emplace(field_id, i);
@@ -241,8 +267,11 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
             auto iter = cur_field_ids.find(field_id);
             // If this field doesn't exist in current, mark the column group for loading
             if (iter == cur_field_ids.end() || iter->second != i) {
-                diff.column_groups_to_load[i].emplace_back(field_id);
+                fields.emplace_back(field_id);
             }
+        }
+        if (!fields.empty()) {
+            diff.column_groups_to_load.emplace_back(i, fields);
         }
     }
 
@@ -275,6 +304,33 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
             !new_info.HasManifestPath(),
             "field binlogs could only be updated with non-manfest load info");
         ComputeDiffBinlogs(diff, new_info);
+    }
+
+    return diff;
+}
+
+LoadDiff
+SegmentLoadInfo::GetLoadDiff() {
+    LoadDiff diff;
+
+    SegmentLoadInfo empty_info;
+
+    // Handle index changes
+    empty_info.ComputeDiffIndexes(diff, *this);
+
+    // Handle field data changes
+    // Note: Updates can only happen within the same category:
+    // - binlog -> binlog
+    // - manifest -> manifest
+    // Cross-category changes are not supported.
+    if (HasManifestPath()) {
+        // set mock path for null check
+        empty_info.info_.set_manifest_path("mocked manifest path");
+        empty_info.column_groups_ =
+            std::make_shared<milvus_storage::api::ColumnGroups>();
+        empty_info.ComputeDiffColumnGroups(diff, *this);
+    } else {
+        empty_info.ComputeDiffBinlogs(diff, *this);
     }
 
     return diff;

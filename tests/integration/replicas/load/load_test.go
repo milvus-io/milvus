@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -747,13 +748,23 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 	// Start a goroutine to continuously insert data and trigger compaction
 	go func() {
 		defer wg.Done()
+		nextStartPK := int64(1)
 		for {
 			select {
 			case <-stopInsertCh:
 				return
 			default:
-				s.InsertAndFlush(ctx, dbName, collName, 2000, dim)
-				_, err := s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+				var err error
+				nextStartPK, err = s.InsertAndFlush(ctx, dbName, collName, 2000, dim, &integration.PrimaryKeyConfig{
+					FieldName:   integration.Int64Field,
+					FieldType:   schemapb.DataType_Int64,
+					NumChannels: 1,
+					StartPK:     nextStartPK,
+				})
+				if err != nil {
+					return
+				}
+				_, err = s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
 					CollectionName: collName,
 				})
 				s.NoError(err)

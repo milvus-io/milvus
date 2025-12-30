@@ -166,8 +166,7 @@ gen_filter_res(milvus::plan::PlanNode* plan_node,
     auto exprs_ =
         std::make_unique<milvus::exec::ExprSet>(filters, exec_context.get());
     std::vector<VectorPtr> results_;
-    milvus::exec::EvalCtx eval_ctx(exec_context.get(), exprs_.get());
-    eval_ctx.set_offset_input(offsets);
+    milvus::exec::EvalCtx eval_ctx(exec_context.get(), offsets);
     exprs_->Eval(0, 1, true, eval_ctx, results_);
 
     auto col_vec = std::dynamic_pointer_cast<milvus::ColumnVector>(results_[0]);

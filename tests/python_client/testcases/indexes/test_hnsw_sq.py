@@ -31,16 +31,14 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
         schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        # Insert data in 2 batches with unique primary keys
-        insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb * insert_times, dim, vector_data_type=DataType.FLOAT_VECTOR))
-        for j in range(insert_times):
-            start_pk = j * default_nb
-            rows = [{
-                pk_field_name: i + start_pk,
-                vector_field_name: random_vectors[i + start_pk]
-            } for i in range(default_nb)]
-            self.insert(client, collection_name, rows)
+        all_rows = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            start=0,
+            random_pk=False
+        )
+
+        self.insert(client, collection_name, all_rows)
         self.flush(client, collection_name)
 
         # create index
@@ -98,18 +96,14 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
             schema.add_field(vector_field_name, datatype=vector_data_type, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        # Insert data in 2 batches with unique primary keys
-        insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=vector_data_type)) \
-            if vector_data_type == DataType.FLOAT_VECTOR \
-            else cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=vector_data_type)
-        for j in range(insert_times):
-            start_pk = j * default_nb
-            rows = [{
-                pk_field_name: i + start_pk,
-                vector_field_name: random_vectors[i + start_pk]
-            } for i in range(default_nb)]
-            self.insert(client, collection_name, rows)
+        all_rows = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            start=0,
+            random_pk=False
+        )
+
+        self.insert(client, collection_name, all_rows)
         self.flush(client, collection_name)
 
         # create index
@@ -155,16 +149,14 @@ class TestHnswSQBuildParams(TestMilvusClientV2Base):
         schema.add_field(vector_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
         self.create_collection(client, collection_name, schema=schema)
 
-        # insert data
-        insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=DataType.FLOAT_VECTOR))
-        for j in range(insert_times):
-            start_pk = j * default_nb
-            rows = [{
-                pk_field_name: i + start_pk,
-                vector_field_name: random_vectors[i + start_pk]
-            } for i in range(default_nb)]
-            self.insert(client, collection_name, rows)
+        all_rows = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=schema,
+            start=0,
+            random_pk=False
+        )
+
+        self.insert(client, collection_name, all_rows)
         self.flush(client, collection_name)
 
         # create index
@@ -214,21 +206,15 @@ class TestHnswSQSearchParams(TestMilvusClientV2Base):
         collection_schema.add_field(self.float_vector_field_name, DataType.FLOAT_VECTOR, dim=128)
         self.create_collection(client, self.collection_name, schema=collection_schema,
                                enable_dynamic_field=self.enable_dynamic_field, force_teardown=False)
-        insert_times = 2
-        float_vectors = cf.gen_vectors(default_nb * insert_times, dim=self.float_vector_dim,
-                                       vector_data_type=DataType.FLOAT_VECTOR)
-        for j in range(insert_times):
-            rows = []
-            for i in range(default_nb):
-                pk = i + j * default_nb
-                row = {
-                    pk_field_name: pk,
-                    self.float_vector_field_name: list(float_vectors[pk])
-                }
-                self.datas.append(row)
-                rows.append(row)
-            self.insert(client, self.collection_name, data=rows)
-            self.primary_keys.extend([i + j * default_nb for i in range(default_nb)])
+        all_data = cf.gen_row_data_by_schema(
+            nb=default_nb,
+            schema=collection_schema,
+            start=0,
+            random_pk=False
+        )
+        self.insert(client, self.collection_name, data=all_data)
+        self.primary_keys.extend([i for i in range(default_nb)])
+
         self.flush(client, self.collection_name)
         # Create HNSW_SQ index
         index_params = self.prepare_index_params(client)[0]
@@ -269,4 +255,4 @@ class TestHnswSQSearchParams(TestMilvusClientV2Base):
                         check_items={"enable_milvus_client_api": True,
                                      "nq": nq,
                                      "limit": ct.default_limit,
-                                     "pk_name": pk_field_name}) 
+                                     "pk_name": pk_field_name})

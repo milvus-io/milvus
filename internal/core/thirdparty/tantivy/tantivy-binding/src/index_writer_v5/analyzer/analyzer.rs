@@ -157,7 +157,7 @@ impl AnalyzerBuilder<'_> {
             Some(type_) => {
                 if !type_.is_string() {
                     return Err(TantivyBindingError::InternalError(format!(
-                        "analyzer type shoud be string"
+                        "analyzer type should be string"
                     )));
                 }
                 return self.build_template(type_.as_str().unwrap());

@@ -1902,7 +1902,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                 "listFlt": [m * 1.0 for m in range(i, i + limit)],
                 "listBool": [bool(i % 2)],
                 "listList": [[i, str(i + 1)], [i * 1.0, i + 1]],
-                "listMix": [i, i * 1.1, str(i), bool(i % 2), [i, str(i)]]
+                "listMix": [i, i * 1.111, str(i), bool(i % 2), [i, str(i)]]
             }
             rows[i][ct.default_json_field_name] = content
         self.insert(client, collection_name, rows)

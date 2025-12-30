@@ -73,4 +73,10 @@ inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
     return boost::regex_match(operand.begin(), operand.end(), r_);
 }
+
+// Extract fixed prefix from LIKE pattern (before first % or _)
+// Examples: "abc%def" -> "abc", "ab_cd%" -> "ab", "%abc" -> ""
+std::string
+extract_fixed_prefix_from_pattern(const std::string& pattern);
+
 }  // namespace milvus
