@@ -17,7 +17,6 @@
 package delegator
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -52,10 +51,6 @@ func (s *ExcludedSegments) Insert(excludeInfo map[int64]uint64) {
 	defer s.mu.Unlock()
 
 	for segmentID, ts := range excludeInfo {
-		log.Ctx(context.TODO()).Debug("add exclude info",
-			zap.Int64("segmentID", segmentID),
-			zap.Uint64("ts", ts),
-		)
 		s.segments[segmentID] = ts
 	}
 }
