@@ -204,6 +204,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		UpdateTimestamp:      ts,
 		SchemaVersion:        0,
 		ShardInfos:           shardInfos,
+		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
 	}
 }
 

@@ -1,40 +1,30 @@
+use log::warn;
 use serde_json as json;
 use std::collections::HashMap;
 use tantivy::tokenizer::*;
 
+use super::options::{get_global_file_resource_helper, FileResourcePathHelper};
 use super::{build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer};
-use crate::analyzer::filter::{get_stop_words_list, get_string_list};
+use crate::analyzer::filter::{create_filter, get_stop_words_list, get_string_list};
 use crate::error::Result;
 use crate::error::TantivyBindingError;
 
 struct AnalyzerBuilder<'a> {
     filters: HashMap<String, SystemFilter>,
+    helper: &'a mut FileResourcePathHelper,
     params: &'a json::Map<String, json::Value>,
 }
 
-impl AnalyzerBuilder<'_> {
-    fn new(params: &json::Map<String, json::Value>) -> AnalyzerBuilder {
-        AnalyzerBuilder {
+impl<'a> AnalyzerBuilder<'a> {
+    fn new(
+        params: &'a json::Map<String, json::Value>,
+        helper: &'a mut FileResourcePathHelper,
+    ) -> Result<AnalyzerBuilder<'a>> {
+        Ok(AnalyzerBuilder {
             filters: HashMap::new(),
             params: params,
-        }
-    }
-
-    fn get_tokenizer_params(&self) -> Result<&json::Value> {
-        let tokenizer = self.params.get("tokenizer");
-        if tokenizer.is_none() {
-            return Err(TantivyBindingError::InternalError(format!(
-                "tokenizer name or type must be set"
-            )));
-        }
-        let value = tokenizer.unwrap();
-        if value.is_object() || value.is_string() {
-            return Ok(tokenizer.unwrap());
-        }
-
-        Err(TantivyBindingError::InternalError(format!(
-            "tokenizer name should be string or dict"
-        )))
+            helper: helper,
+        })
     }
 
     fn build_filter(
@@ -73,7 +63,7 @@ impl AnalyzerBuilder<'_> {
                     }
                 }
             } else if filter.is_object() {
-                let filter = SystemFilter::try_from(filter.as_object().unwrap())?;
+                let filter = create_filter(filter.as_object().unwrap(), &mut self.helper)?;
                 builder = filter.transform(builder);
             }
         }
@@ -110,10 +100,13 @@ impl AnalyzerBuilder<'_> {
         }
     }
 
-    fn build_template(self, type_: &str) -> Result<TextAnalyzer> {
+    fn build_template(mut self, type_: &str) -> Result<TextAnalyzer> {
         match type_ {
             "standard" => Ok(standard_analyzer(self.get_stop_words_option()?)),
-            "chinese" => Ok(chinese_analyzer(self.get_stop_words_option()?)),
+            "chinese" => Ok(chinese_analyzer(
+                self.get_stop_words_option()?,
+                &mut self.helper,
+            )),
             "english" => Ok(english_analyzer(self.get_stop_words_option()?)),
             other_ => Err(TantivyBindingError::InternalError(format!(
                 "unknown build-in analyzer type: {}",
@@ -128,7 +121,7 @@ impl AnalyzerBuilder<'_> {
             Some(type_) => {
                 if !type_.is_string() {
                     return Err(TantivyBindingError::InternalError(format!(
-                        "analyzer type shoud be string"
+                        "analyzer type should be string"
                     )));
                 }
                 return self.build_template(type_.as_str().unwrap());
@@ -137,8 +130,25 @@ impl AnalyzerBuilder<'_> {
         };
 
         //build custom analyzer
-        let tokenizer_params = self.get_tokenizer_params()?;
-        let mut builder = get_builder_with_tokenizer(&tokenizer_params, create_analyzer_by_json)?;
+        let tokenizer_params = self.params.get("tokenizer");
+        if tokenizer_params.is_none() {
+            return Err(TantivyBindingError::InternalError(format!(
+                "tokenizer name or type must be set"
+            )));
+        }
+
+        let value = tokenizer_params.unwrap();
+        if !value.is_object() && !value.is_string() {
+            return Err(TantivyBindingError::InternalError(format!(
+                "tokenizer name should be string or dict"
+            )));
+        }
+
+        let mut builder = get_builder_with_tokenizer(
+            tokenizer_params.unwrap(),
+            &mut self.helper,
+            create_analyzer_by_json,
+        )?;
 
         // build and check other options
         builder = self.build_option(builder)?;
@@ -148,30 +158,50 @@ impl AnalyzerBuilder<'_> {
 
 pub fn create_analyzer_by_json(
     analyzer_params: &json::Map<String, json::Value>,
+    helper: &mut FileResourcePathHelper,
 ) -> Result<TextAnalyzer> {
     if analyzer_params.is_empty() {
         return Ok(standard_analyzer(vec![]));
     }
 
-    let builder = AnalyzerBuilder::new(analyzer_params);
+    let builder = AnalyzerBuilder::new(analyzer_params, helper)?;
     builder.build()
 }
 
-pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
+pub fn create_helper(extra_info: &str) -> Result<FileResourcePathHelper> {
+    if extra_info.is_empty() {
+        Ok(get_global_file_resource_helper())
+    } else {
+        Ok(FileResourcePathHelper::from_json(
+            &json::from_str::<json::Value>(&extra_info)
+                .map_err(|e| TantivyBindingError::JsonError(e))?,
+        )?)
+    }
+}
+
+pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
     if params.len() == 0 {
         return Ok(standard_analyzer(vec![]));
     }
 
-    let json_params =
-        json::from_str::<json::Value>(&params).map_err(|e| TantivyBindingError::JsonError(e))?;
+    let json_params = &json::from_str::<json::Map<String, json::Value>>(&params)
+        .map_err(|e| TantivyBindingError::JsonError(e))?;
 
-    create_analyzer_by_json(
-        json_params
-            .as_object()
-            .ok_or(TantivyBindingError::InternalError(
-                "params should be a json map".to_string(),
-            ))?,
-    )
+    let mut helper = create_helper(extra_info)?;
+    create_analyzer_by_json(json_params, &mut helper)
+}
+
+pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
+    if params.len() == 0 {
+        return Ok(vec![]);
+    }
+
+    let json_params = &json::from_str::<json::Map<String, json::Value>>(&params)
+        .map_err(|e| TantivyBindingError::JsonError(e))?;
+
+    let mut helper = create_helper(extra_info)?;
+    create_analyzer_by_json(json_params, &mut helper)?;
+    Ok(helper.get_resource_ids())
 }
 
 #[cfg(test)]
@@ -185,7 +215,7 @@ mod tests {
             "stop_words": ["_english_"]
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
     }
 
@@ -195,7 +225,7 @@ mod tests {
             "type": "chinese"
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("系统安全;,'';lxyz密码");
@@ -219,7 +249,7 @@ mod tests {
             }
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut bining = tokenizer.unwrap();

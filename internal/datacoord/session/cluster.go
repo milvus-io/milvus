@@ -83,6 +83,13 @@ type Cluster interface {
 	QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.AnalyzeResults, error)
 	// DropAnalyze drops an analysis task
 	DropAnalyze(nodeID int64, taskID int64) error
+
+	// CreateExternalCollectionTask creates and executes an external collection task
+	CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error
+	// QueryExternalCollectionTask queries the status of an external collection task
+	QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error)
+	// DropExternalCollectionTask drops an external collection task
+	DropExternalCollectionTask(nodeID int64, taskID int64) error
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -610,5 +617,73 @@ func (c *cluster) DropAnalyze(nodeID int64, taskID int64) error {
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.Analyze)
+	return c.dropTask(nodeID, properties)
+}
+
+func (c *cluster) CreateExternalCollectionTask(nodeID int64, req *datapb.UpdateExternalCollectionRequest) error {
+	timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cli, err := c.nm.GetClient(nodeID)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to get client", zap.Error(err))
+		return err
+	}
+
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(req.GetTaskID())
+	properties.AppendType(taskcommon.ExternalCollection)
+
+	payload, err := proto.Marshal(req)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal request failed", zap.Error(err))
+		return err
+	}
+
+	// Submit task to worker - task will execute asynchronously in worker's goroutine pool
+	status, err := cli.CreateTask(ctx, &workerpb.CreateTaskRequest{
+		Payload:    payload,
+		Properties: properties,
+	})
+	if err != nil {
+		log.Ctx(ctx).Warn("create external collection task failed", zap.Error(err))
+		return err
+	}
+
+	if err := merr.Error(status); err != nil {
+		log.Ctx(ctx).Warn("create external collection task returned error", zap.Error(err))
+		return err
+	}
+
+	return nil
+}
+
+func (c *cluster) QueryExternalCollectionTask(nodeID int64, taskID int64) (*datapb.UpdateExternalCollectionResponse, error) {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskcommon.ExternalCollection)
+
+	resp, err := c.queryTask(nodeID, properties)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal the response payload
+	result := &datapb.UpdateExternalCollectionResponse{}
+	if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (c *cluster) DropExternalCollectionTask(nodeID int64, taskID int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskcommon.ExternalCollection)
 	return c.dropTask(nodeID, properties)
 }

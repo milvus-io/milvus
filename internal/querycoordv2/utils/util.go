@@ -44,6 +44,7 @@ func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
 // 2. All QueryNodes in the distribution are online
 // 3. The last heartbeat response time is within HeartbeatAvailableInterval for all QueryNodes(include leader) in the distribution
 // 4. All segments of the shard in target should be in the distribution
+// 5. The delegator has caught up with streaming data
 func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.TargetManagerInterface, leader *meta.LeaderView, scope int32) error {
 	log := log.Ctx(context.TODO()).
 		WithRateGroup(fmt.Sprintf("util.CheckDelegatorDataReady-%d", leader.CollectionID), 1, 60).
@@ -55,6 +56,13 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 		err := merr.WrapErrNodeOffline(leader.ID)
 		log.Info("leader is not available", zap.Error(err))
 		return fmt.Errorf("leader not available: %w", err)
+	}
+
+	// Check if delegator is still catching up with streaming data
+	if leader.Status != nil && leader.Status.GetCatchingUpStreamingData() {
+		log.RatedInfo(10, "leader is not available due to still catching up streaming data",
+			zap.String("channel", leader.Channel))
+		return merr.WrapErrChannelNotAvailable(leader.Channel, "still catching up streaming data")
 	}
 
 	segmentDist := targetMgr.GetSealedSegmentsByChannel(context.TODO(), leader.CollectionID, leader.Channel, scope)

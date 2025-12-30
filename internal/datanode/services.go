@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
@@ -619,6 +621,12 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)
+	case taskcommon.ExternalCollection:
+		req := &datapb.UpdateExternalCollectionRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createExternalCollectionTask(ctx, req)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("CreateTask failed", zap.Error(err))
@@ -729,6 +737,31 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.ExternalCollection:
+		// Query task state from external collection manager
+		info := node.externalCollectionManager.Get(clusterID, taskID)
+		if info == nil {
+			resp := &datapb.UpdateExternalCollectionResponse{
+				Status:     merr.Success(),
+				State:      indexpb.JobState_JobStateFailed,
+				FailReason: "task result not found",
+			}
+			resProperties := taskcommon.NewProperties(nil)
+			resProperties.AppendTaskState(taskcommon.Failed)
+			resProperties.AppendReason("task result not found")
+			return wrapQueryTaskResult(resp, resProperties)
+		}
+		resp := &datapb.UpdateExternalCollectionResponse{
+			Status:          merr.Success(),
+			State:           info.State,
+			FailReason:      info.FailReason,
+			KeptSegments:    info.KeptSegments,
+			UpdatedSegments: info.UpdatedSegments,
+		}
+		resProperties := taskcommon.NewProperties(nil)
+		resProperties.AppendTaskState(info.State)
+		resProperties.AppendReason(info.FailReason)
+		return wrapQueryTaskResult(resp, resProperties)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
@@ -772,6 +805,21 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 			TaskIDs:   []int64{taskID},
 			JobType:   jobType,
 		})
+	case taskcommon.ExternalCollection:
+		// Drop external collection task from external collection manager
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		cancelled := node.externalCollectionManager.CancelTask(clusterID, taskID)
+		info := node.externalCollectionManager.Delete(clusterID, taskID)
+		if !cancelled && info != nil && info.Cancel != nil {
+			info.Cancel()
+		}
+		log.Ctx(ctx).Info("DropTask for external collection completed",
+			zap.Int64("taskID", taskID),
+			zap.String("clusterID", clusterID))
+		return merr.Success(), nil
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("DropTask failed", zap.Error(err))
@@ -793,4 +841,78 @@ func (node *DataNode) SyncFileResource(ctx context.Context, req *internalpb.Sync
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
+}
+
+// createExternalCollectionTask handles updating external collection segments
+// This submits the task to the external collection manager for async execution
+func (node *DataNode) createExternalCollectionTask(ctx context.Context, req *datapb.UpdateExternalCollectionRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", req.GetTaskID()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+	)
+
+	log.Info("createExternalCollectionTask received",
+		zap.Int("currentSegments", len(req.GetCurrentSegments())),
+		zap.String("externalSource", req.GetExternalSource()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+
+	// Submit task to external collection manager
+	// The task will execute asynchronously in the manager's goroutine pool
+	err := node.externalCollectionManager.SubmitTask(clusterID, req, func(taskCtx context.Context) (*datapb.UpdateExternalCollectionResponse, error) {
+		// Execute the task
+		task := external.NewUpdateExternalTask(taskCtx, func() {}, req)
+
+		if err := task.PreExecute(taskCtx); err != nil {
+			log.Warn("external collection task PreExecute failed", zap.Error(err))
+			return nil, err
+		}
+
+		if err := task.Execute(taskCtx); err != nil {
+			log.Warn("external collection task Execute failed", zap.Error(err))
+			return nil, err
+		}
+
+		if err := task.PostExecute(taskCtx); err != nil {
+			log.Warn("external collection task PostExecute failed", zap.Error(err))
+			return nil, err
+		}
+
+		log.Info("external collection task completed successfully",
+			zap.Int("updatedSegments", len(task.GetUpdatedSegments())))
+
+		resp := &datapb.UpdateExternalCollectionResponse{
+			Status:          merr.Success(),
+			State:           indexpb.JobState_JobStateFinished,
+			KeptSegments:    extractSegmentIDs(req.GetCurrentSegments()),
+			UpdatedSegments: task.GetUpdatedSegments(),
+		}
+
+		return resp, nil
+	})
+	if err != nil {
+		log.Warn("failed to submit external collection task", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("external collection task submitted to manager")
+	return merr.Success(), nil
+}
+
+func extractSegmentIDs(segments []*datapb.SegmentInfo) []int64 {
+	if len(segments) == 0 {
+		return nil
+	}
+	result := make([]int64, 0, len(segments))
+	for _, seg := range segments {
+		if seg == nil {
+			continue
+		}
+		result = append(result, seg.GetID())
+	}
+	return result
 }

@@ -1,10 +1,14 @@
 use serde_json as json;
 use std::path::{Path, PathBuf};
 
-use super::runtime_option::get_resource_file_path;
+use super::resource_info::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 
-pub fn get_resource_path(v: &json::Value, resource_key: &str) -> Result<PathBuf> {
+pub fn get_resource_path(
+    helper: &mut FileResourcePathHelper,
+    v: &json::Value,
+    resource_key: &str,
+) -> Result<PathBuf> {
     if !v.is_object() {
         return Err(TantivyBindingError::InvalidArgument(format!(
             "file config of {} must be object",
@@ -73,7 +77,7 @@ pub fn get_resource_path(v: &json::Value, resource_key: &str) -> Result<PathBuf>
                     resource_key
                 )))?;
 
-            self::get_resource_file_path(resource_name, file_name)
+            helper.get_resource_file_path(resource_name, file_name)
         }
         other => Err(TantivyBindingError::InvalidArgument(format!(
             "unsupported file type {} of {}",

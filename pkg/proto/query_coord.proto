@@ -675,6 +675,7 @@ message LeaderView {
 
 message LeaderViewStatus {
     bool serviceable = 1;
+    bool catching_up_streaming_data = 2;  // true = still catching up, not ready
 }
 
 message SegmentDist {
@@ -1037,6 +1038,7 @@ message ValidateAnalyzerRequest{
 
 message ValidateAnalyzerResponse{
     common.Status status = 1;
+    repeated int64 resource_ids = 2;
 }
 
 message HighlightOptions{

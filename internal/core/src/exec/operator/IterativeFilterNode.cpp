@@ -160,7 +160,7 @@ PhyIterativeFilterNode::GetOutput() {
     TargetBitmap bitset;
     // get bitset of whole segment first
     if (!is_native_supported_) {
-        EvalCtx eval_ctx(operator_context_->get_exec_context(), exprs_.get());
+        EvalCtx eval_ctx(operator_context_->get_exec_context());
 
         TargetBitmap valid_bitset;
         while (num_processed_rows_ < need_process_rows_) {
@@ -225,8 +225,7 @@ PhyIterativeFilterNode::GetOutput() {
         std::unordered_set<int64_t> unique_doc_ids;
 
         for (auto& iterator : search_result.vector_iterators_.value()) {
-            EvalCtx eval_ctx(operator_context_->get_exec_context(),
-                             exprs_.get());
+            EvalCtx eval_ctx(operator_context_->get_exec_context());
             int topk = 0;
             while (iterator->HasNext() && topk < unity_topk) {
                 FixedVector<int32_t> offsets;

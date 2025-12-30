@@ -30,9 +30,12 @@ set_tokenizer_option(const char* params) {
 }
 
 CStatus
-create_tokenizer(const char* params, CTokenizer* tokenizer) {
+create_tokenizer(const char* params,
+                 const char* extra_info,
+                 CTokenizer* tokenizer) {
     try {
-        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
+        auto impl =
+            std::make_unique<milvus::tantivy::Tokenizer>(params, extra_info);
         *tokenizer = impl.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -63,13 +66,14 @@ create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
     return impl->CreateTokenStream(std::string(text, text_len)).release();
 }
 
-CStatus
-validate_tokenizer(const char* params) {
+CValidateResult
+validate_tokenizer(const char* params, const char* extra_info) {
     try {
-        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
-        return milvus::SuccessCStatus();
+        auto [ids, count] =
+            milvus::tantivy::validate_analyzer(params, extra_info);
+        return CValidateResult{ids, count, milvus::SuccessCStatus()};
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+        return CValidateResult{nullptr, 0, milvus::FailureCStatus(&e)};
     }
 }
 

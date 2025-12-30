@@ -17,6 +17,8 @@
 package model
 
 import (
+	"slices"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -52,6 +54,7 @@ type Collection struct {
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
+	FileResourceIds      []int64
 }
 
 type ShardInfo struct {
@@ -90,6 +93,7 @@ func (c *Collection) ShallowClone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
+		FileResourceIds:      c.FileResourceIds,
 	}
 }
 
@@ -127,6 +131,7 @@ func (c *Collection) Clone() *Collection {
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
+		FileResourceIds:      slices.Clone(c.FileResourceIds),
 	}
 }
 
@@ -232,6 +237,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
+		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 	}
 }
 
@@ -283,6 +289,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		EnableDynamicField: coll.EnableDynamicField,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
+		FileResourceIds:    coll.FileResourceIds,
 	}
 
 	if c.withFields {

@@ -890,6 +890,49 @@ class JsonContainsExpr : public ITypeFilterExpr {
     bool same_type_;
     const std::vector<proto::plan::GenericValue> vals_;
 };
+
+// MatchType mirrors the protobuf MatchType enum
+using MatchType = proto::plan::MatchType;
+
+class MatchExpr : public ITypeFilterExpr {
+ public:
+    MatchExpr(const std::string& struct_name,
+              MatchType match_type,
+              int64_t count,
+              const TypedExprPtr& predicate)
+        : struct_name_(struct_name), match_type_(match_type), count_(count) {
+        inputs_.push_back(predicate);
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("MatchExpr(struct_name={}, match_type={}, count={})",
+                           struct_name_,
+                           proto::plan::MatchType_Name(match_type_),
+                           count_);
+    }
+
+    const std::string&
+    get_struct_name() const {
+        return struct_name_;
+    }
+
+    MatchType
+    get_match_type() const {
+        return match_type_;
+    }
+
+    int64_t
+    get_count() const {
+        return count_;
+    }
+
+ private:
+    std::string struct_name_;
+    MatchType match_type_;
+    int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
+};
+
 }  // namespace expr
 }  // namespace milvus
 
