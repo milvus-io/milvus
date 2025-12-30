@@ -241,8 +241,6 @@ const (
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
-	ReplicateIDKey             = "replicate.id"
-	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
 	NamespaceEnabledKey        = "namespace.enabled"
@@ -512,33 +510,6 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 		}
 	}
 	return true, nil
-}
-
-func IsReplicateEnabled(kvs []*commonpb.KeyValuePair) (bool, bool) {
-	replicateID, ok := GetReplicateID(kvs)
-	return replicateID != "", ok
-}
-
-func GetReplicateID(kvs []*commonpb.KeyValuePair) (string, bool) {
-	for _, kv := range kvs {
-		if kv.GetKey() == ReplicateIDKey {
-			return kv.GetValue(), true
-		}
-	}
-	return "", false
-}
-
-func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
-	for _, kv := range kvs {
-		if kv.GetKey() == ReplicateEndTSKey {
-			ts, err := strconv.ParseUint(kv.GetValue(), 10, 64)
-			if err != nil {
-				return 0, false
-			}
-			return ts, true
-		}
-	}
-	return 0, false
 }
 
 func IsEnableDynamicSchema(kvs []*commonpb.KeyValuePair) (found bool, value bool, err error) {

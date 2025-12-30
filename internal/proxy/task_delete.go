@@ -283,15 +283,6 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection id", merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound))
 	}
 
-	replicateID, err := GetReplicateID(ctx, dr.req.GetDbName(), collName)
-	if err != nil {
-		log.Warn("get replicate info failed", zap.String("collectionName", collName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-	}
-	if replicateID != "" {
-		return merr.WrapErrCollectionReplicateMode("delete")
-	}
-
 	dr.schema, err = globalMetaCache.GetCollectionSchema(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)

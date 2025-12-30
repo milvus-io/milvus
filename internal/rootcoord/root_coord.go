@@ -183,9 +183,6 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 }
 
 func (c *Core) sendMinDdlTsAsTt() {
-	if !paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
-		return
-	}
 	log := log.Ctx(c.ctx)
 	code := c.GetStateCode()
 	if code != commonpb.StateCode_Healthy {

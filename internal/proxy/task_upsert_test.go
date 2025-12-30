@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -340,40 +339,6 @@ func TestUpsertTask(t *testing.T) {
 	})
 }
 
-func TestUpsertTaskForReplicate(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	mockCache := NewMockCache(t)
-	globalMetaCache = mockCache
-	ctx := context.Background()
-
-	t.Run("fail to get collection info", func(t *testing.T) {
-		ut := upsertTask{
-			ctx: ctx,
-			req: &milvuspb.UpsertRequest{
-				CollectionName: "col-0",
-			},
-		}
-		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("foo")).Once()
-		err := ut.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("replicate mode", func(t *testing.T) {
-		ut := upsertTask{
-			ctx: ctx,
-			req: &milvuspb.UpsertRequest{
-				CollectionName: "col-0",
-			},
-		}
-		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			replicateID: "local-mac",
-		}, nil).Once()
-		err := ut.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-}
-
 func TestUpsertTask_Function(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
@@ -537,7 +502,6 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			updateTimestamp: 100,
 		}, nil)
-		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
@@ -965,8 +929,6 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 		// Setup mocks
 		globalMetaCache = &MetaCache{}
 
-		mockey.Mock(GetReplicateID).Return("", nil).Build()
-
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
@@ -1002,26 +964,9 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 	})
 }
 
-func TestUpdateTask_PreExecute_ReplicateIDError(t *testing.T) {
-	mockey.PatchConvey("TestUpdateTask_PreExecute_ReplicateIDError", t, func() {
-		globalMetaCache = &MetaCache{}
-
-		mockey.Mock(GetReplicateID).Return("replica1", nil).Build()
-
-		task := createTestUpdateTask()
-
-		err := task.PreExecute(context.Background())
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "can't operate on the collection under standby mode")
-	})
-}
-
 func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_GetCollectionIDError", t, func() {
 		globalMetaCache = &MetaCache{}
-
-		mockey.Mock(GetReplicateID).Return("", nil).Build()
 
 		expectedErr := merr.WrapErrCollectionNotFound("test_collection")
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), expectedErr).Build()
@@ -1038,7 +983,6 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
 		globalMetaCache = &MetaCache{}
 
-		mockey.Mock(GetReplicateID).Return("", nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
@@ -1061,7 +1005,6 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
 		globalMetaCache = &MetaCache{}
 
-		mockey.Mock(GetReplicateID).Return("", nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
@@ -1087,7 +1030,6 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_QueryPreExecuteError", t, func() {
 		globalMetaCache = &MetaCache{}
 
-		mockey.Mock(GetReplicateID).Return("", nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			updateTimestamp: 12345,
@@ -1695,7 +1637,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 
 		mockey.PatchConvey("test nullable field", t, func() {
 			// Setup mocks using mockey
-			mockey.Mock(GetReplicateID).Return("", nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
@@ -1814,7 +1755,6 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 
 		mockey.PatchConvey("test non-nullable field", t, func() {
 			// Setup mocks using mockey
-			mockey.Mock(GetReplicateID).Return("", nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{updateTimestamp: 12345}, nil).Build()
 			mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()

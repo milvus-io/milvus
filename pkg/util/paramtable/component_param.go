@@ -210,7 +210,6 @@ type commonConfig struct {
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
 	RootCoordStatistics ParamItem `refreshable:"true"`
 	RootCoordDml        ParamItem `refreshable:"false"`
-	ReplicateMsgChannel ParamItem `refreshable:"false"`
 
 	QueryCoordTimeTick ParamItem `refreshable:"true"`
 
@@ -298,14 +297,12 @@ type commonConfig struct {
 	StorageZstdConcurrency   ParamItem `refreshable:"false"`
 	StorageReadRetryAttempts ParamItem `refreshable:"true"`
 
-	TTMsgEnabled              ParamItem `refreshable:"true"`
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
 	BloomFilterType           ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
 	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
 	PanicWhenPluginFail       ParamItem `refreshable:"false"`
-	CollectionReplicateEnable ParamItem `refreshable:"true"`
 
 	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
 	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
@@ -412,17 +409,6 @@ It is recommended to change this parameter before starting Milvus for the first 
 		Export:    true,
 	}
 	p.RootCoordDml.Init(base.mgr)
-
-	p.ReplicateMsgChannel = ParamItem{
-		Key:          "msgChannel.chanNamePrefix.replicateMsg",
-		DefaultValue: "replicate-msg",
-		Version:      "2.3.2",
-		FallbackKeys: []string{"common.chanNamePrefix.replicateMsg"},
-		PanicIfEmpty: true,
-		Formatter:    chanNamePrefix,
-		Export:       true,
-	}
-	p.ReplicateMsgChannel.Init(base.mgr)
 
 	p.QueryCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.queryTimeTick",
@@ -1075,26 +1061,6 @@ The default value is 1, which is enough for most cases.`,
 		Export:       false,
 	}
 	p.StorageReadRetryAttempts.Init(base.mgr)
-
-	p.TTMsgEnabled = ParamItem{
-		Key:          "common.ttMsgEnabled",
-		Version:      "2.3.2",
-		DefaultValue: "true",
-		Doc: `Whether to disable the internal time messaging mechanism for the system.
-If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
-This helps Milvus-CDC synchronize incremental data`,
-		Export: true,
-	}
-	p.TTMsgEnabled.Init(base.mgr)
-
-	p.CollectionReplicateEnable = ParamItem{
-		Key:          "common.collectionReplicateEnable",
-		Version:      "2.4.16",
-		DefaultValue: "false",
-		Doc:          `Whether to enable collection replication.`,
-		Export:       true,
-	}
-	p.CollectionReplicateEnable.Init(base.mgr)
 
 	p.TraceLogMode = ParamItem{
 		Key:          "common.traceLogMode",
