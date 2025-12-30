@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -104,8 +103,9 @@ func (m *WriteMetrics) done(appendMetrics *AppendMetrics) {
 		m.Logger().Warn("append message into wal too slow", appendMetrics.IntoLogFields()...)
 		return
 	}
-	if m.Logger().Level().Enabled(zapcore.DebugLevel) {
-		m.Logger().Debug("append message into wal", appendMetrics.IntoLogFields()...)
+	logLV := appendMetrics.msg.MessageType().LogLevel()
+	if m.Logger().Level().Enabled(logLV) {
+		m.Logger().Log(logLV, "append message into wal", appendMetrics.IntoLogFields()...)
 	}
 }
 

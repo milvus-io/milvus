@@ -65,6 +65,17 @@ func (s *ExcludedSegments) Verify(segmentID int64, ts uint64) bool {
 }
 
 func (s *ExcludedSegments) CleanInvalid(ts uint64) {
+	removedSegmentIDs := make([]int64, 0, 32)
+	if log.Level().Enabled(zap.DebugLevel) {
+		defer func() {
+			log.Debug("remove segment from exclude info",
+				zap.Int("count", len(removedSegmentIDs)),
+				zap.Uint64("ts", ts),
+				zap.Int64s("segmentIDs", removedSegmentIDs),
+			)
+		}()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -77,7 +88,7 @@ func (s *ExcludedSegments) CleanInvalid(ts uint64) {
 
 	for _, segmentID := range invalidExcludedInfos {
 		delete(s.segments, segmentID)
-		log.Ctx(context.TODO()).Debug("remove segment from exclude info", zap.Int64("segmentID", segmentID))
+		removedSegmentIDs = append(removedSegmentIDs, segmentID)
 	}
 	s.lastClean.Store(time.Now())
 }

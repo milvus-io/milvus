@@ -11,7 +11,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
-const maxRedoLogged = 3
+const (
+	maxRedoLogged = 3
+	logThreshold  = 10 * time.Millisecond
+)
 
 type InterceptorMetrics struct {
 	Before    time.Duration
@@ -19,8 +22,12 @@ type InterceptorMetrics struct {
 	After     time.Duration
 }
 
+func (im *InterceptorMetrics) ShouldBeLogged() bool {
+	return im.Before > logThreshold || im.After > logThreshold || im.BeforeErr != nil
+}
+
 func (im *InterceptorMetrics) String() string {
-	return fmt.Sprintf("before: %s, after: %s, before_err: %v", im.Before, im.After, im.BeforeErr)
+	return fmt.Sprintf("b:%s,a:%s,err:%s", im.Before, im.After, im.BeforeErr)
 }
 
 // AppendMetrics is the metrics for append operation.
@@ -67,16 +74,10 @@ func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
 func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	fields := []zap.Field{
 		log.FieldMessage(m.msg),
-		zap.Duration("appendDuration", m.appendDuration),
-		zap.Duration("implAppendDuration", m.implAppendDuration),
+		zap.Duration("duration", m.appendDuration),
+		zap.Duration("implDuration", m.implAppendDuration),
 	}
-	for name, ims := range m.interceptors {
-		for i, im := range ims {
-			if i <= maxRedoLogged {
-				fields = append(fields, zap.Any(fmt.Sprintf("%s_%d", name, i), im))
-			}
-		}
-	}
+
 	if m.err != nil {
 		fields = append(fields, zap.Error(m.err))
 	} else {
@@ -85,6 +86,15 @@ func (m *AppendMetrics) IntoLogFields() []zap.Field {
 		fields = append(fields, zap.Uint64("timetick", m.result.TimeTick))
 		if m.result.TxnCtx != nil {
 			fields = append(fields, zap.Int64("txnID", int64(m.result.TxnCtx.TxnID)))
+		}
+	}
+	for name, ims := range m.interceptors {
+		for i, im := range ims {
+			if i <= maxRedoLogged {
+				if im.ShouldBeLogged() {
+					fields = append(fields, zap.Stringer(fmt.Sprintf("%s_%d", name, i), im))
+				}
+			}
 		}
 	}
 	return fields
