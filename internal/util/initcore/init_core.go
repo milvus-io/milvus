@@ -209,7 +209,12 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
 	cAccessKey := C.CString(params.MinioCfg.AccessKeyID.GetValue())
 	cAccessValue := C.CString(params.MinioCfg.SecretAccessKey.GetValue())
-	cRootPath := C.CString(params.MinioCfg.RootPath.GetValue())
+	var cRootPath *C.char
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		cRootPath = C.CString(params.LocalStorageCfg.Path.GetValue())
+	} else {
+		cRootPath = C.CString(params.MinioCfg.RootPath.GetValue())
+	}
 	cStorageType := C.CString(params.CommonCfg.StorageType.GetValue())
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
 	cCloudProvider := C.CString(params.MinioCfg.CloudProvider.GetValue())
