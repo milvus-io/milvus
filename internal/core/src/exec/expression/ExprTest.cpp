@@ -17846,12 +17846,6 @@ TEST(ExprTest, TestBinaryRangeExprMixedTypesForJSON) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 100;
-    std::vector<std::string> json_col;
-    for (int i = 0; i < N; i++) {
-        // Create JSON with a numeric field that can be compared as int or float
-        json_col.push_back(fmt::format(R"({{"value": {}}})", i * 10));
-    }
-
     auto raw_data = DataGen(schema, N);
     seg->PreInsert(N);
     seg->Insert(0,
