@@ -312,7 +312,7 @@ func (s *BulkInsertSuite) TestImportWithVectorArray() {
 		{schemapb.DataType_Float16Vector, integration.IndexHNSW, metric.MaxSim},
 		{schemapb.DataType_BFloat16Vector, integration.IndexHNSW, metric.MaxSim},
 		{schemapb.DataType_Int8Vector, integration.IndexHNSW, metric.MaxSim},
-		{schemapb.DataType_BinaryVector, integration.IndexFaissBinIDMap, metric.MaxSimHamming},
+		{schemapb.DataType_BinaryVector, integration.IndexHNSW, metric.MaxSimHamming},
 	}
 
 	for _, fileType := range fileTypeArr {
