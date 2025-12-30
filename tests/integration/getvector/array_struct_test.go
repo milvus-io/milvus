@@ -252,6 +252,42 @@ func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_FloatVector() {
 	s.run()
 }
 
+func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_Float16Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.MaxSim
+	s.vecType = schemapb.DataType_Float16Vector
+	s.run()
+}
+
+func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_BFloat16Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.MaxSim
+	s.vecType = schemapb.DataType_BFloat16Vector
+	s.run()
+}
+
+func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_Int8Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.MaxSim
+	s.vecType = schemapb.DataType_Int8Vector
+	s.run()
+}
+
+func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_BinaryVector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexFaissBinIvfFlat
+	s.metricType = metric.MaxSimHamming
+	s.vecType = schemapb.DataType_BinaryVector
+	s.run()
+}
+
 func TestGetVectorArrayStruct(t *testing.T) {
 	// t.Skip("Skip integration test, need to refactor integration test framework.")
 	suite.Run(t, new(TestArrayStructSuite))

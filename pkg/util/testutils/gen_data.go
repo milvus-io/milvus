@@ -297,6 +297,58 @@ func GenerateArrayOfFloatVectorArray(numRows int, dim int) []*schemapb.VectorFie
 	return ret
 }
 
+func GenerateArrayOfFloat16VectorArray(numRows int, dim int) []*schemapb.VectorField {
+	ret := make([]*schemapb.VectorField, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_Float16Vector{
+				Float16Vector: GenerateFloat16Vectors(ElemCountOfArray, dim),
+			},
+		})
+	}
+	return ret
+}
+
+func GenerateArrayOfBFloat16VectorArray(numRows int, dim int) []*schemapb.VectorField {
+	ret := make([]*schemapb.VectorField, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_Bfloat16Vector{
+				Bfloat16Vector: GenerateBFloat16Vectors(ElemCountOfArray, dim),
+			},
+		})
+	}
+	return ret
+}
+
+func GenerateArrayOfInt8VectorArray(numRows int, dim int) []*schemapb.VectorField {
+	ret := make([]*schemapb.VectorField, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_Int8Vector{
+				Int8Vector: typeutil.Int8ArrayToBytes(GenerateInt8Vectors(ElemCountOfArray, dim)),
+			},
+		})
+	}
+	return ret
+}
+
+func GenerateArrayOfBinaryVectorArray(numRows int, dim int) []*schemapb.VectorField {
+	ret := make([]*schemapb.VectorField, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_BinaryVector{
+				BinaryVector: GenerateBinaryVectors(ElemCountOfArray, dim),
+			},
+		})
+	}
+	return ret
+}
+
 func GenerateArrayOfStringArray(numRows int) []*schemapb.ScalarField {
 	ret := make([]*schemapb.ScalarField, 0, numRows)
 	for i := 0; i < numRows; i++ {

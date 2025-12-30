@@ -244,6 +244,30 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         }
                         break;
                     }
+                    case DataType::VECTOR_FLOAT16: {
+                        for (auto& e : obj) {
+                            result += e.float16_vector().size();
+                        }
+                        break;
+                    }
+                    case DataType::VECTOR_BFLOAT16: {
+                        for (auto& e : obj) {
+                            result += e.bfloat16_vector().size();
+                        }
+                        break;
+                    }
+                    case DataType::VECTOR_INT8: {
+                        for (auto& e : obj) {
+                            result += e.int8_vector().size();
+                        }
+                        break;
+                    }
+                    case DataType::VECTOR_BINARY: {
+                        for (auto& e : obj) {
+                            result += e.binary_vector().size();
+                        }
+                        break;
+                    }
                     default: {
                         ThrowInfo(NotImplemented,
                                   fmt::format("not implemented vector type {}",

@@ -330,7 +330,7 @@ func convertElementTypeOfVectorArrayToArrowType(field *schemapb.FieldSchema) (ar
 	case schemapb.DataType_BinaryVector:
 		elemType = arrow.ListOf(arrow.PrimitiveTypes.Uint8)
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		elemType = arrow.ListOf(arrow.PrimitiveTypes.Float32)
+		elemType = arrow.ListOf(arrow.PrimitiveTypes.Uint8)
 	case schemapb.DataType_Int8Vector:
 		elemType = arrow.ListOf(arrow.PrimitiveTypes.Int8)
 	default:
