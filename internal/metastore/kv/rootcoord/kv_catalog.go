@@ -1183,14 +1183,14 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 
 func (kc *Catalog) getRolesByUsername(ctx context.Context, tenant string, username string) ([]string, error) {
 	var roles []string
-	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, username)
+	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, username) + "/"
 	keys, _, err := kc.Txn.LoadWithPrefix(ctx, k)
 	if err != nil {
 		log.Ctx(ctx).Error("fail to load role mappings by the username", zap.String("key", k), zap.Error(err))
 		return roles, err
 	}
 	for _, key := range keys {
-		roleMappingInfos := typeutil.AfterN(key, k+"/", "/")
+		roleMappingInfos := typeutil.AfterN(key, k, "/")
 		if len(roleMappingInfos) != 1 {
 			log.Ctx(ctx).Warn("invalid role mapping key", zap.String("string", key), zap.String("sub_string", k))
 			continue
@@ -1338,14 +1338,14 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		if dbName != entity.DbName && dbName != util.AnyWord && entity.DbName != util.AnyWord {
 			return nil
 		}
-		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, v)
+		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, v) + "/"
 		keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeIDKey)
 		if err != nil {
 			log.Ctx(ctx).Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
 			return err
 		}
 		for i, key := range keys {
-			granteeIDInfos := typeutil.AfterN(key, granteeIDKey+"/", "/")
+			granteeIDInfos := typeutil.AfterN(key, granteeIDKey, "/")
 			if len(granteeIDInfos) != 1 {
 				log.Ctx(ctx).Warn("invalid grantee id", zap.String("string", key), zap.String("sub_string", granteeIDKey))
 				continue
@@ -1399,14 +1399,14 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			return entities, err
 		}
 	} else {
-		granteeKey = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, entity.Role.Name)
+		granteeKey = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, entity.Role.Name) + "/"
 		keys, values, err := kc.Txn.LoadWithPrefix(ctx, granteeKey)
 		if err != nil {
 			log.Ctx(ctx).Error("fail to load grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
 			return entities, err
 		}
 		for i, key := range keys {
-			grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
+			grantInfos := typeutil.AfterN(key, granteeKey, "/")
 			if len(grantInfos) != 2 {
 				log.Ctx(ctx).Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", granteeKey))
 				continue
