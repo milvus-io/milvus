@@ -491,6 +491,92 @@ func TestArrayOfVectorSerialization(t *testing.T) {
 	}
 }
 
+func TestArrayOfVectorEmptyArray(t *testing.T) {
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int
+	}{
+		{"FloatVector empty", schemapb.DataType_FloatVector, 4},
+		{"Float16Vector empty", schemapb.DataType_Float16Vector, 4},
+		{"BFloat16Vector empty", schemapb.DataType_BFloat16Vector, 4},
+		{"Int8Vector empty", schemapb.DataType_Int8Vector, 4},
+		{"BinaryVector empty", schemapb.DataType_BinaryVector, 32},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := serdeMap[schemapb.DataType_ArrayOfVector]
+
+			arrowType := entry.arrowType(tt.dim, tt.elementType)
+			assert.NotNil(t, arrowType)
+
+			// Create empty VectorField based on element type
+			var emptyVector *schemapb.VectorField
+			switch tt.elementType {
+			case schemapb.DataType_FloatVector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{}}},
+				}
+			case schemapb.DataType_Float16Vector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{}},
+				}
+			case schemapb.DataType_BFloat16Vector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{}},
+				}
+			case schemapb.DataType_Int8Vector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{}},
+				}
+			case schemapb.DataType_BinaryVector:
+				emptyVector = &schemapb.VectorField{
+					Dim:  int64(tt.dim),
+					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{}},
+				}
+			}
+
+			builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+			defer builder.Release()
+
+			// Serialize empty vector
+			ok := entry.serialize(builder, emptyVector, tt.elementType)
+			assert.True(t, ok)
+
+			arr := builder.NewArray()
+			defer arr.Release()
+
+			// Deserialize and verify
+			result, ok := entry.deserialize(arr, 0, tt.elementType, tt.dim, false)
+			assert.True(t, ok, "deserialize should succeed for empty array")
+			assert.NotNil(t, result)
+
+			resultVector, ok := result.(*schemapb.VectorField)
+			assert.True(t, ok)
+			assert.Equal(t, int64(tt.dim), resultVector.GetDim())
+
+			// Verify data is empty
+			switch tt.elementType {
+			case schemapb.DataType_FloatVector:
+				assert.Empty(t, resultVector.GetFloatVector().GetData())
+			case schemapb.DataType_Float16Vector:
+				assert.Empty(t, resultVector.GetFloat16Vector())
+			case schemapb.DataType_BFloat16Vector:
+				assert.Empty(t, resultVector.GetBfloat16Vector())
+			case schemapb.DataType_Int8Vector:
+				assert.Empty(t, resultVector.GetInt8Vector())
+			case schemapb.DataType_BinaryVector:
+				assert.Empty(t, resultVector.GetBinaryVector())
+			}
+		})
+	}
+}
+
 func TestArrayOfVectorIntegration(t *testing.T) {
 	tests := []struct {
 		name            string
