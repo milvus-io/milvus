@@ -23,36 +23,56 @@ FILE_COVERAGE_INFO="it_coverage.txt"
 BASEDIR=$(dirname "$0")
 source $BASEDIR/setenv.sh
 
-TEST_CMD=$@
-if [ -z "$TEST_CMD" ]; then
-   TEST_CMD="go test -failfast -count=1" 
-fi
-
 set -e
+
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 echo "MILVUS_WORK_DIR: $MILVUS_WORK_DIR"
 
-# starting the timer
-beginTime=`date +%s`
+TEST_CMD=$@
+if [ -z "$TEST_CMD" ]; then
+   TEST_CMD="go test" 
+fi
 
-for d in $(go list ./tests/integration/...); do
-    echo "Start to run integration test under \"$d\" pkg"
-    if [[ $d == *"coordrecovery"* ]]; then
-        echo "running coordrecovery"
-        # simplified command to speed up coord init test since it is large.
-        $TEST_CMD -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=30m
-    elif [[ $d == *"import"* ]]; then
-        $TEST_CMD -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=60m
-    else
-        $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=15m -timeout=30m
-    fi
-    if [ -f profile.out ]; then
-        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
-        rm profile.out
-    fi
+TEST_CMD_WITH_ARGS=(
+    $TEST_CMD
+    "-gcflags=all=-N -l"
+    -race
+    -tags dynamic,test
+    -v
+    -failfast
+    -count=1
+    -buildvcs=false
+    -coverpkg=./...
+    -coverprofile=profile.out
+    -covermode=atomic
+    -caseTimeout=20m 
+    -timeout=60m
+)
+
+function test_cmd() {
+    mapfile -t PKGS < <(go list -tags dynamic,test ./...)
+    for pkg in "${PKGS[@]}"; do
+        beginTime2=$(date +%s)
+        echo -e "-----------------------------------\nRunning test cases at $pkg ..." 
+        "${TEST_CMD_WITH_ARGS[@]}" "$pkg"
+        if [ -f profile.out ]; then
+            # Skip the per-profile header to keep a single global "mode:" line
+            sed '1{/^mode:/d}' profile.out >> "${FILE_COVERAGE_INFO}"
+            rm profile.out
+        fi
+        endTime2=$(date +%s)
+        echo -e "-----------------------------------\n"
+    done
+}
+
+beginTime=`date +%s`
+printf "=== Running integration test ===\n\n"
+
+for d in tests/integration; do
+    pushd $d 
+    test_cmd 
+    popd
 done
 
 endTime=`date +%s`
-
-echo "Total time for go integration test:" $(($endTime-$beginTime)) "s"
-
+printf "=== Total time for go integration test: $(($endTime-$beginTime)) s==="

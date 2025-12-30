@@ -39,17 +39,16 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -61,7 +60,6 @@ type distribution struct {
 
 type TaskSuite struct {
 	suite.Suite
-	testutils.EmbedEtcdUtil
 
 	// Data
 	collection      int64
@@ -147,15 +145,7 @@ func (suite *TaskSuite) SetupTest() {
 
 	config := GenerateEtcdConfig()
 	suite.ctx = context.Background()
-	cli, err := etcd.GetEtcdClient(
-		config.UseEmbedEtcd.GetAsBool(),
-		config.EtcdUseSSL.GetAsBool(),
-		config.Endpoints.GetAsStrings(),
-		config.EtcdTLSCert.GetValue(),
-		config.EtcdTLSKey.GetValue(),
-		config.EtcdTLSCACert.GetValue(),
-		config.EtcdTLSMinVersion.GetValue())
-	suite.Require().NoError(err)
+	cli, _ := kvfactory.GetEtcdAndPath()
 
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = querycoord.NewCatalog(suite.kv)
