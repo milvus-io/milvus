@@ -499,3 +499,87 @@ func (s *FillExpressionValueSuite) TestBinaryExpression() {
 		}
 	})
 }
+
+func (s *FillExpressionValueSuite) TestBinaryRangeWithMixedNumericTypesForJSON() {
+	// Test that mixed int64/float types are normalized to float for JSON fields.
+	// This prevents assertion failures in C++ expression execution.
+	// Related issue: https://github.com/milvus-io/milvus/issues/46588
+	schemaH := newTestSchemaHelper(s.T())
+
+	s.Run("lower int64 upper float should normalize to float", func() {
+		// A is a dynamic field (JSON type)
+		exprStr := `{min} < A < {max}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(499)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(512.0)),
+		}
+
+		expr, err := ParseExpr(schemaH, exprStr, templateValues)
+		s.NoError(err)
+		s.NotNil(expr)
+
+		// Verify both bounds are normalized to float type
+		bre := expr.GetBinaryRangeExpr()
+		s.NotNil(bre, "expected BinaryRangeExpr")
+		s.NotNil(bre.GetLowerValue().GetFloatVal(), "lower value should be float")
+		s.NotNil(bre.GetUpperValue().GetFloatVal(), "upper value should be float")
+		s.Equal(float64(499), bre.GetLowerValue().GetFloatVal())
+		s.Equal(float64(512.0), bre.GetUpperValue().GetFloatVal())
+	})
+
+	s.Run("lower float upper int64 should normalize to float", func() {
+		exprStr := `{min} < A < {max}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(100)),
+		}
+
+		expr, err := ParseExpr(schemaH, exprStr, templateValues)
+		s.NoError(err)
+		s.NotNil(expr)
+
+		// Verify both bounds are normalized to float type
+		bre := expr.GetBinaryRangeExpr()
+		s.NotNil(bre, "expected BinaryRangeExpr")
+		s.NotNil(bre.GetLowerValue().GetFloatVal(), "lower value should be float")
+		s.NotNil(bre.GetUpperValue().GetFloatVal(), "upper value should be float")
+		s.Equal(float64(10.5), bre.GetLowerValue().GetFloatVal())
+		s.Equal(float64(100), bre.GetUpperValue().GetFloatVal())
+	})
+
+	s.Run("both int64 should remain int64", func() {
+		exprStr := `{min} < A < {max}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Int64, int64(10)),
+			"max": generateTemplateValue(schemapb.DataType_Int64, int64(100)),
+		}
+
+		expr, err := ParseExpr(schemaH, exprStr, templateValues)
+		s.NoError(err)
+		s.NotNil(expr)
+
+		// Verify both bounds remain int64 type
+		bre := expr.GetBinaryRangeExpr()
+		s.NotNil(bre, "expected BinaryRangeExpr")
+		s.Equal(int64(10), bre.GetLowerValue().GetInt64Val())
+		s.Equal(int64(100), bre.GetUpperValue().GetInt64Val())
+	})
+
+	s.Run("both float should remain float", func() {
+		exprStr := `{min} < A < {max}`
+		templateValues := map[string]*schemapb.TemplateValue{
+			"min": generateTemplateValue(schemapb.DataType_Double, float64(10.5)),
+			"max": generateTemplateValue(schemapb.DataType_Double, float64(100.5)),
+		}
+
+		expr, err := ParseExpr(schemaH, exprStr, templateValues)
+		s.NoError(err)
+		s.NotNil(expr)
+
+		// Verify both bounds remain float type
+		bre := expr.GetBinaryRangeExpr()
+		s.NotNil(bre, "expected BinaryRangeExpr")
+		s.Equal(float64(10.5), bre.GetLowerValue().GetFloatVal())
+		s.Equal(float64(100.5), bre.GetUpperValue().GetFloatVal())
+	})
+}
