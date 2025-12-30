@@ -275,16 +275,6 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	for _, segments := range collectionSegments {
 		numSegments += len(segments)
 		for _, segment := range segments {
-			// Restore full paths for text index logs (compatible with old version)
-			// segments from catalog.ListSegments may have filenames only in TextStatsLogs
-			metautil.BuildTextLogPaths(
-				m.chunkManager.RootPath(),
-				segment.GetCollectionID(),
-				segment.GetPartitionID(),
-				segment.GetID(),
-				segment.GetTextStatsLogs(),
-			)
-
 			// segments from catalog.ListSegments will not have logPath
 			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 			metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted())).Inc()
