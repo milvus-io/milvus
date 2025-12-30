@@ -2677,7 +2677,7 @@ type SegmentInfo struct {
 	// we could keep the fullpath since one segment shall only have one active manifest
 	// and we could keep the possiblity that manifest stores out side of collection/partition/segment path
 	ManifestPath string `protobuf:"bytes,32,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
-	// expirQuantiles records the expiration timestmaptz values of the segment
+	// expirQuantiles records the expiration timestamptz values of the segment
 	// at the 20%, 40%, 60%, 80%, and 100% data distribution levels
 	ExpirQuantiles []int64 `protobuf:"varint,33,rep,packed,name=expirQuantiles,proto3" json:"expirQuantiles,omitempty"`
 }
@@ -5014,7 +5014,7 @@ type CompactionSegmentBinlogs struct {
 	IsSorted            bool           `protobuf:"varint,9,opt,name=is_sorted,json=isSorted,proto3" json:"is_sorted,omitempty"`
 	StorageVersion      int64          `protobuf:"varint,10,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
 	Manifest            string         `protobuf:"bytes,11,opt,name=manifest,proto3" json:"manifest,omitempty"`
-	// expirQuantiles records the expiration timestmaptz values of the segment
+	// expirQuantiles records the expiration timestamptz values of the segment
 	// at the 20%, 40%, 60%, 80%, and 100% data distribution levels
 	ExpirQuantiles []int64 `protobuf:"varint,12,rep,packed,name=expirQuantiles,proto3" json:"expirQuantiles,omitempty"`
 }

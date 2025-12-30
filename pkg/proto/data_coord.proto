@@ -431,7 +431,7 @@ message SegmentInfo {
   // and we could keep the possiblity that manifest stores out side of collection/partition/segment path
   string manifest_path = 32;
 
-  // expirQuantiles records the expiration timestmaptz values of the segment
+  // expirQuantiles records the expiration timestamptz values of the segment
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 33;
 }
@@ -692,7 +692,7 @@ message CompactionSegmentBinlogs {
   bool is_sorted = 9;
   int64 storage_version = 10;
   string manifest = 11;
-  // expirQuantiles records the expiration timestmaptz values of the segment
+  // expirQuantiles records the expiration timestamptz values of the segment
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 12;
 }
