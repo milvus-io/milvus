@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	maxRedoLogged = 3
-	logThreshold  = 10 * time.Millisecond
+	maxLogged    = 3
+	logThreshold = 10 * time.Millisecond
 )
 
 type InterceptorMetrics struct {
@@ -88,12 +88,19 @@ func (m *AppendMetrics) IntoLogFields() []zap.Field {
 			fields = append(fields, zap.Int64("txnID", int64(m.result.TxnCtx.TxnID)))
 		}
 	}
+	loggedInterceptorCount := 0
+L:
 	for name, ims := range m.interceptors {
 		for i, im := range ims {
-			if i <= maxRedoLogged {
-				if im.ShouldBeLogged() {
-					fields = append(fields, zap.Stringer(fmt.Sprintf("%s_%d", name, i), im))
-				}
+			if !im.ShouldBeLogged() {
+				continue
+			}
+			if loggedInterceptorCount <= maxLogged {
+				fields = append(fields, zap.Stringer(fmt.Sprintf("%s_%d", name, i), im))
+				loggedInterceptorCount++
+			}
+			if loggedInterceptorCount >= maxLogged {
+				break L
 			}
 		}
 	}
