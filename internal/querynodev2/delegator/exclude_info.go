@@ -42,6 +42,12 @@ func NewExcludedSegments(cleanInterval time.Duration) *ExcludedSegments {
 }
 
 func (s *ExcludedSegments) Insert(excludeInfo map[int64]uint64) {
+	if log.Level().Enabled(zap.DebugLevel) {
+		defer func() {
+			s.logExcludeInfo(excludeInfo)
+		}()
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -52,6 +58,19 @@ func (s *ExcludedSegments) Insert(excludeInfo map[int64]uint64) {
 		)
 		s.segments[segmentID] = ts
 	}
+}
+
+func (s *ExcludedSegments) logExcludeInfo(excludeInfo map[int64]uint64) {
+	segmentIDs := make([]int64, 0, len(excludeInfo))
+	timeTicks := make([]uint64, 0, len(excludeInfo))
+	for segmentID, ts := range excludeInfo {
+		if len(segmentIDs) >= 100 {
+			break
+		}
+		segmentIDs = append(segmentIDs, segmentID)
+		timeTicks = append(timeTicks, ts)
+	}
+	log.Debug("add exclude info", zap.Int("count", len(segmentIDs)), zap.Int64s("segmentIDs", segmentIDs), zap.Uint64s("timeTicks", timeTicks))
 }
 
 // return false if segment has been excluded
