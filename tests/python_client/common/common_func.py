@@ -665,14 +665,6 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
     if is_primary is True:
         nullable = False
 
-    field, _ = ApiFieldSchemaWrapper().init_field_schema(
-        name=name, 
-        dtype=field_type, 
-        description=description,
-        is_primary=is_primary,
-        nullable=nullable,
-        **kwargs
-    )
     if skip_wrapper is True:
         field = FieldSchema(
             name=name,
@@ -682,7 +674,17 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
             nullable=nullable,
             **kwargs
         )
-    return field
+        return field
+    else:
+        field, _ = ApiFieldSchemaWrapper().init_field_schema(
+            name=name,
+            dtype=field_type,
+            description=description,
+            is_primary=is_primary,
+            nullable=nullable,
+            **kwargs
+        )
+        return field
 
 
 # Convenience functions for backward compatibility
