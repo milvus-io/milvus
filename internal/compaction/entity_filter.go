@@ -107,8 +107,8 @@ func (filter *EntityFilterImpl) isEntityExpired(entityTs typeutil.Timestamp) boo
 }
 
 func (filter *EntityFilterImpl) isEntityExpiredByTTLField(expirationTimeMicros int64) bool {
-	// entity expire is not enabled if expirationTimeMicros <= 0
-	if expirationTimeMicros <= 0 {
+	// entity expire is not enabled if expirationTimeMicros < 0
+	if expirationTimeMicros < 0 {
 		return false
 	}
 

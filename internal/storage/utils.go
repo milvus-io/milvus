@@ -1768,6 +1768,25 @@ func VectorArrayToArrowType(elementType schemapb.DataType, dim int) (arrow.DataT
 	}
 }
 
+func getTTLFieldID(schema *schemapb.CollectionSchema) int64 {
+	ttlFieldName := ""
+	for _, pair := range schema.GetProperties() {
+		if pair.GetKey() == common.CollectionTTLFieldKey {
+			ttlFieldName = pair.GetValue()
+			break
+		}
+	}
+	if ttlFieldName == "" {
+		return -1
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetName() == ttlFieldName && field.GetDataType() == schemapb.DataType_Timestamptz {
+			return field.GetFieldID()
+		}
+	}
+	return -1
+}
+
 // calculateExpirQuantiles computes TTL values at 20%, 40%, 60%, 80%, 100% percentiles.
 // Returns nil if ttlFieldID is not enabled or no rows exist.
 // Precondition: ttlFieldValues must contain only positive values (>0); the caller is responsible

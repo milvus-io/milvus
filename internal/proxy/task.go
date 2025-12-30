@@ -357,8 +357,8 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
 	for _, pair := range props {
 		if pair.Key == common.CollectionTTLConfigKey {
-			v, err := strconv.Atoi(pair.Value)
-			if err != nil || v <= 0 {
+			_, err := strconv.Atoi(pair.Value)
+			if err != nil {
 				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
 			}
 			return true, nil

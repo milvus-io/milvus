@@ -503,7 +503,8 @@ TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
                      DataType::INT64,
                      false,
                      std::nullopt);
-    auto ttl_fid = schema->AddDebugField("ttl_field", DataType::INT64, false);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ, false);
     schema->set_primary_field_id(pk_fid);
     schema->set_ttl_field_id(ttl_fid);
 
@@ -563,7 +564,7 @@ TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
 
     {
         auto field_data =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
+            std::make_shared<FieldData<int64_t>>(DataType::TIMESTAMPTZ, false);
         field_data->FillFieldData(ttl_data.data(), test_data_count);
         std::vector<FieldDataPtr> field_datas = {field_data};
         auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
@@ -575,25 +576,43 @@ TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
         segment->LoadFieldData(load_info);
     }
 
-    BitsetType bitset(test_data_count);
+    // Test TTL field filtering using CompileExpressions pathway
+    Timestamp query_ts = base_ts + test_data_count;
+    int64_t active_count = segment->get_active_count(query_ts);
+
+    // Create an expression list with AlwaysTrueExpr - CompileExpressions will
+    // automatically add TTL field filtering expression
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    // Execute query expression - this will trigger CompileExpressions which
+    // automatically adds TTL field filtering expression
+    BitsetType bitset =
+        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+
+    // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
+    // means the row matches (not expired), bitset[i] = false means expired
     BitsetTypeView bitset_view(bitset);
 
-    Timestamp query_ts = base_ts + test_data_count;
-    segment->mask_with_timestamps(bitset_view, query_ts, 0);
-
+    // Verify results:
+    // After ExecuteQueryExpr, bitset[i] = true means row matches (not expired)
+    // bitset[i] = false means row is filtered out (expired)
+    // - i < test_data_count / 2: expired (TTL < current time), should be expired (bitset_view[i] = false)
+    // - i >= test_data_count / 2: not expired, should NOT be expired (bitset_view[i] = true)
     int expired_count = 0;
     for (int i = 0; i < test_data_count; i++) {
-        if (bitset_view[i]) {
+        if (!bitset_view[i]) {
             expired_count++;
         }
     }
 
     EXPECT_EQ(expired_count, test_data_count / 2);
     for (int i = 0; i < test_data_count / 2; i++) {
-        EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should be expired";
+        EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should be expired";
     }
     for (int i = test_data_count / 2; i < test_data_count; i++) {
-        EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should not be expired";
+        EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should not be expired";
     }
 }
 
@@ -607,7 +626,8 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
                      DataType::INT64,
                      false,
                      std::nullopt);
-    auto ttl_fid = schema->AddDebugField("ttl_field", DataType::INT64, true);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ, true);
     schema->set_primary_field_id(pk_fid);
     schema->set_ttl_field_id(ttl_fid);
 
@@ -676,7 +696,7 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
 
     {
         auto field_data =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, true);
+            std::make_shared<FieldData<int64_t>>(DataType::TIMESTAMPTZ, true);
         field_data->FillFieldData(
             ttl_data.data(), valid_data.data(), test_data_count, 0);
         std::vector<FieldDataPtr> field_datas = {field_data};
@@ -689,22 +709,44 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
         segment->LoadFieldData(load_info);
     }
 
-    BitsetType bitset(test_data_count);
+    // Test TTL field filtering using CompileExpressions pathway
+    Timestamp query_ts = base_ts + test_data_count;
+    int64_t active_count = segment->get_active_count(query_ts);
+
+    // Create an expression list with AlwaysTrueExpr - CompileExpressions will
+    // automatically add TTL field filtering expression
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    // Execute query expression - this will trigger CompileExpressions which
+    // automatically adds TTL field filtering expression
+    BitsetType bitset =
+        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+
+    // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
+    // means the row matches (not expired), bitset[i] = false means expired
     BitsetTypeView bitset_view(bitset);
 
-    Timestamp query_ts = base_ts + test_data_count;
-    segment->mask_with_timestamps(bitset_view, query_ts, 0);
-
+    // Verify results:
+    // After ExecuteQueryExpr, bitset[i] = true means row matches (not expired)
+    // bitset[i] = false means row is filtered out (expired)
+    // - i % 4 == 0: null, should NOT be expired (bitset_view[i] = true)
+    // - i % 4 == 1: expired (TTL < current time), should be expired (bitset_view[i] = false)
+    // - i % 4 == 2 or 3: not expired, should NOT be expired (bitset_view[i] = true)
     int expired_count = 0;
     for (int i = 0; i < test_data_count; i++) {
         if (i % 4 == 0) {
-            EXPECT_FALSE(bitset_view[i])
+            // Null value should not be expired (should match)
+            EXPECT_TRUE(bitset_view[i])
                 << "Row " << i << " (null) should not be expired";
         } else if (i % 4 == 1) {
-            EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should be expired";
+            // Should be expired (should be filtered out)
+            EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should be expired";
             expired_count++;
         } else {
-            EXPECT_FALSE(bitset_view[i])
+            // Should not be expired (should match)
+            EXPECT_TRUE(bitset_view[i])
                 << "Row " << i << " should not be expired";
         }
     }

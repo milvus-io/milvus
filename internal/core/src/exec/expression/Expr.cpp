@@ -39,6 +39,7 @@
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "expr/ITypeExpr.h"
 #include "monitor/Monitor.h"
+#include "segcore/Utils.h"
 
 #include <memory>
 namespace milvus {
@@ -62,6 +63,59 @@ ExprSet::Eval(int32_t begin,
     }
 }
 
+// Add TTL field filtering expressions if schema has TTL field configured
+// This implements entity-level TTL by filtering out expired entities
+// Returns two separate expressions: ttl_field >= threshold AND ttl_field is not null
+// They are kept separate to allow optimization reordering with other expressions
+inline void
+AddTTLFieldFilterExpressions(
+    QueryContext* query_context,
+    const std::unordered_set<std::string>& flatten_candidate,
+    bool enable_constant_folding,
+    std::vector<ExprPtr>& exprs) {
+    auto segment = query_context->get_segment();
+    auto& schema = segment->get_schema();
+    if (!schema.get_ttl_field_id().has_value()) {
+        return;
+    }
+
+    auto ttl_field_id = schema.get_ttl_field_id().value();
+    auto& ttl_field_meta = schema[ttl_field_id];
+
+    // Convert query_timestamp to physical microseconds for TTL comparison
+    auto query_timestamp = query_context->get_query_timestamp();
+    int64_t physical_us =
+        static_cast<int64_t>(
+            milvus::segcore::TimestampToPhysicalMs(query_timestamp)) *
+        1000;
+
+    // Create UnaryRangeFilterExpr: ttl_field >= physical_us
+    // This filters out expired entities (ttl_field < physical_us)
+    proto::plan::GenericValue ttl_threshold;
+    ttl_threshold.set_int64_val(physical_us);
+
+    expr::ColumnInfo ttl_column_info(ttl_field_id,
+                                     ttl_field_meta.get_data_type());
+    auto ttl_filter_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        ttl_column_info, proto::plan::OpType::GreaterEqual, ttl_threshold);
+
+    // Create NullExpr: ttl_field is not null
+    // This filters out entities with null ttl_field
+    auto ttl_not_null_expr = std::make_shared<expr::NullExpr>(
+        ttl_column_info, proto::plan::NullExpr_NullOp_IsNotNull);
+
+    // Compile both expressions separately
+    // They will be combined with AND logic in FilterBitsNode along with other expressions
+    exprs.emplace_back(CompileExpression(ttl_not_null_expr,
+                                         query_context,
+                                         flatten_candidate,
+                                         enable_constant_folding));
+    exprs.emplace_back(CompileExpression(ttl_filter_expr,
+                                         query_context,
+                                         flatten_candidate,
+                                         enable_constant_folding));
+}
+
 std::vector<ExprPtr>
 CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                    ExecContext* context,
@@ -76,6 +130,12 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                                              flatten_candidate,
                                              enable_constant_folding));
     }
+
+    // Add TTL field filtering expressions if schema has TTL field
+    AddTTLFieldFilterExpressions(context->get_query_context(),
+                                 flatten_candidate,
+                                 enable_constant_folding,
+                                 exprs);
 
     if (OPTIMIZE_EXPR_ENABLED.load()) {
         OptimizeCompiledExprs(context, exprs);

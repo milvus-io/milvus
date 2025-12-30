@@ -32,7 +32,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 	collectionTtl int64,
 	compactionParams compaction.Params,
 	sortByFields []int64,
-	ttlFieldID int64,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -47,7 +46,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
 		storage.WithStorageConfig(compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(compactionParams.UseLoonFFI),
-		storage.WithTTLFieldID(ttlFieldID),
 	)
 	if err != nil {
 		return nil, err
@@ -59,6 +57,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		return nil, err
 	}
 
+	ttlFieldID := getTTLFieldID(plan.GetSchema())
 	hasTTLField := ttlFieldID >= common.StartOfUserFieldID
 
 	segmentReaders := make([]storage.RecordReader, len(binlogs))

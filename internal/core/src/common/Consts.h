@@ -83,7 +83,7 @@ const int64_t DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE = 8192;
 
 const int64_t DEFAULT_DELETE_DUMP_BATCH_SIZE = 10000;
 
-constexpr const char* COLLECTION_TTL_FIELD_KEY = "collection.ttl.field";
+constexpr const char* COLLECTION_TTL_FIELD_KEY = "ttl_field";
 
 constexpr const char* RADIUS = knowhere::meta::RADIUS;
 constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;

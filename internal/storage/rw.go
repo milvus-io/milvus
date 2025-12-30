@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
@@ -71,7 +70,6 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
-	ttlFieldID          int64
 }
 
 func (o *rwOptions) validate() error {
@@ -104,7 +102,6 @@ func DefaultWriterOptions() *rwOptions {
 		bufferSize:          packed.DefaultWriteBufferSize,
 		multiPartUploadSize: packed.DefaultMultiPartUploadSize,
 		op:                  OpWrite,
-		ttlFieldID:          common.InvalidFieldID,
 	}
 }
 
@@ -112,7 +109,6 @@ func DefaultReaderOptions() *rwOptions {
 	return &rwOptions{
 		bufferSize: packed.DefaultReadBufferSize,
 		op:         OpRead,
-		ttlFieldID: common.InvalidFieldID,
 	}
 }
 
@@ -179,12 +175,6 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
-	}
-}
-
-func WithTTLFieldID(ttlFieldID int64) RwOption {
-	return func(options *rwOptions) {
-		options.ttlFieldID = ttlFieldID
 	}
 }
 
@@ -410,7 +400,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, rwOptions.ttlFieldID, opts...,
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
 		)
 	case StorageV2:
 		if rwOptions.useLoonFFI {
@@ -419,7 +409,6 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				pluginContext,
-				rwOptions.ttlFieldID,
 			)
 		} else {
 			return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -427,7 +416,6 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				pluginContext,
-				rwOptions.ttlFieldID,
 			)
 		}
 	}

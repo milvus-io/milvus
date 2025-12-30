@@ -90,6 +90,8 @@ type clusteringCompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
+	ttlFieldID int64
+
 	memoryLimit int64
 	bufferSize  int64
 
@@ -241,6 +243,7 @@ func (t *clusteringCompactionTask) init() error {
 	}
 
 	t.primaryKeyField = pkField
+	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTime = time.Now()
 	t.memoryLimit = t.getMemoryLimit()
@@ -346,7 +349,6 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			storage.WithBufferSize(t.bufferSize),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
 			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
-			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 		if err != nil {
 			return err
@@ -372,7 +374,6 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			storage.WithBufferSize(t.bufferSize),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
 			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
-			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 		if err != nil {
 			return err
@@ -435,7 +436,6 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 			storage.WithBufferSize(t.bufferSize),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
 			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
-			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 		if err != nil {
 			return err
@@ -648,7 +648,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	}
 	defer rr.Close()
 
-	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
 	offset := int64(-1)
 	for {
@@ -677,7 +677,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
-				if val, exists := row[t.plan.GetTtlFieldID()]; exists {
+				if val, exists := row[t.ttlFieldID]; exists {
 					if v, ok := val.(int64); ok {
 						expireTs = v
 					}
@@ -920,8 +920,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	requiredFields := typeutil.NewSet[int64]()
 	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
-	if t.plan.GetTtlFieldID() >= common.StartOfUserFieldID {
-		requiredFields.Insert(t.plan.GetTtlFieldID())
+	if t.ttlFieldID >= common.StartOfUserFieldID {
+		requiredFields.Insert(t.ttlFieldID)
 	}
 	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return requiredFields.Contain(field.GetFieldID())
@@ -995,7 +995,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
-	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	for {
 		v, err := pkIter.NextValue()
 		if err != nil {
@@ -1016,7 +1016,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 
 		expireTs := int64(-1)
 		if hasTTLField {
-			if val, exists := row[t.plan.GetTtlFieldID()]; exists {
+			if val, exists := row[t.ttlFieldID]; exists {
 				if v, ok := val.(int64); ok {
 					expireTs = v
 				}

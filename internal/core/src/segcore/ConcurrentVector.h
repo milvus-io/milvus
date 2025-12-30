@@ -74,7 +74,12 @@ class ThreadSafeValidData {
             if (length_ + num_rows > data_.size()) {
                 data_.resize(length_ + num_rows);
             }
-            auto src = data->valid_data().data();
+            const auto& valid_data_field = data->valid_data();
+            AssertInfo(valid_data_field.size() >= num_rows,
+                       "valid_data size {} is less than num_rows {}",
+                       valid_data_field.size(),
+                       num_rows);
+            auto src = valid_data_field.data();
             std::copy_n(src, num_rows, data_.data() + length_);
             length_ += num_rows;
         }

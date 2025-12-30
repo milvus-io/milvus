@@ -535,7 +535,7 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 	}
 
 	// not system column
-	if c.ttlFieldID > 1 {
+	if c.ttlFieldID >= common.StartOfUserFieldID {
 		// Defensive check to prevent panic
 		ttlColumn := r.Column(c.ttlFieldID)
 		if ttlColumn == nil {
@@ -739,23 +739,23 @@ func (c *CompositeBinlogRecordWriter) GetRowNum() int64 {
 
 func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, rootPath string, maxRowNum int64,
-	ttlFieldID int64,
 	options ...StreamWriterOption,
 ) (*CompositeBinlogRecordWriter, error) {
 	writer := &CompositeBinlogRecordWriter{
-		collectionID: collectionID,
-		partitionID:  partitionID,
-		segmentID:    segmentID,
-		schema:       schema,
-		BlobsWriter:  blobsWriter,
-		allocator:    allocator,
-		chunkSize:    chunkSize,
-		rootPath:     rootPath,
-		maxRowNum:    maxRowNum,
-		options:      options,
-		tsFrom:       math.MaxUint64,
-		tsTo:         0,
-		ttlFieldID:   ttlFieldID,
+		collectionID:   collectionID,
+		partitionID:    partitionID,
+		segmentID:      segmentID,
+		schema:         schema,
+		BlobsWriter:    blobsWriter,
+		allocator:      allocator,
+		chunkSize:      chunkSize,
+		rootPath:       rootPath,
+		maxRowNum:      maxRowNum,
+		options:        options,
+		tsFrom:         math.MaxUint64,
+		tsTo:           0,
+		ttlFieldID:     getTTLFieldID(schema),
+		ttlFieldValues: make([]int64, 0),
 	}
 
 	// Create stats collectors

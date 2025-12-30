@@ -192,7 +192,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		}
 	}
 
-	if pw.ttlFieldID > 1 {
+	if pw.ttlFieldID >= common.StartOfUserFieldID {
 		ttlColumn := r.Column(pw.ttlFieldID)
 		// Defensive check to prevent panic
 		if ttlColumn == nil {
@@ -299,7 +299,6 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-	ttlFieldID int64,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -323,7 +322,8 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 			storagePluginContext: storagePluginContext,
 			tsFrom:               typeutil.MaxTimestamp,
 			tsTo:                 0,
-			ttlFieldID:           ttlFieldID,
+			ttlFieldID:           getTTLFieldID(schema),
+			ttlFieldValues:       make([]int64, 0),
 		},
 	}
 
@@ -450,7 +450,6 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
-	ttlFieldID int64,
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -474,7 +473,8 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 			storagePluginContext: storagePluginContext,
 			tsFrom:               typeutil.MaxTimestamp,
 			tsTo:                 0,
-			ttlFieldID:           ttlFieldID,
+			ttlFieldID:           getTTLFieldID(schema),
+			ttlFieldValues:       make([]int64, 0),
 		},
 	}
 

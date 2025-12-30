@@ -67,6 +67,8 @@ type sortCompactionTask struct {
 	manifest              string
 	useLoonFFI            bool
 
+	ttlFieldID int64
+
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 
@@ -138,6 +140,7 @@ func (t *sortCompactionTask) preCompact() error {
 	t.segmentStorageVersion = segment.GetStorageVersion()
 	t.manifest = segment.GetManifest()
 	t.useLoonFFI = t.compactionParams.UseLoonFFI
+	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -183,7 +186,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.useLoonFFI),
-		storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 	)
 	if err != nil {
 		log.Warn("sort segment wrong, unable to init segment writer",
@@ -196,7 +198,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		log.Warn("load deletePKs failed", zap.Error(err))
 		return nil, err
 	}
-	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
 	entityFilter := compaction.NewEntityFilter(deletePKs, t.plan.GetCollectionTtl(), t.currentTime)
 	var predicate func(r storage.Record, ri, i int) bool
@@ -207,7 +209,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {
-				col := r.Column(t.plan.GetTtlFieldID()).(*array.Int64)
+				col := r.Column(t.ttlFieldID).(*array.Int64)
 				if col.IsValid(i) {
 					expireTs = col.Value(i)
 				}
@@ -220,7 +222,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			ts := r.Column(common.TimeStampField).(*array.Int64).Value(i)
 			expireTs := int64(-1)
 			if hasTTLField {
-				col := r.Column(t.plan.GetTtlFieldID()).(*array.Int64)
+				col := r.Column(t.ttlFieldID).(*array.Int64)
 				if col.IsValid(i) {
 					expireTs = col.Value(i)
 				}

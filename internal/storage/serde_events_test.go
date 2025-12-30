@@ -158,7 +158,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 				log.Debug("write blobs", zap.Int("files", len(b)))
 				return nil
 			},
-			alloc, chunkSize, "root", 10000, common.InvalidFieldID)
+			alloc, chunkSize, "root", 10000)
 		assert.NoError(t, err)
 		writer := NewBinlogValueWriter(rw, 20)
 		assert.NoError(t, err)

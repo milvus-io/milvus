@@ -2283,61 +2283,6 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
         }
     }
 
-    if (schema_->get_ttl_field_id().has_value()) {
-        auto ttl_field_id = schema_->get_ttl_field_id().value();
-        auto ttl_column = get_column(ttl_field_id);
-        if (ttl_column != nullptr) {
-            int64_t physical_us =
-                static_cast<int64_t>(TimestampToPhysicalMs(timestamp)) * 1000;
-            auto num_chunks = ttl_column->num_chunks();
-            bool is_nullable = ttl_column->IsNullable();
-            int64_t row_offset = 0;
-
-            for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
-                auto chunk_data = ttl_column->DataOfChunk(nullptr, chunk_id);
-                auto ttl_data =
-                    reinterpret_cast<const int64_t*>(chunk_data.get());
-                auto chunk_rows = ttl_column->chunk_row_nums(chunk_id);
-
-                auto aligned_rows = (chunk_rows / 8) * 8;
-                if (aligned_rows > 0) {
-                    BitsetType ttl_expired_bitset(aligned_rows);
-                    ttl_expired_bitset
-                        .inplace_compare_val<int64_t,
-                                             milvus::bitset::CompareOpType::LT>(
-                            ttl_data, aligned_rows, physical_us);
-
-                    if (is_nullable) {
-                        for (int64_t i = 0; i < aligned_rows; ++i) {
-                            if (ttl_expired_bitset[i] &&
-                                ttl_column->IsValid(nullptr, row_offset + i)) {
-                                bitset_chunk.set(row_offset + i);
-                            }
-                        }
-                    } else {
-                        BitsetTypeView target_view(
-                            bitset_chunk.data(),
-                            bitset_chunk.offset() + row_offset,
-                            aligned_rows);
-                        target_view.inplace_or(ttl_expired_bitset,
-                                               aligned_rows);
-                    }
-                }
-
-                for (int64_t i = aligned_rows; i < chunk_rows; ++i) {
-                    bool is_valid =
-                        !is_nullable ||
-                        ttl_column->IsValid(nullptr, row_offset + i);
-                    if (is_valid && physical_us > ttl_data[i]) {
-                        bitset_chunk.set(row_offset + i);
-                    }
-                }
-
-                row_offset += chunk_rows;
-            }
-        }
-    }
-
     AssertInfo(timestamps_data_size == get_row_count(),
                fmt::format("Timestamp size not equal to row count: {}, {}",
                            timestamps_data_size,

@@ -66,6 +66,8 @@ type mixCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+
+	ttlFieldID int64
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -109,7 +111,7 @@ func (t *mixCompactionTask) preCompact() error {
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 	t.targetSize = t.plan.GetMaxSize()
 	t.bm25FieldIDs = GetBM25FieldIDs(t.plan.GetSchema())
-
+	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	currSize := int64(0)
 	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
 		for i, fieldBinlog := range segmentBinlog.GetFieldBinlogs() {
@@ -155,7 +157,6 @@ func (t *mixCompactionTask) mergeSplit(
 		t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096,
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
-		storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 	)
 	if err != nil {
 		return nil, err
@@ -232,7 +233,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			storage.WithDownloader(t.binlogIO.Download),
 			storage.WithVersion(seg.GetStorageVersion()),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 	} else {
 		reader, err = storage.NewBinlogRecordReader(ctx,
@@ -242,7 +242,6 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			storage.WithDownloader(t.binlogIO.Download),
 			storage.WithVersion(seg.GetStorageVersion()),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
-			storage.WithTTLFieldID(t.plan.GetTtlFieldID()),
 		)
 	}
 	if err != nil {
@@ -251,7 +250,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer reader.Close()
 
-	hasTTLField := t.plan.GetTtlFieldID() >= common.StartOfUserFieldID
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 
 	for {
 		var r storage.Record
@@ -276,7 +275,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		)
 
 		if hasTTLField {
-			ttlArr = r.Column(t.plan.GetTtlFieldID()).(*array.Int64)
+			ttlArr = r.Column(t.ttlFieldID).(*array.Int64)
 		}
 
 		for i := range r.Len() {
@@ -404,7 +403,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if sortMergeAppicable {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs, t.plan.GetTtlFieldID())
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams, t.sortByFieldIDs)
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err

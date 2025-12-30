@@ -79,30 +79,71 @@ PhyFilterBitsNode::GetOutput() {
     TargetBitmap bitset;
     TargetBitmap valid_bitset;
     while (num_processed_rows_ < need_process_rows_) {
-        exprs_->Eval(0, 1, true, eval_ctx, results_);
+        // Evaluate all expressions (including TTL filter if added by CompileExpressions)
+        exprs_->Eval(0, exprs_->size(), true, eval_ctx, results_);
 
-        AssertInfo(results_.size() == 1 && results_[0] != nullptr,
-                   "PhyFilterBitsNode result size should be size one and not "
-                   "be nullptr");
+        AssertInfo(
+            results_.size() == exprs_->size(),
+            "PhyFilterBitsNode result size should match expression count");
+        AssertInfo(results_.size() > 0,
+                   "PhyFilterBitsNode should have at least one expression");
 
-        if (auto col_vec =
-                std::dynamic_pointer_cast<ColumnVector>(results_[0])) {
-            if (col_vec->IsBitmap()) {
-                auto col_vec_size = col_vec->size();
-                TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
-                bitset.append(view);
-                TargetBitmapView valid_view(col_vec->GetValidRawData(),
-                                            col_vec_size);
-                valid_bitset.append(valid_view);
-                num_processed_rows_ += col_vec_size;
-            } else {
+        // Combine all expression results using AND logic
+        // When CompileExpressions adds TTL filter, we have multiple expressions
+        // that need to be combined
+        TargetBitmap combined_bitmap;
+        TargetBitmap combined_valid;
+        bool first_expr = true;
+
+        for (size_t i = 0; i < results_.size(); ++i) {
+            AssertInfo(results_[i] != nullptr,
+                       "PhyFilterBitsNode result[{}] should not be nullptr",
+                       i);
+
+            auto col_vec = std::dynamic_pointer_cast<ColumnVector>(results_[i]);
+            if (!col_vec) {
                 ThrowInfo(ExprInvalid,
-                          "PhyFilterBitsNode result should be bitmap");
+                          "PhyFilterBitsNode result[{}] should be ColumnVector",
+                          i);
             }
-        } else {
-            ThrowInfo(ExprInvalid,
-                      "PhyFilterBitsNode result should be ColumnVector");
+            if (!col_vec->IsBitmap()) {
+                ThrowInfo(ExprInvalid,
+                          "PhyFilterBitsNode result[{}] should be bitmap",
+                          i);
+            }
+
+            auto col_vec_size = col_vec->size();
+            TargetBitmapView current_view(col_vec->GetRawData(), col_vec_size);
+            TargetBitmapView current_valid_view(col_vec->GetValidRawData(),
+                                                col_vec_size);
+
+            if (first_expr) {
+                // First expression: create copies as base
+                combined_bitmap = TargetBitmap(current_view);
+                combined_valid = TargetBitmap(current_valid_view);
+                first_expr = false;
+            } else {
+                // Combine with previous results using AND logic
+                AssertInfo(current_view.size() == combined_bitmap.size(),
+                           "Expression result sizes must match: {} vs {}",
+                           current_view.size(),
+                           combined_bitmap.size());
+
+                // In-place AND operation
+                TargetBitmapView combined_view(combined_bitmap);
+                combined_view.inplace_and(current_view, col_vec_size);
+                TargetBitmapView combined_valid_view(combined_valid);
+                combined_valid_view.inplace_and(current_valid_view,
+                                                col_vec_size);
+            }
         }
+
+        auto col_vec_size = combined_bitmap.size();
+        TargetBitmapView view(combined_bitmap);
+        bitset.append(view);
+        TargetBitmapView valid_view(combined_valid);
+        valid_bitset.append(valid_view);
+        num_processed_rows_ += col_vec_size;
     }
     bitset.flip();
     AssertInfo(bitset.size() == need_process_rows_,
