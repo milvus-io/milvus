@@ -65,8 +65,8 @@ ExprSet::Eval(int32_t begin,
 
 // Add TTL field filtering expressions if schema has TTL field configured
 // This implements entity-level TTL by filtering out expired entities
-// Returns two separate expressions: ttl_field >= threshold AND ttl_field is not null
-// They are kept separate to allow optimization reordering with other expressions
+// Returns a single OR expression: ttl_field is null OR ttl_field > physical_us
+// This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
 inline void
 AddTTLFieldFilterExpressions(
     QueryContext* query_context,
@@ -89,28 +89,25 @@ AddTTLFieldFilterExpressions(
             milvus::segcore::TimestampToPhysicalMs(query_timestamp)) *
         1000;
 
-    // Create UnaryRangeFilterExpr: ttl_field >= physical_us
-    // This filters out expired entities (ttl_field < physical_us)
+    expr::ColumnInfo ttl_column_info(ttl_field_id,
+                                     ttl_field_meta.get_data_type(),
+                                     {},
+                                     ttl_field_meta.is_nullable());
+
+    auto ttl_is_null_expr = std::make_shared<expr::NullExpr>(
+        ttl_column_info, proto::plan::NullExpr_NullOp_IsNull);
+
     proto::plan::GenericValue ttl_threshold;
     ttl_threshold.set_int64_val(physical_us);
+    auto ttl_greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        ttl_column_info, proto::plan::OpType::GreaterThan, ttl_threshold);
 
-    expr::ColumnInfo ttl_column_info(ttl_field_id,
-                                     ttl_field_meta.get_data_type());
-    auto ttl_filter_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
-        ttl_column_info, proto::plan::OpType::GreaterEqual, ttl_threshold);
+    auto ttl_or_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::Or,
+        ttl_is_null_expr,
+        ttl_greater_expr);
 
-    // Create NullExpr: ttl_field is not null
-    // This filters out entities with null ttl_field
-    auto ttl_not_null_expr = std::make_shared<expr::NullExpr>(
-        ttl_column_info, proto::plan::NullExpr_NullOp_IsNotNull);
-
-    // Compile both expressions separately
-    // They will be combined with AND logic in FilterBitsNode along with other expressions
-    exprs.emplace_back(CompileExpression(ttl_not_null_expr,
-                                         query_context,
-                                         flatten_candidate,
-                                         enable_constant_folding));
-    exprs.emplace_back(CompileExpression(ttl_filter_expr,
+    exprs.emplace_back(CompileExpression(ttl_or_expr,
                                          query_context,
                                          flatten_candidate,
                                          enable_constant_folding));
