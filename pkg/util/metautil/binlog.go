@@ -98,6 +98,9 @@ func JoinIDPath(ids ...typeutil.UniqueID) string {
 // It modifies the TextStatsLogs map in place, compressing full paths to filenames.
 func ExtractTextLogFilenames(textStatsLogs map[int64]*datapb.TextIndexStats) {
 	for _, textStats := range textStatsLogs {
+		if textStats == nil {
+			continue
+		}
 		filenames := make([]string, 0, len(textStats.GetFiles()))
 		for _, fullPath := range textStats.GetFiles() {
 			idx := strings.LastIndex(fullPath, pathSep)
@@ -115,6 +118,9 @@ func ExtractTextLogFilenames(textStatsLogs map[int64]*datapb.TextIndexStats) {
 // This function is compatible with both old version (full paths) and new version (filenames only).
 func BuildTextLogPaths(rootPath string, collectionID, partitionID, segmentID typeutil.UniqueID, textStatsLogs map[int64]*datapb.TextIndexStats) {
 	for _, textStats := range textStatsLogs {
+		if textStats == nil {
+			continue
+		}
 		prefix := path.Join(
 			rootPath,
 			common.TextIndexPath,
