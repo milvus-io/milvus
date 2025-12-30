@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema, connections, LexicalHighlighter
 from pymilvus.milvus_client.index import IndexParams
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from pymilvus.client.embedding_list import EmbeddingList
@@ -1048,6 +1048,14 @@ class FullTextSearchChecker(Checker):
     @trace()
     def full_text_search(self):
         bm25_anns_field = random.choice(self.bm25_sparse_field_names)
+        # Create highlighter for full text search results
+        highlighter = LexicalHighlighter(
+            pre_tags=["<em>"],
+            post_tags=["</em>"],
+            highlight_search_text=True,
+            fragment_offset=10,
+            fragment_size=50
+        )
         try:
             res = self.milvus_client.search(
                 collection_name=self.c_name,
@@ -1056,7 +1064,8 @@ class FullTextSearchChecker(Checker):
                 search_params=constants.DEFAULT_BM25_SEARCH_PARAM,
                 limit=5,
                 partition_names=self.p_names,
-                timeout=search_timeout
+                timeout=search_timeout,
+                highlighter=highlighter
             )
             return res, True
         except Exception as e:
@@ -1908,34 +1917,52 @@ class QueryChecker(Checker):
 
 
 class TextMatchChecker(Checker):
-    """check text match query operations in a dependent thread"""
+    """check text match search operations with highlighter in a dependent thread"""
 
     def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None):
         if collection_name is None:
-            collection_name = cf.gen_unique_str("QueryChecker_")
+            collection_name = cf.gen_unique_str("TextMatchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         index_params = create_index_params_from_dict(self.float_vector_field_name, constants.DEFAULT_INDEX_PARAM)
         self.milvus_client.create_index(collection_name=self.c_name, index_params=index_params)
-        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)  # do load before query
+        self.milvus_client.load_collection(collection_name=self.c_name, replica_number=replica_number)
         self.insert_data()
         key_word = self.word_freq.most_common(1)[0][0]
-        text_match_field_name = random.choice(self.text_match_field_name_list)
-        self.term_expr = f"TEXT_MATCH({text_match_field_name}, '{key_word}')"
+        self.text_match_field_name = random.choice(self.text_match_field_name_list)
+        self.key_word = key_word
+        self.term_expr = f"TEXT_MATCH({self.text_match_field_name}, '{key_word}')"
 
     @trace()
     def text_match(self):
+        # Create highlighter with query for text match
+        highlighter = LexicalHighlighter(
+            pre_tags=["<em>"],
+            post_tags=["</em>"],
+            highlight_search_text=False,
+            highlight_query=[{"type": "TextMatch", "field": self.text_match_field_name, "text": self.key_word}]
+        )
         try:
-            res = self.milvus_client.query(collection_name=self.c_name, filter=self.term_expr, limit=5, timeout=query_timeout)
+            res = self.milvus_client.search(
+                collection_name=self.c_name,
+                data=cf.gen_vectors(1, self.dim),
+                anns_field=self.float_vector_field_name,
+                search_params=constants.DEFAULT_SEARCH_PARAM,
+                filter=self.term_expr,
+                limit=5,
+                output_fields=[self.text_match_field_name],
+                timeout=search_timeout,
+                highlighter=highlighter
+            )
             return res, True
         except Exception as e:
-            log.info(f"text_match error: {e}")
             return str(e), False
 
     @exception_handler()
     def run_task(self):
         key_word = self.word_freq.most_common(1)[0][0]
-        text_match_field_name = random.choice(self.text_match_field_name_list)
-        self.term_expr = f"TEXT_MATCH({text_match_field_name}, '{key_word}')"
+        self.text_match_field_name = random.choice(self.text_match_field_name_list)
+        self.key_word = key_word
+        self.term_expr = f"TEXT_MATCH({self.text_match_field_name}, '{key_word}')"
         res, result = self.text_match()
         return res, result
 
