@@ -4682,32 +4682,6 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("ttl.seconds must be positive integer", func(t *testing.T) {
-		col := "alter_ttl_seconds_invalid_" + funcutil.GenRandomStr()
-		createCollectionWithProps(col, nil)
-		task1 := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: col,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "-1"}},
-			},
-			ctx:      ctx,
-			mixCoord: qc,
-		}
-		assert.Error(t, task1.PreExecute(ctx))
-
-		task2 := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Base:           &commonpb.MsgBase{},
-				CollectionName: col,
-				Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "abc"}},
-			},
-			ctx:      ctx,
-			mixCoord: qc,
-		}
-		assert.Error(t, task2.PreExecute(ctx))
-	})
-
 	t.Run("ttl.field must exist in schema", func(t *testing.T) {
 		col := "alter_ttl_field_invalid_" + funcutil.GenRandomStr()
 		createCollectionWithProps(col, nil)

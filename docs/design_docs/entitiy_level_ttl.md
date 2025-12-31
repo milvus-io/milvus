@@ -40,7 +40,7 @@ Milvus already supports the `TIMESTAMPTZ` data type. Entity TTL information will
 Entity-level TTL is implemented by allowing users to explicitly add a `TIMESTAMPTZ` column in the schema and mark it in collection properties:
 
 ```text
-"collection.ttl.field": "ttl"
+"ttl_field": "ttl"
 ```
 
 Here, `ttl` is the name of the column that stores TTL information. This mechanism is **mutually exclusive** with collection-level TTL.
@@ -49,7 +49,6 @@ Here, `ttl` is the name of the column that stores TTL information. This mechanis
 
 ### Terminology and Conventions
 
-* **TTL column / TTL field** : A field of type `TIMESTAMPTZ` declared in the schema and marked with `is_ttl = true`.
 * **ExpireAt** : The value stored in the TTL field, representing the absolute expiration timestamp of an entity (UTC by default if no timezone is specified).
 * **Collection-level TTL** : The existing mechanism where retention duration is defined at the collection level (e.g., retain 30 days).
 * **insert_ts / mvcc_ts** : Existing Milvus write or MVCC timestamps, used as fallback when needed.
@@ -228,7 +227,7 @@ schema.add_field("id", DataType.INT64, is_primary=True)
 schema.add_field("ttl", DataType.TIMESTAMPTZ, nullable=True)
 schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
 
-prop = {"collection.ttl.field": "ttl"}
+prop = {"ttl_field": "ttl"}
 client.create_collection(
     collection_name,
     schema=schema,
