@@ -32,7 +32,7 @@ from datetime import timezone
 from dateutil import parser
 import pytz
 
-from pymilvus import CollectionSchema, DataType, FunctionType, Function, MilvusException, MilvusClient
+from pymilvus import CollectionSchema, FieldSchema, DataType, FunctionType, Function, MilvusException, MilvusClient
 
 from bm25s.tokenization import Tokenizer
 
@@ -632,7 +632,8 @@ def gen_digits_by_length(length=8):
     return "".join(random.choice(string.digits) for _ in range(length))
 
 
-def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_primary=False, **kwargs):
+def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_primary=False,
+                     nullable=False, skip_wrapper=False, **kwargs):
     """
     Generate a field schema based on the field type.
     
@@ -641,6 +642,9 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
         name: Field name (uses default if None)
         description: Field description
         is_primary: Whether this is a primary field
+        nullable: Whether this field is nullable
+        skip_wrapper: whether to call FieldSchemaWrapper, in gen_row_data case,
+                      it logs too much if calling the wrapper
         **kwargs: Additional parameters like max_length, max_capacity, etc.
     
     Returns:
@@ -658,15 +662,29 @@ def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_prim
             kwargs['element_type'] = DataType.INT64
         if 'max_capacity' not in kwargs:
             kwargs['max_capacity'] = ct.default_max_capacity
-    
-    field, _ = ApiFieldSchemaWrapper().init_field_schema(
-        name=name, 
-        dtype=field_type, 
-        description=description,
-        is_primary=is_primary, 
-        **kwargs
-    )
-    return field
+    if is_primary is True:
+        nullable = False
+
+    if skip_wrapper is True:
+        field = FieldSchema(
+            name=name,
+            dtype=field_type,
+            description=description,
+            is_primary=is_primary,
+            nullable=nullable,
+            **kwargs
+        )
+        return field
+    else:
+        field, _ = ApiFieldSchemaWrapper().init_field_schema(
+            name=name,
+            dtype=field_type,
+            description=description,
+            is_primary=is_primary,
+            nullable=nullable,
+            **kwargs
+        )
+        return field
 
 
 # Convenience functions for backward compatibility
@@ -1825,7 +1843,8 @@ def convert_orm_schema_to_dict_schema(orm_schema):
     return schema_dict
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[], desired_field_names=[]):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, 
+                           skip_field_names=[], desired_field_names=[], desired_dynamic_field_names=[]):
     """
     Generates row data based on the given schema.
 
@@ -1839,6 +1858,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         random_pk (bool, optional): Whether to generate random primary key values (default: False)
         skip_field_names(list, optional): whether to skip some field to gen data manually (default: [])
         desired_field_names(list, optional): only generate data for specified field names (default: [])
+        desired_dynamic_field_names(list, optional): generate additional data with random types for specified dynamic fields (default: [])
 
     Returns:
         list[dict]: List of dictionaries where each dictionary represents a row,
@@ -1862,6 +1882,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         schema = convert_orm_schema_to_dict_schema(schema)
 
     # Now schema is always a dict after conversion, process it uniformly
+    enable_dynamic = schema.get('enable_dynamic_field', False)
     # Get all fields from schema
     all_fields = schema.get('fields', [])
     fields = []
@@ -1875,9 +1896,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
 
     # Get struct_fields from schema
     struct_fields = schema.get('struct_fields', [])
-    log.debug(f"[gen_row_data_by_schema] struct_fields from schema: {len(struct_fields)} items")
+    # log.debug(f"[gen_row_data_by_schema] struct_fields from schema: {len(struct_fields)} items")
     if struct_fields:
-        log.debug(f"[gen_row_data_by_schema] First struct_field: {struct_fields[0]}")
+        pass
+        # log.debug(f"[gen_row_data_by_schema] First struct_field: {struct_fields[0]}")
 
     # If struct_fields is not present, extract struct array fields from fields list
     # This happens when using client.describe_collection()
@@ -1943,10 +1965,18 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
             field_name = struct_field.get('name', None)
             struct_data = gen_struct_array_data(struct_field, start=start, random_pk=random_pk)
             tmp[field_name] = struct_data
+        
+        # generate additional data for dynamic fields
+        if enable_dynamic:
+            for name in desired_dynamic_field_names:
+                data_types = [DataType.JSON, DataType.INT64, DataType.FLOAT, DataType.VARCHAR, DataType.BOOL, DataType.ARRAY]
+                data_type = data_types[random.randint(0, len(data_types) - 1)]
+                dynamic_field = gen_scalar_field(data_type, nullable=True, skip_wrapper=True)
+                tmp[name] = gen_data_by_collection_field(dynamic_field)
 
         data.append(tmp)
 
-    log.debug(f"[gen_row_data_by_schema] Generated {len(data)} rows, first row keys: {list(data[0].keys()) if data else []}")
+    # log.debug(f"[gen_row_data_by_schema] Generated {len(data)} rows, first row keys: {list(data[0].keys()) if data else []}")
     return data
 
 
@@ -3846,14 +3876,17 @@ def extract_vector_field_name_list(collection_w):
     return vector_name_list
 
 
-def get_field_dtype_by_field_name(collection_w, field_name):
+def get_field_dtype_by_field_name(schema, field_name):
     """
     get the vector field data type by field name
     collection_w : the collection object to be extracted
     return: the field data type of the field name
     """
-    schema_dict = collection_w.schema.to_dict()
-    fields = schema_dict.get('fields')
+    # Convert ORM schema to dict schema for unified processing
+    if not isinstance(schema, dict):
+        schema = convert_orm_schema_to_dict_schema(schema)
+
+    fields = schema.get('fields')
     for field in fields:
         if field['name'] == field_name:
             return field['type']
