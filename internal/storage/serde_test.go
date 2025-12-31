@@ -659,7 +659,7 @@ func TestArrayOfVectorIntegration(t *testing.T) {
 			name:            "Int8Vector",
 			elementType:     schemapb.DataType_Int8Vector,
 			dim:             4,
-			elementTypeCode: "104",
+			elementTypeCode: "105",
 			createVectors: func(dim int) []*schemapb.VectorField {
 				return []*schemapb.VectorField{
 					{

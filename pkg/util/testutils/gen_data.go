@@ -872,6 +872,82 @@ func NewVectorArrayFieldData(fieldName string, numRows, dim int) *schemapb.Field
 	}
 }
 
+func NewFloat16VectorArrayFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        GenerateArrayOfFloat16VectorArray(numRows, dim),
+						ElementType: schemapb.DataType_Float16Vector,
+						Dim:         int64(dim),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewBFloat16VectorArrayFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        GenerateArrayOfBFloat16VectorArray(numRows, dim),
+						ElementType: schemapb.DataType_BFloat16Vector,
+						Dim:         int64(dim),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewInt8VectorArrayFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        GenerateArrayOfInt8VectorArray(numRows, dim),
+						ElementType: schemapb.DataType_Int8Vector,
+						Dim:         int64(dim),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewBinaryVectorArrayFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        GenerateArrayOfBinaryVectorArray(numRows, dim),
+						ElementType: schemapb.DataType_BinaryVector,
+						Dim:         int64(dim),
+					},
+				},
+			},
+		},
+	}
+}
+
 func NewArrayFieldDataWithValue(fieldName string, fieldValue interface{}) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
@@ -1234,6 +1310,22 @@ func GenerateArrayOfStructArray(schema *schemapb.StructArrayFieldSchema, numRows
 			ret = append(ret, fieldData)
 		case schemapb.DataType_FloatVector:
 			fieldData := NewVectorArrayFieldData(field.Name, numRows, dim)
+			fieldData.FieldId = field.FieldID
+			ret = append(ret, fieldData)
+		case schemapb.DataType_Float16Vector:
+			fieldData := NewFloat16VectorArrayFieldData(field.Name, numRows, dim)
+			fieldData.FieldId = field.FieldID
+			ret = append(ret, fieldData)
+		case schemapb.DataType_BFloat16Vector:
+			fieldData := NewBFloat16VectorArrayFieldData(field.Name, numRows, dim)
+			fieldData.FieldId = field.FieldID
+			ret = append(ret, fieldData)
+		case schemapb.DataType_Int8Vector:
+			fieldData := NewInt8VectorArrayFieldData(field.Name, numRows, dim)
+			fieldData.FieldId = field.FieldID
+			ret = append(ret, fieldData)
+		case schemapb.DataType_BinaryVector:
+			fieldData := NewBinaryVectorArrayFieldData(field.Name, numRows, dim)
 			fieldData.FieldId = field.FieldID
 			ret = append(ret, fieldData)
 		default:
