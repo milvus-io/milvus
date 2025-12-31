@@ -1,18 +1,17 @@
 use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
-use log::warn;
 use serde_json as json;
 use std::fs;
 use std::io::BufReader;
-use std::{borrow::Cow, path::PathBuf};
+use std::{path::PathBuf, sync::Arc};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 
 lazy_static! {
-    static ref JIEBA: jieba_rs::Jieba = jieba_rs::Jieba::new();
+    static ref JIEBA: Arc<jieba_rs::Jieba> = Arc::new(jieba_rs::Jieba::new());
 }
 
 static EXTEND_DEFAULT_DICT: &str = include_str!("../data/jieba/dict.txt.big");
@@ -25,10 +24,10 @@ pub enum JiebaMode {
 }
 
 #[derive(Clone)]
-pub struct JiebaTokenizer<'a> {
+pub struct JiebaTokenizer {
     mode: JiebaMode,
     hmm: bool,
-    tokenizer: Cow<'a, jieba_rs::Jieba>,
+    tokenizer: Arc<jieba_rs::Jieba>,
 }
 
 pub struct JiebaTokenStream {
@@ -149,19 +148,19 @@ fn get_jieba_hmm(params: &json::Map<String, json::Value>) -> Result<bool> {
     }
 }
 
-impl<'a> JiebaTokenizer<'a> {
-    pub fn new() -> JiebaTokenizer<'a> {
+impl JiebaTokenizer {
+    pub fn new() -> JiebaTokenizer {
         JiebaTokenizer {
             mode: JiebaMode::Search,
             hmm: true,
-            tokenizer: Cow::Borrowed(&JIEBA),
+            tokenizer: JIEBA.clone(),
         }
     }
 
     pub fn from_json(
         params: &json::Map<String, json::Value>,
         helper: &mut FileResourcePathHelper,
-    ) -> Result<JiebaTokenizer<'a>> {
+    ) -> Result<JiebaTokenizer> {
         let (words, system_dict, user_dict) = get_jieba_dict(params, helper)?;
 
         let mut tokenizer =
@@ -203,7 +202,7 @@ impl<'a> JiebaTokenizer<'a> {
         Ok(JiebaTokenizer {
             mode: mode,
             hmm: hmm,
-            tokenizer: Cow::Owned(tokenizer),
+            tokenizer: Arc::new(tokenizer),
         })
     }
 
@@ -235,7 +234,7 @@ impl<'a> JiebaTokenizer<'a> {
     }
 }
 
-impl Tokenizer for JiebaTokenizer<'static> {
+impl Tokenizer for JiebaTokenizer {
     type TokenStream<'a> = JiebaTokenStream;
 
     fn token_stream(&mut self, text: &str) -> JiebaTokenStream {
