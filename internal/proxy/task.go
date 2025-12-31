@@ -433,6 +433,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
+	// Validate collection ttl
+	_, err = common.GetCollectionTTL(t.GetProperties(), -1)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("collection ttl property value not valid, parse error: %w", err)
+	}
+
 	// validate clustering key
 	if err := t.validateClusteringKey(ctx); err != nil {
 		return err
@@ -1280,6 +1286,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
 			}
+		}
+
+		_, err = common.GetCollectionTTL(t.GetProperties(), -1)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("collection ttl properties value not valid, parse error: %w", err)
 		}
 
 		enabled, _ := common.IsAllowInsertAutoID(t.Properties...)
