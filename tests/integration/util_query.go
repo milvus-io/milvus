@@ -342,9 +342,16 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType, isEmbe
 			values = append(values, bs)
 		}
 	case schemapb.DataType_BinaryVector:
-		placeholderType = commonpb.PlaceholderType_BinaryVector
+		if !isEmbeddingList {
+			placeholderType = commonpb.PlaceholderType_BinaryVector
+		} else {
+			placeholderType = commonpb.PlaceholderType_EmbListBinaryVector
+		}
 		for i := 0; i < nq; i++ {
 			total := dim / 8
+			if isEmbeddingList {
+				total = total * (rand.Intn(10) + 3)
+			}
 			ret := make([]byte, total)
 			_, err := rand.Read(ret)
 			if err != nil {
@@ -353,17 +360,33 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType, isEmbe
 			values = append(values, ret)
 		}
 	case schemapb.DataType_Float16Vector:
-		placeholderType = commonpb.PlaceholderType_Float16Vector
-		data := testutils.GenerateFloat16Vectors(nq, dim)
+		if !isEmbeddingList {
+			placeholderType = commonpb.PlaceholderType_Float16Vector
+		} else {
+			placeholderType = commonpb.PlaceholderType_EmbListFloat16Vector
+		}
+		vecCount := dim
+		if isEmbeddingList {
+			vecCount = vecCount * (rand.Intn(10) + 3)
+		}
+		data := testutils.GenerateFloat16Vectors(nq, vecCount)
 		for i := 0; i < nq; i++ {
-			rowBytes := dim * 2
+			rowBytes := vecCount * 2
 			values = append(values, data[rowBytes*i:rowBytes*(i+1)])
 		}
 	case schemapb.DataType_BFloat16Vector:
-		placeholderType = commonpb.PlaceholderType_BFloat16Vector
-		data := testutils.GenerateBFloat16Vectors(nq, dim)
+		if !isEmbeddingList {
+			placeholderType = commonpb.PlaceholderType_BFloat16Vector
+		} else {
+			placeholderType = commonpb.PlaceholderType_EmbListBFloat16Vector
+		}
+		vecCount := dim
+		if isEmbeddingList {
+			vecCount = vecCount * (rand.Intn(10) + 3)
+		}
+		data := testutils.GenerateBFloat16Vectors(nq, vecCount)
 		for i := 0; i < nq; i++ {
-			rowBytes := dim * 2
+			rowBytes := vecCount * 2
 			values = append(values, data[rowBytes*i:rowBytes*(i+1)])
 		}
 	case schemapb.DataType_SparseFloatVector:
@@ -373,10 +396,18 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType, isEmbe
 		sparseVecs := GenerateSparseFloatArray(nq)
 		values = append(values, sparseVecs.Contents...)
 	case schemapb.DataType_Int8Vector:
-		placeholderType = commonpb.PlaceholderType_Int8Vector
-		data := testutils.GenerateInt8Vectors(nq, dim)
+		if !isEmbeddingList {
+			placeholderType = commonpb.PlaceholderType_Int8Vector
+		} else {
+			placeholderType = commonpb.PlaceholderType_EmbListInt8Vector
+		}
+		vecCount := dim
+		if isEmbeddingList {
+			vecCount = vecCount * (rand.Intn(10) + 3)
+		}
+		data := testutils.GenerateInt8Vectors(nq, vecCount)
 		for i := 0; i < nq; i++ {
-			rowBytes := dim
+			rowBytes := vecCount
 			values = append(values, typeutil.Int8ArrayToBytes(data[rowBytes*i:rowBytes*(i+1)]))
 		}
 	default:
