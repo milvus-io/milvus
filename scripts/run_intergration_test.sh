@@ -52,15 +52,14 @@ TEST_CMD_WITH_ARGS=(
 function test_cmd() {
     mapfile -t PKGS < <(go list -tags dynamic,test ./...)
     for pkg in "${PKGS[@]}"; do
-        beginTime2=$(date +%s)
         echo -e "-----------------------------------\nRunning test cases at $pkg ..." 
         "${TEST_CMD_WITH_ARGS[@]}" "$pkg"
         if [ -f profile.out ]; then
             # Skip the per-profile header to keep a single global "mode:" line
-            sed '1{/^mode:/d}' profile.out >> "${FILE_COVERAGE_INFO}"
+            # Skip the packages that are not covered by the test
+            sed '1{/^mode:/d}' profile.out | grep -vE '(planparserv2/generated|mocks)' >> "${FILE_COVERAGE_INFO}" || [ $? -eq 1 ] 
             rm profile.out
         fi
-        endTime2=$(date +%s)
         echo -e "-----------------------------------\n"
     done
 }
@@ -69,7 +68,7 @@ beginTime=`date +%s`
 printf "=== Running integration test ===\n\n"
 
 for d in tests/integration; do
-    pushd $d 
+    pushd "$d"
     test_cmd 
     popd
 done
