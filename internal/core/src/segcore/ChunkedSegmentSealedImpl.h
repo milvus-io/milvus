@@ -137,29 +137,26 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                       info_proto) override;
 
     void
-    LoadJsonStats(FieldId field_id,
-                  index::CacheJsonKeyStatsPtr cache_slot) override {
-        json_stats_.wlock()->insert({field_id, std::move(cache_slot)});
-    }
-
-    PinWrapper<index::JsonKeyStats*>
-    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
-        auto r = json_stats_.rlock();
-        auto it = r->find(field_id);
-        if (it == r->end()) {
-            return PinWrapper<index::JsonKeyStats*>(nullptr);
-        }
-        auto ca = SemiInlineGet(it->second->PinCells(op_ctx, {0}));
-        auto* stats = ca->get_cell_of(0);
-        AssertInfo(stats != nullptr,
-                   "json stats cache is corrupted, field_id: {}",
-                   field_id.get());
-        return PinWrapper<index::JsonKeyStats*>(ca, stats);
+    RemoveJsonStats(FieldId field_id) override {
+        std::unique_lock lck(mutex_);
+        json_stats_.erase(field_id);
     }
 
     void
-    RemoveJsonStats(FieldId field_id) override {
-        json_stats_.wlock()->erase(field_id);
+    LoadJsonStats(FieldId field_id,
+                  std::shared_ptr<index::JsonKeyStats> stats) override {
+        std::unique_lock lck(mutex_);
+        json_stats_[field_id] = stats;
+    }
+
+    std::shared_ptr<index::JsonKeyStats>
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
+        std::shared_lock lck(mutex_);
+        auto iter = json_stats_.find(field_id);
+        if (iter == json_stats_.end()) {
+            return nullptr;
+        }
+        return iter->second;
     }
 
     PinWrapper<index::NgramInvertedIndex*>

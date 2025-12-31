@@ -33,6 +33,9 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "cachinglayer/Manager.h"
+#include "segcore/Utils.h"
 
 namespace milvus::index {
 
@@ -66,8 +69,9 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
     if (is_load) {
         auto prefix = disk_file_manager_->GetLocalJsonStatsPrefix();
         path_ = prefix;
-        bson_inverted_index_ = std::make_shared<BsonInvertedIndex>(
-            path_, field_id_, true, ctx, tantivy_index_version);
+        LOG_INFO("load json key stats from local path: {} for segment {}",
+                 path_,
+                 segment_id_);
     } else {
         auto prefix = disk_file_manager_->GetLocalTempJsonStatsPrefix();
         path_ = prefix;
@@ -96,17 +100,14 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
                  shared_key_index_path,
                  segment_id_);
         boost::filesystem::create_directories(shared_key_index_path);
-        bson_inverted_index_ =
-            std::make_shared<BsonInvertedIndex>(shared_key_index_path,
-                                                field_id_,
-                                                false,
-                                                ctx,
-                                                tantivy_index_version);
+        bson_inverted_index_ = std::make_shared<BsonInvertedIndex>(
+            shared_key_index_path, field_id_, ctx, tantivy_index_version);
     }
 }
 
 JsonKeyStats::~JsonKeyStats() {
     boost::filesystem::remove_all(path_);
+    LOG_INFO("remove json key stats with path: {}", path_);
 }
 
 void
@@ -1051,8 +1052,40 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files) {
 }
 
 void
+JsonKeyStats::LoadSharedKeyIndex(
+    const std::vector<std::string>& shared_key_index_files,
+    bool enable_mmap,
+    int64_t index_size) {
+    segcore::storagev1translator::BsonInvertedIndexLoadInfo load_info;
+    load_info.enable_mmap = enable_mmap;
+    load_info.segment_id = segment_id_;
+    load_info.field_id = field_id_;
+    load_info.index_files = shared_key_index_files;
+    load_info.index_size = index_size;
+    load_info.load_priority = load_priority_;
+
+    std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
+        translator = std::make_unique<
+            segcore::storagev1translator::BsonInvertedIndexTranslator>(
+            load_info, disk_file_manager_);
+
+    bson_index_cache_slot_ =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot(
+            std::move(translator));
+
+    LOG_INFO(
+        "loaded bson inverted index using translator for field:{} of "
+        "segment:{}, enable_mmap:{}",
+        field_id_,
+        segment_id_,
+        enable_mmap);
+}
+
+void
 JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
-    if (config.contains(ENABLE_MMAP)) {
+    auto enable_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(false);
+    if (enable_mmap) {
         mmap_filepath_ =
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
                 .GetChunkManager()
@@ -1111,10 +1144,14 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
     // load shredding data
     LoadShreddingData(shredding_data_files);
 
+    // get all index files size as shared key index size,
+    // no accurate way to get the shared key index size,
+    // so we use the total size of all index files as the shared key index size
+    auto index_size =
+        GetValueFromConfig<int64_t>(config, milvus::index::INDEX_SIZE)
+            .value_or(0);
     // load shared key index
-    bson_inverted_index_->LoadIndex(shared_key_index_files,
-                                    load_priority_,
-                                    config.contains(MMAP_FILE_PATH));
+    LoadSharedKeyIndex(shared_key_index_files, enable_mmap, index_size);
 }
 
 IndexStatsPtr

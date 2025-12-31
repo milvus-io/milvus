@@ -1009,9 +1009,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
         cached_index_chunk_res_ =
             (op_type == proto::plan::OpType::NotEqual)
                 ? std::make_shared<TargetBitmap>(active_count_, true)
@@ -1115,7 +1114,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                     pointer, milvus::index::JSONType::ARRAY);
                 if (!target_field.empty()) {
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
-                    index->template ExecutorForShreddingData<std::string_view>(
+                    index->ExecutorForShreddingData<std::string_view>(
                         op_ctx_,
                         target_field,
                         executor,
@@ -1273,7 +1272,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                         ms);
                 });
 
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
         }
 
         // for NotEqual: flip the result
