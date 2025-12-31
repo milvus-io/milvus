@@ -1921,6 +1921,7 @@ type (
 	ImmutableFlushAllMessageV2       = SpecializedImmutableMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
 	BroadcastFlushAllMessageV2       = SpecializedBroadcastMessage[*FlushAllMessageHeader, *FlushAllMessageBody]
 	BroadcastResultFlushAllMessageV2 = BroadcastResult[*FlushAllMessageHeader, *FlushAllMessageBody]
+	AckResultFlushAllMessageV2       = AckResult[*FlushAllMessageHeader, *FlushAllMessageBody]
 )
 
 // MessageTypeWithVersion for FlushAllMessageV2

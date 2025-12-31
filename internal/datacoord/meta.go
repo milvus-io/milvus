@@ -453,7 +453,6 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 	for _, entry := range mDimEntry {
 		result = append(result, entry)
 	}
-	log.Ctx(context.TODO()).Debug("GetSegmentsChanPart", zap.Int("length", len(result)))
 	return result
 }
 
