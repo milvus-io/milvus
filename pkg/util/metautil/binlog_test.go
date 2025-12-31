@@ -17,10 +17,12 @@
 package metautil
 
 import (
+	"path"
 	"reflect"
-	"sort"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -141,111 +143,55 @@ func TestParseInsertLogPath(t *testing.T) {
 }
 
 func TestExtractTextLogFilenames(t *testing.T) {
-	tests := []struct {
-		name  string
-		files []string
-		want  []string
-	}{
-		{
-			name: "test extract filenames from full paths",
-			files: []string{
-				"files/text_log/123/0/456/789/101112/131415/test_file.pos_0",
-				"files/text_log/123/0/456/789/101112/131415/test_file.pos_1",
-				"files/text_log/123/0/456/789/101112/131416/another_file.pos_0",
-			},
-			want: []string{
-				"test_file.pos_0",
-				"test_file.pos_1",
-				"another_file.pos_0",
-			},
-		},
-		{
-			name: "test extract filename without path",
-			files: []string{
-				"filename.txt",
-			},
-			want: []string{
-				"filename.txt",
-			},
-		},
-		{
-			name:  "test empty slice",
-			files: []string{},
-			want:  []string{},
-		},
-		{
-			name: "test single file",
-			files: []string{
-				"root/path/to/file.log",
-			},
-			want: []string{
-				"file.log",
+	textStatsLogs := map[int64]*datapb.TextIndexStats{
+		100: {
+			FieldID: 100,
+			Files: []string{
+				"/root/text_log/1/2/10/20/30/100/file1.txt",
+				"/root/text_log/1/2/10/20/30/100/file2.txt",
 			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractTextLogFilenames(tt.files)
-			// Sort both slices for comparison
-			sort.Strings(got)
-			sort.Strings(tt.want)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ExtractTextLogFilenames() = %v, want %v", got, tt.want)
-			}
-		})
+	ExtractTextLogFilenames(textStatsLogs)
+
+	wantFiles := []string{"file1.txt", "file2.txt"}
+	if !reflect.DeepEqual(textStatsLogs[100].Files, wantFiles) {
+		t.Errorf("ExtractTextLogFilenames() Files = %v, want %v", textStatsLogs[100].Files, wantFiles)
 	}
 }
 
 func TestBuildTextLogPaths(t *testing.T) {
-	tests := []struct {
-		name         string
-		rootPath     string
-		buildID      typeutil.UniqueID
-		version      typeutil.UniqueID
-		collectionID typeutil.UniqueID
-		partitionID  typeutil.UniqueID
-		segmentID    typeutil.UniqueID
-		fieldID      typeutil.UniqueID
-		filenames    []string
-		want         []string
-	}{
-		{
-			name:         "test build text log paths with multiple files",
-			rootPath:     "files",
-			buildID:      123,
-			version:      0,
-			collectionID: 456,
-			partitionID:  789,
-			segmentID:    101112,
-			fieldID:      131415,
-			filenames:    []string{"test_file.pos_0", "test_file.pos_1", "another_file.pos_0"},
-			want: []string{
-				"files/text_log/123/0/456/789/101112/131415/test_file.pos_0",
-				"files/text_log/123/0/456/789/101112/131415/test_file.pos_1",
-				"files/text_log/123/0/456/789/101112/131415/another_file.pos_0",
-			},
-		},
-		{
-			name:         "test build text log paths with empty filenames",
-			rootPath:     "files",
-			buildID:      123,
-			version:      0,
-			collectionID: 456,
-			partitionID:  789,
-			segmentID:    101112,
-			fieldID:      131415,
-			filenames:    []string{},
-			want:         []string{},
+	rootPath := "/root"
+	collectionID := typeutil.UniqueID(10)
+	partitionID := typeutil.UniqueID(20)
+	segmentID := typeutil.UniqueID(30)
+
+	// Test building paths from filenames (new version)
+	textStatsLogs := map[int64]*datapb.TextIndexStats{
+		100: {
+			FieldID: 100,
+			BuildID: 1,
+			Version: 2,
+			Files:   []string{"file1.txt", "file2.txt"},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := BuildTextLogPaths(tt.rootPath, tt.buildID, tt.version, tt.collectionID, tt.partitionID, tt.segmentID, tt.fieldID, tt.filenames)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("BuildTextLogPaths() = %v, want %v", got, tt.want)
-			}
-		})
+	BuildTextLogPaths(rootPath, collectionID, partitionID, segmentID, textStatsLogs)
+
+	wantFiles := []string{
+		path.Join(rootPath, common.TextIndexPath, "1", "2", "10", "20", "30", "100", "file1.txt"),
+		path.Join(rootPath, common.TextIndexPath, "1", "2", "10", "20", "30", "100", "file2.txt"),
+	}
+	if !reflect.DeepEqual(textStatsLogs[100].Files, wantFiles) {
+		t.Errorf("BuildTextLogPaths() Files = %v, want %v", textStatsLogs[100].Files, wantFiles)
+	}
+
+	// Test old version compatibility (already full paths)
+	fullPath := path.Join(rootPath, common.TextIndexPath, "1", "2", "10", "20", "30", "100", "file3.txt")
+	textStatsLogs[100].Files = []string{fullPath}
+	BuildTextLogPaths(rootPath, collectionID, partitionID, segmentID, textStatsLogs)
+	if textStatsLogs[100].Files[0] != fullPath {
+		t.Errorf("BuildTextLogPaths() should keep full path unchanged, got %v", textStatsLogs[100].Files[0])
 	}
 }
