@@ -1662,10 +1662,10 @@ func TestRBAC_Credential(t *testing.T) {
 			c      = NewCatalog(kvmock, nil)
 
 			validName              = "user1"
-			validUserRoleKeyPrefix = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, validName)
+			validUserRoleKeyPrefix = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, validName) + "/"
 
 			dropFailName          = "drop-fail"
-			dropUserRoleKeyPrefix = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, dropFailName)
+			dropUserRoleKeyPrefix = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, util.DefaultTenant, dropFailName) + "/"
 			getFailName           = "get-fail"
 		)
 
@@ -1674,8 +1674,8 @@ func TestRBAC_Credential(t *testing.T) {
 			mock.Anything,
 			[]string{
 				fmt.Sprintf("%s/%s", CredentialPrefix, validName),
-				validUserRoleKeyPrefix + "/role1",
-				validUserRoleKeyPrefix + "/role2",
+				validUserRoleKeyPrefix + "role1",
+				validUserRoleKeyPrefix + "role2",
 			},
 		).Return(nil)
 		kvmock.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("Mock invalid multi remove"))
@@ -1685,7 +1685,7 @@ func TestRBAC_Credential(t *testing.T) {
 		kvmock.EXPECT().Load(mock.Anything, fmt.Sprintf("%s/%s", CredentialPrefix, dropFailName)).Return(getUserInfoMetaString(dropFailName), nil)
 
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, validUserRoleKeyPrefix).Return(
-			[]string{validUserRoleKeyPrefix + "/role1", validUserRoleKeyPrefix + "/role2"},
+			[]string{validUserRoleKeyPrefix + "role1", validUserRoleKeyPrefix + "role2"},
 			[]string{"", ""},
 			nil,
 		)
@@ -2065,20 +2065,20 @@ func TestRBAC_Role(t *testing.T) {
 			c      = NewCatalog(kvmock, nil).(*Catalog)
 
 			invalidUser    = "invalid-user"
-			invalidUserKey = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, invalidUser)
+			invalidUserKey = funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, invalidUser) + "/"
 		)
 		// returns error for invalidUserKey
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidUserKey).Call.Return(
 			nil, nil, errors.New("Mock load with prefix wrong"))
 
-		// Returns keys for RoleMappingPrefix/tenant/user1
-		user1Key := fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, tenant, "user1")
+		// Returns keys for RoleMappingPrefix/tenant/user1/ (with trailing slash after the fix)
+		user1Key := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "user1") + "/"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, user1Key).Call.Return(
 			func(ctx context.Context, key string) []string {
 				return []string{
-					fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, tenant, "user1/role1"),
-					fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, tenant, "user1/role2"),
-					fmt.Sprintf("%s/%s/%s", RoleMappingPrefix, tenant, "user1/role3/error"),
+					user1Key + "role1",
+					user1Key + "role2",
+					user1Key + "role3/error",
 				}
 			}, nil, nil)
 
@@ -2526,23 +2526,23 @@ func TestRBAC_Grant(t *testing.T) {
 		kvmock.EXPECT().Load(mock.Anything, mock.Anything).Call.
 			Return("", errors.New("mock Load error"))
 
-		invalidRoleKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, invalidRole)
+		invalidRoleKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, invalidRole) + "/"
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, invalidRoleKey).Call.Return(nil, nil, errors.New("mock loadWithPrefix error"))
 		kvmock.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Call.Return(
 			func(ctx context.Context, key string) []string {
-				// Mock kv_catalog.go:ListGrant:L871
+				// Mock kv_catalog.go:ListGrant - key now ends with "/" after the fix
 				if strings.Contains(key, GranteeIDPrefix) {
 					return []string{
-						fmt.Sprintf("%s/%s", key, "PrivilegeLoad"),
-						fmt.Sprintf("%s/%s", key, "PrivilegeRelease"),
+						key + "PrivilegeLoad",
+						key + "PrivilegeRelease",
 					}
 				}
 
-				// Mock kv_catalog.go:ListGrant:L912
+				// Mock kv_catalog.go:ListGrant - key now ends with "/" after the fix
 				return []string{
-					fmt.Sprintf("%s/%s", key, "obj1/obj_name1"),
-					fmt.Sprintf("%s/%s", key, "obj2/foo.obj_name2"),
-					fmt.Sprintf("%s/%s", key, "obj3/*.obj_name3"),
+					key + "obj1/obj_name1",
+					key + "obj2/foo.obj_name2",
+					key + "obj3/*.obj_name3",
 				}
 			},
 			func(ctx context.Context, key string) []string {
@@ -2550,9 +2550,9 @@ func TestRBAC_Grant(t *testing.T) {
 					return []string{"user1", "user2"}
 				}
 				return []string{
-					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj1/obj_name1")),
-					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj2/foo.obj_name2")),
-					crypto.MD5(fmt.Sprintf("%s/%s", key, "obj3/*.obj_name3")),
+					crypto.MD5(key + "obj1/obj_name1"),
+					crypto.MD5(key + "obj2/foo.obj_name2"),
+					crypto.MD5(key + "obj3/*.obj_name3"),
 				}
 			},
 			nil,
@@ -3115,4 +3115,131 @@ func TestCatalog_listFunctionError(t *testing.T) {
 	mockSnapshot.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"test-key"}, []string{"invalid bytes"}, nil)
 	_, err = kc.listFunctions(context.TODO(), 1, 1)
 	assert.Error(t, err)
+}
+
+// TestRBACPrefixMatch tests the fix for RBAC prefix matching issues.
+// The fix ensures that when querying by prefix (e.g., user1), it won't
+// mistakenly match other entries with similar prefixes (e.g., user10).
+func TestRBACPrefixMatch(t *testing.T) {
+	ctx := context.Background()
+	tenant := util.DefaultTenant
+
+	t.Run("getRolesByUsername should not match similar prefix usernames", func(t *testing.T) {
+		// Scenario: user1 and user10 exist, querying user1 should not return user10's roles
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil).(*Catalog)
+
+		// The fix adds "/" to the prefix, so query for "user1" uses prefix "RoleMappingPrefix/tenant/user1/"
+		// This ensures user10's data won't be matched
+		user1Prefix := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "user1") + "/"
+
+		// Mock: return keys that match the prefix correctly
+		// Key format: prefix + roleName (where prefix already ends with "/")
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, user1Prefix).Return(
+			[]string{
+				user1Prefix + "roleA",
+				user1Prefix + "roleB",
+			},
+			nil,
+			nil,
+		)
+
+		roles, err := c.getRolesByUsername(ctx, tenant, "user1")
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(roles))
+		assert.Contains(t, roles, "roleA")
+		assert.Contains(t, roles, "roleB")
+	})
+
+	t.Run("ListGrant should not match similar prefix role names", func(t *testing.T) {
+		// Scenario: role1 and role10 exist, querying role1 should not return role10's grants
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil).(*Catalog)
+
+		// The fix adds "/" to the prefix for role query
+		role1Prefix := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "role1") + "/"
+
+		// Mock: return only role1's grants (the fix ensures role10 won't be matched)
+		// Key format: prefix + object + "/" + objectName (prefix already ends with "/")
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, role1Prefix).Return(
+			[]string{
+				role1Prefix + "Collection/col1",
+				role1Prefix + "Collection/col2",
+			},
+			[]string{
+				"grantee_id_1",
+				"grantee_id_2",
+			},
+			nil,
+		)
+
+		// Mock granteeID lookups with "/" suffix
+		granteeID1Prefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "grantee_id_1") + "/"
+		granteeID2Prefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "grantee_id_2") + "/"
+
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeID1Prefix).Return(
+			[]string{granteeID1Prefix + "Load"},
+			[]string{"admin"},
+			nil,
+		)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeID2Prefix).Return(
+			[]string{granteeID2Prefix + "Release"},
+			[]string{"admin"},
+			nil,
+		)
+
+		entity := &milvuspb.GrantEntity{
+			Role:   &milvuspb.RoleEntity{Name: "role1"},
+			DbName: util.DefaultDBName,
+		}
+		grants, err := c.ListGrant(ctx, tenant, entity)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(grants))
+		for _, g := range grants {
+			assert.Equal(t, "role1", g.GetRole().GetName())
+		}
+	})
+
+	t.Run("ListGrant granteeID prefix should not match similar prefixes", func(t *testing.T) {
+		// Scenario: granteeID "abc" and "abc123" exist, querying abc should not return abc123's privileges
+		kvmock := mocks.NewTxnKV(t)
+		c := NewCatalog(kvmock, nil).(*Catalog)
+
+		// Setup for a specific object query that triggers appendGrantEntity
+		granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant,
+			fmt.Sprintf("%s/%s/%s", "testRole", "Collection", "testCol"))
+
+		// Mock Load to return a granteeID
+		kvmock.EXPECT().Load(mock.Anything, granteeKey).Return("grantee_abc", nil)
+
+		// The fix adds "/" to granteeID prefix query
+		granteeIDPrefix := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, "grantee_abc") + "/"
+
+		// Mock: return only grantee_abc's privileges (not grantee_abc123's)
+		kvmock.EXPECT().LoadWithPrefix(mock.Anything, granteeIDPrefix).Return(
+			[]string{
+				granteeIDPrefix + "Insert",
+				granteeIDPrefix + "Delete",
+			},
+			[]string{"user1", "user2"},
+			nil,
+		)
+
+		entity := &milvuspb.GrantEntity{
+			Role:       &milvuspb.RoleEntity{Name: "testRole"},
+			Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+			ObjectName: "testCol",
+			DbName:     util.DefaultDBName,
+		}
+		grants, err := c.ListGrant(ctx, tenant, entity)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(grants))
+		// Verify privileges are correctly parsed
+		privileges := make([]string, 0, len(grants))
+		for _, g := range grants {
+			privileges = append(privileges, g.GetGrantor().GetPrivilege().GetName())
+		}
+		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Insert"))
+		assert.Contains(t, privileges, util.PrivilegeNameForAPI("Delete"))
+	})
 }
