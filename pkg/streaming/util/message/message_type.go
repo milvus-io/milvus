@@ -3,8 +3,9 @@ package message
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 type MessageType messagespb.MessageType
