@@ -325,7 +325,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 			return nil, merr.WrapErrParameterInvalid("BM25", req.GetReq().GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
 		}
 		// build idf for bm25 search
-		avgdl, err := sd.buildBM25IDF(req.GetReq())
+		avgdl, err := sd.buildBM25IDF(ctx, req.GetReq())
 		if err != nil {
 			return nil, err
 		}

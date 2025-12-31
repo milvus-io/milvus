@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -927,7 +928,10 @@ func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
 	}
 }
 
-func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest) (float64, error) {
+func (sd *shardDelegator) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest) (float64, error) {
+	ctx, span := otel.Tracer(typeutil.StreamingNodeRole).Start(ctx, fmt.Sprintf("build-bm25-idf-%s", sd.vchannelName))
+	defer span.End()
+
 	pb := &commonpb.PlaceholderGroup{}
 	proto.Unmarshal(req.GetPlaceholderGroup(), pb)
 
