@@ -2680,6 +2680,7 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	defaultTTL := paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second)
 	ttl, err := common.GetCollectionTTL(pairs, defaultTTL)
 	if err != nil {
+		log.Error("failed to get collection ttl, use default ttl", zap.Error(err))
 		ttl = defaultTTL
 	}
 	if ttl < 0 {
