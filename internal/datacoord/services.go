@@ -837,7 +837,6 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 	)
-	log.Info("get recovery info request received")
 	resp := &datapb.GetRecoveryInfoResponse{
 		Status: merr.Success(),
 	}
@@ -974,7 +973,6 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs),
 	)
-	log.Info("get recovery info request received")
 	resp := &datapb.GetRecoveryInfoResponseV2{
 		Status: merr.Success(),
 	}

@@ -697,7 +697,6 @@ func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collec
 		return coll.Clone(), nil
 	}
 	if !coll.Available() {
-		log.Warn("collection not available", zap.Int64("collectionID", collectionID), zap.Any("state", coll.State))
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return filterUnavailable(coll), nil

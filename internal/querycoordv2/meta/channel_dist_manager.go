@@ -347,16 +347,11 @@ func (m *ChannelDistManager) updateCollectionIndex() {
 func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica) *DmChannel {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
-	logger := log.With(zap.String("Scope", "ChannelDistManager"), zap.String("channelName", channelName),
-		zap.Int64("replicaID", replica.GetID()))
+	var setReason string
 	channels := m.collectionIndex[replica.GetCollectionID()]
 
 	var candidates *DmChannel
-	for chIdx, channel := range channels {
-		logger := logger.With(zap.Int("channelIdx", chIdx))
-		logger.Debug("process", zap.Int64("channelID", channel.Node), zap.Int64("channelVersion", channel.Version),
-			zap.String("channel name", channel.GetChannelName()),
-			zap.Bool("replicaContains", replica.Contains(channel.Node)))
+	for _, channel := range channels {
 		if channel.GetChannelName() == channelName && replica.Contains(channel.Node) {
 			if candidates == nil {
 				candidates = channel
@@ -370,26 +365,34 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 				case !candidatesServiceable && channelServiceable:
 					// Current candidate is not serviceable but new channel is
 					updateNeeded = true
-					logger.Debug("set serviceable delegator to candidate shard leader", zap.Int64("node", channel.Node),
-						zap.Int64("channel version", channel.Version))
+					setReason = "serviceable"
 				case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
 					// Same service status but higher version
 					updateNeeded = true
-					logger.Debug("set serviceable delegator with larger version to candidate shard leader", zap.Int64("node", channel.Node),
-						zap.Int64("channel version", channel.Version), zap.Int64("candidate version", candidates.Version))
+					setReason = "version_updated"
 				}
 				if updateNeeded {
 					candidates = channel
-				} else {
-					logger.Debug("not set any channel to candidates in this round")
 				}
 			}
 		}
 	}
-	if candidates != nil {
-		logger.Debug("final", zap.Any("candidates", candidates),
-			zap.Int64("candidates version", candidates.Version),
-			zap.Int64("candidates node", candidates.Node))
+	if log.Level().Enabled(zap.DebugLevel) {
+		logger := log.With(
+			zap.String("Scope", "ChannelDistManager"),
+			zap.String("channelName", channelName),
+			zap.Int64("replicaID", replica.GetID()),
+		).WithRateGroup("ChannelDistManager", 1.0, 60.0)
+		if candidates != nil {
+			logger.RatedDebug(1.0, "final",
+				zap.String("candidates", candidates.GetChannelName()),
+				zap.Int64("candidates version", candidates.Version),
+				zap.Int64("candidates node", candidates.Node),
+				zap.String("reason", setReason),
+			)
+		} else {
+			logger.RatedDebug(1.0, "no candidates found")
+		}
 	}
 	return candidates
 }

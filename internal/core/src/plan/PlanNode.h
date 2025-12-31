@@ -167,7 +167,7 @@ class FilterBitsNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("FilterBitsNode:\n\t[filter_expr:{}]",
+        return fmt::format("FilterBitsNode:[filter_expr:{}]",
                            filter_->ToString());
     }
 
@@ -207,7 +207,7 @@ class MvccNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("MvccNode:\n\t[source node:{}]", SourceToString());
+        return fmt::format("MvccNode:[source_node:{}]", SourceToString());
     }
 
  private:
@@ -240,7 +240,7 @@ class RandomSampleNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("RandomSampleNode:\n\t[factor:{}]", factor_);
+        return fmt::format("RandomSampleNode:[factor:{}]", factor_);
     }
 
     float
@@ -278,7 +278,7 @@ class VectorSearchNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("VectorSearchNode:\n\t[source node:{}]",
+        return fmt::format("VectorSearchNode:[source_node:{}]",
                            SourceToString());
     }
 
@@ -310,8 +310,7 @@ class GroupByNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("GroupByNode:\n\t[source node:{}]",
-                           SourceToString());
+        return fmt::format("GroupByNode:[source_node:{}]", SourceToString());
     }
 
  private:
@@ -343,7 +342,7 @@ class CountNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("CountNode:\n\t[source node:{}]", SourceToString());
+        return fmt::format("CountNode:[source_node:{}]", SourceToString());
     }
 
  private:
@@ -390,8 +389,7 @@ class RescoresNode : public PlanNode {
 
     std::string
     ToString() const override {
-        return fmt::format("RescoresNode:\n\t[source node:{}]",
-                           SourceToString());
+        return fmt::format("RescoresNode:[source_node:{}]", SourceToString());
     }
 
  private:

@@ -171,9 +171,6 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// 2. partition is fenced.
 			// 3. segment is not ready.
 			// we just redo it to refresh a new latest timetick.
-			if impl.shardManager.Logger().Level().Enabled(zap.DebugLevel) {
-				impl.shardManager.Logger().Debug("segment assign interceptor redo insert message", zap.Object("message", msg), zap.Error(err))
-			}
 			return nil, redo.ErrRedo
 		}
 		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
