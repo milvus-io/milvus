@@ -129,6 +129,24 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 		expr.UpperValue = castedUpperValue
 	}
 
+	// For JSON type, normalize numeric types to ensure both bounds have the same type.
+	// If one is float and the other is int, convert the int to float.
+	// This prevents type mismatch assertions in C++ expression execution.
+	if typeutil.IsJSONType(dataType) {
+		lowerVal := expr.GetLowerValue()
+		upperVal := expr.GetUpperValue()
+		lowerIsFloat := IsFloating(lowerVal)
+		upperIsFloat := IsFloating(upperVal)
+		lowerIsInt := IsInteger(lowerVal)
+		upperIsInt := IsInteger(upperVal)
+
+		if lowerIsFloat && upperIsInt {
+			expr.UpperValue = NewFloat(float64(upperVal.GetInt64Val()))
+		} else if lowerIsInt && upperIsFloat {
+			expr.LowerValue = NewFloat(float64(lowerVal.GetInt64Val()))
+		}
+	}
+
 	if !(expr.GetLowerInclusive() && expr.GetUpperInclusive()) {
 		if getGenericValue(GreaterEqual(lowerValue, upperValue)).GetBoolVal() {
 			return errors.New("invalid range: lowerbound is greater than upperbound")
