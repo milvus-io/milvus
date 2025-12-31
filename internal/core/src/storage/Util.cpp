@@ -810,15 +810,7 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
     boost::filesystem::path prefix = cm->GetRootPath();
     boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
     boost::filesystem::path path1 =
-        std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
-    return NormalizePath(prefix / path / path1);
-}
-
-std::string
-GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
-    boost::filesystem::path path1 = std::to_string(segment_id);
+        std::to_string(segment_id) + "_" + std::to_string(field_id) + "/";
     return NormalizePath(prefix / path / path1);
 }
 

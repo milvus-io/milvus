@@ -207,8 +207,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, " + KnowhereStatusString(stat));
 
-    local_chunk_manager->RemoveDir(
-        storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
+    local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
+        local_chunk_manager, segment_id, field_id));
 }
 
 template <typename T>
@@ -298,8 +298,8 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
-    local_chunk_manager->RemoveDir(
-        storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
+    local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
+        local_chunk_manager, segment_id, field_id));
 
     // TODO ::
     // SetDim(index_->Dim());
