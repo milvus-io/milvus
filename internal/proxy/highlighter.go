@@ -14,17 +14,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
 	PreTagsKey             = "pre_tags"
 	PostTagsKey            = "post_tags"
 	HighlightSearchTextKey = "highlight_search_text"
-	HighlightQueryKey      = "queries"
+	HighlightQueryKey      = "highlight_query"
 	FragmentOffsetKey      = "fragment_offset"
 	FragmentSizeKey        = "fragment_size"
 	FragmentNumKey         = "num_of_fragments"
@@ -36,6 +38,7 @@ const (
 
 type Highlighter interface {
 	AsSearchPipelineOperator(t *searchTask) (operator, error)
+	FieldIDs() []int64
 }
 
 // highlight task for one field
@@ -52,7 +55,8 @@ type highlightQuery struct {
 }
 
 type LexicalHighlighter struct {
-	tasks map[int64]*highlightTask // fieldID -> highlightTask
+	tasks       map[int64]*highlightTask // fieldID -> highlightTask
+	extraFields []int64                  // extra fields id for fetch analyzer name of multi analyzers
 	// option for all highlight task
 	// TODO: support set option for each task
 	preTags         [][]byte
@@ -64,7 +68,7 @@ type LexicalHighlighter struct {
 
 // add highlight task with search
 // must used before addTaskWithQuery
-func (h *LexicalHighlighter) addTaskWithSearchText(fieldID int64, fieldName string, analyzerName string, texts []string) error {
+func (h *LexicalHighlighter) addTaskWithSearchText(collInfo *schemaInfo, fieldID int64, fieldName string, analyzerName string, texts []string) error {
 	_, ok := h.tasks[fieldID]
 	if ok {
 		return merr.WrapErrParameterInvalidMsg("not support hybrid search with highlight now. fieldID: %d", fieldID)
@@ -83,11 +87,24 @@ func (h *LexicalHighlighter) addTaskWithSearchText(fieldID int64, fieldName stri
 
 	task.Texts = texts
 	task.SearchTextNum = int64(len(texts))
-	if analyzerName != "" {
+
+	// try get multi analyzer name field id
+	nameFieldID, err := collInfo.GetMultiAnalyzerNameFieldID(fieldID)
+	if err != nil {
+		return err
+	}
+	// set analyzer name and extra field id for multi analyzer
+	if nameFieldID > 0 {
+		// if multi analyzer name field id is found, set analyzer name to default
+		if analyzerName == "" {
+			analyzerName = "default"
+		}
+
 		task.AnalyzerNames = []string{}
 		for i := 0; i < len(texts); i++ {
 			task.AnalyzerNames = append(task.AnalyzerNames, analyzerName)
 		}
+		h.extraFields = append(h.extraFields, nameFieldID)
 	}
 	return nil
 }
@@ -114,23 +131,32 @@ func (h *LexicalHighlighter) addTaskWithQuery(fieldID int64, query *highlightQue
 	})
 }
 
-func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+func (h *LexicalHighlighter) initHighlightQueries(t *searchTask) error {
 	// add query to highlight tasks
 	for _, query := range h.queries {
 		fieldID, ok := t.schema.MapFieldID(query.fieldName)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
+			return merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
 		}
 		h.addTaskWithQuery(fieldID, query)
 	}
+	return nil
+}
+
+func (h *LexicalHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
 	return newLexicalHighlightOperator(t, lo.Values(h.tasks))
+}
+
+func (h *LexicalHighlighter) FieldIDs() []int64 {
+	return append(lo.Keys(h.tasks), h.extraFields...)
 }
 
 func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlighter, error) {
 	params := funcutil.KeyValuePair2Map(highlighter.GetParams())
 	h := &LexicalHighlighter{
-		tasks:   make(map[int64]*highlightTask),
-		options: &querypb.HighlightOptions{},
+		tasks:       make(map[int64]*highlightTask),
+		options:     &querypb.HighlightOptions{},
+		extraFields: make([]int64, 0),
 	}
 
 	// set pre_tags and post_tags
@@ -262,10 +288,10 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 }
 
 type lexicalHighlightOperator struct {
-	tasks        []*highlightTask
-	fieldSchemas []*schemapb.FieldSchema
-	lbPolicy     shardclient.LBPolicy
-	scheduler    *taskScheduler
+	tasks     []*highlightTask
+	schema    *schemaInfo
+	lbPolicy  shardclient.LBPolicy
+	scheduler *taskScheduler
 
 	collectionName string
 	collectionID   int64
@@ -277,7 +303,7 @@ func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operato
 		tasks:          tasks,
 		lbPolicy:       t.lb,
 		scheduler:      t.node.(*Proxy).sched,
-		fieldSchemas:   typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
+		schema:         t.schema,
 		collectionName: t.request.CollectionName,
 		collectionID:   t.CollectionID,
 		dbName:         t.request.DbName,
@@ -286,7 +312,12 @@ func newLexicalHighlightOperator(t *searchTask, tasks []*highlightTask) (operato
 
 func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
-	datas := result.Results.GetFieldsData()
+	datas := result.GetResults().GetFieldsData()
+	// skip highlight if result is empty
+	if len(datas) == 0 {
+		return []any{result}, nil
+	}
+
 	req := &querypb.GetHighlightRequest{
 		Topks: result.GetResults().GetTopks(),
 		Tasks: lo.Map(op.tasks, func(task *highlightTask, _ int) *querypb.HighlightTask { return task.HighlightTask }),
@@ -300,30 +331,23 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 		texts := textFieldDatas.GetScalars().GetStringData().GetData()
 		task.Texts = append(task.Texts, texts...)
 		task.CorpusTextNum = int64(len(texts))
-		field, ok := lo.Find(op.fieldSchemas, func(schema *schemapb.FieldSchema) bool {
-			return schema.GetFieldID() == task.GetFieldId()
-		})
-		if !ok {
-			return nil, errors.Errorf("get highlight failed, field not found in schema %s: %d", task.GetFieldName(), task.GetFieldId())
+
+		field, err := op.schema.schemaHelper.GetFieldFromID(task.GetFieldId())
+		if err != nil {
+			return nil, err
+		}
+
+		nameFieldID, err := op.schema.GetMultiAnalyzerNameFieldID(field.GetFieldID())
+		if err != nil {
+			return nil, err
 		}
 
 		// if use multi analyzer
 		// get analyzer field data
-		helper := typeutil.CreateFieldSchemaHelper(field)
-		if v, ok := helper.GetMultiAnalyzerParams(); ok {
-			params := map[string]any{}
-			err := json.Unmarshal([]byte(v), &params)
-			if err != nil {
-				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params-: %v", err)
-			}
-			analyzerField, ok := params["by_field"]
+		if nameFieldID > 0 {
+			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == nameFieldID })
 			if !ok {
-				return nil, errors.Errorf("get highlight failed, get invalid multi analyzer params, no by_field")
-			}
-
-			analyzerFieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldName == analyzerField.(string) })
-			if !ok {
-				return nil, errors.Errorf("get highlight failed, analyzer field not in output field")
+				return nil, errors.Errorf("get highlight failed, analyzer name field: %d for multi analyzer not in output field", nameFieldID)
 			}
 			task.AnalyzerNames = append(task.AnalyzerNames, analyzerFieldDatas.GetScalars().GetStringData().GetData()...)
 		}
@@ -391,4 +415,59 @@ func buildStringFragments(task *highlightTask, idx int, frags []*querypb.Highlig
 		result.Fragments = append(result.Fragments, fragString.String())
 	}
 	return result
+}
+
+type SemanticHighlighter struct {
+	highlight *highlight.SemanticHighlight
+}
+
+func newSemanticHighlighter(t *searchTask, extraInfo *models.ModelExtraInfo) (*SemanticHighlighter, error) {
+	conf := paramtable.Get().FunctionCfg.ZillizProviders.GetValue()
+	highlight, err := highlight.NewSemanticHighlight(t.schema.CollectionSchema, t.request.GetHighlighter().GetParams(), conf, extraInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &SemanticHighlighter{highlight: highlight}, nil
+}
+
+func (h *SemanticHighlighter) FieldIDs() []int64 {
+	return h.highlight.FieldIDs()
+}
+
+func (h *SemanticHighlighter) AsSearchPipelineOperator(t *searchTask) (operator, error) {
+	return &semanticHighlightOperator{highlight: h.highlight}, nil
+}
+
+type semanticHighlightOperator struct {
+	highlight *highlight.SemanticHighlight
+}
+
+func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+	result := inputs[0].(*milvuspb.SearchResults)
+	datas := result.Results.GetFieldsData()
+	if len(datas) == 0 {
+		return []any{result}, nil
+	}
+	highlightResults := []*commonpb.HighlightResult{}
+	for _, fieldID := range op.highlight.FieldIDs() {
+		fieldDatas, ok := lo.Find(datas, func(data *schemapb.FieldData) bool { return data.FieldId == fieldID })
+		if !ok {
+			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
+		}
+		texts := fieldDatas.GetScalars().GetStringData().GetData()
+		highlights, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts, nil)
+		if err != nil {
+			return nil, err
+		}
+		singeFieldHighlights := &commonpb.HighlightResult{
+			FieldName: fieldDatas.FieldName,
+			Datas:     make([]*commonpb.HighlightData, 0, len(highlights)),
+		}
+		for _, highlight := range highlights {
+			singeFieldHighlights.Datas = append(singeFieldHighlights.Datas, &commonpb.HighlightData{Fragments: highlight})
+		}
+		highlightResults = append(highlightResults, singeFieldHighlights)
+	}
+	result.Results.HighlightResults = highlightResults
+	return []any{result}, nil
 }

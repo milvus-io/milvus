@@ -326,6 +326,10 @@ GenerateRandomSparseFloatVector(size_t rows,
                                 size_t cols = kTestSparseDim,
                                 float density = kTestSparseVectorDensity,
                                 int seed = 42) {
+    if (rows == 0) {
+        return std::make_unique<
+            knowhere::sparse::SparseRow<milvus::SparseValueType>[]>(0);
+    }
     int32_t num_elements = static_cast<int32_t>(rows * cols * density);
 
     std::mt19937 rng(seed);
@@ -542,7 +546,8 @@ DataGen(SchemaPtr schema,
         int group_count = 1,
         bool random_pk = false,
         bool random_val = true,
-        bool random_valid = false) {
+        bool random_valid = false,
+        int null_percent = 50) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -635,41 +640,138 @@ DataGen(SchemaPtr schema,
         return data;
     };
 
+    auto generate_valid_data = [&](const FieldMeta& field_meta, int64_t N) {
+        struct Result {
+            int64_t valid_count;
+            FixedVector<bool> valid_data;
+        };
+
+        Result result;
+        result.valid_data.resize(N);
+        result.valid_count = 0;
+
+        bool is_nullable = field_meta.is_nullable();
+        if (is_nullable) {
+            for (int i = 0; i < N; ++i) {
+                if (random_valid) {
+                    int x = rand();
+                    result.valid_data[i] = x % 2 == 0 ? true : false;
+                } else {
+                    result.valid_data[i] = (i % 100) >= null_percent;
+                }
+                if (result.valid_data[i]) {
+                    result.valid_count++;
+                }
+            }
+        } else {
+            result.valid_count = N;
+        }
+
+        return result;
+    };
+
     for (auto field_id : schema->get_field_ids()) {
         auto field_meta = schema->operator[](field_id);
         switch (field_meta.get_data_type()) {
             case DataType::VECTOR_FLOAT: {
-                auto data = generate_float_vector(field_meta, N);
-                insert_cols(data, N, field_meta, random_valid);
+                auto [valid_count, valid_data] =
+                    generate_valid_data(field_meta, N);
+                bool is_nullable = field_meta.is_nullable();
+
+                auto data = generate_float_vector(field_meta, valid_count);
+                auto array = milvus::segcore::CreateVectorDataArrayFrom(
+                    data.data(),
+                    is_nullable ? valid_data.data() : nullptr,
+                    N,
+                    valid_count,
+                    field_meta);
+                insert_data->mutable_fields_data()->AddAllocated(
+                    array.release());
                 break;
             }
             case DataType::VECTOR_BINARY: {
-                auto data = generate_binary_vector(field_meta, N);
-                insert_cols(data, N, field_meta, random_valid);
+                auto [valid_count, valid_data] =
+                    generate_valid_data(field_meta, N);
+                bool is_nullable = field_meta.is_nullable();
+
+                auto data = generate_binary_vector(field_meta, valid_count);
+                auto array = milvus::segcore::CreateVectorDataArrayFrom(
+                    data.data(),
+                    is_nullable ? valid_data.data() : nullptr,
+                    N,
+                    valid_count,
+                    field_meta);
+                insert_data->mutable_fields_data()->AddAllocated(
+                    array.release());
                 break;
             }
             case DataType::VECTOR_FLOAT16: {
-                auto data = generate_float16_vector(field_meta, N);
-                insert_cols(data, N, field_meta, random_valid);
+                auto [valid_count, valid_data] =
+                    generate_valid_data(field_meta, N);
+                bool is_nullable = field_meta.is_nullable();
+
+                auto data = generate_float16_vector(field_meta, valid_count);
+                auto array = milvus::segcore::CreateVectorDataArrayFrom(
+                    data.data(),
+                    is_nullable ? valid_data.data() : nullptr,
+                    N,
+                    valid_count,
+                    field_meta);
+                insert_data->mutable_fields_data()->AddAllocated(
+                    array.release());
                 break;
             }
             case DataType::VECTOR_BFLOAT16: {
-                auto data = generate_bfloat16_vector(field_meta, N);
-                insert_cols(data, N, field_meta, random_valid);
+                auto [valid_count, valid_data] =
+                    generate_valid_data(field_meta, N);
+                bool is_nullable = field_meta.is_nullable();
+
+                auto data = generate_bfloat16_vector(field_meta, valid_count);
+                auto array = milvus::segcore::CreateVectorDataArrayFrom(
+                    data.data(),
+                    is_nullable ? valid_data.data() : nullptr,
+                    N,
+                    valid_count,
+                    field_meta);
+                insert_data->mutable_fields_data()->AddAllocated(
+                    array.release());
                 break;
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
-                auto res = GenerateRandomSparseFloatVector(
-                    N, kTestSparseDim, kTestSparseVectorDensity, seed);
-                auto array = milvus::segcore::CreateDataArrayFrom(
-                    res.get(), nullptr, N, field_meta);
+                auto [valid_count, valid_data] =
+                    generate_valid_data(field_meta, N);
+                bool is_nullable = field_meta.is_nullable();
+
+                auto res =
+                    GenerateRandomSparseFloatVector(valid_count,
+                                                    kTestSparseDim,
+                                                    kTestSparseVectorDensity,
+                                                    seed);
+
+                auto array = milvus::segcore::CreateVectorDataArrayFrom(
+                    res.get(),
+                    is_nullable ? valid_data.data() : nullptr,
+                    N,
+                    valid_count,
+                    field_meta);
                 insert_data->mutable_fields_data()->AddAllocated(
                     array.release());
                 break;
             }
             case DataType::VECTOR_INT8: {
-                auto data = generate_int8_vector(field_meta, N);
-                insert_cols(data, N, field_meta, random_valid);
+                auto [valid_count, valid_data] =
+                    generate_valid_data(field_meta, N);
+                bool is_nullable = field_meta.is_nullable();
+
+                auto data = generate_int8_vector(field_meta, valid_count);
+                auto array = milvus::segcore::CreateVectorDataArrayFrom(
+                    data.data(),
+                    is_nullable ? valid_data.data() : nullptr,
+                    N,
+                    valid_count,
+                    field_meta);
+                insert_data->mutable_fields_data()->AddAllocated(
+                    array.release());
                 break;
             }
 
@@ -1151,7 +1253,10 @@ CreatePlaceholderGroup(int64_t num_queries,
 
 template <class TraitType = milvus::FloatVector>
 auto
-CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
+CreatePlaceholderGroup(int64_t num_queries,
+                       int dim,
+                       int64_t seed = 42,
+                       bool element_level = false) {
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         assert(dim % 8 == 0);
     }
@@ -1162,6 +1267,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
     value->set_type(TraitType::placeholder_type);
+    value->set_element_level(element_level);
     // TODO caiyd: need update for Int8Vector
     std::normal_distribution<double> dis(0, 1);
     std::default_random_engine e(seed);

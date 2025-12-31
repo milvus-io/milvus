@@ -162,13 +162,37 @@ func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(uniquePartitionKey Parti
 }
 
 // FlushAndFenceSegmentAllocUntil flush all segment that contains the message which timetick is less than the incoming timetick.
-// It will be used for message like ManualFlush, SchemaChange operations that want the exists segment to be flushed.
+// It will be used for message like ManualFlush, SchemaChange, TruncateCollection operations that want the exists segment to be flushed.
 // !!! The returned segmentIDs may be is on-flushing state(which is on-flushing, a segmentFlushWorker is running, but not send into wal yet)
 // !!! The caller should promise the returned segmentIDs to be flushed.
 func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
 	logger := m.Logger().With(zap.Int64("collectionID", collectionID), zap.Uint64("timetick", timetick))
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	segmentIDs, err := m.flushAndFenceSegmentAllocUntil(collectionID, timetick)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("segments should be flushed when FlushAndFenceSegmentAllocUntil", zap.Int64s("segmentIDs", segmentIDs))
+	return segmentIDs, nil
+}
+
+func (m *shardManagerImpl) FlushAllAndFenceSegmentAllocUntil(timetick uint64) ([]int64, error) {
+	logger := m.Logger().With(zap.Uint64("timetick", timetick))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	segmentIDs := make([]int64, 0)
+	for collectionID := range m.collections {
+		ids, _ := m.flushAndFenceSegmentAllocUntil(collectionID, timetick)
+		segmentIDs = append(segmentIDs, ids...)
+	}
+	logger.Info("segments should be flushed when FlushAllAndFenceSegmentAllocUntil", zap.Int64s("segmentIDs", segmentIDs))
+	return segmentIDs, nil
+}
+
+func (m *shardManagerImpl) flushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error) {
+	logger := m.Logger().With(zap.Int64("collectionID", collectionID), zap.Uint64("timetick", timetick))
 
 	if err := m.checkIfCollectionExists(collectionID); err != nil {
 		logger.Warn("collection not found when FlushAndFenceSegmentAllocUntil", zap.Error(err))
@@ -189,7 +213,6 @@ func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, ti
 		newSealedSegments := pm.FlushAndFenceSegmentUntil(timetick)
 		segmentIDs = append(segmentIDs, newSealedSegments...)
 	}
-	logger.Info("segments should be flushed when FlushAndFenceSegmentAllocUntil", zap.Int64s("segmentIDs", segmentIDs))
 	return segmentIDs, nil
 }
 

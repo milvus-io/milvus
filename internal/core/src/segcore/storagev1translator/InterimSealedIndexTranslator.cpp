@@ -143,19 +143,53 @@ InterimSealedIndexTranslator::get_cells(
     }
 
     auto num_chunk = vec_data_->num_chunks();
+    const auto& offset_mapping = vec_data_->GetOffsetMapping();
+    bool nullable = offset_mapping.IsEnabled();
+    const auto& valid_count_per_chunk =
+        nullable ? vec_data_->GetValidCountPerChunk() : std::vector<int64_t>{};
+
+    int64_t total_valid_count =
+        nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
+
+    if (total_valid_count == 0) {
+        if (nullable) {
+            const auto& valid_data = vec_data_->GetValidData();
+            vec_index->BuildValidData(valid_data.data(), valid_data.size());
+        }
+        std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
+            result;
+        result.emplace_back(std::make_pair(0, std::move(vec_index)));
+        return result;
+    }
+
+    bool first_build = true;
     for (int i = 0; i < num_chunk; ++i) {
         auto pw = vec_data_->GetChunk(nullptr, i);
         auto chunk = pw.get();
-        auto dataset = knowhere::GenDataSet(
-            vec_data_->chunk_row_nums(i), dim_, chunk->Data());
+
+        int64_t actual_row_count =
+            nullable ? valid_count_per_chunk[i] : vec_data_->chunk_row_nums(i);
+
+        if (actual_row_count == 0) {
+            continue;
+        }
+
+        auto dataset =
+            knowhere::GenDataSet(actual_row_count, dim_, chunk->Data());
         dataset->SetIsOwner(false);
         dataset->SetIsSparse(is_sparse_);
 
-        if (i == 0) {
+        if (first_build) {
             vec_index->BuildWithDataset(dataset, build_config_);
+            first_build = false;
         } else {
             vec_index->AddWithDataset(dataset, build_config_);
         }
+    }
+
+    if (nullable) {
+        const auto& valid_data = vec_data_->GetValidData();
+        vec_index->BuildValidData(valid_data.data(), valid_data.size());
     }
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
         result;

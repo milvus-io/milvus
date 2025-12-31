@@ -35,6 +35,9 @@ type ConsumerOptions struct {
 
 	// Handler is the message handler used to handle message after recv from consumer.
 	MessageHandler message.Handler
+
+	// IgnorePauseConsumption is the flag to ignore the consumption pause of the consumer.
+	IgnorePauseConsumption bool
 }
 
 // CreateConsumer creates a new consumer client.
@@ -200,9 +203,10 @@ func (c *consumerImpl) createVChannelConsumer() error {
 	if err := c.grpcStreamClient.Send(&streamingpb.ConsumeRequest{
 		Request: &streamingpb.ConsumeRequest_CreateVchannelConsumer{
 			CreateVchannelConsumer: &streamingpb.CreateVChannelConsumerRequest{
-				Vchannel:       c.opts.VChannel,
-				DeliverPolicy:  c.opts.DeliverPolicy,
-				DeliverFilters: c.opts.DeliverFilters,
+				Vchannel:               c.opts.VChannel,
+				DeliverPolicy:          c.opts.DeliverPolicy,
+				DeliverFilters:         c.opts.DeliverFilters,
+				IgnorePauseConsumption: c.opts.IgnorePauseConsumption,
 			},
 		},
 	}); err != nil {

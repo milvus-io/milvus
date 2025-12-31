@@ -23,7 +23,8 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "index/json_stats/bson_inverted.h"
+#include "cachinglayer/CacheSlot.h"
 
 namespace milvus {
 namespace exec {
@@ -90,7 +91,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::ExistsExpr> expr_;
-    PinWrapper<index::JsonKeyStats*> pinned_json_stats_{nullptr};
+    PinWrapper<index::BsonInvertedIndex*> bson_index_{nullptr};
 };
 }  //namespace exec
 }  // namespace milvus

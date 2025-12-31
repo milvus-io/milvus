@@ -21,22 +21,23 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -174,102 +176,82 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 	}, nil
 }
 
-func resolveCollectionsToFlush(ctx context.Context, s *Server, req *datapb.FlushAllRequest) ([]int64, error) {
-	collectionsToFlush := make([]int64, 0)
-	if len(req.GetFlushTargets()) > 0 {
-		// Use flush_targets from request
-		for _, target := range req.GetFlushTargets() {
-			collectionsToFlush = append(collectionsToFlush, target.GetCollectionIds()...)
-		}
-	} else if req.GetDbName() != "" {
-		// Backward compatibility: use deprecated db_name field
-		showColRsp, err := s.broker.ShowCollectionIDs(ctx, req.GetDbName())
-		if err != nil {
-			log.Warn("failed to ShowCollectionIDs", zap.String("db", req.GetDbName()), zap.Error(err))
-			return nil, err
-		}
-		for _, dbCollection := range showColRsp.GetDbCollections() {
-			collectionsToFlush = append(collectionsToFlush, dbCollection.GetCollectionIDs()...)
-		}
-	} else {
-		// Flush all databases
-		dbsResp, err := s.broker.ListDatabases(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, dbName := range dbsResp.GetDbNames() {
-			showColRsp, err := s.broker.ShowCollectionIDs(ctx, dbName)
-			if err != nil {
-				log.Warn("failed to ShowCollectionIDs", zap.String("db", dbName), zap.Error(err))
-				return nil, err
-			}
-			for _, dbCollection := range showColRsp.GetDbCollections() {
-				collectionsToFlush = append(collectionsToFlush, dbCollection.GetCollectionIDs()...)
-			}
-		}
-	}
-
-	return collectionsToFlush, nil
-}
-
 func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("receive flushAll request")
-	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
-	defer sp.End()
+	log.Ctx(ctx).Info("receive FlushAll request")
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		log.Info("server is not healthy", zap.Error(err), zap.Any("stateCode", s.GetStateCode()))
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
 
-	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
-	ts, err := s.allocator.AllocTimestamp(ctx)
-	if err != nil {
-		log.Warn("unable to alloc timestamp", zap.Error(err))
-		return nil, err
-	}
-
-	// resolve collections to flush
-	collectionsToFlush, err := resolveCollectionsToFlush(ctx, s, req)
+	// Create a new broadcaster with exclusive cluster resource key.
+	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
+	defer broadcaster.Close()
 
-	var mu sync.Mutex
-	flushInfos := make([]*datapb.FlushResult, 0)
-	wg := errgroup.Group{}
-	// limit goroutine number to 100
-	wg.SetLimit(100)
-	for _, cid := range collectionsToFlush {
-		wg.Go(func() error {
-			flushResult, err := s.flushCollection(ctx, cid, ts, nil)
-			if err != nil {
-				log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
-				return err
-			}
-			mu.Lock()
-			flushInfos = append(flushInfos, flushResult)
-			mu.Unlock()
-			return nil
-		})
-	}
-
-	err = wg.Wait()
+	// Get broadcast pchannels
+	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
 		return &datapb.FlushAllResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
+	latestAssignment, err := balancer.GetLatestChannelAssignment()
+	if err != nil {
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	controlChannel := streaming.WAL().ControlChannel()
+	pchannels := lo.MapToSlice(latestAssignment.PChannelView.Channels, func(_ channel.ChannelID, channel *channel.PChannelMeta) string {
+		return channel.Name()
+	})
+	broadcastPChannels := lo.Map(pchannels, func(pchannel string, _ int) string {
+		if funcutil.IsOnPhysicalChannel(controlChannel, pchannel) {
+			// return control channel if the control channel is on the pchannel.
+			return controlChannel
+		}
+		return pchannel
+	})
 
+	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
+		WithHeader(&message.FlushAllMessageHeader{}).
+		WithBody(&message.FlushAllMessageBody{}).
+		WithBroadcast(broadcastPChannels).
+		MustBuildBroadcast()
+	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
+	if err != nil {
+		log.Ctx(ctx).Warn("broadcast FlushAllMessage fail", zap.Error(err))
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	flushAllMsgs := make(map[string]*commonpb.ImmutableMessage, len(res.AppendResults))
+	msgs := broadcastFlushAllMsg.SplitIntoMutableMessage()
+	for _, msg := range msgs {
+		appendResult := res.GetAppendResult(msg.VChannel())
+		// if is control channel, convert it to physical channel.
+		channel := funcutil.ToPhysicalChannel(msg.VChannel())
+		flushAllMsgs[channel] = msg.WithTimeTick(appendResult.TimeTick).
+			WithLastConfirmed(appendResult.LastConfirmedMessageID).
+			IntoImmutableMessage(appendResult.MessageID).
+			IntoImmutableMessageProto()
+	}
+	log.Ctx(ctx).Info("FlushAll successfully", zap.Strings("broadcastedPChannels", broadcastPChannels), log.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
 		Status:       merr.Success(),
-		FlushTs:      ts,
-		FlushResults: flushInfos,
+		FlushAllMsgs: flushAllMsgs,
+		ClusterInfo: &milvuspb.ClusterInfo{
+			ClusterId: Params.CommonCfg.ClusterID.GetValue(),
+			Cchannel:  controlChannel,
+			Pchannels: pchannels,
+		},
 	}, nil
 }
 
@@ -1064,6 +1046,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			NumOfRows:     rowCount,
 			Level:         segment.GetLevel(),
 			IsSorted:      segment.GetIsSorted(),
+			ManifestPath:  segment.GetManifestPath(),
 		})
 	}
 
@@ -1278,7 +1261,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
-	log.Info("received manual compaction")
+	log.Info("received manual compaction", zap.Any("request", req))
 
 	resp := &milvuspb.ManualCompactionResponse{
 		Status: merr.Success(),
@@ -1297,8 +1280,8 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	if req.GetMajorCompaction() || req.GetL0Compaction() {
-		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction())
+	if req.GetMajorCompaction() || req.GetL0Compaction() || req.GetTargetSize() != 0 {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction(), req.GetL0Compaction(), req.GetTargetSize())
 	} else {
 		id, err = s.compactionTrigger.TriggerCompaction(ctx, NewCompactionSignal().
 			WithIsForce(true).
@@ -1324,7 +1307,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	}
 
 	log.Info("success to trigger manual compaction", zap.Bool("isL0Compaction", req.GetL0Compaction()),
-		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
+		zap.Bool("isMajorCompaction", req.GetMajorCompaction()), zap.Int64("targetSize", req.GetTargetSize()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
@@ -1526,7 +1509,7 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 
 // GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).WithRateGroup("dc.GetFlushAllState", 1, 60)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetFlushAllStateResponse{
 			Status: merr.Status(err),
@@ -1534,9 +1517,12 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 	}
 
 	resp := &milvuspb.GetFlushAllStateResponse{
-		Status:      merr.Success(),
-		FlushStates: make([]*milvuspb.FlushAllState, 0),
+		Status: merr.Success(),
 	}
+
+	// TODO: Introduce pchannel level flush checkpoint to
+	// check if the flush is complete.
+	// Rather than validate every vchannel checkpoint.
 
 	dbsRsp, err := s.broker.ListDatabases(ctx)
 	if err != nil {
@@ -1545,53 +1531,10 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 		return resp, nil
 	}
 
-	// Determine which databases to check
-	var targetDbs []string
-	if len(req.GetFlushTargets()) > 0 {
-		// Use flush_targets from request
-		for _, target := range req.GetFlushTargets() {
-			if target.GetDbName() != "" {
-				if !lo.Contains(dbsRsp.DbNames, target.GetDbName()) {
-					resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(target.GetDbName()))
-					return resp, nil
-				}
-				targetDbs = append(targetDbs, target.GetDbName())
-			}
-		}
-	} else if req.GetDbName() != "" {
-		if !lo.Contains(dbsRsp.DbNames, req.GetDbName()) {
-			resp.Status = merr.Status(merr.WrapErrDatabaseNotFound(req.GetDbName()))
-			return resp, nil
-		}
-		// Backward compatibility: use deprecated db_name field
-		targetDbs = []string{req.GetDbName()}
-	} else {
-		// Check all databases
-		targetDbs = dbsRsp.DbNames
-	}
-
-	// Remove duplicates
-	targetDbs = lo.Uniq(targetDbs)
+	targetDbs := lo.Uniq(dbsRsp.DbNames)
 	allFlushed := true
-
+OUTER:
 	for _, dbName := range targetDbs {
-		flushState := &milvuspb.FlushAllState{
-			DbName:                dbName,
-			CollectionFlushStates: make(map[string]bool),
-		}
-
-		// Get collections to check for this database
-		var targetCollections []string
-		if len(req.GetFlushTargets()) > 0 {
-			// Check if specific collections are requested for this db
-			for _, target := range req.GetFlushTargets() {
-				if target.GetDbName() == dbName && len(target.GetCollectionNames()) > 0 {
-					targetCollections = target.GetCollectionNames()
-					break
-				}
-			}
-		}
-
 		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
 		if err != nil {
 			log.Warn("failed to ShowCollections", zap.String("db", dbName), zap.Error(err))
@@ -1599,42 +1542,76 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 			return resp, nil
 		}
 
-		for idx, collectionID := range showColRsp.GetCollectionIds() {
-			collectionName := ""
-			if idx < len(showColRsp.GetCollectionNames()) {
-				collectionName = showColRsp.GetCollectionNames()[idx]
-			}
-
-			// If specific collections are requested, skip others
-			if len(targetCollections) > 0 && !lo.Contains(targetCollections, collectionName) {
-				continue
-			}
-
+		for _, collectionID := range showColRsp.GetCollectionIds() {
 			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 			if err != nil {
-				log.Warn("failed to DescribeCollectionInternal",
-					zap.Int64("collectionID", collectionID), zap.Error(err))
+				log.Warn("failed to DescribeCollectionInternal", zap.Int64("collectionID", collectionID), zap.Error(err))
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
-
-			collectionFlushed := true
 			for _, channel := range describeColRsp.GetVirtualChannelNames() {
-				channelCP := s.meta.GetChannelCheckpoint(channel)
-				if channelCP == nil || channelCP.GetTimestamp() < req.GetFlushAllTs() {
-					collectionFlushed = false
-					allFlushed = false
-					break
+				if len(req.GetFlushAllTss()) > 0 {
+					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(log, channel, req.GetFlushAllTss())
+					if err != nil {
+						resp.Status = merr.Status(err)
+						return resp, nil
+					}
+					if !ok {
+						allFlushed = false
+						break OUTER
+					}
+				} else if req.GetFlushAllTs() != 0 {
+					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
+					if !s.verifyFlushAllStateByLegacyFlushAllTs(log, channel, req.GetFlushAllTs()) {
+						allFlushed = false
+						break OUTER
+					}
+				} else {
+					resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("FlushAllTss or FlushAllTs is required"))
+					return resp, nil
 				}
 			}
-			flushState.CollectionFlushStates[collectionName] = collectionFlushed
 		}
+	}
 
-		resp.FlushStates = append(resp.FlushStates, flushState)
+	if allFlushed {
+		log.Info("GetFlushAllState all flushed", zap.Any("flushAllTss", req.GetFlushAllTss()), zap.Uint64("FlushAllTs", req.GetFlushAllTs()))
 	}
 
 	resp.Flushed = allFlushed
 	return resp, nil
+}
+
+func (s *Server) verifyFlushAllStateByChannelFlushAllTs(logger *log.MLogger, channel string, flushAllTss map[string]uint64) (bool, error) {
+	channelCP := s.meta.GetChannelCheckpoint(channel)
+	pchannel := funcutil.ToPhysicalChannel(channel)
+	flushAllTs, ok := flushAllTss[pchannel]
+	if !ok || flushAllTs == 0 {
+		logger.Warn("FlushAllTs not found for pchannel", zap.String("pchannel", pchannel), zap.Uint64("flushAllTs", flushAllTs))
+		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
+	}
+	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+		logger.RatedInfo(10, "channel unflushed",
+			zap.String("vchannel", channel),
+			zap.Uint64("flushAllTs", flushAllTs),
+			zap.Uint64("channelCP", channelCP.GetTimestamp()),
+		)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(logger *log.MLogger, channel string, flushAllTs uint64) bool {
+	channelCP := s.meta.GetChannelCheckpoint(channel)
+	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+		logger.RatedInfo(10, "channel unflushed",
+			zap.String("vchannel", channel),
+			zap.Uint64("flushAllTs", flushAllTs),
+			zap.Uint64("channelCP", channelCP.GetTimestamp()),
+		)
+		return false
+	}
+	return true
 }
 
 // Deprecated
@@ -1805,13 +1782,25 @@ func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest
 			status.Reason = fmt.Sprintf("pause duration not valid, %s", err.Error())
 			return status, nil
 		}
-		if err := s.garbageCollector.Pause(ctx, time.Duration(pauseSeconds)*time.Second); err != nil {
+
+		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
+
+		if err := s.garbageCollector.Pause(ctx, collectionID, ticket, time.Duration(pauseSeconds)*time.Second); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil
 		}
 	case datapb.GcCommand_Resume:
-		if err := s.garbageCollector.Resume(ctx); err != nil {
+		collectionID, err, _ := common.GetInt64Value(request.GetParams(), "collection_id")
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		ticket, _ := common.GetStringValue(request.GetParams(), "ticket")
+		if err := s.garbageCollector.Resume(ctx, collectionID, ticket); err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
 			return status, nil
@@ -2035,9 +2024,9 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		return merr.Status(err), nil
 	}
 
-	// Convert to model.FileResource
-	resource := &model.FileResource{
-		ID:   id,
+	// Convert to internalpb.FileResourceInfo
+	resource := &internalpb.FileResourceInfo{
+		Id:   id,
 		Name: req.GetName(),
 		Path: req.GetPath(),
 	}
@@ -2047,6 +2036,10 @@ func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResou
 		log.Ctx(ctx).Warn("AddFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	s.fileManager.Notify()
+
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("AddFileResource success")
 	return merr.Success(), nil
@@ -2066,6 +2059,10 @@ func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFil
 		log.Ctx(ctx).Warn("RemoveFileResource fail", zap.Error(err))
 		return merr.Status(err), nil
 	}
+	s.fileManager.Notify()
+
+	resources, version := s.meta.ListFileResource(ctx)
+	s.mixCoord.SyncQcFileResource(ctx, resources, version)
 
 	log.Ctx(ctx).Info("RemoveFileResource success")
 	return merr.Success(), nil
@@ -2081,9 +2078,9 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 
 	log.Ctx(ctx).Info("receive ListFileResources request")
 
-	resources := s.meta.ListFileResource(ctx)
+	resources, _ := s.meta.ListFileResource(ctx)
 
-	// Convert model.FileResource to milvuspb.FileResourceInfo
+	// Convert internal.FileResourceInfo to milvuspb.FileResourceInfo
 	fileResources := make([]*milvuspb.FileResourceInfo, 0, len(resources))
 	for _, resource := range resources {
 		fileResources = append(fileResources, &milvuspb.FileResourceInfo{
@@ -2142,4 +2139,37 @@ func (s *Server) CreateExternalCollection(ctx context.Context, req *msgpb.Create
 	return &datapb.CreateExternalCollectionResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+// first sync file resource data to qc when all coord init finished
+func (s *Server) SyncFileResources(ctx context.Context) error {
+	resources, version := s.meta.ListFileResource(ctx)
+	return s.mixCoord.SyncQcFileResource(ctx, resources, version)
+}
+
+// DropSegmentsByTime drop segments that were updated before the flush timestamp for TruncateCollection
+func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+
+	log.Ctx(ctx).Info("receive DropSegmentsByTime request",
+		zap.Int64("collectionID", collectionID))
+
+	for channelName, flushTs := range flushTsList {
+		// wait until the checkpoint reaches or exceeds the flush timestamp
+		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
+		if err != nil {
+			log.Ctx(ctx).Warn("WatchChannelCheckpoint failed", zap.Error(err))
+			return err
+		}
+		// drop segments that were updated before the flush timestamp
+		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
+		if err != nil {
+			log.Warn("TruncateChannelByTime failed", zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
 }

@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -98,7 +99,6 @@ type collectionInfo struct {
 	createdUtcTimestamp   uint64
 	consistencyLevel      commonpb.ConsistencyLevel
 	partitionKeyIsolation bool
-	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
 	numPartitions         int64
@@ -119,10 +119,11 @@ type databaseInfo struct {
 // with extra fields mapping and methods
 type schemaInfo struct {
 	*schemapb.CollectionSchema
-	fieldMap             *typeutil.ConcurrentMap[string, int64] // field name to id mapping
-	hasPartitionKeyField bool
-	pkField              *schemapb.FieldSchema
-	schemaHelper         *typeutil.SchemaHelper
+	fieldMap              *typeutil.ConcurrentMap[string, int64] // field name to id mapping
+	hasPartitionKeyField  bool
+	pkField               *schemapb.FieldSchema
+	multiAnalyzerFieldMap *typeutil.ConcurrentMap[int64, int64] // multi analzyer field id to dependent field id mapping
+	schemaHelper          *typeutil.SchemaHelper
 }
 
 func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
@@ -148,11 +149,12 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 	// partial load shall be processed as hint after tiered storage feature
 	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 	return &schemaInfo{
-		CollectionSchema:     schema,
-		fieldMap:             fieldMap,
-		hasPartitionKeyField: hasPartitionkey,
-		pkField:              pkField,
-		schemaHelper:         schemaHelper,
+		CollectionSchema:      schema,
+		fieldMap:              fieldMap,
+		hasPartitionKeyField:  hasPartitionkey,
+		pkField:               pkField,
+		multiAnalyzerFieldMap: typeutil.NewConcurrentMap[int64, int64](),
+		schemaHelper:          schemaHelper,
 	}
 }
 
@@ -169,6 +171,48 @@ func (s *schemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
 		return nil, merr.WrapErrServiceInternal("pk field not found")
 	}
 	return s.pkField, nil
+}
+
+func (s *schemaInfo) GetMultiAnalyzerNameFieldID(id int64) (int64, error) {
+	if id, ok := s.multiAnalyzerFieldMap.Get(id); ok {
+		return id, nil
+	}
+
+	field, err := s.schemaHelper.GetFieldFromID(id)
+	if err != nil {
+		return 0, err
+	}
+
+	helper := typeutil.CreateFieldSchemaHelper(field)
+
+	params, ok := helper.GetMultiAnalyzerParams()
+	if !ok {
+		s.multiAnalyzerFieldMap.Insert(id, 0)
+		return 0, nil
+	}
+
+	var raw map[string]json.RawMessage
+	err = json.Unmarshal([]byte(params), &raw)
+	if err != nil {
+		return 0, err
+	}
+
+	jsonFieldID, ok := raw["by_field"]
+	if !ok {
+		return 0, merr.WrapErrServiceInternal("multi_analyzer_params missing required 'by_field' key")
+	}
+	var analyzerFieldName string
+	err = json.Unmarshal(jsonFieldID, &analyzerFieldName)
+	if err != nil {
+		return 0, err
+	}
+	analyzerField, err := s.schemaHelper.GetFieldFromName(analyzerFieldName)
+	if err != nil {
+		return 0, err
+	}
+
+	s.multiAnalyzerFieldMap.Insert(id, analyzerField.GetFieldID())
+	return analyzerField.GetFieldID(), nil
 }
 
 // GetLoadFieldIDs returns field id for load field list.
@@ -404,7 +448,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		collectionName = collection.Schema.GetName()
 	}
 	if database == "" {
-		log.Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
+		log.Ctx(ctx).Warn("database is empty, use default database name", zap.String("collectionName", collectionName), zap.Stack("stack"))
 	}
 	isolation, err := common.IsPartitionKeyIsolationKvEnabled(collection.Properties...)
 	if err != nil {
@@ -418,7 +462,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	curVersion := m.collectionCacheVersion[collection.GetCollectionID()]
 	// Compatibility logic: if the rootcoord version is lower(requestTime = 0), update the cache directly.
 	if collection.GetRequestTime() < curVersion && collection.GetRequestTime() != 0 {
-		log.Debug("describe collection timestamp less than version, don't update cache",
+		log.Ctx(ctx).Debug("describe collection timestamp less than version, don't update cache",
 			zap.String("collectionName", collectionName),
 			zap.Uint64("version", collection.GetRequestTime()), zap.Uint64("cache version", curVersion))
 		return &collectionInfo{
@@ -444,7 +488,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		m.collInfo[database] = make(map[string]*collectionInfo)
 	}
 
-	replicateID, _ := common.GetReplicateID(collection.Properties)
 	m.collInfo[database][collectionName] = &collectionInfo{
 		collID:                collection.CollectionID,
 		schema:                schemaInfo,
@@ -453,7 +496,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		createdUtcTimestamp:   collection.CreatedUtcTimestamp,
 		consistencyLevel:      collection.ConsistencyLevel,
 		partitionKeyIsolation: isolation,
-		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
 		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
 		vChannels:             collection.VirtualChannelNames,
@@ -560,31 +602,6 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 			metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 			return collInfo, nil
 		}
-		collInfo, err := m.UpdateByID(ctx, database, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo, nil
-	}
-
-	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-	return collInfo, nil
-}
-
-// GetCollectionInfo returns the collection information related to provided collection name
-// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
-// TODO: may cause data race of this implementation, should be refactored in future.
-func (m *MetaCache) getFullCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionInfo, error) {
-	collInfo, ok := m.getCollection(database, collectionName, collectionID)
-
-	method := "GetCollectionInfo"
-	// if collInfo.collID != collectionID, means that the cache is not trustable
-	// try to get collection according to collectionID
-	if !ok || collInfo.collID != collectionID {
-		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
-
 		collInfo, err := m.UpdateByID(ctx, database, collectionID)
 		if err != nil {
 			return nil, err

@@ -631,7 +631,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Schema:                 schema,
 					PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 101, End: 200},
 					PreAllocatedLogIDs:     &datapb.IDRange{Begin: 100, End: 200},
-					MaxSize:                1342177280,
+					MaxSize:                1073741824,
 					SlotUsage:              paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64(),
 					JsonParams:             params,
 				},
@@ -642,17 +642,15 @@ func Test_compactionTrigger_force(t *testing.T) {
 		tt.fields.inspector.(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				manualSignals:                make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       make(chan *compactionSignal, 100),
+				manualSignals: make(chan *compactionSignal, 100),
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 			tr.closeWaiter.Add(1)
 			go func() {
@@ -687,17 +685,15 @@ func Test_compactionTrigger_force(t *testing.T) {
 				tt.fields.meta.segments.secondaryIndexes.coll2Segments[segment.GetCollectionID()][segment.GetID()] = segment
 			}
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				manualSignals:                make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       make(chan *compactionSignal, 100),
+				manualSignals: make(chan *compactionSignal, 100),
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 			tr.closeWaiter.Add(1)
 			go func() {
@@ -726,17 +722,15 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segment.CollectionID = 1111
 			}
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				manualSignals:                make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       make(chan *compactionSignal, 100),
+				manualSignals: make(chan *compactionSignal, 100),
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 			tr.closeWaiter.Add(1)
 			go func() {
@@ -976,17 +970,15 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				manualSignals:                make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       make(chan *compactionSignal, 100),
+				manualSignals: make(chan *compactionSignal, 100),
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 			tr.closeWaiter.Add(1)
 			go func() {
@@ -1138,16 +1130,14 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       make(chan *compactionSignal, 100),
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 			tr.start()
 			defer tr.stop()
@@ -1476,17 +1466,15 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 				MsgID:     []byte{1, 2, 3, 4},
 			}
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				indexEngineVersionManager:    newMockVersionManager(),
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:                      tt.fields.meta,
+				handler:                   newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                 tt.fields.allocator,
+				signals:                   make(chan *compactionSignal, 100),
+				inspector:                 tt.fields.inspector,
+				globalTrigger:             tt.fields.globalTrigger,
+				indexEngineVersionManager: newMockVersionManager(),
+				closeCh:                   lifetime.NewSafeChan(),
+				testingOnly:               true,
 			}
 			tr.start()
 			defer tr.stop()
@@ -2773,16 +2761,14 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       tt.fields.signals,
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 
 			if got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize); !reflect.DeepEqual(got, tt.want) {
@@ -3071,16 +3057,14 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      tt.fields.signals,
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
+				meta:          tt.fields.meta,
+				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				allocator:     tt.fields.allocator,
+				signals:       tt.fields.signals,
+				inspector:     tt.fields.inspector,
+				globalTrigger: tt.fields.globalTrigger,
+				closeCh:       lifetime.NewSafeChan(),
+				testingOnly:   true,
 			}
 
 			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)

@@ -34,9 +34,11 @@ var exclusiveRequiredMessageType = map[MessageType]struct{}{
 	MessageTypeCreatePartition:      {},
 	MessageTypeDropPartition:        {},
 	MessageTypeManualFlush:          {},
+	MessageTypeFlushAll:             {},
 	MessageTypeSchemaChange:         {},
 	MessageTypeAlterReplicateConfig: {},
 	MessageTypeAlterCollection:      {},
+	MessageTypeTruncateCollection:   {},
 }
 
 // mustAsSpecializedMutableMessage converts a MutableMessage to a specialized MutableMessage.

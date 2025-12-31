@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -268,6 +269,9 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		log.Ctx(ctx).Warn("get iowait failed", zap.Error(err))
 	}
 
+	// Get jemalloc memory statistics
+	jemallocStats := segcore.GetJemallocStats()
+
 	hardwareInfos := metricsinfo.HardwareMetrics{
 		IP:               node.session.Address,
 		CPUCoreCount:     hardware.GetCPUNum(),
@@ -277,6 +281,16 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		Disk:             totalDiskGB,
 		DiskUsage:        usedDiskGB,
 		IOWaitPercentage: ioWait,
+		// Jemalloc memory statistics (comprehensive metrics)
+		JemallocAllocated:     jemallocStats.Allocated,
+		JemallocActive:        jemallocStats.Active,
+		JemallocMetadata:      jemallocStats.Metadata,
+		JemallocResident:      jemallocStats.Resident,
+		JemallocMapped:        jemallocStats.Mapped,
+		JemallocRetained:      jemallocStats.Retained,
+		JemallocFragmentation: jemallocStats.Fragmentation,
+		JemallocOverhead:      jemallocStats.Overhead,
+		JemallocSuccess:       jemallocStats.Success,
 	}
 
 	quotaMetrics, err := getQuotaMetrics(node)

@@ -565,6 +565,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 		return nil, err
 	}
 
+	// TODO: the cache should be removed in next step.
 	return h.s.meta.GetCollection(collectionID), nil
 }
 

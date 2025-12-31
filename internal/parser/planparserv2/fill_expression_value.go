@@ -40,6 +40,14 @@ func FillExpressionValue(expr *planpb.Expr, templateValues map[string]*planpb.Ge
 		return FillJSONContainsExpressionValue(e.JsonContainsExpr, templateValues)
 	case *planpb.Expr_RandomSampleExpr:
 		return FillExpressionValue(expr.GetExpr().(*planpb.Expr_RandomSampleExpr).RandomSampleExpr.GetPredicate(), templateValues)
+	case *planpb.Expr_ElementFilterExpr:
+		if err := FillExpressionValue(e.ElementFilterExpr.GetElementExpr(), templateValues); err != nil {
+			return err
+		}
+		if e.ElementFilterExpr.GetPredicate() != nil {
+			return FillExpressionValue(e.ElementFilterExpr.GetPredicate(), templateValues)
+		}
+		return nil
 	default:
 		return fmt.Errorf("this expression no need to fill placeholder with expr type: %T", e)
 	}
@@ -56,7 +64,8 @@ func FillTermExpressionValue(expr *planpb.TermExpr, templateValues map[string]*p
 	}
 	dataType := expr.GetColumnInfo().GetDataType()
 	if typeutil.IsArrayType(dataType) {
-		if len(expr.GetColumnInfo().GetNestedPath()) != 0 {
+		// Use element type if accessing array element
+		if len(expr.GetColumnInfo().GetNestedPath()) != 0 || expr.GetColumnInfo().GetIsElementLevel() {
 			dataType = expr.GetColumnInfo().GetElementType()
 		}
 	}
@@ -83,7 +92,8 @@ func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues m
 
 	dataType := expr.GetColumnInfo().GetDataType()
 	if typeutil.IsArrayType(dataType) {
-		if len(expr.GetColumnInfo().GetNestedPath()) != 0 {
+		// Use element type if accessing array element
+		if len(expr.GetColumnInfo().GetNestedPath()) != 0 || expr.GetColumnInfo().GetIsElementLevel() {
 			dataType = expr.GetColumnInfo().GetElementType()
 		}
 	}
@@ -99,7 +109,8 @@ func FillUnaryRangeExpressionValue(expr *planpb.UnaryRangeExpr, templateValues m
 func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues map[string]*planpb.GenericValue) error {
 	var ok bool
 	dataType := expr.GetColumnInfo().GetDataType()
-	if typeutil.IsArrayType(dataType) && len(expr.GetColumnInfo().GetNestedPath()) != 0 {
+	// Use element type if accessing array element
+	if typeutil.IsArrayType(dataType) && (len(expr.GetColumnInfo().GetNestedPath()) != 0 || expr.GetColumnInfo().GetIsElementLevel()) {
 		dataType = expr.GetColumnInfo().GetElementType()
 	}
 	lowerValue := expr.GetLowerValue()
@@ -127,6 +138,24 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 			return err
 		}
 		expr.UpperValue = castedUpperValue
+	}
+
+	// For JSON type, normalize numeric types to ensure both bounds have the same type.
+	// If one is float and the other is int, convert the int to float.
+	// This prevents type mismatch assertions in C++ expression execution.
+	if typeutil.IsJSONType(dataType) {
+		lowerVal := expr.GetLowerValue()
+		upperVal := expr.GetUpperValue()
+		lowerIsFloat := IsFloating(lowerVal)
+		upperIsFloat := IsFloating(upperVal)
+		lowerIsInt := IsInteger(lowerVal)
+		upperIsInt := IsInteger(upperVal)
+
+		if lowerIsFloat && upperIsInt {
+			expr.UpperValue = NewFloat(float64(upperVal.GetInt64Val()))
+		} else if lowerIsInt && upperIsFloat {
+			expr.LowerValue = NewFloat(float64(lowerVal.GetInt64Val()))
+		}
 	}
 
 	if !(expr.GetLowerInclusive() && expr.GetUpperInclusive()) {

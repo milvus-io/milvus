@@ -495,10 +495,52 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:     "float vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_FloatVector,
+			nullable: true,
+		},
+		{
+			name:     "float16 vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_Float16Vector,
+			nullable: true,
+		},
+		{
+			name:     "bfloat16 vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_BFloat16Vector,
+			nullable: true,
+		},
+		{
+			name:     "binary vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_BinaryVector,
+			nullable: true,
+		},
+		{
+			name:     "sparse float vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_SparseFloatVector,
+			nullable: true,
+		},
+		{
+			name:     "int8 vector is nullable",
+			fieldID:  200,
+			dataType: schemapb.DataType_Int8Vector,
+			nullable: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			schema := buildSchemaFn()
+			isVectorType := tt.dataType == schemapb.DataType_FloatVector ||
+				tt.dataType == schemapb.DataType_Float16Vector ||
+				tt.dataType == schemapb.DataType_BFloat16Vector ||
+				tt.dataType == schemapb.DataType_BinaryVector ||
+				tt.dataType == schemapb.DataType_SparseFloatVector ||
+				tt.dataType == schemapb.DataType_Int8Vector
 			fieldSchema := &schemapb.FieldSchema{
 				FieldID:      tt.fieldID,
 				Name:         fmt.Sprintf("field_%d", tt.fieldID),
@@ -511,10 +553,12 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "100"})
 			} else if tt.dataType == schemapb.DataType_VarChar {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
+			} else if isVectorType && tt.dataType != schemapb.DataType_SparseFloatVector {
+				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
 			}
 
 			// create data without the new field
-			insertData, err := testutil.CreateInsertData(schema, count)
+			insertData, err := testutil.CreateInsertData(schema, count, 100)
 			assert.NoError(t, err)
 
 			// add new nullalbe/default field to the schema
@@ -524,7 +568,7 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 			tempSchema := &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{fieldSchema},
 			}
-			tempData, err := testutil.CreateInsertData(tempSchema, 1)
+			tempData, err := testutil.CreateInsertData(tempSchema, 1, 100)
 			assert.NoError(t, err)
 			insertData.Data[fieldSchema.GetFieldID()] = tempData.Data[fieldSchema.GetFieldID()]
 

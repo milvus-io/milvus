@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -80,4 +81,14 @@ func NewMilvusClient(ctx context.Context, cfg *client.ClientConfig) (*MilvusClie
 func (mc *MilvusClient) Close(ctx context.Context) error {
 	err := mc.Client.Close(ctx)
 	return err
+}
+
+func (mc *MilvusClient) Compact(ctx context.Context, option client.CompactOption, callOptions ...grpc.CallOption) (int64, error) {
+	compactID, err := mc.Client.Compact(ctx, option, callOptions...)
+	return compactID, err
+}
+
+func (mc *MilvusClient) GetCompactionState(ctx context.Context, option client.GetCompactionStateOption, callOptions ...grpc.CallOption) (entity.CompactionState, error) {
+	state, err := mc.Client.GetCompactionState(ctx, option, callOptions...)
+	return state, err
 }

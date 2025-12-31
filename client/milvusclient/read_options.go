@@ -102,9 +102,12 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 
 	var err error
 	// placeholder group
-	request.PlaceholderGroup, err = vector2PlaceholderGroupBytes(r.vectors)
+	placeHolderGroupBytes, err := vector2PlaceholderGroupBytes(r.vectors)
 	if err != nil {
 		return nil, err
+	}
+	request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
+		PlaceholderGroup: placeHolderGroupBytes,
 	}
 
 	params := map[string]string{

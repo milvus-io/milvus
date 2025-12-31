@@ -344,8 +344,15 @@ VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
                 auto binary_values =
                     std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
                         list_array->values());
-                total_size +=
-                    binary_values->length() * binary_values->byte_width();
+                int byte_width = binary_values->byte_width();
+                // Calculate actual values count using list offsets
+                // This handles sliced ListArrays correctly, as values() returns
+                // the entire underlying array, but we only need the values
+                // referenced by this slice
+                const int32_t* list_offsets = list_array->raw_value_offsets();
+                int64_t actual_values_count =
+                    list_offsets[list_array->length()] - list_offsets[0];
+                total_size += actual_values_count * byte_width;
                 break;
             }
             default:
@@ -428,8 +435,10 @@ SparseFloatVectorChunkWriter::calculate_size(
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int64_t i = 0; i < array->length(); ++i) {
-            auto str = array->GetView(i);
-            size += str.size();
+            if (!nullable_ || !array->IsNull(i)) {
+                auto str = array->GetView(i);
+                size += str.size();
+            }
         }
         row_nums_ += array->length();
     }
@@ -452,8 +461,10 @@ SparseFloatVectorChunkWriter::write_to_target(
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int64_t i = 0; i < array->length(); ++i) {
-            auto str = array->GetView(i);
-            strs.emplace_back(str);
+            if (!nullable_ || !array->IsNull(i)) {
+                auto str = array->GetView(i);
+                strs.emplace_back(str);
+            }
         }
         if (nullable_) {
             null_bitmaps.emplace_back(
@@ -471,9 +482,23 @@ SparseFloatVectorChunkWriter::write_to_target(
     std::vector<uint64_t> offsets;
     offsets.reserve(offset_num);
 
-    for (const auto& str : strs) {
-        offsets.push_back(offset_start_pos);
-        offset_start_pos += str.size();
+    if (nullable_) {
+        size_t str_idx = 0;
+        for (const auto& data : array_vec) {
+            auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+            for (int i = 0; i < array->length(); i++) {
+                offsets.push_back(offset_start_pos);
+                if (!array->IsNull(i)) {
+                    offset_start_pos += strs[str_idx].size();
+                    str_idx++;
+                }
+            }
+        }
+    } else {
+        for (const auto& str : strs) {
+            offsets.push_back(offset_start_pos);
+            offset_start_pos += str.size();
+        }
     }
     offsets.push_back(offset_start_pos);
 
@@ -517,22 +542,43 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
                 dim, nullable);
         case milvus::DataType::VECTOR_FLOAT:
+            if (nullable) {
+                return std::make_shared<
+                    NullableVectorChunkWriter<knowhere::fp32>>(dim, nullable);
+            }
             return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp32>>(
                 dim, nullable);
         case milvus::DataType::VECTOR_BINARY:
+            if (nullable) {
+                return std::make_shared<
+                    NullableVectorChunkWriter<knowhere::bin1>>(dim / 8,
+                                                               nullable);
+            }
             return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bin1>>(
                 dim / 8, nullable);
         case milvus::DataType::VECTOR_FLOAT16:
+            if (nullable) {
+                return std::make_shared<
+                    NullableVectorChunkWriter<knowhere::fp16>>(dim, nullable);
+            }
             return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp16>>(
                 dim, nullable);
         case milvus::DataType::VECTOR_BFLOAT16:
+            if (nullable) {
+                return std::make_shared<
+                    NullableVectorChunkWriter<knowhere::bf16>>(dim, nullable);
+            }
             return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
                 dim, nullable);
         case milvus::DataType::VECTOR_INT8:
+            if (nullable) {
+                return std::make_shared<
+                    NullableVectorChunkWriter<knowhere::int8>>(dim, nullable);
+            }
             return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::int8>>(
                 dim, nullable);

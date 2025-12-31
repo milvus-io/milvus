@@ -126,6 +126,11 @@ class Chunk {
         return data_;
     }
 
+    FixedVector<bool>&
+    Valid() {
+        return valid_;
+    }
+
     virtual bool
     isValid(int offset) const {
         if (nullable_) {
@@ -559,17 +564,32 @@ class SparseFloatVectorChunk : public Chunk {
                            bool nullable,
                            std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
         : Chunk(row_nums, data, size, nullable, chunk_mmap_guard) {
-        vec_.resize(row_nums);
         auto null_bitmap_bytes_num = nullable ? (row_nums + 7) / 8 : 0;
         auto offsets_ptr =
             reinterpret_cast<uint64_t*>(data + null_bitmap_bytes_num);
-        for (int i = 0; i < row_nums; i++) {
-            vec_[i] = {(offsets_ptr[i + 1] - offsets_ptr[i]) /
-                           knowhere::sparse::SparseRow<
-                               SparseValueType>::element_size(),
-                       reinterpret_cast<uint8_t*>(data + offsets_ptr[i]),
-                       false};
-            dim_ = std::max(dim_, vec_[i].dim());
+
+        if (nullable_) {
+            for (int i = 0; i < row_nums; i++) {
+                if (isValid(i)) {
+                    vec_.emplace_back(
+                        (offsets_ptr[i + 1] - offsets_ptr[i]) /
+                            knowhere::sparse::SparseRow<
+                                SparseValueType>::element_size(),
+                        reinterpret_cast<uint8_t*>(data + offsets_ptr[i]),
+                        false);
+                    dim_ = std::max(dim_, vec_.back().dim());
+                }
+            }
+        } else {
+            vec_.resize(row_nums);
+            for (int i = 0; i < row_nums; i++) {
+                vec_[i] = {(offsets_ptr[i + 1] - offsets_ptr[i]) /
+                               knowhere::sparse::SparseRow<
+                                   SparseValueType>::element_size(),
+                           reinterpret_cast<uint8_t*>(data + offsets_ptr[i]),
+                           false};
+                dim_ = std::max(dim_, vec_[i].dim());
+            }
         }
     }
 

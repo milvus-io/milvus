@@ -242,6 +242,12 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             const auto& array = data[i];
             for (int j = 0; j < array.length(); ++j) {
@@ -336,6 +342,12 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::shared_ptr<MultiElement>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -449,9 +461,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -508,7 +519,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
                 }
             }
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -566,6 +578,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) -> bool {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -657,9 +675,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -707,7 +724,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
             }
             return false;
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -764,6 +782,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::set<GetType>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             std::set<GetType> tmp_elements(elements);
             // Note: array can only be iterated once
@@ -864,6 +888,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::set<GetType>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](const size_t i) -> bool {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -973,9 +1003,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -1042,7 +1071,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
             }
             res_view[row_offset] = tmp_elements.empty();
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1097,6 +1127,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements,
             const std::unordered_set<int> elements_index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) -> bool {
             const auto& json = data[i];
             auto doc = json.dom_doc();
@@ -1251,9 +1287,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -1371,7 +1406,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByStats() {
             }
             res_view[row_offset] = tmp_elements_index.size() == 0;
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1423,6 +1459,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::Array>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](const size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -1519,9 +1561,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -1576,7 +1617,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
             res_view[row_offset] =
                 exist_elements_index.size() == elements.size();
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -1631,6 +1673,12 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](const size_t i) {
             auto& json = data[i];
             auto doc = json.dom_doc();
@@ -1769,9 +1817,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -1880,7 +1927,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByStats() {
                 }
             }
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 

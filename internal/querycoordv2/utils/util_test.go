@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -156,6 +157,52 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 		suite.setNodeAvailable(1, 2)
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)
+	})
+
+	suite.Run("catching up streaming data", func() {
+		leadview := &meta.LeaderView{
+			ID:            1,
+			Channel:       "test",
+			Segments:      map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			TargetVersion: 1011,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable:             true,
+				CatchingUpStreamingData: true, // still catching up
+			},
+		}
+		// When catching up, function returns early without calling targetMgr
+		// so we can pass nil as targetMgr
+		suite.setNodeAvailable(1, 2)
+		err := CheckDelegatorDataReady(suite.nodeMgr, nil, leadview, meta.CurrentTarget)
+		suite.Error(err)
+		suite.Contains(err.Error(), "catching up streaming data")
+	})
+
+	suite.Run("caught up streaming data", func() {
+		leadview := &meta.LeaderView{
+			ID:            1,
+			Channel:       "test",
+			Segments:      map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+			TargetVersion: 1011,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable:             true,
+				CatchingUpStreamingData: false, // already caught up
+			},
+		}
+		// Use mockey to mock TargetManager.GetSealedSegmentsByChannel
+		targetMgr := &meta.TargetManager{}
+		mockGetSealedSegments := mockey.Mock(mockey.GetMethod(targetMgr, "GetSealedSegmentsByChannel")).
+			Return(map[int64]*datapb.SegmentInfo{
+				2: {
+					ID:            2,
+					InsertChannel: "test",
+				},
+			}).Build()
+		defer mockGetSealedSegments.UnPatch()
+
+		suite.setNodeAvailable(1, 2)
+		err := CheckDelegatorDataReady(suite.nodeMgr, targetMgr, leadview, meta.CurrentTarget)
+		suite.NoError(err)
 	})
 }
 

@@ -31,7 +31,12 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    switch (expr_->column_.data_type_) {
+
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>(context);
             break;
@@ -72,61 +77,74 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            auto value_type = expr_->lower_val_.val_case();
+            auto lower_type = expr_->lower_val_.val_case();
+            auto upper_type = expr_->upper_val_.val_case();
+            // For numeric types, if either bound is float, use double for both.
+            // This handles mixed int64/float cases properly.
+            bool use_double =
+                (lower_type == proto::plan::GenericValue::ValCase::kFloatVal ||
+                 upper_type == proto::plan::GenericValue::ValCase::kFloatVal);
+            bool is_numeric =
+                ((lower_type == proto::plan::GenericValue::ValCase::kInt64Val ||
+                  lower_type ==
+                      proto::plan::GenericValue::ValCase::kFloatVal) &&
+                 (upper_type == proto::plan::GenericValue::ValCase::kInt64Val ||
+                  upper_type == proto::plan::GenericValue::ValCase::kFloatVal));
+
             if (SegmentExpr::CanUseIndex() && !has_offset_input_) {
-                switch (value_type) {
-                    case proto::plan::GenericValue::ValCase::kInt64Val: {
-                        proto::plan::GenericValue double_lower_val;
+                if (is_numeric) {
+                    // Convert both bounds to double for index path
+                    proto::plan::GenericValue double_lower_val;
+                    if (lower_type ==
+                        proto::plan::GenericValue::ValCase::kInt64Val) {
                         double_lower_val.set_float_val(
                             static_cast<double>(expr_->lower_val_.int64_val()));
-                        proto::plan::GenericValue double_upper_val;
+                    } else {
+                        double_lower_val.set_float_val(
+                            expr_->lower_val_.float_val());
+                    }
+                    proto::plan::GenericValue double_upper_val;
+                    if (upper_type ==
+                        proto::plan::GenericValue::ValCase::kInt64Val) {
                         double_upper_val.set_float_val(
                             static_cast<double>(expr_->upper_val_.int64_val()));
+                    } else {
+                        double_upper_val.set_float_val(
+                            expr_->upper_val_.float_val());
+                    }
 
-                        lower_arg_.SetValue<double>(double_lower_val);
-                        upper_arg_.SetValue<double>(double_upper_val);
-                        arg_inited_ = true;
+                    lower_arg_.SetValue<double>(double_lower_val);
+                    upper_arg_.SetValue<double>(double_upper_val);
+                    arg_inited_ = true;
 
-                        result = ExecRangeVisitorImplForIndex<double>();
-                        break;
-                    }
-                    case proto::plan::GenericValue::ValCase::kFloatVal: {
-                        result = ExecRangeVisitorImplForIndex<double>();
-                        break;
-                    }
-                    case proto::plan::GenericValue::ValCase::kStringVal: {
-                        result =
-                            ExecRangeVisitorImplForJson<std::string>(context);
-                        break;
-                    }
-                    default: {
-                        ThrowInfo(DataTypeInvalid,
-                                  fmt::format(
-                                      "unsupported value type {} in expression",
-                                      value_type));
-                    }
+                    result = ExecRangeVisitorImplForIndex<double>();
+                } else if (lower_type ==
+                           proto::plan::GenericValue::ValCase::kStringVal) {
+                    result = ExecRangeVisitorImplForJson<std::string>(context);
+                } else {
+                    ThrowInfo(
+                        DataTypeInvalid,
+                        fmt::format("unsupported value type {} in expression",
+                                    lower_type));
                 }
             } else {
-                switch (value_type) {
-                    case proto::plan::GenericValue::ValCase::kInt64Val: {
-                        result = ExecRangeVisitorImplForJson<int64_t>(context);
-                        break;
-                    }
-                    case proto::plan::GenericValue::ValCase::kFloatVal: {
-                        result = ExecRangeVisitorImplForJson<double>(context);
-                        break;
-                    }
-                    case proto::plan::GenericValue::ValCase::kStringVal: {
-                        result =
-                            ExecRangeVisitorImplForJson<std::string>(context);
-                        break;
-                    }
-                    default: {
-                        ThrowInfo(DataTypeInvalid,
-                                  fmt::format(
-                                      "unsupported value type {} in expression",
-                                      value_type));
-                    }
+                if (is_numeric && use_double) {
+                    // Use double when either bound is float
+                    result = ExecRangeVisitorImplForJson<double>(context);
+                } else if (lower_type ==
+                           proto::plan::GenericValue::ValCase::kInt64Val) {
+                    result = ExecRangeVisitorImplForJson<int64_t>(context);
+                } else if (lower_type ==
+                           proto::plan::GenericValue::ValCase::kFloatVal) {
+                    result = ExecRangeVisitorImplForJson<double>(context);
+                } else if (lower_type ==
+                           proto::plan::GenericValue::ValCase::kStringVal) {
+                    result = ExecRangeVisitorImplForJson<std::string>(context);
+                } else {
+                    ThrowInfo(
+                        DataTypeInvalid,
+                        fmt::format("unsupported value type {} in expression",
+                                    lower_type));
                 }
             }
             break;
@@ -331,6 +349,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             TargetBitmapView valid_res,
             HighPrecisionType val1,
             HighPrecisionType val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,
@@ -408,14 +432,28 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 skip_index_func,
-                                                 input,
-                                                 res,
-                                                 valid_res,
-                                                 val1,
-                                                 val2);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering
+            processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             val1,
+                                                             val2);
+        } else {
+            // For doc-level filtering
+            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
+                                                     skip_index_func,
+                                                     input,
+                                                     res,
+                                                     valid_res,
+                                                     val1,
+                                                     val2);
+        }
     } else {
+        AssertInfo(!expr_->column_.element_level_,
+                   "Element-level filtering is not supported without offsets");
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, skip_index_func, res, valid_res, val1, val2);
     }
@@ -479,6 +517,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             TargetBitmapView valid_res,
             ValueType val1,
             ValueType val2) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true, filter_type>
                 func;
@@ -573,16 +617,17 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
     auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
-    ValueType val1 = GetValueFromProto<ValueType>(expr_->lower_val_);
-    ValueType val2 = GetValueFromProto<ValueType>(expr_->upper_val_);
+    // Use GetValueWithCastNumber to handle mixed int64/float types safely.
+    // This allows int64 values to be cast to double when ValueType is double.
+    ValueType val1 = GetValueWithCastNumber<ValueType>(expr_->lower_val_);
+    ValueType val2 = GetValueWithCastNumber<ValueType>(expr_->upper_val_);
 
     if (cached_index_chunk_id_ != 0 &&
         segment_->type() == SegmentType::Sealed) {
         auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -722,7 +767,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonStats() {
                     }
                 }
             };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -782,6 +828,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             ValueType val1,
             ValueType val2,
             int index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
                 func;

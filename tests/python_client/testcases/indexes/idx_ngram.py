@@ -94,18 +94,18 @@ class NGRAM:
         {
             "description": "min_gram greater than max_gram",
             "params": {"min_gram": 5, "max_gram": 3},
-            "expected": {"err_code": 999, "err_msg": "invalid min_gram or max_gram value for Ngram index"}
+            "expected": {"err_code": 1100, "err_msg": "invalid min_gram or max_gram value for Ngram index"}
         },
         # min_gram invalid with both specified
         {
             "description": "Invalid min_gram - negative value (both specified)",
             "params": {"min_gram": -1, "max_gram": 3},
-            "expected": {"err_code": 999, "err_msg": "invalid min_gram or max_gram value for Ngram index"}
+            "expected": {"err_code": 1100, "err_msg": "invalid min_gram or max_gram value for Ngram index"}
         },
         {
             "description": "Invalid min_gram - zero value (both specified)",
             "params": {"min_gram": 0, "max_gram": 3},
-            "expected": {"err_code": 999, "err_msg": "Ngram index must specify both min_gram and max_gram"}
+            "expected": {"err_code": 1100, "err_msg": "invalid min_gram or max_gram value for Ngram index"}
         },
         {
             "description": "Invalid min_gram - string type (both specified)",

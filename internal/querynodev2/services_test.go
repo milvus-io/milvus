@@ -1958,6 +1958,32 @@ func (suite *ServiceSuite) TestGetDataDistribution_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestGetDataDistribution_LeaderViewStatus() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	req := &querypb.GetDataDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+	}
+
+	resp, err := suite.node.GetDataDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	// Verify LeaderView has Status field with CatchingUpStreamingData
+	suite.NotEmpty(resp.LeaderViews)
+	for _, leaderView := range resp.LeaderViews {
+		suite.NotNil(leaderView.Status, "LeaderView should have Status field")
+		// Initially delegator is catching up streaming data (true)
+		suite.True(leaderView.Status.CatchingUpStreamingData,
+			"New delegator should be catching up streaming data")
+	}
+}
+
 func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	ctx := context.Background()
 	// prepare
@@ -2433,7 +2459,7 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
-		suite.Require().Equal(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Require().Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	suite.Run("invalid analyzer params", func() {
@@ -2449,7 +2475,7 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
-		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	suite.Run("abnormal node", func() {
@@ -2467,7 +2493,7 @@ func (suite *ServiceSuite) TestValidateAnalyzer() {
 
 		resp, err := suite.node.ValidateAnalyzer(ctx, req)
 		suite.Require().NoError(err)
-		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetErrorCode())
+		suite.Require().NotEqual(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
 

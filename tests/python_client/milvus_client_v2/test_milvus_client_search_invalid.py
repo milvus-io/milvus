@@ -195,11 +195,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_vectors = get_invalid_vectors
         log.info("test_search_param_invalid_vectors: searching with "
                  "invalid vectors: {}".format(invalid_vectors))
+        if get_invalid_vectors is None:
+            err_msg = "Either ids or data must be provided"
+        else:
+            err_msg = "`search_data` value {} is illegal".format(invalid_vectors)
         collection_w.search(invalid_vectors, default_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 999,
-                                         "err_msg": "`search_data` value {} is illegal".format(invalid_vectors)})
+                            check_items={"err_code": 999, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_dim(self):

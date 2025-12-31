@@ -322,10 +322,6 @@ func WrapErrAsInputErrorWhen(err error, targets ...milvusError) error {
 	return err
 }
 
-func WrapErrCollectionReplicateMode(operation string) error {
-	return wrapFields(ErrCollectionReplicateMode, value("operation", operation))
-}
-
 func GetErrorType(err error) ErrorType {
 	if merr, ok := err.(milvusError); ok {
 		return merr.errType
@@ -942,6 +938,13 @@ func WrapErrIoUnexpectEOF(key string, err error) error {
 		return nil
 	}
 	return wrapFieldsWithDesc(ErrIoUnexpectEOF, err.Error(), value("key", key))
+}
+
+func WrapErrIoTooManyRequests(key string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return wrapFieldsWithDesc(ErrIoTooManyRequests, err.Error(), value("key", key))
 }
 
 // Parameter related

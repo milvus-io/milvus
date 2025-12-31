@@ -134,7 +134,8 @@ const (
 )
 
 const (
-	JSONStatsDataFormatVersion = 2
+	// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
+	JSONStatsDataFormatVersion = 3
 )
 
 // Search, Index parameter keys
@@ -188,6 +189,9 @@ const (
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
 
+	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
+	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
+
 	// Note:
 	// Function output fields cannot be included in inserted data.
 	// In particular, the `bm25` function output field is always disallowed
@@ -197,8 +201,6 @@ const (
 	// rate limit
 	CollectionInsertRateMaxKey   = "collection.insertRate.max.mb"
 	CollectionInsertRateMinKey   = "collection.insertRate.min.mb"
-	CollectionUpsertRateMaxKey   = "collection.upsertRate.max.mb"
-	CollectionUpsertRateMinKey   = "collection.upsertRate.min.mb"
 	CollectionDeleteRateMaxKey   = "collection.deleteRate.max.mb"
 	CollectionDeleteRateMinKey   = "collection.deleteRate.min.mb"
 	CollectionBulkLoadRateMaxKey = "collection.bulkLoadRate.max.mb"
@@ -239,8 +241,6 @@ const (
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
-	ReplicateIDKey             = "replicate.id"
-	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
 	NamespaceEnabledKey        = "namespace.enabled"
@@ -512,33 +512,6 @@ func ShouldFieldBeLoaded(kvs []*commonpb.KeyValuePair) (bool, error) {
 	return true, nil
 }
 
-func IsReplicateEnabled(kvs []*commonpb.KeyValuePair) (bool, bool) {
-	replicateID, ok := GetReplicateID(kvs)
-	return replicateID != "", ok
-}
-
-func GetReplicateID(kvs []*commonpb.KeyValuePair) (string, bool) {
-	for _, kv := range kvs {
-		if kv.GetKey() == ReplicateIDKey {
-			return kv.GetValue(), true
-		}
-	}
-	return "", false
-}
-
-func GetReplicateEndTS(kvs []*commonpb.KeyValuePair) (uint64, bool) {
-	for _, kv := range kvs {
-		if kv.GetKey() == ReplicateEndTSKey {
-			ts, err := strconv.ParseUint(kv.GetValue(), 10, 64)
-			if err != nil {
-				return 0, false
-			}
-			return ts, true
-		}
-	}
-	return 0, false
-}
-
 func IsEnableDynamicSchema(kvs []*commonpb.KeyValuePair) (found bool, value bool, err error) {
 	for _, kv := range kvs {
 		if kv.GetKey() == EnableDynamicSchemaKey {
@@ -604,6 +577,31 @@ func IsAllowInsertAutoID(kvs ...*commonpb.KeyValuePair) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+func GetInt64Value(kvs []*commonpb.KeyValuePair, key string) (result int64, parseErr error, exist bool) {
+	kv := lo.FindOrElse(kvs, nil, func(kv *commonpb.KeyValuePair) bool {
+		return kv.GetKey() == key
+	})
+	if kv == nil {
+		return 0, nil, false
+	}
+
+	result, err := strconv.ParseInt(kv.GetValue(), 10, 64)
+	if err != nil {
+		return 0, err, true
+	}
+	return result, nil, true
+}
+
+func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, exist bool) {
+	kv := lo.FindOrElse(kvs, nil, func(kv *commonpb.KeyValuePair) bool {
+		return kv.GetKey() == key
+	})
+	if kv == nil {
+		return "", false
+	}
+	return kv.GetValue(), true
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {

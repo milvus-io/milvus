@@ -76,6 +76,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.TruncateCollectionMessageHeader",
+                "BodyType": "messagespb.TruncateCollectionMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeTruncateCollection",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.CreatePartitionMessageHeader",
                 "BodyType": "msgpb.CreatePartitionRequest"
             },
@@ -432,6 +442,16 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeDropIndex",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.FlushAllMessageHeader",
+                "BodyType": "messagespb.FlushAllMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeFlushAll",
                 "Version": 2
             }
         }

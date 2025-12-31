@@ -438,6 +438,9 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetDoubleData().GetData())
 	case schemapb.DataType_Timestamptz:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetTimestamptzData().GetData())
+		if fieldNumRows == 0 {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
+		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
@@ -446,40 +449,71 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
 	case schemapb.DataType_Geometry:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryData().GetData())
+		if fieldNumRows == 0 {
+			fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetGeometryWktData().GetData())
+		}
 	case schemapb.DataType_FloatVector:
-		dim := fieldData.GetVectors().GetDim()
-		fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
-		if err != nil {
-			return 0, err
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			dim := fieldData.GetVectors().GetDim()
+			fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
+			if err != nil {
+				return 0, err
+			}
 		}
 	case schemapb.DataType_BinaryVector:
-		dim := fieldData.GetVectors().GetDim()
-		fieldNumRows, err = GetNumRowsOfBinaryVectorField(fieldData.GetVectors().GetBinaryVector(), dim)
-		if err != nil {
-			return 0, err
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			dim := fieldData.GetVectors().GetDim()
+			fieldNumRows, err = GetNumRowsOfBinaryVectorField(fieldData.GetVectors().GetBinaryVector(), dim)
+			if err != nil {
+				return 0, err
+			}
 		}
 	case schemapb.DataType_Float16Vector:
-		dim := fieldData.GetVectors().GetDim()
-		fieldNumRows, err = GetNumRowsOfFloat16VectorField(fieldData.GetVectors().GetFloat16Vector(), dim)
-		if err != nil {
-			return 0, err
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			dim := fieldData.GetVectors().GetDim()
+			fieldNumRows, err = GetNumRowsOfFloat16VectorField(fieldData.GetVectors().GetFloat16Vector(), dim)
+			if err != nil {
+				return 0, err
+			}
 		}
 	case schemapb.DataType_BFloat16Vector:
-		dim := fieldData.GetVectors().GetDim()
-		fieldNumRows, err = GetNumRowsOfBFloat16VectorField(fieldData.GetVectors().GetBfloat16Vector(), dim)
-		if err != nil {
-			return 0, err
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			dim := fieldData.GetVectors().GetDim()
+			fieldNumRows, err = GetNumRowsOfBFloat16VectorField(fieldData.GetVectors().GetBfloat16Vector(), dim)
+			if err != nil {
+				return 0, err
+			}
 		}
 	case schemapb.DataType_SparseFloatVector:
-		fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
+		}
 	case schemapb.DataType_Int8Vector:
-		dim := fieldData.GetVectors().GetDim()
-		fieldNumRows, err = GetNumRowsOfInt8VectorField(fieldData.GetVectors().GetInt8Vector(), dim)
-		if err != nil {
-			return 0, err
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			dim := fieldData.GetVectors().GetDim()
+			fieldNumRows, err = GetNumRowsOfInt8VectorField(fieldData.GetVectors().GetInt8Vector(), dim)
+			if err != nil {
+				return 0, err
+			}
 		}
 	case schemapb.DataType_ArrayOfVector:
-		fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
+		if len(fieldData.GetValidData()) > 0 {
+			fieldNumRows = uint64(len(fieldData.GetValidData()))
+		} else {
+			fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
+		}
 	default:
 		return 0, fmt.Errorf("%s is not supported now", fieldSchema.GetDataType())
 	}
@@ -519,6 +553,9 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			return 0, fmt.Errorf("%s is not supported now", scalarType)
 		}
 	case *schemapb.FieldData_Vectors:
+		if len(fieldData.GetValidData()) > 0 {
+			return uint64(len(fieldData.GetValidData())), nil
+		}
 		vectorField := fieldData.GetVectors()
 		switch vectorFieldType := vectorField.Data.(type) {
 		case *schemapb.VectorField_FloatVector:

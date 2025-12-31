@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
@@ -1189,11 +1190,25 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 
 	// Text match index mmap config is based on the raw data mmap.
 	enableMmap := isDataMmapEnable(f)
+
+	// Reconstruct full paths from filenames
+	// Files stored in TextIndexStats only contain filenames to save space
+	fullPaths := metautil.BuildTextLogPaths(
+		binlog.GetRootPath(),
+		textLogs.GetBuildID(),
+		textLogs.GetVersion(),
+		s.Collection(),
+		s.Partition(),
+		s.ID(),
+		textLogs.GetFieldID(),
+		textLogs.GetFiles(),
+	)
+
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
 		BuildID:      textLogs.GetBuildID(),
-		Files:        textLogs.GetFiles(),
+		Files:        fullPaths,
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
@@ -1227,13 +1242,15 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return nil
 	}
 
+	// for compatibility, we only support load data format version equal to the current data format version
+	// if the data format version is less than the current version, wait for trigger a stats task again
 	if jsonKeyStats.GetJsonKeyStatsDataFormat() != common.JSONStatsDataFormatVersion {
-		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
+		log.Ctx(ctx).Warn("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
 
 	log.Ctx(ctx).Info("load json key index", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
-	if info, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok && info.GetDataFormatVersion() >= common.JSONStatsDataFormatVersion {
+	if _, ok := s.fieldJSONStats[jsonKeyStats.GetFieldID()]; ok {
 		log.Warn("JsonKeyIndexStats already loaded", zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
@@ -1254,7 +1271,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		LoadPriority: s.loadInfo.Load().GetPriority(),
 		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
 		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
-		StatsSize:    jsonKeyStats.GetMemorySize(),
+		StatsSize:    jsonKeyStats.GetLogSize(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1370,6 +1387,17 @@ func (s *LocalSegment) FinishLoad() error {
 
 func (s *LocalSegment) Load(ctx context.Context) error {
 	return s.csegment.Load(ctx)
+}
+
+func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
+		LoadInfo: newLoadInfo,
+	})
+	if err != nil {
+		return err
+	}
+	s.loadInfo.Store(newLoadInfo)
+	return nil
 }
 
 type ReleaseScope int

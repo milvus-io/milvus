@@ -28,6 +28,9 @@
 #include <NamedType/named_type.hpp>
 
 #include "common/FieldMeta.h"
+#include "common/ArrayOffsets.h"
+#include "common/OffsetMapping.h"
+#include "query/Utils.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
 
@@ -113,25 +116,64 @@ struct OffsetDisPair {
 };
 
 struct OffsetDisPairComparator {
+    bool larger_is_closer_ = false;
+
+    OffsetDisPairComparator(bool larger_is_closer = false)
+        : larger_is_closer_(larger_is_closer) {
+    }
+
     bool
     operator()(const std::shared_ptr<OffsetDisPair>& left,
                const std::shared_ptr<OffsetDisPair>& right) const {
+        // For priority_queue: return true if left has lower priority than right
+        // We want the element with better (closer) distance at the top
         if (left->GetOffDis().second != right->GetOffDis().second) {
-            return left->GetOffDis().second < right->GetOffDis().second;
+            if (larger_is_closer_) {
+                // IP/Cosine: larger distance is better, smaller has lower priority
+                return left->GetOffDis().second < right->GetOffDis().second;
+            } else {
+                // L2: smaller distance is better, larger has lower priority
+                return left->GetOffDis().second > right->GetOffDis().second;
+            }
         }
         return left->GetOffDis().first < right->GetOffDis().first;
     }
 };
-struct VectorIterator {
+
+class VectorIterator {
  public:
-    VectorIterator(int chunk_count,
-                   const std::vector<int64_t>& total_rows_until_chunk = {})
-        : total_rows_until_chunk_(total_rows_until_chunk) {
+    virtual ~VectorIterator() = default;
+
+    virtual bool
+    HasNext() = 0;
+
+    virtual std::optional<std::pair<int64_t, float>>
+    Next() = 0;
+};
+
+// Multi-way merge iterator for vector search results from multiple chunks
+//
+// Merges knowhere iterators from different chunks using a min-heap,
+// returning results in distance-sorted order.
+class ChunkMergeIterator : public VectorIterator {
+ public:
+    ChunkMergeIterator(int chunk_count,
+                       const milvus::OffsetMapping& offset_mapping,
+                       const std::vector<int64_t>& total_rows_until_chunk = {},
+                       bool larger_is_closer = false)
+        : offset_mapping_(&offset_mapping),
+          larger_is_closer_(larger_is_closer),
+          heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
 
+    bool
+    HasNext() override {
+        return !heap_.empty();
+    }
+
     std::optional<std::pair<int64_t, float>>
-    Next() {
+    Next() override {
         if (!heap_.empty()) {
             auto top = heap_.top();
             heap_.pop();
@@ -141,14 +183,15 @@ struct VectorIterator {
                     origin_pair, top->GetIteratorIdx());
                 heap_.push(off_dis_pair);
             }
-            return top->GetOffDis();
+            auto result = top->GetOffDis();
+            if (offset_mapping_ != nullptr) {
+                result.first = offset_mapping_->GetLogicalOffset(result.first);
+            }
+            return result;
         }
         return std::nullopt;
     }
-    bool
-    HasNext() {
-        return !heap_.empty();
-    }
+
     bool
     AddIterator(knowhere::IndexNode::IteratorPtr iter) {
         if (!sealed && iter != nullptr) {
@@ -157,6 +200,7 @@ struct VectorIterator {
         }
         return false;
     }
+
     void
     seal() {
         sealed = true;
@@ -194,8 +238,10 @@ struct VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
+    const milvus::OffsetMapping* offset_mapping_ = nullptr;
     std::vector<int64_t> total_rows_until_chunk_;
-    //currently, VectorIterator is guaranteed to be used serially without concurrent problem, in the future
+    bool larger_is_closer_ = false;
+    //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
 
@@ -219,7 +265,9 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         const std::vector<int64_t>& total_rows_until_chunk,
-        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators) {
+        const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
+        const milvus::OffsetMapping& offset_mapping,
+        bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
                    "wrong state",
@@ -230,15 +278,24 @@ struct SearchResult {
         for (int i = 0, vec_iter_idx = 0; i < kw_iterators.size(); i++) {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
-                auto vector_iterator = std::make_shared<VectorIterator>(
-                    chunk_count, total_rows_until_chunk);
-                vector_iterators.emplace_back(vector_iterator);
+                auto chunk_merge_iter =
+                    std::make_shared<ChunkMergeIterator>(chunk_count,
+                                                         offset_mapping,
+                                                         total_rows_until_chunk,
+                                                         larger_is_closer);
+                vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];
-            vector_iterators[vec_iter_idx++]->AddIterator(kw_iterator);
+            auto chunk_merge_iter =
+                std::static_pointer_cast<ChunkMergeIterator>(
+                    vector_iterators[vec_iter_idx++]);
+            chunk_merge_iter->AddIterator(kw_iterator);
         }
         for (const auto& vector_iter : vector_iterators) {
-            vector_iter->seal();
+            // Cast to ChunkMergeIterator to call seal
+            auto chunk_merge_iter =
+                std::static_pointer_cast<ChunkMergeIterator>(vector_iter);
+            chunk_merge_iter->seal();
         }
         this->vector_iterators_ = vector_iterators;
     }
@@ -275,6 +332,28 @@ struct SearchResult {
         vector_iterators_;
     // record the storage usage in search
     StorageCost search_storage_cost_;
+
+    bool element_level_{false};
+    std::vector<int32_t> element_indices_;
+    std::optional<std::vector<std::shared_ptr<VectorIterator>>>
+        element_iterators_;
+    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
+
+    bool
+    HasIterators() const {
+        return (element_level_ && element_iterators_.has_value()) ||
+               (!element_level_ && vector_iterators_.has_value());
+    }
+
+    std::optional<std::vector<std::shared_ptr<VectorIterator>>>
+    GetIterators() {
+        if (element_level_) {
+            return element_iterators_;
+        } else {
+            return vector_iterators_;
+        }
+    }
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;

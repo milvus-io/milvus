@@ -168,19 +168,19 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		}
 	case schemapb.DataType_BinaryVector:
 		vectors := data.(*storage.BinaryVectorFieldData).Data
-		err = evt.AddBinaryVectorToPayload(vectors, int(dim))
+		err = evt.AddBinaryVectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_FloatVector:
 		vectors := data.(*storage.FloatVectorFieldData).Data
-		err = evt.AddFloatVectorToPayload(vectors, int(dim))
+		err = evt.AddFloatVectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_Float16Vector:
 		vectors := data.(*storage.Float16VectorFieldData).Data
-		err = evt.AddFloat16VectorToPayload(vectors, int(dim))
+		err = evt.AddFloat16VectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_BFloat16Vector:
 		vectors := data.(*storage.BFloat16VectorFieldData).Data
-		err = evt.AddBFloat16VectorToPayload(vectors, int(dim))
+		err = evt.AddBFloat16VectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_SparseFloatVector:
 		vectors := data.(*storage.SparseFloatVectorFieldData)
@@ -188,7 +188,7 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		assert.NoError(t, err)
 	case schemapb.DataType_Int8Vector:
 		vectors := data.(*storage.Int8VectorFieldData).Data
-		err = evt.AddInt8VectorToPayload(vectors, int(dim))
+		err = evt.AddInt8VectorToPayload(vectors, int(dim), nil)
 		assert.NoError(t, err)
 	case schemapb.DataType_ArrayOfVector:
 		elementType := field.GetElementType()
@@ -386,7 +386,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
-	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024)
+	reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
@@ -585,18 +585,18 @@ func (suite *ReaderSuite) TestVerify() {
 
 	checkFunc := func() {
 		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
-		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024)
+		reader, err := NewReader(context.Background(), cm, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 		suite.Error(err)
 		suite.Nil(reader)
 	}
 
 	// no insert binlogs to import
-	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024)
+	reader, err := NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 	suite.Error(err)
 	suite.Nil(reader)
 
 	// too many input paths
-	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024)
+	reader, err = NewReader(context.Background(), nil, schema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 	suite.Error(err)
 	suite.Nil(reader)
 
@@ -749,7 +749,7 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
 		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
-		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024)
+		reader, err := NewReader(context.Background(), cm, targetSchema, &indexpb.StorageConfig{}, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd, 64*1024*1024, "")
 		suite.NoError(err)
 		suite.NotNil(reader)
 

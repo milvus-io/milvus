@@ -163,7 +163,11 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    switch (expr_->column_.data_type_) {
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>(context);
             break;
@@ -181,6 +185,10 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::INT64: {
+            result = ExecRangeVisitorImpl<int64_t>(context);
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
             result = ExecRangeVisitorImpl<int64_t>(context);
             break;
         }
@@ -1001,9 +1009,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
 
         auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
         cached_index_chunk_res_ =
             (op_type == proto::plan::OpType::NotEqual)
                 ? std::make_shared<TargetBitmap>(active_count_, true)
@@ -1107,7 +1114,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                     pointer, milvus::index::JSONType::ARRAY);
                 if (!target_field.empty()) {
                     ShreddingArrayBsonExecutor executor(op_type, pointer, val);
-                    index->template ExecutorForShreddingData<std::string_view>(
+                    index->ExecutorForShreddingData<std::string_view>(
                         op_ctx_,
                         target_field,
                         executor,
@@ -1265,7 +1272,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonByStats() {
                         ms);
                 });
 
-            index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+            index->ExecuteForSharedData(
+                op_ctx_, bson_index_, pointer, shared_executor);
         }
 
         // for NotEqual: flip the result
@@ -1558,6 +1566,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             IndexInnerType val) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 UnaryElementFunc<T, proto::plan::GreaterThan, filter_type> func;
@@ -1707,9 +1721,17 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(
-            execute_sub_batch, skip_index_func, input, res, valid_res, val);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering
+            processed_size = ProcessElementLevelByOffsets<T>(
+                execute_sub_batch, skip_index_func, input, res, valid_res, val);
+        } else {
+            processed_size = ProcessDataByOffsets<T>(
+                execute_sub_batch, skip_index_func, input, res, valid_res, val);
+        }
     } else {
+        AssertInfo(!expr_->column_.element_level_,
+                   "Element-level filtering is not supported without offsets");
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, skip_index_func, res, valid_res, val);
     }
@@ -1736,6 +1758,10 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
+    if (!SegmentExpr::CanUseIndex()) {
+        use_index_ = false;
+        return false;
+    }
     bool has_index = pinned_index_.size() > 0;
     switch (val_type) {
         case DataType::STRING:

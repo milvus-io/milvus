@@ -415,39 +415,60 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 	}
 
 	newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-	collReadyDelegatorList := make([]*meta.DmChannel, 0)
-	for channel := range channelNames {
-		delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel))
-		chReadyDelegatorList := lo.Filter(delegatorList, func(ch *meta.DmChannel, _ int) bool {
-			err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, ch.View, meta.NextTarget)
-			dataReadyForNextTarget := err == nil
-			if !dataReadyForNextTarget {
-				log.Info("check delegator",
-					zap.Int64("collectionID", collectionID),
-					zap.String("channelName", channel),
-					zap.Int64("targetVersion", ch.View.TargetVersion),
-					zap.Int64("newTargetVersion", newVersion),
-					zap.Bool("isServiceable", ch.IsServiceable()),
-					zap.Int64("nodeID", ch.Node),
-					zap.Int64("version", ch.Version),
-					zap.Error(err),
-				)
-			}
-			return (newVersion == ch.View.TargetVersion && ch.IsServiceable()) || dataReadyForNextTarget
-		})
 
-		// to avoid stuck here in dynamic increase replica case, we just check available delegator number
-		if int32(len(chReadyDelegatorList)) < replicaNum {
-			log.RatedInfo(10, "channel not ready",
-				zap.Int("readyReplicaNum", len(chReadyDelegatorList)),
-				zap.String("channelName", channel),
+	// checkDelegatorDataReady checks if a delegator is ready for the next target.
+	// A delegator is considered ready if:
+	// 1. Its target version matches the new version and it is serviceable, OR
+	// 2. Its data is ready for the next target (all segments and channels are loaded)
+	checkDelegatorDataReady := func(replica *meta.Replica, channel *meta.DmChannel) bool {
+		err := utils.CheckDelegatorDataReady(ob.nodeMgr, ob.targetMgr, channel.View, meta.NextTarget)
+		dataReadyForNextTarget := err == nil
+		if !dataReadyForNextTarget {
+			log.Info("check delegator",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("replicaID", replica.GetID()),
+				zap.Int64("nodeID", channel.Node),
+				zap.String("channelName", channel.GetChannelName()),
+				zap.Int64("targetVersion", channel.View.TargetVersion),
+				zap.Int64("newTargetVersion", newVersion),
+				zap.Bool("isServiceable", channel.IsServiceable()),
+				zap.Int64("version", channel.Version),
+				zap.Error(err),
 			)
-			return false
 		}
-		collReadyDelegatorList = append(collReadyDelegatorList, chReadyDelegatorList...)
+		return (newVersion == channel.View.TargetVersion && channel.IsServiceable()) || dataReadyForNextTarget
 	}
 
-	return ob.syncNextTargetToDelegator(ctx, collectionID, collReadyDelegatorList, newVersion)
+	// Iterate through each replica to check if all its delegators are ready.
+	// this approach ensures each replica has at least one ready delegator for every channel.
+	// This prevents the issue where some replicas may lack nodes during dynamic replica scaling,
+	// while the total count still meets the threshold.
+	readyDelegatorsInCollection := make([]*meta.DmChannel, 0)
+	replicas := ob.meta.ReplicaManager.GetByCollection(ctx, collectionID)
+	for _, replica := range replicas {
+		readyDelegatorsInReplica := make([]*meta.DmChannel, 0)
+		for channel := range channelNames {
+			// Filter delegators by replica to ensure we only check delegators belonging to this replica
+			delegatorList := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica), meta.WithChannelName2Channel(channel))
+			readyDelegatorsInChannel := lo.Filter(delegatorList, func(ch *meta.DmChannel, _ int) bool {
+				return checkDelegatorDataReady(replica, ch)
+			})
+
+			if len(readyDelegatorsInChannel) > 0 {
+				readyDelegatorsInReplica = append(readyDelegatorsInReplica, readyDelegatorsInChannel...)
+			}
+		}
+		readyDelegatorsInCollection = append(readyDelegatorsInCollection, readyDelegatorsInReplica...)
+	}
+
+	// segment data satisfies next target spec
+	segmentDataReady := !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
+		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
+
+	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
+	syncedChannelNames := lo.Uniq(lo.Map(readyDelegatorsInCollection, func(ch *meta.DmChannel, _ int) string { return ch.ChannelName }))
+	// only after all channel are synced, we can consider the current target is ready
+	return syncSuccess && lo.Every(syncedChannelNames, lo.Keys(channelNames)) && segmentDataReady
 }
 
 // sync next target info to delegator as readable snapshot

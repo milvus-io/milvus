@@ -110,6 +110,7 @@ func TestGetSegmentSize(t *testing.T) {
 		SegmentInfo: &datapb.SegmentInfo{
 			Binlogs: []*datapb.FieldBinlog{
 				{
+					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
 							LogID:      1,
@@ -143,6 +144,9 @@ func TestGetSegmentSize(t *testing.T) {
 
 	assert.Equal(t, int64(3), segment.getSegmentSize())
 	assert.Equal(t, int64(3), segment.getSegmentSize())
+	assert.Equal(t, int64(1), segment.getFieldBinlogSize(1))
+	// field 2 has no binlogs, fallback to getSegmentSize
+	assert.Equal(t, int64(3), segment.getFieldBinlogSize(2))
 }
 
 func TestIsDeltaLogExists(t *testing.T) {

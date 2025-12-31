@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -85,6 +84,7 @@ const (
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"
+	TruncateCollectionTaskName    = "TruncateCollectionTask"
 	HasCollectionTaskName         = "HasCollectionTask"
 	DescribeCollectionTaskName    = "DescribeCollectionTask"
 	ShowCollectionTaskName        = "ShowCollectionTask"
@@ -562,9 +562,6 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", t.fieldSchema.GetDataType()))
 	}
 
-	if typeutil.IsVectorType(t.fieldSchema.DataType) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add vector field, field name = %s", t.fieldSchema.Name))
-	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName}, t.fieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support to add system field, field name = %s", t.fieldSchema.Name))
 	}
@@ -573,6 +570,17 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 	if !t.fieldSchema.Nullable {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", t.fieldSchema.Name))
+	}
+	if typeutil.IsVectorType(t.fieldSchema.DataType) && t.fieldSchema.Nullable {
+		if t.fieldSchema.DataType == schemapb.DataType_FloatVector ||
+			t.fieldSchema.DataType == schemapb.DataType_Float16Vector ||
+			t.fieldSchema.DataType == schemapb.DataType_BFloat16Vector ||
+			t.fieldSchema.DataType == schemapb.DataType_BinaryVector ||
+			t.fieldSchema.DataType == schemapb.DataType_Int8Vector {
+			if len(t.fieldSchema.TypeParams) == 0 {
+				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vector field must have dimension specified, field name = %s", t.fieldSchema.Name))
+			}
+		}
 	}
 	if t.fieldSchema.AutoID {
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("only primary field can speficy AutoID with true, field name = %s", t.fieldSchema.Name))
@@ -673,6 +681,71 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (t *dropCollectionTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type truncateCollectionTask struct {
+	baseTask
+	Condition
+	*milvuspb.TruncateCollectionRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.TruncateCollectionResponse
+	chMgr    channelsMgr
+}
+
+func (t *truncateCollectionTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *truncateCollectionTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *truncateCollectionTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *truncateCollectionTask) Name() string {
+	return TruncateCollectionTaskName
+}
+
+func (t *truncateCollectionTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *truncateCollectionTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *truncateCollectionTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *truncateCollectionTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *truncateCollectionTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_TruncateCollection
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *truncateCollectionTask) PreExecute(ctx context.Context) error {
+	return validateCollectionName(t.CollectionName)
+}
+
+func (t *truncateCollectionTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.mixCoord.TruncateCollection(ctx, t.TruncateCollectionRequest)
+	return merr.CheckRPCCall(t.result, err)
+}
+
+func (t *truncateCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
@@ -865,6 +938,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Aliases = result.Aliases
 	t.result.Properties = result.Properties
 	t.result.DbName = result.GetDbName()
+	t.result.DbId = result.GetDbId()
 	t.result.NumPartitions = result.NumPartitions
 	t.result.UpdateTimestamp = result.UpdateTimestamp
 	t.result.UpdateTimestampStr = result.UpdateTimestampStr
@@ -1291,26 +1365,6 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
 		}
 	}
-
-	_, ok := common.IsReplicateEnabled(t.Properties)
-	if ok {
-		return merr.WrapErrParameterInvalidMsg("can't set the replicate.id property")
-	}
-	endTS, ok := common.GetReplicateEndTS(t.Properties)
-	if ok && collBasicInfo.replicateID != "" {
-		allocResp, err := t.mixCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
-			Count:          1,
-			BlockTimestamp: endTS,
-		})
-		if err = merr.CheckRPCCall(allocResp, err); err != nil {
-			return merr.WrapErrServiceInternal("alloc timestamp failed", err.Error())
-		}
-		if allocResp.GetTimestamp() <= endTS {
-			return merr.WrapErrServiceInternal("alter collection: alloc timestamp failed, timestamp is not greater than endTS",
-				fmt.Sprintf("timestamp = %d, endTS = %d", allocResp.GetTimestamp(), endTS))
-		}
-	}
-
 	return nil
 }
 

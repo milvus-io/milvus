@@ -108,6 +108,7 @@ type ShardDelegator interface {
 
 	// control
 	Serviceable() bool
+	CatchingUpStreamingData() bool
 	Start()
 	Close()
 }
@@ -165,6 +166,9 @@ type shardDelegator struct {
 	// schema version
 	schemaChangeMutex sync.RWMutex
 	schemaVersion     uint64
+
+	// streaming data catch-up state
+	catchingUpStreamingData *atomic.Bool
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -996,16 +1000,40 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 
 // updateTSafe read current tsafe value from tsafeManager.
 func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
+	log := sd.getLogger(context.Background()).WithRateGroup(fmt.Sprintf("UpdateTSafe-%s", sd.vchannelName), 1, 60)
 	sd.tsCond.L.Lock()
 	if tsafe > sd.latestTsafe.Load() {
 		sd.latestTsafe.Store(tsafe)
 		sd.tsCond.Broadcast()
+
+		// Check if caught up with streaming data
+		if sd.catchingUpStreamingData.Load() {
+			lagThreshold := paramtable.Get().QueryNodeCfg.CatchUpStreamingDataTsLag.GetAsDurationByParse()
+			if lagThreshold > 0 {
+				tsafeTime := tsoutil.PhysicalTime(tsafe)
+				lag := time.Since(tsafeTime)
+				caughtUp := lag <= lagThreshold
+				log.RatedInfo(10, "delegator catching up streaming data progress",
+					zap.String("channel", sd.vchannelName),
+					zap.Duration("lag", lag),
+					zap.Duration("threshold", lagThreshold),
+					zap.Bool("caughtUp", caughtUp))
+				if caughtUp {
+					sd.catchingUpStreamingData.Store(false)
+				}
+			}
+		}
 	}
 	sd.tsCond.L.Unlock()
 }
 
 func (sd *shardDelegator) GetTSafe() uint64 {
 	return sd.latestTsafe.Load()
+}
+
+// CatchingUpStreamingData returns true if delegator is still catching up with streaming data.
+func (sd *shardDelegator) CatchingUpStreamingData() bool {
+	return sd.catchingUpStreamingData.Load()
 }
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
@@ -1179,17 +1207,18 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
-		pkOracle:         pkoracle.NewPkOracle(),
-		latestTsafe:      atomic.NewUint64(startTs),
-		loader:           loader,
-		queryHook:        queryHook,
-		chunkManager:     chunkManager,
-		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
-		excludedSegments: excludedSegments,
-		functionRunners:  make(map[int64]function.FunctionRunner),
-		analyzerRunners:  make(map[UniqueID]function.Analyzer),
-		isBM25Field:      make(map[int64]bool),
-		l0ForwardPolicy:  policy,
+		pkOracle:                pkoracle.NewPkOracle(),
+		latestTsafe:             atomic.NewUint64(startTs),
+		loader:                  loader,
+		queryHook:               queryHook,
+		chunkManager:            chunkManager,
+		partitionStats:          make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		excludedSegments:        excludedSegments,
+		functionRunners:         make(map[int64]function.FunctionRunner),
+		analyzerRunners:         make(map[UniqueID]function.Analyzer),
+		isBM25Field:             make(map[int64]bool),
+		l0ForwardPolicy:         policy,
+		catchingUpStreamingData: atomic.NewBool(true),
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {
@@ -1204,6 +1233,17 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 			if tf.GetType() == schemapb.FunctionType_BM25 {
 				sd.isBM25Field[tf.OutputFieldIds[0]] = true
 			}
+		}
+	}
+
+	for _, field := range collection.Schema().GetFields() {
+		helper := typeutil.CreateFieldSchemaHelper(field)
+		if helper.EnableAnalyzer() && sd.analyzerRunners[field.GetFieldID()] == nil {
+			analyzerRunner, err := function.NewAnalyzerRunner(field)
+			if err != nil {
+				return nil, err
+			}
+			sd.analyzerRunners[field.GetFieldID()] = analyzerRunner
 		}
 	}
 

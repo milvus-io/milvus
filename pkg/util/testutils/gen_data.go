@@ -105,7 +105,17 @@ func GenerateFloat64Array(numRows int) []float64 {
 func GenerateVarCharArray(numRows int, maxLen int) []string {
 	ret := make([]string, numRows)
 	for i := 0; i < numRows; i++ {
-		ret[i] = funcutil.RandomString(rand.Intn(maxLen))
+		suffix := fmt.Sprintf("_%d", i)
+		suffixLen := len(suffix)
+		availableLen := maxLen - suffixLen
+		if availableLen < 0 {
+			availableLen = 0
+		}
+		randLen := 0
+		if availableLen > 0 {
+			randLen = rand.Intn(availableLen + 1)
+		}
+		ret[i] = funcutil.RandomString(randLen) + suffix
 	}
 	return ret
 }
@@ -353,6 +363,21 @@ func GenerateInt8Vectors(numRows, dim int) []int8 {
 	ret := make([]int8, 0, total)
 	for i := 0; i < total; i++ {
 		ret = append(ret, int8(rand.Intn(256)-128))
+	}
+	return ret
+}
+
+func GenerateFloatVectorsWithInvalidData(numRows, dim int) []float32 {
+	total := numRows * dim
+	ret := make([]float32, 0, total)
+	for i := 0; i < total; i++ {
+		var f float32
+		if i%2 == 0 {
+			f = float32(math.NaN())
+		} else {
+			f = float32(math.Inf(1))
+		}
+		ret = append(ret, f)
 	}
 	return ret
 }

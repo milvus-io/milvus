@@ -40,6 +40,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -59,6 +62,25 @@ func newForwardService(streamingCoordClient client.Client) *forwardServiceImpl {
 	return fs
 }
 
+type ForwardService interface {
+	ForwardLegacyProxy(ctx context.Context, request any, forwardAuth ...ForwardOption) (any, error)
+}
+
+// OptForwardAuth is the option to set the auth token for the forward service.
+func OptForwardAuth(authToken string) ForwardOption {
+	return func(fs *forwardOption) {
+		fs.authToken = authToken
+	}
+}
+
+// ForwardOption is the option for the forward service.
+type ForwardOption func(*forwardOption)
+
+// forwardOption is the option for the forward service.
+type forwardOption struct {
+	authToken string
+}
+
 // forwardServiceImpl is the implementation of FallbackService.
 type forwardServiceImpl struct {
 	log.Binder
@@ -70,13 +92,13 @@ type forwardServiceImpl struct {
 	rb                   resolver.Builder
 }
 
-// ForwardDMLToLegacyProxy forwards the DML request to the legacy proxy.
-func (fs *forwardServiceImpl) ForwardDMLToLegacyProxy(ctx context.Context, request any) (any, error) {
+// ForwardLegacyProxy forwards the request to the legacy proxy.
+func (fs *forwardServiceImpl) ForwardLegacyProxy(ctx context.Context, request any, opts ...ForwardOption) (any, error) {
 	if err := fs.checkIfForwardDisabledWithLock(ctx); err != nil {
 		return nil, err
 	}
 
-	return fs.forwardDMLToLegacyProxy(ctx, request)
+	return fs.forwardLegacyProxy(ctx, request, opts...)
 }
 
 // checkIfForwardDisabledWithLock checks if the forward is disabled with lock.
@@ -87,11 +109,19 @@ func (fs *forwardServiceImpl) checkIfForwardDisabledWithLock(ctx context.Context
 	return fs.checkIfForwardDisabled(ctx)
 }
 
-// forwardDMLToLegacyProxy forwards the DML request to the legacy proxy.
-func (fs *forwardServiceImpl) forwardDMLToLegacyProxy(ctx context.Context, request any) (any, error) {
+// forwardLegacyProxy forwards the request to the legacy proxy.
+func (fs *forwardServiceImpl) forwardLegacyProxy(ctx context.Context, request any, opts ...ForwardOption) (any, error) {
 	s, err := fs.getLegacyProxyService(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	var optForwardOption forwardOption
+	for _, opt := range opts {
+		opt(&optForwardOption)
+	}
+	if optForwardOption.authToken != "" {
+		ctx = contextutil.SetToIncomingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode(optForwardOption.authToken))
 	}
 
 	var result proto.Message
@@ -102,6 +132,12 @@ func (fs *forwardServiceImpl) forwardDMLToLegacyProxy(ctx context.Context, reque
 		result, err = s.Delete(ctx, req)
 	case *milvuspb.UpsertRequest:
 		result, err = s.Upsert(ctx, req)
+	case *milvuspb.SearchRequest:
+		result, err = s.Search(ctx, req)
+	case *milvuspb.HybridSearchRequest:
+		result, err = s.HybridSearch(ctx, req)
+	case *milvuspb.QueryRequest:
+		result, err = s.Query(ctx, req)
 	default:
 		panic(fmt.Sprintf("unsupported request type: %T", request))
 	}
@@ -174,7 +210,7 @@ func (fs *forwardServiceImpl) initLegacyProxy() {
 	})
 	fs.legacyProxy = lazygrpc.WithServiceCreator(conn, milvuspb.NewMilvusServiceClient)
 	fs.rb = rb
-	fs.Logger().Info("streaming service is not ready, legacy proxy is initiated to forward DML request", zap.Int("proxyPort", port))
+	fs.Logger().Info("streaming service is not ready, legacy proxy is initiated to forward request", zap.Int("proxyPort", port))
 }
 
 // getDialOptions returns the dial options for the legacy proxy.
@@ -232,21 +268,24 @@ func (fs *forwardServiceImpl) markForwardDisabled() {
 	}
 }
 
-// ForwardDMLToLegacyProxyUnaryServerInterceptor forwards the DML request to the legacy proxy.
+// ForwardLegacyProxyUnaryServerInterceptor forwards the request to the legacy proxy.
 // When upgrading from 2.5.x to 2.6.x, the streaming service is not ready yet,
 // the dml cannot be executed at new 2.6.x proxy until all 2.5.x proxies are down.
 //
 // so we need to forward the request to the 2.5.x proxy.
-func ForwardDMLToLegacyProxyUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+func ForwardLegacyProxyUnaryServerInterceptor(opts ...ForwardOption) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if info.FullMethod != milvuspb.MilvusService_Insert_FullMethodName &&
 			info.FullMethod != milvuspb.MilvusService_Delete_FullMethodName &&
-			info.FullMethod != milvuspb.MilvusService_Upsert_FullMethodName {
+			info.FullMethod != milvuspb.MilvusService_Upsert_FullMethodName &&
+			info.FullMethod != milvuspb.MilvusService_Search_FullMethodName &&
+			info.FullMethod != milvuspb.MilvusService_HybridSearch_FullMethodName &&
+			info.FullMethod != milvuspb.MilvusService_Query_FullMethodName {
 			return handler(ctx, req)
 		}
 
 		// try to forward the request to the legacy proxy.
-		resp, err := WAL().(*walAccesserImpl).forwardService.ForwardDMLToLegacyProxy(ctx, req)
+		resp, err := WAL().ForwardService().ForwardLegacyProxy(ctx, req, opts...)
 		if err == nil {
 			return resp, nil
 		}

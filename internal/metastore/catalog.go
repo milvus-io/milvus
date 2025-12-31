@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -185,9 +186,9 @@ type DataCoordCatalog interface {
 	DropUpdateExternalCollectionTask(ctx context.Context, taskID typeutil.UniqueID) error
 
 	// Analyzer Resource
-	SaveFileResource(ctx context.Context, resource *model.FileResource) error
-	RemoveFileResource(ctx context.Context, resourceID int64) error
-	ListFileResource(ctx context.Context) ([]*model.FileResource, error)
+	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
+	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
+	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 }
 
 type QueryCoordCatalog interface {

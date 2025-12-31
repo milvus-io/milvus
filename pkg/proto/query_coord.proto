@@ -101,7 +101,8 @@ service QueryCoord {
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
-  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+  rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
+  rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
 }
 
 service QueryNode {
@@ -177,10 +178,28 @@ service QueryNode {
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
     
     rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(common.Status){}
+    rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+    
+    // file resource
+    rpc SyncFileResource(internal.SyncFileResourceRequest) returns(common.Status) {}
+
+    rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
+
+message ComputePhraseMatchSlopRequest {
+    common.MsgBase base = 1;
+    string analyzer_params = 2;
+    string query_text = 3;
+    repeated string data_texts = 4;
+}
+
+message ComputePhraseMatchSlopResponse {
+    common.Status status = 1;
+    repeated bool is_match = 2;
+    repeated int64 slops = 3;
+}
 
 message ShowCollectionsRequest {
     common.MsgBase base = 1;
@@ -416,6 +435,7 @@ enum LoadScope {
     Delta = 1;
     Index = 2;
     Stats = 3;
+    Reopen = 4;
 }
 
 message LoadSegmentsRequest {
@@ -655,6 +675,7 @@ message LeaderView {
 
 message LeaderViewStatus {
     bool serviceable = 1;
+    bool catching_up_streaming_data = 2;  // true = still catching up, not ready
 }
 
 message SegmentDist {
@@ -674,6 +695,7 @@ message SegmentVersionInfo {
     bool is_sorted = 9;
     repeated int64 field_json_index_stats = 10;
     map<int64, JsonStatsInfo> json_stats_info = 11; 
+    string manifest_path = 12;
 }
 
 message ChannelVersionInfo {
@@ -1012,6 +1034,11 @@ message AnalyzerInfo{
 message ValidateAnalyzerRequest{
     common.MsgBase base = 1;
     repeated AnalyzerInfo analyzer_infos = 2;
+}
+
+message ValidateAnalyzerResponse{
+    common.Status status = 1;
+    repeated int64 resource_ids = 2;
 }
 
 message HighlightOptions{

@@ -214,8 +214,9 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				return
 			}
 			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
+			opManifest := UpdateManifest(info.GetSegmentID(), info.GetManifestPath())
 			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
-			err = t.meta.UpdateSegmentsInfo(context.TODO(), op1, op2)
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), op1, opManifest, op2)
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {

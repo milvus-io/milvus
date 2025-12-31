@@ -113,6 +113,11 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 
 	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
+	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
+	// It will be used to forbid the compaction of current collection when truncate collection operation is in progress.
+	BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error
+	// TruncateCollection is called when the truncate collection message is acknowledged.
+	TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error
 	CheckIfCollectionRenamable(ctx context.Context, dbName string, oldName string, newDBName string, newName string) error
 	GetGeneralCount(ctx context.Context) int
 
@@ -331,7 +336,7 @@ func (mt *MetaTable) createDefaultDb() error {
 	}
 
 	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
-	if hookutil.IsClusterEncyptionEnabled() && len(defaultRootKey) > 0 {
+	if hookutil.IsClusterEncryptionEnabled() && len(defaultRootKey) > 0 {
 		// Set unique ID as ezID because the default dbID for each cluster
 		// is the same
 		ezID, err := mt.tsoAllocator.GenerateTSO(1)
@@ -557,6 +562,10 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
+	log.Ctx(ctx).Info("update coll state to dropping",
+		zap.Int64("collectionID", collectionID),
+		zap.String("state", clone.State.String()),
+	)
 
 	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
 	if err != nil {
@@ -575,31 +584,50 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	return nil
 }
 
-func (mt *MetaTable) removeIfNameMatchedInternal(collectionID UniqueID, name string) {
+func (mt *MetaTable) removeIfNameMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
 	mt.names.removeIf(func(db string, collection string, id UniqueID) bool {
-		return collectionID == id
+		if collectionID == id {
+			log.Ctx(ctx).Info("remove from names",
+				zap.String("dbName", db),
+				zap.String("collectionName", collection),
+				zap.Int64("collectionID", id),
+			)
+			return true
+		}
+		return false
 	})
 }
 
-func (mt *MetaTable) removeIfAliasMatchedInternal(collectionID UniqueID, alias string) {
+func (mt *MetaTable) removeIfAliasMatchedInternal(ctx context.Context, collectionID UniqueID, alias string) {
 	mt.aliases.removeIf(func(db string, collection string, id UniqueID) bool {
-		return collectionID == id
+		if collectionID == id {
+			log.Ctx(ctx).Info("remove from aliases",
+				zap.String("dbName", db),
+				zap.String("alias", collection),
+				zap.Int64("collectionID", id),
+			)
+			return true
+		}
+		return false
 	})
 }
 
-func (mt *MetaTable) removeIfMatchedInternal(collectionID UniqueID, name string) {
-	mt.removeIfNameMatchedInternal(collectionID, name)
-	mt.removeIfAliasMatchedInternal(collectionID, name)
+func (mt *MetaTable) removeIfMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
+	mt.removeIfNameMatchedInternal(ctx, collectionID, name)
+	mt.removeIfAliasMatchedInternal(ctx, collectionID, name)
 }
 
-func (mt *MetaTable) removeAllNamesIfMatchedInternal(collectionID UniqueID, names []string) {
+func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, collectionID UniqueID, names []string) {
 	for _, name := range names {
-		mt.removeIfMatchedInternal(collectionID, name)
+		mt.removeIfMatchedInternal(ctx, collectionID, name)
 	}
 }
 
-func (mt *MetaTable) removeCollectionByIDInternal(collectionID UniqueID) {
+func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
 	delete(mt.collID2Meta, collectionID)
+	log.Ctx(ctx).Info("delete from collID2Meta",
+		zap.Int64("collectionID", collectionID),
+	)
 }
 
 func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
@@ -635,8 +663,8 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	allNames = append(allNames, coll.Name)
 
 	// We cannot delete the name directly, since newly collection with same name may be created.
-	mt.removeAllNamesIfMatchedInternal(collectionID, allNames)
-	mt.removeCollectionByIDInternal(collectionID)
+	mt.removeAllNamesIfMatchedInternal(ctx, collectionID, allNames)
+	mt.removeCollectionByIDInternal(ctx, collectionID)
 
 	log.Ctx(ctx).Info("remove collection",
 		zap.Int64("dbID", coll.DBID),
@@ -970,7 +998,79 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	mt.names.remove(oldColl.DBName, oldColl.Name)
 	mt.names.insert(newColl.DBName, newColl.Name, newColl.CollectionID)
 	mt.collID2Meta[header.CollectionId] = newColl
-	log.Ctx(ctx).Info("alter collection finished", zap.Bool("dbChanged", dbChanged), zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", newColl.UpdateTimestamp))
+	log.Ctx(ctx).Info("alter collection finished",
+		zap.String("oldDBName", oldColl.DBName),
+		zap.String("newDBName", newColl.DBName),
+		zap.String("oldCollectionName", oldColl.Name),
+		zap.String("newCollectionName", newColl.Name),
+		zap.Int64("headerCollectionID", header.CollectionId),
+		zap.Int64("newCollectionID", newColl.CollectionID),
+		zap.Int64("oldCollectionID", oldColl.CollectionID),
+		zap.Bool("dbChanged", dbChanged),
+		zap.Uint64("ts", newColl.UpdateTimestamp),
+	)
+	return nil
+}
+
+func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return errAlterCollectionNotFound
+	}
+
+	// Apply the properties to override the existing properties.
+	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	key := common.CollectionOnTruncatingKey
+	if _, ok := newProperties[key]; ok && newProperties[key] == "1" {
+		return nil
+	}
+	newProperties[key] = "1"
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+	newColl.Properties = common.NewKeyValuePairs(newProperties)
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[coll.CollectionID] = newColl
+	log.Ctx(ctx).Info("update collID2Meta for begin truncate collection",
+		zap.Int64("collectionID", coll.CollectionID),
+	)
+	return nil
+}
+
+func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.BroadcastResultTruncateCollectionMessageV2) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	collectionID := result.Message.Header().CollectionId
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return errAlterCollectionNotFound
+	}
+
+	oldColl := coll.Clone()
+
+	// remmove the truncating key from the properties and update the last truncate time tick of the shard infos
+	newColl := coll.Clone()
+	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
+	delete(newProperties, common.CollectionOnTruncatingKey)
+	newColl.Properties = common.NewKeyValuePairs(newProperties)
+	for vchannel := range newColl.ShardInfos {
+		newColl.ShardInfos[vchannel].LastTruncateTimeTick = result.Results[vchannel].TimeTick
+	}
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[coll.CollectionID] = newColl
+	log.Ctx(ctx).Info("update collID2Meta for truncate collection",
+		zap.Int64("collectionID", coll.CollectionID),
+	)
 	return nil
 }
 
@@ -1286,7 +1386,8 @@ func (mt *MetaTable) AlterAlias(ctx context.Context, result message.BroadcastRes
 	log.Ctx(ctx).Info("alter alias",
 		zap.String("db", header.DbName),
 		zap.String("alias", header.Alias),
-		zap.String("collection", header.CollectionName),
+		zap.String("collectionName", header.CollectionName),
+		zap.Int64("collectionID", header.CollectionId),
 		zap.Uint64("ts", result.GetControlChannelResult().TimeTick),
 	)
 	return nil
@@ -1524,7 +1625,7 @@ func (mt *MetaTable) AlterCredential(ctx context.Context, result message.Broadca
 	}
 	// if the credential already exists and the version is not greater than the current timetick.
 	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
-		log.Info("credential already exists and the version is not greater than the current timetick",
+		log.Ctx(ctx).Info("credential already exists and the version is not greater than the current timetick",
 			zap.String("username", body.CredentialInfo.Username),
 			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
 			zap.Uint64("current", existsCredential.TimeTick),
@@ -1576,7 +1677,7 @@ func (mt *MetaTable) DeleteCredential(ctx context.Context, result message.Broadc
 	}
 	// if the credential already exists and the version is not greater than the current timetick.
 	if existsCredential != nil && existsCredential.TimeTick >= result.GetControlChannelResult().TimeTick {
-		log.Info("credential already exists and the version is not greater than the current timetick",
+		log.Ctx(ctx).Info("credential already exists and the version is not greater than the current timetick",
 			zap.String("username", result.Message.Header().UserName),
 			zap.Uint64("incoming", result.GetControlChannelResult().TimeTick),
 			zap.Uint64("current", existsCredential.TimeTick),

@@ -65,6 +65,10 @@ type walAccesserImpl struct {
 	forwardService *forwardServiceImpl
 }
 
+func (w *walAccesserImpl) ForwardService() ForwardService {
+	return w.forwardService
+}
+
 func (w *walAccesserImpl) Replicate() ReplicateService {
 	return replicateService{w}
 }
@@ -118,11 +122,12 @@ func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
 	}
 	// TODO: optimize the consumer into pchannel level.
 	rc := consumer.NewResumableConsumer(w.handlerClient.CreateConsumer, &consumer.ConsumerOptions{
-		PChannel:       opts.PChannel,
-		VChannel:       opts.VChannel,
-		DeliverPolicy:  opts.DeliverPolicy,
-		DeliverFilters: opts.DeliverFilters,
-		MessageHandler: opts.MessageHandler,
+		PChannel:               opts.PChannel,
+		VChannel:               opts.VChannel,
+		DeliverPolicy:          opts.DeliverPolicy,
+		DeliverFilters:         opts.DeliverFilters,
+		MessageHandler:         opts.MessageHandler,
+		IgnorePauseConsumption: opts.IgnorePauseConsumption,
 	})
 	return rc
 }

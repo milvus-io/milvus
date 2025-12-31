@@ -49,6 +49,11 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                  proto::plan::OpType op_type,
                  exec::SegmentExpr* segment);
 
+    ScalarIndexType
+    GetIndexType() const override {
+        return ScalarIndexType::NGRAM;
+    }
+
     void
     finish() {
         this->wrapper_->finish();
@@ -60,11 +65,11 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     }
 
  private:
-    template <typename T>
+    template <typename T, typename Predicate>
     std::optional<TargetBitmap>
     ExecuteQueryWithPredicate(const std::string& literal,
                               exec::SegmentExpr* segment,
-                              std::function<bool(const T&)> predicate,
+                              Predicate&& predicate,
                               bool need_post_filter);
 
     // Match is something like xxx%xxx%xxx, xxx%xxx, %xxx%xxx, xxx_x etc.

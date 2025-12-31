@@ -1221,14 +1221,13 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_partial_update_same_pk_same_field(self):
         """
-        target:  Test PU will success and query will success
+        target: Test partial update on an existing pk with the same field will success
         method:
             1. Create a collection
             2. Insert rows
-            3. Upsert the rows with same pk and same field
-            4. Query the rows
-            5. Upsert the rows with same pk and different field
-        expected: Step 2 -> 4 should success 5 should fail
+            3. Upsert a single row with existing pk and same field (partial update)
+            4. Query the row to verify the update
+        expected: All steps should success, and the field value should be updated
         """
         # step 1: create collection
         client = self._client()
@@ -1236,28 +1235,31 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_int32_field_name, DataType.INT32, nullable=True)
-        index_params = self.prepare_index_params(client)[0] 
+        index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
         index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
         collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
-        self.create_collection(client, collection_name, default_dim, schema=schema, 
+        self.create_collection(client, collection_name, default_dim, schema=schema,
                                consistency_level="Strong", index_params=index_params)
-        
+
         # step 2: Insert rows
         rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, rows, partial_update=True)
 
-        # step 3: Upsert the rows with same pk and same field
-        new_rows = [{default_primary_key_field_name: 0, 
-                    default_int32_field_name: i} for i in range(default_nb)]
-        self.upsert(client, collection_name, new_rows, partial_update=True)
+        # step 3: Upsert a single row with existing pk=0 and update the same field
+        updated_value = 99999
+        new_row = {default_primary_key_field_name: 0,
+                   default_int32_field_name: updated_value}
+        self.upsert(client, collection_name, [new_row], partial_update=True)
 
-        # step 4: Query the rows
+        # step 4: Query the row to verify the update
+        expected_row = {default_primary_key_field_name: 0,
+                        default_int32_field_name: updated_value}
         result = self.query(client, collection_name, filter=f"{default_primary_key_field_name} == 0",
                    check_task=CheckTasks.check_query_results,
                    output_fields=[default_int32_field_name],
-                   check_items={exp_res: [new_rows[-1]],
+                   check_items={exp_res: [expected_row],
                                 "pk_name": default_primary_key_field_name})[0]
         assert len(result) == 1
 
@@ -1319,6 +1321,50 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_partial_update_duplicate_pk_partial_update(self):
+        """
+        target: test PU will success when partial update duplicate pk with partial update
+        method:
+            1. Create a collection
+            2. Insert rows with duplicate pk
+            3. Upsert the rows with duplicate pk with partial update
+        expected: Step 3 result in default_nb rows
+        """
+        # step 1: create collection
+        client = self._client()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_int32_field_name, DataType.INT32, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_primary_key_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_vector_field_name, index_type="AUTOINDEX")
+        index_params.add_index(default_int32_field_name, index_type="AUTOINDEX")
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, schema=schema, 
+                               consistency_level="Strong", index_params=index_params)
+        
+        # step 2: Insert rows with duplicate pk
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
+        self.insert(client, collection_name, rows)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0]["count(*)"] == default_nb
+
+        dup_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, skip_field_names=[default_int32_field_name])
+        self.insert(client, collection_name, dup_rows)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0]["count(*)"] == default_nb * 2
+        
+        # step 3: Upsert the rows with duplicate pk with partial update
+        new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
+                                            desired_field_names=[default_primary_key_field_name, default_int32_field_name])
+        self.upsert(client, collection_name, new_rows, partial_update=True)
+        result = self.query(client, collection_name, filter=default_search_exp, output_fields=["count(*)"])
+        assert result[0][0]["count(*)"] == default_nb
+        
+        self.drop_collection(client, collection_name)
+        
 class TestMilvusClientPartialUpdateInvalid(TestMilvusClientV2Base):
     """ Test case of partial update interface """
     @pytest.fixture(scope="function", params=[False, True])

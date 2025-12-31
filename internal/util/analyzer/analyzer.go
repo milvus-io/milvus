@@ -11,11 +11,15 @@ type (
 )
 
 func NewAnalyzer(param string) (Analyzer, error) {
-	return canalyzer.NewAnalyzer(param)
+	return canalyzer.NewAnalyzer(param, "")
 }
 
-func ValidateAnalyzer(param string) error {
-	return canalyzer.ValidateAnalyzer(param)
+func ValidateAnalyzer(param string) ([]int64, error) {
+	return canalyzer.ValidateAnalyzer(param, "")
+}
+
+func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {
+	return canalyzer.UpdateGlobalResourceInfo(resourceMap)
 }
 
 func InitOptions() {

@@ -19,9 +19,7 @@ package json
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -31,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -38,16 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-type mockReader struct {
-	io.Reader
-	io.Closer
-	io.ReaderAt
-	io.Seeker
-	size int64
-}
-
-func (mr *mockReader) Size() (int64, error) {
-	return mr.size, nil
+func init() {
+	paramtable.Init()
 }
 
 type ReaderSuite struct {
@@ -58,10 +49,6 @@ type ReaderSuite struct {
 	vecDataType schemapb.DataType
 }
 
-func (suite *ReaderSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
-}
-
 func (suite *ReaderSuite) SetupTest() {
 	// default suite params
 	suite.numRows = 100
@@ -69,7 +56,7 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.vecDataType = schemapb.DataType_FloatVector
 }
 
-func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool) {
+func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool, nullPercent int) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -94,6 +81,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 						Value: "8",
 					},
 				},
+				Nullable: nullable,
 			},
 			{
 				FieldID:     102,
@@ -134,7 +122,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 		})
 	}
 
-	insertData, err := testutil.CreateInsertData(schema, suite.numRows)
+	insertData, err := testutil.CreateInsertData(schema, suite.numRows, nullPercent)
 	suite.NoError(err)
 
 	rows, err := testutil.CreateInsertDataRowsForJSON(schema, insertData)
@@ -145,11 +133,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-		reader := strings.NewReader(string(jsonBytes))
-		r := &mockReader{
-			Reader: reader,
-			Closer: io.NopCloser(reader),
-		}
+		r := importcommon.NewMockReader(string(jsonBytes))
 		return r, nil
 	})
 	cm.EXPECT().Size(mock.Anything, "mockPath").Return(128, nil)
@@ -236,7 +220,7 @@ func (suite *ReaderSuite) runWithDefaultValue(dataType schemapb.DataType, elemTy
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+		r := importcommon.NewMockReader(string(jsonBytes))
 		return r, nil
 	})
 	reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
@@ -278,12 +262,16 @@ func (suite *ReaderSuite) TestReadScalarFields() {
 	for _, dataType := range scalarTypes {
 		if dataType == schemapb.DataType_Array {
 			for _, elementType := range elementTypes {
-				suite.run(dataType, elementType, false)
-				suite.run(dataType, elementType, true)
+				suite.run(dataType, elementType, false, 0)
+				for _, nullPercent := range []int{0, 50, 100} {
+					suite.run(dataType, elementType, true, nullPercent)
+				}
 			}
 		} else {
-			suite.run(dataType, schemapb.DataType_None, false)
-			suite.run(dataType, schemapb.DataType_None, true)
+			suite.run(dataType, schemapb.DataType_None, false, 0)
+			for _, nullPercent := range []int{0, 50, 100} {
+				suite.run(dataType, schemapb.DataType_None, true, nullPercent)
+			}
 		}
 	}
 }
@@ -308,22 +296,29 @@ func (suite *ReaderSuite) TestReadScalarFieldsWithDefaultValue() {
 
 func (suite *ReaderSuite) TestStringPK() {
 	suite.pkDataType = schemapb.DataType_VarChar
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+	for _, nullPercent := range []int{0, 50, 100} {
+		suite.run(schemapb.DataType_Int32, schemapb.DataType_None, true, nullPercent)
+	}
 }
 
 func (suite *ReaderSuite) TestVector() {
-	suite.vecDataType = schemapb.DataType_BinaryVector
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	suite.vecDataType = schemapb.DataType_FloatVector
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	suite.vecDataType = schemapb.DataType_Float16Vector
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	suite.vecDataType = schemapb.DataType_BFloat16Vector
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	suite.vecDataType = schemapb.DataType_SparseFloatVector
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
-	suite.vecDataType = schemapb.DataType_Int8Vector
-	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
+	dataTypes := []schemapb.DataType{
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_Int8Vector,
+	}
+
+	for _, dataType := range dataTypes {
+		suite.vecDataType = dataType
+		suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+		for _, nullPercent := range []int{0, 50, 100} {
+			suite.run(schemapb.DataType_Int32, schemapb.DataType_None, true, nullPercent)
+		}
+	}
 }
 
 func (suite *ReaderSuite) TestDecodeError() {
@@ -341,8 +336,8 @@ func (suite *ReaderSuite) TestDecodeError() {
 
 		cm := mocks.NewChunkManager(suite.T())
 		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-			r := &mockReader{Reader: strings.NewReader(jsonContent)}
-			return r, ioErr
+			r := importcommon.NewMockReader(jsonContent)
+			return r, nil
 		})
 		var reader *reader
 		var err error
@@ -436,7 +431,7 @@ func (suite *ReaderSuite) TestReadCount() {
 
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+		r := importcommon.NewMockReader(string(jsonBytes))
 		return r, nil
 	})
 
@@ -503,7 +498,7 @@ func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
 	{
 		cm := mocks.NewChunkManager(suite.T())
 		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-			r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+			r := importcommon.NewMockReader(string(jsonBytes))
 			return r, nil
 		})
 		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
@@ -518,7 +513,7 @@ func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
 		schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
 		cm := mocks.NewChunkManager(suite.T())
 		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
-			r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+			r := importcommon.NewMockReader(string(jsonBytes))
 			return r, nil
 		})
 		reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)

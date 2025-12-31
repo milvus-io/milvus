@@ -1,6 +1,8 @@
+use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
+use std::io::BufRead;
 use std::sync::Arc;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 
@@ -203,7 +205,10 @@ pub struct SynonymFilter {
 }
 
 impl SynonymFilter {
-    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<SynonymFilter> {
+    pub fn from_json(
+        params: &json::Map<String, json::Value>,
+        helper: &mut FileResourcePathHelper,
+    ) -> Result<SynonymFilter> {
         let expand = params.get("expand").map_or(Ok(true), |v| {
             v.as_bool().ok_or(TantivyBindingError::InvalidArgument(
                 "create synonym filter failed, `expand` must be bool".to_string(),
@@ -224,6 +229,22 @@ impl SynonymFilter {
                     ))?;
                     builder.add_row(s)
                 })?;
+        }
+
+        if let Some(file_params) = params.get("synonyms_file") {
+            let path = get_resource_path(helper, file_params, "synonyms dict file")?;
+            let file = std::fs::File::open(path)?;
+            let reader = std::io::BufReader::new(file);
+            for line in reader.lines() {
+                if let Ok(row_data) = line {
+                    builder.add_row(&row_data)?;
+                } else {
+                    return Err(TantivyBindingError::InternalError(format!(
+                        "read synonyms dict file failed, error: {}",
+                        line.unwrap_err().to_string()
+                    )));
+                }
+            }
         }
 
         Ok(SynonymFilter {
@@ -327,10 +348,14 @@ impl<T: TokenStream> TokenStream for SynonymFilterStream<T> {
 #[cfg(test)]
 mod tests {
     use super::SynonymFilter;
+    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
     use crate::analyzer::tokenizers::standard_builder;
     use crate::log::init_log;
+
     use serde_json as json;
     use std::collections::HashSet;
+    use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn test_synonym_filter() {
@@ -341,7 +366,8 @@ mod tests {
             "synonyms": ["trans => translate, \\=>", "\\\\test, test, tests"]
         }"#;
         let json_params = json::from_str::<json::Value>(&params).unwrap();
-        let filter = SynonymFilter::from_json(json_params.as_object().unwrap());
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = SynonymFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());
         let mut analyzer = builder.build();
@@ -359,6 +385,44 @@ mod tests {
                 .map(|s| s.as_str())
                 .collect::<HashSet<&str>>(),
             HashSet::from(["\\test", "translate", "=>", "synonym"])
+        );
+    }
+
+    #[test]
+    fn test_synonym_filter_with_file() {
+        init_log();
+        let file_dir = Path::new(file!()).parent().unwrap();
+        let synonyms_path = file_dir.join("../data/test/synonyms_dict.txt");
+        let synonyms_path_str = synonyms_path.to_string_lossy().to_string();
+        let params = format!(
+            r#"{{
+                "type": "synonym",
+                "synonyms_file": {{
+                    "type": "local",
+                    "path": "{synonyms_path_str}"
+                }}
+            }}"#
+        );
+        let json_params = json::from_str::<json::Value>(&params).unwrap();
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let filter = SynonymFilter::from_json(json_params.as_object().unwrap(), &mut helper);
+        assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
+        let builder = standard_builder().filter(filter.unwrap());
+        let mut analyzer = builder.build();
+        let mut stream = analyzer.token_stream("distance interval");
+
+        let mut results = Vec::<String>::new();
+        while stream.advance() {
+            let token = stream.token();
+            results.push(token.text.clone());
+        }
+
+        assert_eq!(
+            results
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<HashSet<&str>>(),
+            HashSet::from(["distance", "range", "span", "length", "interval", "gap"])
         );
     }
 }

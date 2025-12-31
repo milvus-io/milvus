@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -60,10 +59,6 @@ type ReaderSuite struct {
 	numRows     int
 	pkDataType  schemapb.DataType
 	vecDataType schemapb.DataType
-}
-
-func (s *ReaderSuite) SetupSuite() {
-	paramtable.Get().Init(paramtable.NewBaseTable())
 }
 
 func (s *ReaderSuite) SetupTest() {
@@ -455,8 +450,10 @@ func (s *ReaderSuite) runWithSparseVector(indicesType arrow.DataType, valuesType
 		builder.AppendValues(int64Data, validData)
 		arrowColumns = append(arrowColumns, builder.NewInt64Array())
 
-		contents := insertData.Data[schema.Fields[1].FieldID].(*storage.SparseFloatVectorFieldData).GetContents()
-		arr, err := testutil.BuildSparseVectorData(mem, contents, arrowFields[1].Type)
+		sparseFieldData := insertData.Data[schema.Fields[1].FieldID].(*storage.SparseFloatVectorFieldData)
+		contents := sparseFieldData.GetContents()
+		sparseValidData := sparseFieldData.ValidData
+		arr, err := testutil.BuildSparseVectorData(mem, contents, arrowFields[1].Type, sparseValidData)
 		assert.NoError(s.T(), err)
 		arrowColumns = append(arrowColumns, arr)
 
@@ -550,65 +547,34 @@ func (s *ReaderSuite) TestReadScalarFieldsWithDefaultValue() {
 }
 
 func (s *ReaderSuite) TestReadScalarFields() {
-	s.run(schemapb.DataType_Bool, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Int8, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Int16, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Int64, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Float, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Double, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_String, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_JSON, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Geometry, schemapb.DataType_None, false, 0)
+	elementTypes := []schemapb.DataType{
+		schemapb.DataType_Bool,
+		schemapb.DataType_Int8,
+		schemapb.DataType_Int16,
+		schemapb.DataType_Int32,
+		schemapb.DataType_Int64,
+		schemapb.DataType_Float,
+		schemapb.DataType_Double,
+		schemapb.DataType_String,
+	}
 
-	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Float, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Double, false, 0)
-	s.run(schemapb.DataType_Array, schemapb.DataType_String, false, 0)
+	scalarTypes := append(elementTypes, []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_JSON, schemapb.DataType_Geometry, schemapb.DataType_Array}...)
 
-	s.run(schemapb.DataType_Bool, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_Int8, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_Int16, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_Int64, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_Float, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_String, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true, 50)
-
-	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Float, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Double, true, 50)
-	s.run(schemapb.DataType_Array, schemapb.DataType_String, true, 50)
-
-	s.run(schemapb.DataType_Bool, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_Int8, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_Int16, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_Int64, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_Float, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_String, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_VarChar, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_JSON, schemapb.DataType_None, true, 100)
-	s.run(schemapb.DataType_Geometry, schemapb.DataType_None, true, 100)
-
-	s.run(schemapb.DataType_Array, schemapb.DataType_Bool, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int8, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int16, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int32, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Int64, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Float, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_Double, true, 100)
-	s.run(schemapb.DataType_Array, schemapb.DataType_String, true, 100)
+	for _, dataType := range scalarTypes {
+		if dataType == schemapb.DataType_Array {
+			for _, elementType := range elementTypes {
+				s.run(dataType, elementType, false, 0)
+				for _, nullPercent := range []int{0, 50, 100} {
+					s.run(dataType, elementType, true, nullPercent)
+				}
+			}
+		} else {
+			s.run(dataType, schemapb.DataType_None, false, 0)
+			for _, nullPercent := range []int{0, 50, 100} {
+				s.run(dataType, schemapb.DataType_None, true, nullPercent)
+			}
+		}
+	}
 
 	s.failRun(schemapb.DataType_JSON, true)
 }
@@ -616,24 +582,28 @@ func (s *ReaderSuite) TestReadScalarFields() {
 func (s *ReaderSuite) TestStringPK() {
 	s.pkDataType = schemapb.DataType_VarChar
 	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 50)
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, 100)
+	for _, nullPercent := range []int{0, 50, 100} {
+		s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, nullPercent)
+	}
 }
 
 func (s *ReaderSuite) TestVector() {
-	s.vecDataType = schemapb.DataType_BinaryVector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	s.vecDataType = schemapb.DataType_FloatVector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	s.vecDataType = schemapb.DataType_Float16Vector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	s.vecDataType = schemapb.DataType_BFloat16Vector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	// this test case only test parsing sparse vector from JSON-format string
-	s.vecDataType = schemapb.DataType_SparseFloatVector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
-	s.vecDataType = schemapb.DataType_Int8Vector
-	s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+	dataTypes := []schemapb.DataType{
+		schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_Int8Vector,
+	}
+
+	for _, dataType := range dataTypes {
+		s.vecDataType = dataType
+		s.run(schemapb.DataType_Int32, schemapb.DataType_None, false, 0)
+		for _, nullPercent := range []int{0, 50, 100} {
+			s.run(schemapb.DataType_Int32, schemapb.DataType_None, true, nullPercent)
+		}
+	}
 }
 
 func (s *ReaderSuite) TestSparseVector() {

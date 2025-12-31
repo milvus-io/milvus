@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -48,6 +49,36 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	n := binlogNum * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt()
 	begin, end, err := allocator.AllocN(int64(n))
 	return &datapb.IDRange{Begin: begin, End: end}, err
+}
+
+func WrapPluginContextWithImport(collectionID int64, dbProperties []*commonpb.KeyValuePair, options importutilv2.Options, msg proto.Message) {
+	pluginContext := make([]*commonpb.KeyValuePair, 0)
+
+	importEzk, _ := importutilv2.GetEZK(options)
+	readPluginContext := hookutil.GetReadStoragePluginContext(importEzk)
+	if readPluginContext != nil {
+		pluginContext = append(pluginContext, readPluginContext...)
+	}
+
+	writePluginContext := hookutil.GetStoragePluginContext(dbProperties, collectionID)
+	if writePluginContext != nil {
+		pluginContext = append(pluginContext, writePluginContext...)
+	}
+
+	if len(pluginContext) == 0 {
+		return
+	}
+
+	switch msg.(type) {
+	case *datapb.ImportRequest:
+		job := msg.(*datapb.ImportRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	case *datapb.PreImportRequest:
+		job := msg.(*datapb.PreImportRequest)
+		job.PluginContext = append(job.PluginContext, pluginContext...)
+	default:
+		return
+	}
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
@@ -77,5 +108,31 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
 		return
+	}
+}
+
+// isCompactionTaskFinished returns true if the task has reached a terminal state
+// (timeout, completed, cleaned, or unknown) and requires no further processing.
+func isCompactionTaskFinished(t *datapb.CompactionTask) bool {
+	switch t.GetState() {
+	case datapb.CompactionTaskState_timeout,
+		datapb.CompactionTaskState_completed,
+		datapb.CompactionTaskState_cleaned,
+		datapb.CompactionTaskState_unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// isCompactionTaskCleaned returns true if the task has been cleaned
+// (cleaned, or unknown) and requires no further processing.
+func isCompactionTaskCleaned(t *datapb.CompactionTask) bool {
+	switch t.GetState() {
+	case datapb.CompactionTaskState_cleaned,
+		datapb.CompactionTaskState_unknown:
+		return true
+	default:
+		return false
 	}
 }

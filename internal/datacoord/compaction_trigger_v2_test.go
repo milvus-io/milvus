@@ -89,7 +89,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	s.Require().Equal(1, len(latestL0Segments))
 	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments, 10000)
 	s.Require().Equal(1, len(levelZeroViews))
-	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
+	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
@@ -132,7 +132,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	s.Require().NotEmpty(latestL0Segments)
 	levelZeroViews := s.triggerManager.l0Policy.groupL0ViewsByPartChan(1, latestL0Segments, 10000)
 	s.Require().Equal(1, len(levelZeroViews))
-	cView, ok := levelZeroViews[0].(*LevelZeroSegmentsView)
+	cView, ok := levelZeroViews[0].(*LevelZeroCompactionView)
 	s.True(ok)
 	s.NotNil(cView)
 	log.Info("view", zap.Any("cView", cView))
@@ -432,14 +432,14 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 		}).Return(nil).Once()
 
 	// Test L0 manual trigger
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, true, 0)
 	s.NoError(err)
 	s.Equal(int64(12345), triggerID)
 }
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	// Test with both clustering and L0 compaction false
-	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false)
+	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false, 0)
 	s.NoError(err)
 	s.Equal(int64(0), triggerID)
 }

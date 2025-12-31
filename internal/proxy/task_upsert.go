@@ -291,11 +291,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
 	// set field id for user passed field data, prepare for merge logic
-	upsertFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
-	if len(upsertFieldData) == 0 {
+	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("upsert field data is empty")
 	}
-	for _, fieldData := range upsertFieldData {
+	for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
 		fieldName := fieldData.GetFieldName()
 		if fieldData.GetIsDynamic() {
 			fieldName = "$meta"
@@ -316,6 +315,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+
+	// Validate field data alignment before processing to prevent index out of range panic
+	if err := newValidateUtil().checkAligned(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.schemaHelper, uint64(upsertIDSize)); err != nil {
+		log.Warn("check field data aligned failed", zap.Error(err))
+		return err
 	}
 
 	// Two nullable data formats are supported:
@@ -387,6 +392,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		}
 
 		baseIdx := 0
+		idxComputer := typeutil.NewFieldDataIdxComputer(existFieldData)
 		for _, idx := range updateIdxInUpsert {
 			typeutil.AppendIDs(it.deletePKs, upsertIDs, idx)
 			oldPK := typeutil.GetPK(upsertIDs, int64(idx))
@@ -394,8 +400,9 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			if !ok {
 				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
 			}
-			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
-			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(baseIdx), int64(idx))
+			fieldIdxs := idxComputer.Compute(int64(existIndex))
+			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex), fieldIdxs...)
+			err := typeutil.UpdateFieldData(it.insertFieldData, it.upsertMsg.InsertMsg.GetFieldsData(), int64(baseIdx), int64(idx))
 			baseIdx += 1
 			if err != nil {
 				log.Info("update field data failed", zap.Error(err))
@@ -433,8 +440,32 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 				insertWithNullField = append(insertWithNullField, fieldData)
 			}
 		}
-		for _, idx := range insertIdxInUpsert {
-			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx))
+		vectorIdxMap := make([][]int64, len(insertIdxInUpsert))
+		for rowIdx, offset := range insertIdxInUpsert {
+			vectorIdxMap[rowIdx] = make([]int64, len(insertWithNullField))
+			for fieldIdx := range insertWithNullField {
+				vectorIdxMap[rowIdx][fieldIdx] = int64(offset)
+			}
+		}
+		for fieldIdx, fieldData := range insertWithNullField {
+			validData := fieldData.GetValidData()
+			if len(validData) > 0 && typeutil.IsVectorType(fieldData.Type) {
+				dataIdx := int64(0)
+				rowIdx := 0
+				for i := 0; i < len(validData) && rowIdx < len(insertIdxInUpsert); i++ {
+					if i == insertIdxInUpsert[rowIdx] {
+						vectorIdxMap[rowIdx][fieldIdx] = dataIdx
+						rowIdx++
+					}
+					if validData[i] {
+						dataIdx++
+					}
+				}
+			}
+		}
+
+		for rowIdx, idx := range insertIdxInUpsert {
+			typeutil.AppendFieldData(it.insertFieldData, insertWithNullField, int64(idx), vectorIdxMap[rowIdx]...)
 		}
 	}
 
@@ -614,6 +645,10 @@ func ToCompressedFormatNullable(field *schemapb.FieldData) error {
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
+
+	case *schemapb.FieldData_Vectors:
+		// Vector data is already in compressed format, skip
+		return nil
 
 	default:
 		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
@@ -1000,15 +1035,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		Timestamp: it.EndTs(),
 	}
 
-	replicateID, err := GetReplicateID(ctx, it.req.GetDbName(), collectionName)
-	if err != nil {
-		log.Warn("get replicate info failed", zap.String("collectionName", collectionName), zap.Error(err))
-		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-	}
-	if replicateID != "" {
-		return merr.WrapErrCollectionReplicateMode("upsert")
-	}
-
 	// check collection exists
 	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
 	if err != nil {
@@ -1072,24 +1098,19 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	// deduplicate upsert data to handle duplicate primary keys in the same batch
+	// check for duplicate primary keys in the same batch
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
 	if err != nil {
 		log.Warn("fail to get primary field schema", zap.Error(err))
 		return err
 	}
-	deduplicatedFieldsData, newNumRows, err := DeduplicateFieldData(primaryFieldSchema, it.req.GetFieldsData(), schema)
+	duplicate, err := CheckDuplicatePkExist(primaryFieldSchema, it.req.GetFieldsData())
 	if err != nil {
-		log.Warn("fail to deduplicate upsert data", zap.Error(err))
+		log.Warn("fail to check duplicate primary keys", zap.Error(err))
+		return err
 	}
-
-	// dedup won't decrease numOfRows to 0
-	if newNumRows > 0 && newNumRows != it.req.NumRows {
-		log.Info("upsert data deduplicated",
-			zap.Uint32("original_num_rows", it.req.NumRows),
-			zap.Uint32("deduplicated_num_rows", newNumRows))
-		it.req.FieldsData = deduplicatedFieldsData
-		it.req.NumRows = newNumRows
+	if duplicate {
+		return merr.WrapErrParameterInvalidMsg("duplicate primary keys are not allowed in the same batch")
 	}
 
 	it.upsertMsg = &msgstream.UpsertMsg{

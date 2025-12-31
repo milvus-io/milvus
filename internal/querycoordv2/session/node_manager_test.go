@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 type NodeManagerSuite struct {
@@ -228,6 +230,29 @@ func (s *NodeManagerSuite) TestMemCapacityFunctionality() {
 	// Test updating memory capacity
 	node.UpdateStats(WithMemCapacity(2048.75))
 	s.Equal(2048.75, node.MemCapacity())
+}
+
+func (s *NodeManagerSuite) TestNodeInfoLabels() {
+	info := ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+		Labels: map[string]string{
+			sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1",
+		},
+	}
+
+	info2 := NodeInfo{
+		immutableInfo: info,
+	}
+	s.True(info2.IsEmbeddedQueryNodeInStreamingNode())
+
+	info2.immutableInfo.Labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] = "1"
+	delete(info2.immutableInfo.Labels, sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode)
+	s.True(info2.IsEmbeddedQueryNodeInStreamingNode())
+
+	info.Labels[sessionutil.LabelResourceGroup] = "rg1"
+	s.Equal("rg1", info2.ResourceGroupName())
 }
 
 func TestNodeManagerSuite(t *testing.T) {

@@ -120,6 +120,26 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                   "failed to Deserialize index, " + KnowhereStatusString(stat));
     span_load_engine->End();
 
+    auto local_chunk_manager =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
+
+    auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
+    if (local_chunk_manager->Exist(valid_data_path)) {
+        size_t count;
+        local_chunk_manager->Read(valid_data_path, 0, &count, sizeof(size_t));
+        size_t byte_size = (count + 7) / 8;
+        std::vector<uint8_t> valid_bitmap(byte_size);
+        local_chunk_manager->Read(
+            valid_data_path, sizeof(size_t), valid_bitmap.data(), byte_size);
+        // Convert bitmap to bool array
+        std::unique_ptr<bool[]> valid_data(new bool[count]);
+        for (size_t i = 0; i < count; ++i) {
+            valid_data[i] = (valid_bitmap[i / 8] >> (i % 8)) & 1;
+        }
+        BuildValidData(valid_data.get(), count);
+    }
+
     SetDim(index_.Dim());
 }
 
@@ -207,8 +227,8 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, " + KnowhereStatusString(stat));
 
-    local_chunk_manager->RemoveDir(
-        storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
+    local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
+        local_chunk_manager, segment_id, field_id));
 }
 
 template <typename T>
@@ -298,8 +318,25 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
-    local_chunk_manager->RemoveDir(
-        storage::GetSegmentRawDataPathPrefix(local_chunk_manager, segment_id));
+
+    if (HasValidData()) {
+        auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
+        size_t count = offset_mapping_.GetTotalCount();
+        local_chunk_manager->Write(valid_data_path, 0, &count, sizeof(size_t));
+        size_t byte_size = (count + 7) / 8;
+        std::vector<uint8_t> packed_data(byte_size, 0);
+        for (size_t i = 0; i < count; ++i) {
+            if (offset_mapping_.IsValid(i)) {
+                packed_data[i / 8] |= (1 << (i % 8));
+            }
+        }
+        local_chunk_manager->Write(
+            valid_data_path, sizeof(size_t), packed_data.data(), byte_size);
+        file_manager_->AddFile(valid_data_path);
+    }
+
+    local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
+        local_chunk_manager, segment_id, field_id));
 
     // TODO ::
     // SetDim(index_->Dim());

@@ -166,6 +166,9 @@ type Server struct {
 	broker broker.Broker
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// file resource
+	fileManager *FileResourceManager
 }
 
 type CollectionNameInfo struct {
@@ -232,7 +235,7 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) ServerExist(serverID int64) bool {
-	sessions, _, err := s.session.GetSessions(typeutil.DataNodeRole)
+	sessions, _, err := s.session.GetSessions(s.ctx, typeutil.DataNodeRole)
 	if err != nil {
 		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
 		return false
@@ -337,6 +340,8 @@ func (s *Server) initDataCoord() error {
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
+	s.fileManager = NewFileResourceManager(s.ctx, s.meta, s.nodeManager)
+
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
 	RegisterDDLCallbacks(s)
@@ -432,7 +437,8 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
 	s.startServerLoop()
-
+	s.fileManager.Start()
+	s.fileManager.Notify()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
@@ -541,7 +547,7 @@ func (s *Server) initServiceDiscovery() error {
 	}
 
 	s.indexEngineVersionManager = newIndexEngineVersionManager()
-	qnSessions, qnRevision, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	qnSessions, qnRevision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		log.Warn("DataCoord get QueryNode sessions failed", zap.Error(err))
 		return err
@@ -691,6 +697,7 @@ func (s *Server) initCompaction() {
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
+	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 
@@ -868,7 +875,14 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 					zap.String("event type", event.EventType.String()))
 				return nil
 			}
-			return s.nodeManager.AddNode(event.Session.ServerID, event.Session.Address)
+			err := s.nodeManager.AddNode(event.Session.ServerID, event.Session.Address)
+			if err != nil {
+				return err
+			}
+
+			// notify file manager sync file resource to new node
+			s.fileManager.Notify()
+			return nil
 		case sessionutil.SessionDelEvent:
 			log.Info("received datanode unregister",
 				zap.String("address", info.Address),
@@ -1051,6 +1065,7 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
+	s.fileManager.Close()
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()

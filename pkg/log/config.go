@@ -153,7 +153,7 @@ func (cfg *Config) initialize() {
 		cfg.AsyncWritePendingLength = 1024
 	}
 	if cfg.AsyncWriteBufferSize <= 0 {
-		cfg.AsyncWriteBufferSize = 1024 * 1024
+		cfg.AsyncWriteBufferSize = 4 * 1024
 	}
 	if cfg.AsyncWriteMaxBytesPerLog <= 0 {
 		cfg.AsyncWriteMaxBytesPerLog = 1024 * 1024

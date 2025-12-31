@@ -31,6 +31,7 @@ import (
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -54,7 +55,9 @@ type Cluster interface {
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
 	DropIndex(ctx context.Context, nodeID int64, req *querypb.DropIndexRequest) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
-	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)
+	ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)
+	SyncFileResource(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
+	ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)
 	Start()
 	Stop()
 }
@@ -300,14 +303,44 @@ func (c *QueryCluster) RunAnalyzer(ctx context.Context, nodeID int64, req *query
 	return resp, err
 }
 
-func (c *QueryCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (c *QueryCluster) ValidateAnalyzer(ctx context.Context, nodeID int64, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	var (
-		resp *commonpb.Status
+		resp *querypb.ValidateAnalyzerResponse
 		err  error
 	)
 
 	sendErr := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
 		resp, err = cli.ValidateAnalyzer(ctx, req)
+	})
+	if sendErr != nil {
+		return nil, sendErr
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) SyncFileResource(ctx context.Context, nodeID int64, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	var (
+		resp *commonpb.Status
+		err  error
+	)
+
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.SyncFileResource(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) ComputePhraseMatchSlop(ctx context.Context, nodeID int64, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	var (
+		resp *querypb.ComputePhraseMatchSlopResponse
+		err  error
+	)
+
+	sendErr := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.ComputePhraseMatchSlop(ctx, req)
 	})
 	if sendErr != nil {
 		return nil, sendErr

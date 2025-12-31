@@ -53,21 +53,17 @@ mod tests {
     use crate::analyzer::analyzer::create_analyzer;
 
     #[test]
-    #[cfg(feature = "lindera-ipadic")]
     fn test_remove_punct_filter() {
         let params = r#"{
-            "tokenizer": {
-                "type": "lindera",
-                "dict_kind": "ipadic"
-            },
+            "tokenizer": "jieba",
             "filter": ["removepunct"]
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut bining = tokenizer.unwrap();
-        let mut stream = bining.token_stream("ミルヴァスの日本語テスト、句読点テスト");
+        let mut stream = bining.token_stream("中文标点，测试。");
 
         let mut results = Vec::<String>::new();
         while stream.advance() {

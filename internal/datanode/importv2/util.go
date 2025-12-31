@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"strconv"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -58,18 +61,30 @@ func NewSyncTask(ctx context.Context,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
 	storageVersion int64,
+	useLoonFFI bool,
 	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
-		metaCache.AddSegment(&datapb.SegmentInfo{
+		segment := &datapb.SegmentInfo{
 			ID:             segmentID,
 			State:          commonpb.SegmentState_Importing,
 			CollectionID:   collectionID,
 			PartitionID:    partitionID,
 			InsertChannel:  vchannel,
 			StorageVersion: storageVersion,
-		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
+		}
+		// init first manifest path
+		if useLoonFFI {
+			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
+			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+			if storageConfig.GetStorageType() != "local" {
+				basePath = path.Join(storageConfig.GetBucketName(), basePath)
+			}
+			// -1 for first write
+			segment.ManifestPath = packed.MarshalManifestPath(basePath, -1)
+		}
+		metaCache.AddSegment(segment, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
 		}, metacache.NewBM25StatsFactory)
@@ -123,6 +138,7 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		Statslogs:    lo.Values(statsBinlog),
 		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
+		ManifestPath: segment.ManifestPath(),
 	}, nil
 }
 
@@ -358,6 +374,19 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 				appender := &nullDefaultAppender[*schemapb.ScalarField]{}
 				err = appender.AppendNull(fieldData, rowNum)
 			}
+		case schemapb.DataType_FloatVector,
+			schemapb.DataType_Float16Vector,
+			schemapb.DataType_BFloat16Vector,
+			schemapb.DataType_BinaryVector,
+			schemapb.DataType_SparseFloatVector,
+			schemapb.DataType_Int8Vector:
+			if nullable {
+				for i := 0; i < rowNum; i++ {
+					if err = fieldData.AppendRow(nil); err != nil {
+						return err
+					}
+				}
+			}
 		default:
 			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
 		}
@@ -408,6 +437,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 }
 
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
+	log.Info("start to run embedding function")
 	if err := RunDenseEmbedding(task, data); err != nil {
 		return err
 	}
@@ -419,14 +449,18 @@ func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 }
 
 func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
+	log.Info("start to run dense embedding")
 	schema := task.GetSchema()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
+	log.Info("allowNonBM25Outputs", zap.Any("allowNonBM25Outputs", allowNonBM25Outputs))
 	fieldIDs := lo.Keys(data.Data)
 	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, false)
 	if err != nil {
 		return err
 	}
+	log.Info("needProcessFunctions", zap.Any("needProcessFunctions", needProcessFunctions))
 	if embedding.HasNonBM25Functions(schema.Functions, []int64{}) {
+		log.Info("has non bm25 functions")
 		extraInfo := &models.ModelExtraInfo{
 			ClusterID: task.req.ClusterID,
 			DBName:    task.req.Schema.DbName,
@@ -438,11 +472,13 @@ func RunDenseEmbedding(task *ImportTask, data *storage.InsertData) error {
 		if err := exec.ProcessBulkInsert(context.Background(), data); err != nil {
 			return err
 		}
+		log.Info("end to run dense embedding")
 	}
 	return nil
 }
 
 func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
+	log.Info("start to run bm25 function")
 	fns := task.GetSchema().GetFunctions()
 	for _, fn := range fns {
 		runner, err := function.NewFunctionRunner(task.GetSchema(), fn)

@@ -58,6 +58,8 @@ enum MessageType {
     CreateIndex          = 34;
     AlterIndex           = 35;
     DropIndex            = 36;
+    FlushAll             = 37;
+    TruncateCollection   = 38;
 
     // AlterReplicateConfig is used to alter the replicate configuration to the current cluster.
     // When the AlterReplicateConfig message is received, the replication topology is changed.
@@ -584,6 +586,10 @@ message ManualFlushExtraResponse {
     repeated int64 segment_ids = 1;
 }
 
+message FlushAllMessageHeader {}
+
+message FlushAllMessageBody {}
+
 // TxnContext is the context of transaction.
 // It will be carried by every message in a transaction.
 message TxnContext {
@@ -624,6 +630,13 @@ message BroadcastHeader {
     // Once the broadcast is sent, the resource of resource key will be hold.
     // New broadcast message with the same resource key will be rejected.
     // And the user can watch the resource key to known when the resource is released.
+    bool ack_sync_up = 4; // whether the broadcast operation is need to be synced up between the streaming node and the coordinator.
+    // If the ack_sync_up is false, the broadcast operation will be acked once the recovery storage see the message at current vchannel,
+    // the fast ack operation can be applied to speed up the broadcast operation.
+    // If the ack_sync_up is true, the broadcast operation will be acked after the checkpoint of current vchannel reach current message.
+    // the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
+    // e.g. if truncate collection operation want to call ack once callback after the all segment are flushed at current vchannel,
+    // it should set the ack_sync_up to be true.
 }
 
 // ReplicateHeader is the header of replicate message.
@@ -663,3 +676,14 @@ message CipherHeader {
     bytes safe_key = 3; // the safe key
     int64 payload_bytes = 4; // the size of the payload before encryption
 }
+
+// TruncateCollectionMessageHeader is the header of truncate collection message.
+message TruncateCollectionMessageHeader {
+    int64 db_id = 1;
+    int64 collection_id = 2;
+    repeated int64 segment_ids = 3;
+}
+
+// TruncateCollectionMessageBody is the body of truncate collection message.
+message TruncateCollectionMessageBody {}
+

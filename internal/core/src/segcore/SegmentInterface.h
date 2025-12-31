@@ -24,6 +24,7 @@
 #include <index/ScalarIndex.h>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -217,14 +218,8 @@ class SegmentInterface {
                          FieldId field_id,
                          const std::string& nested_path) const = 0;
 
-    virtual PinWrapper<index::JsonKeyStats*>
+    virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
-
-    virtual void
-    LoadJsonStats(FieldId field_id, index::CacheJsonKeyStatsPtr cache_slot) = 0;
-
-    virtual void
-    RemoveJsonStats(FieldId field_id) = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -232,6 +227,9 @@ class SegmentInterface {
     // reopen segment with new schema
     virtual void
     Reopen(SchemaPtr sch) = 0;
+
+    virtual void
+    Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
 
     // FinishLoad notifies the segment that all load operation are done
     // currently it's used to sync field data list with updated schema.
@@ -243,6 +241,11 @@ class SegmentInterface {
 
     virtual void
     Load(milvus::tracer::TraceContext& trace_ctx) = 0;
+
+    // Get IArrayOffsets for element-level filtering on array fields
+    // Returns nullptr if the field doesn't have IArrayOffsets
+    virtual std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -444,6 +447,9 @@ class SegmentInternalInterface : public SegmentInterface {
         const milvus::proto::segcore::SegmentLoadInfo& load_info) override {
         load_info_ = load_info;
     }
+
+    virtual std::shared_ptr<index::JsonKeyStats>
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
@@ -683,9 +689,7 @@ class SegmentInternalInterface : public SegmentInterface {
                          milvus::index::TextMatchIndex>>>>
         text_indexes_;
 
-    // json stats cache (field_id -> CacheSlot of JsonKeyStats)
-    mutable folly::Synchronized<
-        std::unordered_map<FieldId, index::CacheJsonKeyStatsPtr>>
+    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
         json_stats_;
 
     GEOSContextHandle_t ctx_ = GEOS_init_r();

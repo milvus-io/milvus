@@ -30,6 +30,65 @@ func (_m *MockQueryNode) EXPECT() *MockQueryNode_Expecter {
 	return &MockQueryNode_Expecter{mock: &_m.Mock}
 }
 
+// ComputePhraseMatchSlop provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNode) ComputePhraseMatchSlop(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputePhraseMatchSlop")
+	}
+
+	var r0 *querypb.ComputePhraseMatchSlopResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) *querypb.ComputePhraseMatchSlopResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ComputePhraseMatchSlopResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNode_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
+type MockQueryNode_ComputePhraseMatchSlop_Call struct {
+	*mock.Call
+}
+
+// ComputePhraseMatchSlop is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ComputePhraseMatchSlopRequest
+func (_e *MockQueryNode_Expecter) ComputePhraseMatchSlop(_a0 interface{}, _a1 interface{}) *MockQueryNode_ComputePhraseMatchSlop_Call {
+	return &MockQueryNode_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop", _a0, _a1)}
+}
+
+func (_c *MockQueryNode_ComputePhraseMatchSlop_Call) Run(run func(_a0 context.Context, _a1 *querypb.ComputePhraseMatchSlopRequest)) *MockQueryNode_ComputePhraseMatchSlop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ComputePhraseMatchSlopRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNode_ComputePhraseMatchSlop_Call) Return(_a0 *querypb.ComputePhraseMatchSlopResponse, _a1 error) *MockQueryNode_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNode_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error)) *MockQueryNode_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNode) Delete(_a0 context.Context, _a1 *querypb.DeleteRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1817,6 +1876,65 @@ func (_c *MockQueryNode_SyncDistribution_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// SyncFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNode) SyncFileResource(_a0 context.Context, _a1 *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.SyncFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNode_SyncFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncFileResource'
+type MockQueryNode_SyncFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.SyncFileResourceRequest
+func (_e *MockQueryNode_Expecter) SyncFileResource(_a0 interface{}, _a1 interface{}) *MockQueryNode_SyncFileResource_Call {
+	return &MockQueryNode_SyncFileResource_Call{Call: _e.mock.On("SyncFileResource", _a0, _a1)}
+}
+
+func (_c *MockQueryNode_SyncFileResource_Call) Run(run func(_a0 context.Context, _a1 *internalpb.SyncFileResourceRequest)) *MockQueryNode_SyncFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.SyncFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNode_SyncFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNode_SyncFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNode_SyncFileResource_Call) RunAndReturn(run func(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)) *MockQueryNode_SyncFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncReplicaSegments provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNode) SyncReplicaSegments(_a0 context.Context, _a1 *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -2028,23 +2146,23 @@ func (_c *MockQueryNode_UpdateStateCode_Call) RunAndReturn(run func(commonpb.Sta
 }
 
 // ValidateAnalyzer provides a mock function with given fields: _a0, _a1
-func (_m *MockQueryNode) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (_m *MockQueryNode) ValidateAnalyzer(_a0 context.Context, _a1 *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ValidateAnalyzer")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.ValidateAnalyzerResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest) *querypb.ValidateAnalyzerResponse); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.ValidateAnalyzerResponse)
 		}
 	}
 
@@ -2076,12 +2194,12 @@ func (_c *MockQueryNode_ValidateAnalyzer_Call) Run(run func(_a0 context.Context,
 	return _c
 }
 
-func (_c *MockQueryNode_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNode_ValidateAnalyzer_Call {
+func (_c *MockQueryNode_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnalyzerResponse, _a1 error) *MockQueryNode_ValidateAnalyzer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockQueryNode_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error)) *MockQueryNode_ValidateAnalyzer_Call {
+func (_c *MockQueryNode_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error)) *MockQueryNode_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

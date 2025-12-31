@@ -70,8 +70,9 @@ var (
 	ErrCollectionIllegalSchema                 = newMilvusError("illegal collection schema", 105, false)
 	ErrCollectionOnRecovering                  = newMilvusError("collection on recovering", 106, true)
 	ErrCollectionVectorClusteringKeyNotAllowed = newMilvusError("vector clustering key not allowed", 107, false)
-	ErrCollectionReplicateMode                 = newMilvusError("can't operate on the collection under standby mode", 108, false)
-	ErrCollectionSchemaMismatch                = newMilvusError("collection schema mismatch", 109, false)
+	// Deprecated, keep it only for reserving the error code
+	ErrCollectionReplicateMode  = newMilvusError("can't operate on the collection under standby mode", 108, false)
+	ErrCollectionSchemaMismatch = newMilvusError("collection schema mismatch", 109, false)
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
@@ -132,9 +133,10 @@ var (
 	ErrNodeStateUnexpected = newMilvusError("node state unexpected", 906, false)
 
 	// IO related
-	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
-	ErrIoFailed      = newMilvusError("IO failed", 1001, false)
-	ErrIoUnexpectEOF = newMilvusError("unexpected EOF", 1002, true)
+	ErrIoKeyNotFound     = newMilvusError("key not found", 1000, false)
+	ErrIoFailed          = newMilvusError("IO failed", 1001, false)
+	ErrIoUnexpectEOF     = newMilvusError("unexpected EOF", 1002, true)
+	ErrIoTooManyRequests = newMilvusError("too many requests", 1003, true)
 
 	// Parameter related
 	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)
@@ -148,7 +150,8 @@ var (
 	ErrMqTopicNotFound = newMilvusError("topic not found", 1300, false)
 	ErrMqTopicNotEmpty = newMilvusError("topic not empty", 1301, false)
 	ErrMqInternal      = newMilvusError("message queue internal error", 1302, false)
-	ErrDenyProduceMsg  = newMilvusError("deny to write the message to mq", 1303, false)
+	// Deprecated, keep it only for reserving the error code
+	ErrDenyProduceMsg = newMilvusError("deny to write the message to mq", 1303, false)
 
 	// Privilege related
 	// this operation is denied because the user not authorized, user need to login in first
@@ -177,7 +180,7 @@ var (
 	ErrCheckPrimaryKey           = newMilvusError("please check the primary key and its' type can only in [int, string]", 1806, false)
 	ErrHTTPRateLimit             = newMilvusError("request is rejected by limiter", 1807, true)
 
-	// replicate related
+	// Deprecated, legacy replicate related errors, keep them only for reserving the error code
 	ErrDenyReplicateMessage = newMilvusError("deny to use the replicate message in the normal instance", 1900, false)
 	ErrInvalidMsgBytes      = newMilvusError("invalid replicate msg bytes", 1901, false)
 	ErrNoAssignSegmentID    = newMilvusError("no assign segment id", 1902, false)

@@ -629,18 +629,19 @@ func constructTestSearchRequest(dbName, collectionName, floatVecField, expr stri
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 expr,
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: false,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
@@ -725,42 +726,23 @@ func constructTestEmbeddingListSearchRequest(dbName, collectionName, structFVec,
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 expr,
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: false,
-	}
-}
-
-// Helper functions for TestProxy
-func constructPrimaryKeysPlaceholderGroup(int64Field string, insertedIDs []int64) *commonpb.PlaceholderGroup {
-	expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIDs[0])
-	exprBytes := []byte(expr)
-
-	return &commonpb.PlaceholderGroup{
-		Placeholders: []*commonpb.PlaceholderValue{
-			{
-				Tag:    "$0",
-				Type:   commonpb.PlaceholderType_None,
-				Values: [][]byte{exprBytes},
-			},
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
 		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
 func constructSearchByPksRequest(t *testing.T, dbName, collectionName, floatVecField, int64Field string, insertedIDs []int64, nprobe, topk, roundDecimal int) *milvuspb.SearchRequest {
-	plg := constructPrimaryKeysPlaceholderGroup(int64Field, insertedIDs)
-	plgBs, err := proto.Marshal(plg)
-	assert.NoError(t, err)
-
 	params := make(map[string]string)
 	params["nprobe"] = strconv.Itoa(nprobe)
 	b, err := json.Marshal(params)
@@ -774,18 +756,25 @@ func constructSearchByPksRequest(t *testing.T, dbName, collectionName, floatVecF
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:                nil,
-		DbName:              dbName,
-		CollectionName:      collectionName,
-		PartitionNames:      nil,
-		Dsl:                 "",
-		PlaceholderGroup:    plgBs,
-		DslType:             commonpb.DslType_BoolExprV1,
-		OutputFields:        nil,
-		SearchParams:        searchParams,
-		TravelTimestamp:     0,
-		GuaranteeTimestamp:  0,
-		SearchByPrimaryKeys: true,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            "",
+		SearchInput: &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: insertedIDs,
+					},
+				},
+			},
+		},
+		DslType:            commonpb.DslType_BoolExprV1,
+		OutputFields:       nil,
+		SearchParams:       searchParams,
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
 	}
 }
 
@@ -973,8 +962,6 @@ func TestProxy(t *testing.T) {
 	params.DataNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 	params.Save(params.MQCfg.Type.Key, "pulsar")
-	params.CommonCfg.EnableStorageV2.SwapTempValue("false")
-	defer params.CommonCfg.EnableStorageV2.SwapTempValue("")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")
@@ -2658,6 +2645,31 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("truncate collection", func(t *testing.T) {
+		defer wg.Done()
+		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		// Verify that data is cleared but collection still exists
+		statsResp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, statsResp.GetStatus().GetErrorCode())
+		rowNumStr := funcutil.KeyValuePair2Map(statsResp.Stats)["row_count"]
+		assert.Equal(t, "0", rowNumStr)
+	})
+
+	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
 		defer wg.Done()
 		_, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
@@ -2901,6 +2913,14 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("TruncateCollection fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	wg.Add(1)
@@ -3293,6 +3313,14 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("TruncateCollection fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.TruncateCollection(ctx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
 	t.Run("HasCollection fail, dd queue full", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
@@ -3578,6 +3606,14 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.DropCollection(shortCtx, &milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("TruncateCollection fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.TruncateCollection(shortCtx, &milvuspb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	wg.Add(1)

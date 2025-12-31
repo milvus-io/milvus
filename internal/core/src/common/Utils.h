@@ -28,6 +28,7 @@
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
 #include "common/Types.h"
 #include "common/EasyAssert.h"
 #include "knowhere/dataset.h"
@@ -172,7 +173,10 @@ PositivelyRelated(const knowhere::MetricType& metric_type) {
     return IsMetricType(metric_type, knowhere::metric::IP) ||
            IsMetricType(metric_type, knowhere::metric::COSINE) ||
            IsMetricType(metric_type, knowhere::metric::BM25) ||
-           IsMetricType(metric_type, knowhere::metric::MHJACCARD);
+           IsMetricType(metric_type, knowhere::metric::MHJACCARD) ||
+           IsMetricType(metric_type, knowhere::metric::MAX_SIM) ||
+           IsMetricType(metric_type, knowhere::metric::MAX_SIM_IP) ||
+           IsMetricType(metric_type, knowhere::metric::MAX_SIM_COSINE);
 }
 
 inline std::string
@@ -300,7 +304,9 @@ CopyAndWrapSparseRow(const void* data,
 template <typename Iterable>
 std::unique_ptr<knowhere::sparse::SparseRow<SparseValueType>[]>
 SparseBytesToRows(const Iterable& rows, const bool validate = false) {
-    AssertInfo(rows.size() > 0, "at least 1 sparse row should be provided");
+    if (rows.size() == 0) {
+        return nullptr;
+    }
     auto res = std::make_unique<knowhere::sparse::SparseRow<SparseValueType>[]>(
         rows.size());
     for (size_t i = 0; i < rows.size(); ++i) {

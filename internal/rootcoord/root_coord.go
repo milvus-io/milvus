@@ -48,6 +48,7 @@ import (
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -182,9 +183,6 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 }
 
 func (c *Core) sendMinDdlTsAsTt() {
-	if !paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool() {
-		return
-	}
 	log := log.Ctx(c.ctx)
 	code := c.GetStateCode()
 	if code != commonpb.StateCode_Healthy {
@@ -444,7 +442,7 @@ func (c *Core) initInternal() error {
 	c.proxyWatcher = proxyutil.NewProxyWatcher(
 		c.etcdCli,
 		c.chanTimeTick.initSessions,
-		c.proxyClientManager.AddProxyClients,
+		c.proxyClientManager.SetProxyClients,
 	)
 	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
 	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
@@ -966,6 +964,37 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	return merr.Success(), nil
 }
 
+// TruncateCollection truncate collection
+func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("TruncateCollection")
+
+	logger := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("name", in.GetCollectionName()))
+	logger.Info("received request to truncate collection")
+
+	if err := c.broadcastTruncateCollection(ctx, in); err != nil {
+		logger.Info("failed to truncate collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.FailLabel).Inc()
+		return &milvuspb.TruncateCollectionResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("TruncateCollection", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("TruncateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	logger.Info("done to truncate collection")
+	return &milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 // HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
@@ -1048,6 +1077,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		Functions:          model.MarshalFunctionModels(collInfo.Functions),
 		EnableDynamicField: collInfo.EnableDynamicField,
 		Properties:         collInfo.Properties,
+		FileResourceIds:    collInfo.FileResourceIds,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
@@ -3096,4 +3126,45 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return c.quotaCenter.getQuotaMetrics(), nil
+}
+
+func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	method := "BackupEzk"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	ctxLog := log.Ctx(ctx).With(zap.String("role", typeutil.RootCoordRole), zap.String("dbName", req.GetDbName()))
+	ctxLog.Debug(method)
+
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &internalpb.BackupEzkResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	db, err := c.meta.GetDatabaseByName(ctx, req.GetDbName(), 0)
+	if err != nil {
+		ctxLog.Warn("database not found", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return &internalpb.BackupEzkResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	ezkJSON, err := hookutil.BackupEZKFromDBProperties(db.Properties)
+	if err != nil {
+		ctxLog.Warn("failed to backup EZK", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return &internalpb.BackupEzkResponse{
+			Status: merr.Status(err),
+			Ezk:    "",
+		}, nil
+	}
+
+	ctxLog.Debug(method + " success")
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &internalpb.BackupEzkResponse{
+		Status: merr.Success(),
+		Ezk:    ezkJSON,
+	}, nil
 }

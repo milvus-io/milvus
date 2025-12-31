@@ -21,6 +21,8 @@
 #include <string>
 #include <type_traits>
 
+#include "common/Array.h"
+#include "common/ArrayOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -679,6 +681,173 @@ class SegmentExpr : public Expr {
         return input->size();
     }
 
+    // Process element-level data by element IDs
+    // Handles the type mismatch between storage (ArrayView) and element type
+    // Currently only implemented for sealed chunked segments
+    template <typename ElementType, typename FUNC, typename... ValTypes>
+    int64_t
+    ProcessElementLevelByOffsets(
+        FUNC func,
+        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
+        OffsetVector* element_ids,
+        TargetBitmapView res,
+        TargetBitmapView valid_res,
+        const ValTypes&... values) {
+        auto& skip_index = segment_->GetSkipIndex();
+        if (segment_->type() == SegmentType::Sealed) {
+            AssertInfo(
+                segment_->is_chunked(),
+                "Element-level filtering requires chunked segment for sealed");
+
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            if (!array_offsets) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "IArrayOffsets not found for field {}",
+                          field_id_.get());
+            }
+
+            // Batch process consecutive elements belonging to the same chunk
+            size_t processed_size = 0;
+            size_t i = 0;
+
+            // Reuse these vectors to avoid repeated heap allocations
+            FixedVector<int32_t> offsets;
+            FixedVector<int32_t> elem_indices;
+
+            while (i < element_ids->size()) {
+                // Start of a new chunk batch
+                int64_t element_id = (*element_ids)[i];
+                auto [doc_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+                auto [chunk_id, chunk_offset] =
+                    segment_->get_chunk_by_offset(field_id_, doc_id);
+
+                // Collect consecutive elements belonging to the same chunk
+                offsets.clear();
+                elem_indices.clear();
+                offsets.push_back(chunk_offset);
+                elem_indices.push_back(elem_idx);
+
+                size_t batch_start = i;
+                i++;
+
+                // Look ahead for more elements in the same chunk
+                while (i < element_ids->size()) {
+                    int64_t next_element_id = (*element_ids)[i];
+                    auto [next_doc_id, next_elem_idx] =
+                        array_offsets->ElementIDToRowID(next_element_id);
+                    auto [next_chunk_id, next_chunk_offset] =
+                        segment_->get_chunk_by_offset(field_id_, next_doc_id);
+
+                    if (next_chunk_id != chunk_id) {
+                        break;  // Different chunk, process current batch
+                    }
+
+                    offsets.push_back(next_chunk_offset);
+                    elem_indices.push_back(next_elem_idx);
+                    i++;
+                }
+
+                // Batch fetch all ArrayViews for this chunk
+                auto pw = segment_->get_views_by_offsets<ArrayView>(
+                    op_ctx_, field_id_, chunk_id, offsets);
+
+                auto [array_vec, valid_data] = pw.get();
+
+                // Process each element in this batch
+                for (size_t j = 0; j < offsets.size(); j++) {
+                    size_t result_idx = batch_start + j;
+
+                    if ((!skip_func ||
+                         !skip_func(skip_index, field_id_, chunk_id)) &&
+                        (!namespace_skip_func_.has_value() ||
+                         !namespace_skip_func_.value()(chunk_id))) {
+                        // Extract element from ArrayView
+                        auto value =
+                            array_vec[j].template get_data<ElementType>(
+                                elem_indices[j]);
+                        bool is_valid = !valid_data.data() || valid_data[j];
+
+                        func.template operator()<FilterType::random>(
+                            &value,
+                            &is_valid,
+                            nullptr,
+                            1,
+                            res + result_idx,
+                            valid_res + result_idx,
+                            values...);
+                    } else {
+                        // Chunk is skipped - handle exactly like ProcessDataByOffsets
+                        if (valid_data.size() > j && !valid_data[j]) {
+                            res[result_idx] = valid_res[result_idx] = false;
+                        }
+                    }
+
+                    processed_size++;
+                }
+            }
+            return processed_size;
+        } else {
+            auto array_offsets = segment_->GetArrayOffsets(field_id_);
+            if (!array_offsets) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "IArrayOffsets not found for field {}",
+                          field_id_.get());
+            }
+
+            auto& skip_index = segment_->GetSkipIndex();
+            size_t processed_size = 0;
+
+            for (size_t i = 0; i < element_ids->size(); i++) {
+                int64_t element_id = (*element_ids)[i];
+
+                auto [doc_id, elem_idx] =
+                    array_offsets->ElementIDToRowID(element_id);
+
+                // Calculate chunk_id and chunk_offset for this doc
+                auto chunk_id = doc_id / size_per_chunk_;
+                auto chunk_offset = doc_id % size_per_chunk_;
+
+                // Get the Array chunk (Growing segment stores Array, not ArrayView)
+                auto pw =
+                    segment_->chunk_data<Array>(op_ctx_, field_id_, chunk_id);
+                auto chunk = pw.get();
+                const Array* array_ptr = chunk.data() + chunk_offset;
+                const bool* valid_data = chunk.valid_data();
+                if (valid_data != nullptr) {
+                    valid_data += chunk_offset;
+                }
+
+                if ((!skip_func ||
+                     !skip_func(skip_index, field_id_, chunk_id)) &&
+                    (!namespace_skip_func_.has_value() ||
+                     !namespace_skip_func_.value()(chunk_id))) {
+                    // Extract element from Array
+                    auto value = array_ptr->get_data<ElementType>(elem_idx);
+                    bool is_valid = !valid_data || valid_data[0];
+
+                    func.template operator()<FilterType::random>(
+                        &value,
+                        &is_valid,
+                        nullptr,
+                        1,
+                        res + processed_size,
+                        valid_res + processed_size,
+                        values...);
+                } else {
+                    // Chunk is skipped
+                    if (valid_data && !valid_data[0]) {
+                        res[processed_size] = valid_res[processed_size] = false;
+                    }
+                }
+
+                processed_size++;
+            }
+
+            return processed_size;
+        }
+    }
+
     // Template parameter to control whether segment offsets are needed (for GIS functions)
     template <typename T,
               bool NeedSegmentOffsets = false,
@@ -753,10 +922,39 @@ class SegmentExpr : public Expr {
                          values...);
                 }
             } else {
+                // Chunk is skipped by SkipIndex.
+                // We still need to:
+                // 1. Apply valid_data to handle nullable fields
+                // 2. Call func with nullptr to update internal cursors
+                //    (e.g., processed_cursor for bitmap_input indexing)
                 ApplyValidData(valid_data,
                                res + processed_size,
                                valid_res + processed_size,
                                size);
+                // Call func with nullptr to update internal cursors
+                if constexpr (NeedSegmentOffsets) {
+                    std::vector<int32_t> segment_offsets_array(size);
+                    for (int64_t j = 0; j < size; ++j) {
+                        segment_offsets_array[j] = static_cast<int32_t>(
+                            size_per_chunk_ * i + data_pos + j);
+                    }
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
             }
 
             processed_size += size;
@@ -770,46 +968,37 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
-    // If process_all_chunks is true, all chunks will be processed and no inner state will be changed.
     template <typename T,
               bool NeedSegmentOffsets = false,
               typename FUNC,
               typename... ValTypes>
     int64_t
-    ProcessMultipleChunksCommon(
+    ProcessDataChunksForMultipleChunk(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        bool process_all_chunks,
         const ValTypes&... values) {
         int64_t processed_size = 0;
-
-        size_t start_chunk = process_all_chunks ? 0 : current_data_chunk_;
 
         // prefetch chunks to reduce cache miss latency
         if (!prefetched_) {
             std::vector<int64_t> pf_chunk_ids;
-            pf_chunk_ids.reserve(num_data_chunk_ - start_chunk);
-            for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+            pf_chunk_ids.reserve(num_data_chunk_ - current_data_chunk_);
+            for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
                 pf_chunk_ids.push_back(i);
             }
             segment_->prefetch_chunks(op_ctx_, field_id_, pf_chunk_ids);
             prefetched_ = true;
         }
 
-        for (size_t i = start_chunk; i < num_data_chunk_; i++) {
+        for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
-                process_all_chunks
-                    ? 0
-                    : (i == current_data_chunk_ ? current_data_chunk_pos_ : 0);
+                i == current_data_chunk_ ? current_data_chunk_pos_ : 0;
 
             // if segment is chunked, type won't be growing
             int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
-            // process a whole chunk if process_all_chunks is true
-            if (!process_all_chunks) {
-                size = std::min(size, batch_size_ - processed_size);
-            }
+            size = std::min(size, batch_size_ - processed_size);
 
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
@@ -887,6 +1076,11 @@ class SegmentExpr : public Expr {
                     }
                 }
             } else {
+                // Chunk is skipped by SkipIndex.
+                // We still need to:
+                // 1. Apply valid_data to handle nullable fields
+                // 2. Call func with nullptr to update internal cursors
+                //    (e.g., processed_cursor for bitmap_input indexing)
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
@@ -910,11 +1104,30 @@ class SegmentExpr : public Expr {
                                    valid_res + processed_size,
                                    size);
                 }
+                // Call func with nullptr to update internal cursors
+                if constexpr (NeedSegmentOffsets) {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         segment_offsets_array.data(),
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                } else {
+                    func(nullptr,
+                         nullptr,
+                         nullptr,
+                         size,
+                         res + processed_size,
+                         valid_res + processed_size,
+                         values...);
+                }
             }
 
             processed_size += size;
 
-            if (!process_all_chunks && processed_size >= batch_size_) {
+            if (processed_size >= batch_size_) {
                 current_data_chunk_ = i;
                 current_data_chunk_pos_ = data_pos + size;
                 break;
@@ -922,33 +1135,6 @@ class SegmentExpr : public Expr {
         }
 
         return processed_size;
-    }
-
-    template <typename T,
-              bool NeedSegmentOffsets = false,
-              typename FUNC,
-              typename... ValTypes>
-    int64_t
-    ProcessDataChunksForMultipleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        return ProcessMultipleChunksCommon<T, NeedSegmentOffsets>(
-            func, skip_func, res, valid_res, false, values...);
-    }
-
-    template <typename T, typename FUNC, typename... ValTypes>
-    int64_t
-    ProcessAllChunksForMultipleChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        return ProcessMultipleChunksCommon<T>(
-            func, skip_func, res, valid_res, true, values...);
     }
 
     template <typename T,
@@ -971,20 +1157,45 @@ class SegmentExpr : public Expr {
         }
     }
 
-    template <typename T, typename FUNC, typename... ValTypes>
+    // Specialized method for ngram post-filter: processes all data in batches
+    // - Starts from position 0
+    // - Does NOT modify segment state variables (current_data_chunk_, etc.)
+    template <typename T, typename FUNC>
     int64_t
-    ProcessAllDataChunk(
-        FUNC func,
-        std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        TargetBitmapView res,
-        TargetBitmapView valid_res,
-        const ValTypes&... values) {
-        if (segment_->is_chunked()) {
-            return ProcessAllChunksForMultipleChunk<T>(
-                func, skip_func, res, valid_res, values...);
-        } else {
-            ThrowInfo(ErrorCode::Unsupported, "unreachable");
+    ProcessAllDataChunkBatched(FUNC func, TargetBitmapView res) {
+        static_assert(std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>,
+                      "ProcessAllDataChunkBatched only supports string_view, "
+                      "Json, and ArrayView types");
+
+        AssertInfo(segment_->is_chunked(),
+                   "ProcessAllDataChunkBatched requires chunked segment");
+        AssertInfo(segment_->type() == SegmentType::Sealed,
+                   "ProcessAllDataChunkBatched requires sealed segment");
+
+        int64_t processed_size = 0;
+
+        for (size_t chunk_id = 0; chunk_id < num_data_chunk_; chunk_id++) {
+            int64_t chunk_size = segment_->chunk_size(field_id_, chunk_id);
+            int64_t chunk_offset = 0;
+
+            while (chunk_offset < chunk_size) {
+                int64_t batch_size =
+                    std::min(batch_size_, chunk_size - chunk_offset);
+
+                auto pw = segment_->get_batch_views<T>(
+                    op_ctx_, field_id_, chunk_id, chunk_offset, batch_size);
+                auto data_vec = std::move(pw.get().first);
+
+                func(data_vec.data(), batch_size, res + processed_size);
+
+                chunk_offset += batch_size;
+                processed_size += batch_size;
+            }
         }
+
+        return processed_size;
     }
 
     int
@@ -1378,7 +1589,59 @@ class SegmentExpr : public Expr {
     CanUseIndex() const {
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
         // TODO: if multiple indexes are supported, this logic should be changed
-        return num_index_chunk_ != 0 && !CanUseNgramIndex();
+        if (num_index_chunk_ == 0 || CanUseNgramIndex()) {
+            return false;
+        }
+
+        // For JSON fields with JsonFlatIndex, check if prefix matching is valid.
+        // Tantivy JSON index can handle nested object paths (e.g., "a.b") but NOT
+        // numeric array indices (e.g., "a.0"). Per RFC 6901, JSON Pointer doesn't
+        // distinguish between array indices and object keys syntactically. Since
+        // Tantivy doesn't store array index information, we must fall back to
+        // brute-force search when the relative path contains numeric segments.
+        if (field_type_ != DataType::JSON || pinned_index_.empty()) {
+            return true;
+        }
+
+        auto json_flat_index =
+            dynamic_cast<const index::JsonFlatIndex*>(pinned_index_[0].get());
+        if (json_flat_index == nullptr) {
+            return true;
+        }
+
+        auto index_path = json_flat_index->GetNestedPath();
+        auto query_path = milvus::Json::pointer(nested_path_);
+
+        // Exact match - safe to use index
+        if (index_path == query_path) {
+            return true;
+        }
+
+        // PinJsonIndex guarantees index_path is a prefix of query_path
+
+        // Get relative path (e.g., if index_path="/a" and query_path="/a/0/b",
+        // relative_path="/0/b")
+        auto relative_path = query_path.substr(index_path.length());
+
+        // Check if any path segment is numeric (potential array index)
+        size_t pos = 0;
+        while (pos < relative_path.length()) {
+            if (relative_path[pos] == '/') {
+                pos++;
+                continue;
+            }
+            size_t end = relative_path.find('/', pos);
+            if (end == std::string::npos) {
+                end = relative_path.length();
+            }
+            auto segment = relative_path.substr(pos, end - pos);
+            if (!segment.empty() && milvus::IsInteger(segment)) {
+                return false;
+            }
+            pos = end;
+        }
+
+        return true;
     }
 
     template <typename T>
@@ -1442,7 +1705,9 @@ class SegmentExpr : public Expr {
     bool
     HasJsonStats(FieldId field_id) const {
         return segment_->type() == SegmentType::Sealed &&
-               segment_->GetJsonStats(op_ctx_, field_id).get() != nullptr;
+               static_cast<const segcore::SegmentSealed*>(segment_)
+                       ->GetJsonStats(op_ctx_, field_id)
+                       .get() != nullptr;
     }
 
     bool

@@ -45,6 +45,20 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		Topks:      make([]int64, 0),
 	}
 
+	// Check element-level consistency: all results must have ElementIndices or none
+	hasElementIndices := searchResultData[0].ElementIndices != nil
+	for i, data := range searchResultData {
+		if (data.ElementIndices != nil) != hasElementIndices {
+			return nil, fmt.Errorf("inconsistent element-level flag in search results: result[0] has ElementIndices=%v, but result[%d] has ElementIndices=%v",
+				hasElementIndices, i, data.ElementIndices != nil)
+		}
+	}
+	if hasElementIndices {
+		ret.ElementIndices = &schemapb.LongArray{
+			Data: make([]int64, 0),
+		}
+	}
+
 	resultOffsets := make([][]int64, len(searchResultData))
 	for i := 0; i < len(searchResultData); i++ {
 		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
@@ -52,6 +66,11 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
+	}
+
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
+	for i, srd := range searchResultData {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
 	}
 
 	var skipDupCnt int64
@@ -73,9 +92,14 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
-				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+				fieldsData := searchResultData[sel].FieldsData
+				fieldIdxs := idxComputers[sel].Compute(idx)
+				retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
 				typeutil.AppendPKs(ret.Ids, id)
 				ret.Scores = append(ret.Scores, score)
+				if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
+					ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+				}
 				idSet[id] = struct{}{}
 				j++
 			} else {
@@ -127,6 +151,20 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 		Topks:      make([]int64, 0),
 	}
 
+	// Check element-level consistency: all results must have ElementIndices or none
+	hasElementIndices := searchResultData[0].ElementIndices != nil
+	for i, data := range searchResultData {
+		if (data.ElementIndices != nil) != hasElementIndices {
+			return nil, fmt.Errorf("inconsistent element-level flag in search results: result[0] has ElementIndices=%v, but result[%d] has ElementIndices=%v",
+				hasElementIndices, i, data.ElementIndices != nil)
+		}
+	}
+	if hasElementIndices {
+		ret.ElementIndices = &schemapb.LongArray{
+			Data: make([]int64, 0),
+		}
+	}
+
 	resultOffsets := make([][]int64, len(searchResultData))
 	groupByValIterator := make([]func(int) any, len(searchResultData))
 	for i := range searchResultData {
@@ -140,6 +178,11 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(searchResultData[0].GetGroupByFieldValue().GetType(), true, int(info.GetTopK()))
 	if err != nil {
 		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
+	}
+
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, len(searchResultData))
+	for i, srd := range searchResultData {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(srd.FieldsData)
 	}
 
 	var filteredCount int64
@@ -177,9 +220,14 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 					// exceed the limit for each group, filter this entity
 					filteredCount++
 				} else {
-					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+					fieldsData := searchResultData[sel].FieldsData
+					fieldIdxs := idxComputers[sel].Compute(idx)
+					retSize += typeutil.AppendFieldData(ret.FieldsData, fieldsData, idx, fieldIdxs...)
 					typeutil.AppendPKs(ret.Ids, id)
 					ret.Scores = append(ret.Scores, score)
+					if searchResultData[sel].ElementIndices != nil && ret.ElementIndices != nil {
+						ret.ElementIndices.Data = append(ret.ElementIndices.Data, searchResultData[sel].ElementIndices.Data[idx])
+					}
 					gpFieldBuilder.Add(groupByVal)
 					groupByValueMap[groupByVal] += 1
 					idSet[id] = struct{}{}

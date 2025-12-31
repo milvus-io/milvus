@@ -36,13 +36,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -102,8 +103,9 @@ type meta struct {
 	externalCollectionTaskMeta *externalCollectionTaskMeta
 
 	// File Resource Meta
-	resourceMeta map[string]*model.FileResource
-	resourceLock lock.RWMutex
+	resourceMeta    map[string]*internalpb.FileResourceInfo // name -> info
+	resourceVersion uint64
+	resourceLock    lock.RWMutex
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -125,12 +127,16 @@ func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
 type channelCPs struct {
 	lock.RWMutex
 	checkpoints map[string]*msgpb.MsgPosition
+	cond        *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
-	return &channelCPs{
+	cp := &channelCPs{
 		checkpoints: make(map[string]*msgpb.MsgPosition),
 	}
+	// use the same lock as channelCPs
+	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
+	return cp
 }
 
 // A local cache of segment metric update. Must call commit() to take effect.
@@ -204,7 +210,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		compactionTaskMeta: ctm,
 		statsTaskMeta:      stm,
 		// externalCollectionTaskMeta: ectm,
-		resourceMeta: make(map[string]*model.FileResource),
+		resourceMeta: make(map[string]*internalpb.FileResourceInfo),
 	}
 	err = mt.reloadFromKV(ctx, broker)
 	if err != nil {
@@ -269,6 +275,12 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	for _, segments := range collectionSegments {
 		numSegments += len(segments)
 		for _, segment := range segments {
+			// Convert old text log paths (full paths) to filenames to save memory
+			// This handles backward compatibility during recovery
+			for _, textStatsLog := range segment.GetTextStatsLogs() {
+				textStatsLog.Files = metautil.ExtractTextLogFilenames(textStatsLog.GetFiles())
+			}
+
 			// segments from catalog.ListSegments will not have logPath
 			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 			metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted())).Inc()
@@ -504,7 +516,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 			coll, ok := m.collections.Get(segment.GetCollectionID())
 			if ok {
-				collIDStr := fmt.Sprint(segment.GetCollectionID())
+				collIDStr := strconv.FormatInt(segment.GetCollectionID(), 10)
 				coll2DbName[collIDStr] = coll.DatabaseName
 				if _, ok := storedBinlogSize[collIDStr]; !ok {
 					storedBinlogSize[collIDStr] = make(map[string]int64)
@@ -545,7 +557,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 		coll, ok := m.collections.Get(collectionID)
 		if ok {
 			for state, rows := range statesRows {
-				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), coll.Schema.GetName(), state.String()).Set(float64(rows))
+				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10), coll.Schema.GetName(), state.String()).Set(float64(rows))
 			}
 		}
 	}
@@ -554,7 +566,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	for collectionID, entriesNum := range collectionL0RowCounts {
 		coll, ok := m.collections.Get(collectionID)
 		if ok {
-			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID)).Set(float64(entriesNum))
+			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
 		}
 	}
 
@@ -1758,7 +1770,9 @@ func (m *meta) completeMixCompactionMutation(
 		zap.String("type", t.GetType().String()),
 		zap.Int64("collectionID", t.CollectionID),
 		zap.Int64("partitionID", t.PartitionID),
-		zap.String("channel", t.GetChannel()))
+		zap.String("channel", t.GetChannel()),
+		zap.Int64("planID", t.GetPlanID()),
+	)
 
 	metricMutation := &segMetricMutation{stateChange: make(map[string]map[string]map[string]int)}
 	var compactFromSegIDs []int64
@@ -1788,6 +1802,12 @@ func (m *meta) completeMixCompactionMutation(
 
 		// metrics mutation for compaction from segments
 		updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+
+		log.Info("compact from segment",
+			zap.Int64("segmentID", cloned.GetID()),
+			zap.Int64("segment size", cloned.getSegmentSize()),
+			zap.Int64("num rows", cloned.GetNumOfRows()),
+		)
 	}
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
@@ -1837,6 +1857,7 @@ func (m *meta) completeMixCompactionMutation(
 			zap.Int("binlog count", len(compactToSegmentInfo.GetBinlogs())),
 			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
 			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
+			zap.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
@@ -2029,6 +2050,8 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel).Set(float64(ts.Unix()))
 	}
+	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
+	m.channelCPs.cond.UnsafeBroadcast()
 	return nil
 }
 
@@ -2331,7 +2354,9 @@ func (m *meta) completeSortCompactionMutation(
 
 	log = log.With(zap.Int64s("compactFrom", []int64{oldSegment.GetID()}), zap.Int64("compactTo", segment.GetID()))
 
-	log.Info("meta update: prepare for complete stats mutation - complete", zap.Int64("num rows", segment.GetNumOfRows()))
+	log.Info("meta update: prepare for complete stats mutation - complete",
+		zap.Int64("num rows", segment.GetNumOfRows()),
+		zap.Int64("segment size", segment.getSegmentSize()))
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, nil, err
@@ -2417,20 +2442,21 @@ func (m *meta) reloadFileResourceMeta(ctx context.Context) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
 
-	resources, err := m.catalog.ListFileResource(ctx)
+	resources, version, err := m.catalog.ListFileResource(ctx)
 	if err != nil {
 		return err
 	}
 
-	m.resourceMeta = make(map[string]*model.FileResource)
+	m.resourceMeta = make(map[string]*internalpb.FileResourceInfo)
 	for _, resource := range resources {
 		m.resourceMeta[resource.Name] = resource
 	}
+	m.resourceVersion = version
 	return nil
 }
 
 // AddFileResource add file resource to meta
-func (m *meta) AddFileResource(ctx context.Context, resource *model.FileResource) error {
+func (m *meta) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
 	m.resourceLock.Lock()
 	defer m.resourceLock.Unlock()
 
@@ -2438,12 +2464,13 @@ func (m *meta) AddFileResource(ctx context.Context, resource *model.FileResource
 		return merr.WrapErrAsInputError(fmt.Errorf("create resource failed: resource name exist"))
 	}
 
-	err := m.catalog.SaveFileResource(ctx, resource)
+	err := m.catalog.SaveFileResource(ctx, resource, m.resourceVersion+1)
 	if err != nil {
 		return err
 	}
 
 	m.resourceMeta[resource.Name] = resource
+	m.resourceVersion += 1
 	return nil
 }
 
@@ -2453,21 +2480,83 @@ func (m *meta) RemoveFileResource(ctx context.Context, name string) error {
 	defer m.resourceLock.Unlock()
 
 	if resource, ok := m.resourceMeta[name]; ok {
-		err := m.catalog.RemoveFileResource(ctx, resource.ID)
+		err := m.catalog.RemoveFileResource(ctx, resource.Id, m.resourceVersion+1)
 		if err != nil {
 			return err
 		}
 
 		delete(m.resourceMeta, name)
+		m.resourceVersion += 1
 	}
 
 	return nil
 }
 
 // ListFileResource list file resources from meta
-func (m *meta) ListFileResource(ctx context.Context) []*model.FileResource {
+func (m *meta) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
 	m.resourceLock.RLock()
 	defer m.resourceLock.RUnlock()
 
-	return lo.Values(m.resourceMeta)
+	return lo.Values(m.resourceMeta), m.resourceVersion
+}
+
+// TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp
+func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flushTs uint64) error {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	segments := m.segments.GetSegmentsBySelector(SegmentFilterFunc(isSegmentHealthy), WithChannel(vChannel))
+	segmentsToDrop := make([]*SegmentInfo, 0)
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]int),
+	}
+
+	for _, segment := range segments {
+		if segment.GetDmlPosition().GetTimestamp() <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+			cloned := segment.Clone()
+			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+			segmentsToDrop = append(segmentsToDrop, cloned)
+		}
+	}
+
+	if len(segmentsToDrop) == 0 {
+		return nil
+	}
+
+	// Persist to etcd
+	segmentsProto := lo.Map(segmentsToDrop, func(seg *SegmentInfo, _ int) *datapb.SegmentInfo {
+		return seg.SegmentInfo
+	})
+	if err := m.catalog.AlterSegments(ctx, segmentsProto); err != nil {
+		log.Ctx(ctx).Warn("Failed to batch set segments state to dropped", zap.Error(err))
+		return err
+	}
+
+	// Update metrics
+	metricMutation.commit()
+
+	// Update memory
+	for _, seg := range segmentsToDrop {
+		m.segments.SetSegment(seg.GetID(), seg)
+	}
+
+	return nil
+}
+
+// WatchChannelCheckpoint waits until the checkpoint of the specified channel
+// reaches or exceeds the target timestamp. Used for TruncateCollection.
+func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {
+	m.channelCPs.cond.L.Lock()
+
+	for {
+		cp, ok := m.channelCPs.checkpoints[vChannel]
+		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
+			m.channelCPs.cond.L.Unlock()
+			return nil
+		}
+
+		if err := m.channelCPs.cond.Wait(ctx); err != nil {
+			return err
+		}
+	}
 }

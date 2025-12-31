@@ -43,12 +43,14 @@ set(MILVUS_TEST_FILES
         test_index_wrapper.cpp
         test_integer_overflow.cpp
         test_query.cpp
+        test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
         test_string_expr.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
         test_group_by_json.cpp
+        test_element_filter.cpp
         )
 
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
@@ -116,33 +118,6 @@ install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
 add_subdirectory(test_json_stats)
-
-# Optionally include external scalar-benchmark project
-option(ENABLE_SCALAR_BENCH "Enable fetching and building scalar-benchmark" OFF)
-set(SCALAR_BENCHMARK_GIT_URL "https://github.com/zilliztech/scalar-benchmark" CACHE STRING "Scalar benchmark git repo URL")
-set(SCALAR_BENCHMARK_GIT_TAG "main" CACHE STRING "Scalar benchmark git tag/branch")
-
-if (ENABLE_SCALAR_BENCH)
-    include(FetchContent)
-    if (DEFINED SCALAR_BENCHMARK_SOURCE_DIR AND EXISTS ${SCALAR_BENCHMARK_SOURCE_DIR}/CMakeLists.txt)
-        message(STATUS "Using local scalar-benchmark from ${SCALAR_BENCHMARK_SOURCE_DIR}")
-        add_subdirectory(${SCALAR_BENCHMARK_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/scalar-benchmark-build)
-    else()
-        message(STATUS "Fetching scalar-benchmark from ${SCALAR_BENCHMARK_GIT_URL} (${SCALAR_BENCHMARK_GIT_TAG})")
-        FetchContent_Declare(
-            scalar_benchmark
-            GIT_REPOSITORY ${SCALAR_BENCHMARK_GIT_URL}
-            GIT_TAG        ${SCALAR_BENCHMARK_GIT_TAG}
-            SOURCE_DIR     ${CMAKE_CURRENT_BINARY_DIR}/scalar-benchmark-src
-            BINARY_DIR     ${CMAKE_CURRENT_BINARY_DIR}/scalar-benchmark-build
-        )
-        FetchContent_GetProperties(scalar_benchmark)
-        if (NOT scalar_benchmark_POPULATED)
-            FetchContent_Populate(scalar_benchmark)
-            add_subdirectory(${scalar_benchmark_SOURCE_DIR} ${scalar_benchmark_BINARY_DIR})
-        endif()
-    endif()
-endif()
 
 # bitset unit test
 include(CheckCXXCompilerFlag)

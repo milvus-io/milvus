@@ -42,6 +42,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/common.pb.h"
 #include "milvus-storage/reader.h"
+#include "segcore/SegmentLoadInfo.h"
 
 namespace milvus::segcore {
 
@@ -89,7 +90,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
              FieldId field_id,
              bool include_ngram = false) const override {
         auto [scalar_indexings, ngram_fields] =
-            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+            lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
         if (!include_ngram) {
             if (ngram_fields->find(field_id) != ngram_fields->end()) {
                 return {};
@@ -136,29 +137,26 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                       info_proto) override;
 
     void
-    LoadJsonStats(FieldId field_id,
-                  index::CacheJsonKeyStatsPtr cache_slot) override {
-        json_stats_.wlock()->insert({field_id, std::move(cache_slot)});
-    }
-
-    PinWrapper<index::JsonKeyStats*>
-    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
-        auto r = json_stats_.rlock();
-        auto it = r->find(field_id);
-        if (it == r->end()) {
-            return PinWrapper<index::JsonKeyStats*>(nullptr);
-        }
-        auto ca = SemiInlineGet(it->second->PinCells(op_ctx, {0}));
-        auto* stats = ca->get_cell_of(0);
-        AssertInfo(stats != nullptr,
-                   "json stats cache is corrupted, field_id: {}",
-                   field_id.get());
-        return PinWrapper<index::JsonKeyStats*>(ca, stats);
+    RemoveJsonStats(FieldId field_id) override {
+        std::unique_lock lck(mutex_);
+        json_stats_.erase(field_id);
     }
 
     void
-    RemoveJsonStats(FieldId field_id) override {
-        json_stats_.wlock()->erase(field_id);
+    LoadJsonStats(FieldId field_id,
+                  std::shared_ptr<index::JsonKeyStats> stats) override {
+        std::unique_lock lck(mutex_);
+        json_stats_[field_id] = stats;
+    }
+
+    std::shared_ptr<index::JsonKeyStats>
+    GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override {
+        std::shared_lock lck(mutex_);
+        auto iter = json_stats_.find(field_id);
+        if (iter == json_stats_.end()) {
+            return nullptr;
+        }
+        return iter->second;
     }
 
     PinWrapper<index::NgramInvertedIndex*>
@@ -168,6 +166,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetNgramIndexForJson(milvus::OpContext* op_ctx,
                          FieldId field_id,
                          const std::string& nested_path) const override;
+
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const override {
+        auto it = array_offsets_map_.find(field_id);
+        if (it != array_offsets_map_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
 
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -181,6 +188,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Reopen(SchemaPtr sch) override;
+
+    void
+    Reopen(
+        const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
     LazyCheckSchema(SchemaPtr sch) override;
@@ -866,7 +877,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         google::protobuf::RepeatedPtrField<T>* dst);
 
     std::unique_ptr<DataArray>
-    fill_with_empty(FieldId field_id, int64_t count) const;
+    fill_with_empty(FieldId field_id,
+                    int64_t count,
+                    int64_t valid_count = 0,
+                    const void* valid_data = nullptr) const;
 
     std::unique_ptr<DataArray>
     get_raw_data(milvus::OpContext* op_ctx,
@@ -874,6 +888,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                  const FieldMeta& field_meta,
                  const int64_t* seg_offsets,
                  int64_t count) const;
+
+    struct ValidResult {
+        int64_t valid_count = 0;
+        std::unique_ptr<bool[]> valid_data;
+        std::vector<int64_t> valid_offsets;
+    };
+
+    ValidResult
+    FilterVectorValidOffsets(milvus::OpContext* op_ctx,
+                             FieldId field_id,
+                             const int64_t* seg_offsets,
+                             int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -931,6 +957,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
+    void
+    LoadBatchIndexes(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>&
+            field_id_to_index_info);
+
+    void
+    LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
+                       std::vector<std::pair<std::vector<FieldId>,
+                                             proto::segcore::FieldBinlog>>&
+                           field_binlog_to_load);
+
     /**
      * @brief Load all column groups from a manifest file path
      *
@@ -940,7 +978,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @param manifest_path JSON string containing base_path and version fields
      */
     void
-    LoadColumnGroups(const std::string& manifest_path);
+    LoadManifest(const std::string& manifest_path);
+
+    void
+    LoadColumnGroups(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids);
 
     /**
      * @brief Load a single column group at the specified index
@@ -956,7 +1000,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index);
+        int64_t index,
+        const std::vector<FieldId>& milvus_field_ids);
+
+    /**
+     * @brief Apply load differences to update segment load information
+     *
+     * This method processes the differences between current and new load states,
+     * updating the segment's loaded fields and indexes accordingly. It handles
+     * incremental updates during segment reopen operations.
+     *
+     * @param segment_load_info The segment load information to be updated
+     * @param load_diff The differences to apply, containing fields and indexes to add/remove
+     */
+    void
+    ApplyLoadDiff(SegmentLoadInfo& segment_load_info, LoadDiff& load_diff);
 
     void
     load_field_data_common(
@@ -967,11 +1025,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column,
         std::optional<ParquetStatistics> statistics = {});
-
-    // Convert proto::segcore::FieldIndexInfo to LoadIndexInfo
-    LoadIndexInfo
-    ConvertFieldIndexInfoToLoadIndexInfo(
-        const milvus::proto::segcore::FieldIndexInfo* field_index_info) const;
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {
@@ -1026,7 +1079,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
-    milvus::proto::segcore::SegmentLoadInfo segment_load_info_;
+
+    SegmentLoadInfo segment_load_info_;
 
     SchemaPtr schema_;
     int64_t id_;
@@ -1049,6 +1103,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;
+
+    // ArrayOffsetsSealed for element-level filtering on array fields
+    // field_id -> ArrayOffsetsSealed mapping
+    std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
+        array_offsets_map_;
+    // struct_name -> ArrayOffsetsSealed mapping (temporary during load)
+    std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
+        struct_to_array_offsets_;
 };
 
 inline SegmentSealedUPtr

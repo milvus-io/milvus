@@ -76,6 +76,80 @@ func (_c *MockQueryNodeClient_Close_Call) RunAndReturn(run func() error) *MockQu
 	return _c
 }
 
+// ComputePhraseMatchSlop provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryNodeClient) ComputePhraseMatchSlop(ctx context.Context, in *querypb.ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputePhraseMatchSlop")
+	}
+
+	var r0 *querypb.ComputePhraseMatchSlopResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest, ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest, ...grpc.CallOption) *querypb.ComputePhraseMatchSlopResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ComputePhraseMatchSlopResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ComputePhraseMatchSlopRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeClient_ComputePhraseMatchSlop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputePhraseMatchSlop'
+type MockQueryNodeClient_ComputePhraseMatchSlop_Call struct {
+	*mock.Call
+}
+
+// ComputePhraseMatchSlop is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.ComputePhraseMatchSlopRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryNodeClient_Expecter) ComputePhraseMatchSlop(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryNodeClient_ComputePhraseMatchSlop_Call {
+	return &MockQueryNodeClient_ComputePhraseMatchSlop_Call{Call: _e.mock.On("ComputePhraseMatchSlop",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryNodeClient_ComputePhraseMatchSlop_Call) Run(run func(ctx context.Context, in *querypb.ComputePhraseMatchSlopRequest, opts ...grpc.CallOption)) *MockQueryNodeClient_ComputePhraseMatchSlop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ComputePhraseMatchSlopRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeClient_ComputePhraseMatchSlop_Call) Return(_a0 *querypb.ComputePhraseMatchSlopResponse, _a1 error) *MockQueryNodeClient_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeClient_ComputePhraseMatchSlop_Call) RunAndReturn(run func(context.Context, *querypb.ComputePhraseMatchSlopRequest, ...grpc.CallOption) (*querypb.ComputePhraseMatchSlopResponse, error)) *MockQueryNodeClient_ComputePhraseMatchSlop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryNodeClient) Delete(ctx context.Context, in *querypb.DeleteRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -1926,6 +2000,80 @@ func (_c *MockQueryNodeClient_SyncDistribution_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// SyncFileResource provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryNodeClient) SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.SyncFileResourceRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.SyncFileResourceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeClient_SyncFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncFileResource'
+type MockQueryNodeClient_SyncFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *internalpb.SyncFileResourceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryNodeClient_Expecter) SyncFileResource(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryNodeClient_SyncFileResource_Call {
+	return &MockQueryNodeClient_SyncFileResource_Call{Call: _e.mock.On("SyncFileResource",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryNodeClient_SyncFileResource_Call) Run(run func(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption)) *MockQueryNodeClient_SyncFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*internalpb.SyncFileResourceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeClient_SyncFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNodeClient_SyncFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeClient_SyncFileResource_Call) RunAndReturn(run func(context.Context, *internalpb.SyncFileResourceRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryNodeClient_SyncFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncReplicaSegments provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryNodeClient) SyncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -2149,7 +2297,7 @@ func (_c *MockQueryNodeClient_UpdateSchema_Call) RunAndReturn(run func(context.C
 }
 
 // ValidateAnalyzer provides a mock function with given fields: ctx, in, opts
-func (_m *MockQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb.ValidateAnalyzerRequest, opts ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -2163,16 +2311,16 @@ func (_m *MockQueryNodeClient) ValidateAnalyzer(ctx context.Context, in *querypb
 		panic("no return value specified for ValidateAnalyzer")
 	}
 
-	var r0 *commonpb.Status
+	var r0 *querypb.ValidateAnalyzerResponse
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) *querypb.ValidateAnalyzerResponse); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
+			r0 = ret.Get(0).(*querypb.ValidateAnalyzerResponse)
 		}
 	}
 
@@ -2212,12 +2360,12 @@ func (_c *MockQueryNodeClient_ValidateAnalyzer_Call) Run(run func(ctx context.Co
 	return _c
 }
 
-func (_c *MockQueryNodeClient_ValidateAnalyzer_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNodeClient_ValidateAnalyzer_Call {
+func (_c *MockQueryNodeClient_ValidateAnalyzer_Call) Return(_a0 *querypb.ValidateAnalyzerResponse, _a1 error) *MockQueryNodeClient_ValidateAnalyzer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockQueryNodeClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryNodeClient_ValidateAnalyzer_Call {
+func (_c *MockQueryNodeClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.ValidateAnalyzerRequest, ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error)) *MockQueryNodeClient_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

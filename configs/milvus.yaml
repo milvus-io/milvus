@@ -215,6 +215,10 @@ woodpecker:
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
     retentionPolicy:
       ttl: 72h # Time to live for truncated segments in seconds, default is 72h
+    fencePolicy:
+      # Enable conditional write for embedded mode, default is auto, which will automatically detect whether the storage supports conditional write.
+      # Valid values: [auto, enable, disable]
+      conditionWrite: auto
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
@@ -297,7 +301,7 @@ rootCoord:
   maxGeneralCapacity: 65536 # upper limit for the sum of of product of partitionNumber and shardNumber
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # TCP/IP address of rootCoord. If not specified, use the first unicastable address
-  port: 53100 # TCP port of rootCoord
+  port: 22125 # TCP port of rootCoord
   grpc:
     serverMaxSendSize: 536870912 # The maximum size of each RPC request that the rootCoord can send, unit: byte
     serverMaxRecvSize: 268435456 # The maximum size of each RPC request that the rootCoord can receive, unit: byte
@@ -662,7 +666,7 @@ dataCoord:
     # default is FIFO.
     # level is prioritized by level: L0 compactions first, then mix compactions, then clustering compactions.
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
-    taskPrioritizer: default
+    taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
@@ -735,6 +739,7 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonShreddingTriggerCount: 10 # jsonkey stats task count per trigger
@@ -836,7 +841,6 @@ msgChannel:
     # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
     # It is recommended to change this parameter before starting Milvus for the first time.
     rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
     # Sub-name prefix of the message channel where the query node publishes time tick messages.
     # The complete channel name prefix is ${msgChannel.chanNamePrefix.cluster}-${msgChannel.chanNamePrefix.queryTimeTick}
     # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
@@ -998,6 +1002,10 @@ common:
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
+  estimate:
+    varCharLengthAvg: 256 # average length considered per VarChar/Text field when estimating record size
+    dynamicFieldLengthAvg: 512 # average length considered per JSON/Array/Geometry field when estimating record size
+    sparseFloatVectorSize: 1200 # fallback size (bytes) used when estimating sparse float vector fields
   locks:
     metrics:
       enable: false # whether gather statistics for metrics locks
@@ -1015,16 +1023,11 @@ common:
         enabled: false # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
-  # Whether to disable the internal time messaging mechanism for the system.
-  # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
-  # This helps Milvus-CDC synchronize incremental data
-  ttMsgEnabled: true
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
   bloomFilterType: BlockedBloomFilter # bloom filter type, support BasicBloomFilter and BlockedBloomFilter
   maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
   bloomFilterApplyBatchSize: 1000 # batch size when to apply pk to bloom filter
-  collectionReplicateEnable: false # Whether to enable collection replication.
   usePartitionKeyAsClusteringKey: false # if true, do clustering compaction and segment prune on partition key field
   useVectorAsClusteringKey: false # if true, do clustering compaction and segment prune on vector field
   enableVectorClusteringKey: false # if true, enable vector clustering key and vector clustering compaction
@@ -1056,6 +1059,10 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  # FactorChangeThreshold defines the minimum relative change in factor to trigger an update.
+  # If the factor change is less than this threshold (e.g., 5%), the update is skipped
+  # to reduce unnecessary proxy updates. Range: (0, 1]
+  factorChangeThreshold: 0.05
   forceDenyAllDDL: false # true to force deny all DDL requests, false to allow.
   limits:
     allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
@@ -1126,14 +1133,6 @@ quotaAndLimits:
         # Setting this item to 5 indicates that Milvus only allows data insertion to any collection at the rate of 5 MB/s.
         # To use this setting, set quotaAndLimits.dml.enabled to true at the same time.
         max: -1
-      partition:
-        max: -1 # MB/s, default no limit
-    upsertRate:
-      max: -1 # MB/s, default no limit
-      db:
-        max: -1 # MB/s, default no limit
-      collection:
-        max: -1 # MB/s, default no limit
       partition:
         max: -1 # MB/s, default no limit
     deleteRate:
@@ -1474,3 +1473,4 @@ function:
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
+    concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included

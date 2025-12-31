@@ -114,6 +114,69 @@ class BitmapIndex : public ScalarIndex<T> {
         return Count();
     }
 
+    void
+    ComputeByteSize() override {
+        ScalarIndex<T>::ComputeByteSize();
+        int64_t total = this->cached_byte_size_;
+
+        // valid_bitset_
+        total += valid_bitset_.size_in_bytes();
+
+        if (is_mmap_) {
+            // mmap mode
+            total += mmap_size_;
+            // bitmap_info_map_ overhead (keys and roaring metadata in memory)
+            size_t num_entries = bitmap_info_map_.size();
+            if constexpr (std::is_same_v<T, std::string>) {
+                for (const auto& [key, bitmap] : bitmap_info_map_) {
+                    total += key.capacity();
+                }
+            } else {
+                total += num_entries * sizeof(T);
+            }
+            // roaring metadata + map node overhead per entry
+            total += num_entries * (sizeof(roaring::Roaring) + 40);
+        } else if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            // data_: map<T, roaring::Roaring>
+            for (const auto& [key, bitmap] : data_) {
+                if constexpr (std::is_same_v<T, std::string>) {
+                    total += key.capacity();
+                } else {
+                    total += sizeof(T);
+                }
+                total += bitmap.getSizeInBytes();
+                // std::map red-black tree node overhead (~40 bytes per node)
+                total += 40;
+            }
+        } else {
+            // bitsets_: map<T, TargetBitmap>
+            size_t num_entries = bitsets_.size();
+            if (num_entries > 0) {
+                size_t bitset_bytes = bitsets_.begin()->second.size_in_bytes();
+                total += num_entries * bitset_bytes;
+                if constexpr (std::is_same_v<T, std::string>) {
+                    for (const auto& [key, bitset] : bitsets_) {
+                        total += key.capacity();
+                    }
+                } else {
+                    total += num_entries * sizeof(T);
+                }
+                // std::map red-black tree node overhead (~40 bytes per node)
+                total += num_entries * 40;
+            }
+        }
+
+        // offset cache
+        total += data_offsets_cache_.capacity() *
+                 sizeof(typename decltype(data_offsets_cache_)::value_type);
+        total += bitsets_offsets_cache_.capacity() *
+                 sizeof(typename decltype(bitsets_offsets_cache_)::value_type);
+        total += mmap_offsets_cache_.capacity() *
+                 sizeof(typename decltype(mmap_offsets_cache_)::value_type);
+
+        this->cached_byte_size_ = total;
+    }
+
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 

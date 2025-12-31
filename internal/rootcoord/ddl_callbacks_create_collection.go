@@ -86,10 +86,7 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 	msg := message.NewCreateCollectionMessageBuilderV1().
 		WithHeader(createCollectionTask.header).
 		WithBody(createCollectionTask.body).
-		WithBroadcast(broadcastChannel,
-			message.NewSharedDBNameResourceKey(createCollectionTask.body.DbName),
-			message.NewExclusiveCollectionNameResourceKey(createCollectionTask.body.DbName, createCollectionTask.body.CollectionName),
-		).
+		WithBroadcast(broadcastChannel).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -177,6 +174,14 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		})
 	}
 	consistencyLevel, properties := mustConsumeConsistencyLevel(body.CollectionSchema.Properties)
+	shardInfos := make(map[string]*model.ShardInfo, len(body.VirtualChannelNames))
+	for idx, vchannel := range body.VirtualChannelNames {
+		shardInfos[vchannel] = &model.ShardInfo{
+			VChannelName:         vchannel,
+			PChannelName:         body.PhysicalChannelNames[idx],
+			LastTruncateTimeTick: 0,
+		}
+	}
 	return &model.Collection{
 		CollectionID:         header.CollectionId,
 		DBID:                 header.DbId,
@@ -197,6 +202,9 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		Properties:           properties,
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		UpdateTimestamp:      ts,
+		SchemaVersion:        0,
+		ShardInfos:           shardInfos,
+		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
 	}
 }
 

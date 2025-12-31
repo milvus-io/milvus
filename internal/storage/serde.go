@@ -553,8 +553,12 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			b.AppendNull()
 			return true
 		}
-		if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
-			if v, ok := v.([]byte); ok {
+		if v, ok := v.([]byte); ok {
+			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
+				builder.Append(v)
+				return true
+			}
+			if builder, ok := b.(*array.BinaryBuilder); ok {
 				builder.Append(v)
 				return true
 			}
@@ -607,14 +611,21 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				b.AppendNull()
 				return true
 			}
+			var bytesData []byte
+			if vv, ok := v.([]byte); ok {
+				bytesData = vv
+			} else if vv, ok := v.([]int8); ok {
+				bytesData = arrow.Int8Traits.CastToBytes(vv)
+			} else {
+				return false
+			}
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
-				if vv, ok := v.([]byte); ok {
-					builder.Append(vv)
-					return true
-				} else if vv, ok := v.([]int8); ok {
-					builder.Append(arrow.Int8Traits.CastToBytes(vv))
-					return true
-				}
+				builder.Append(bytesData)
+				return true
+			}
+			if builder, ok := b.(*array.BinaryBuilder); ok {
+				builder.Append(bytesData)
+				return true
 			}
 			return false
 		},
@@ -643,15 +654,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 				b.AppendNull()
 				return true
 			}
-			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
-				if vv, ok := v.([]float32); ok {
-					dim := len(vv)
-					byteLength := dim * 4
-					bytesData := make([]byte, byteLength)
-					for i, vec := range vv {
-						bytes := math.Float32bits(vec)
-						common.Endian.PutUint32(bytesData[i*4:], bytes)
-					}
+			if vv, ok := v.([]float32); ok {
+				dim := len(vv)
+				byteLength := dim * 4
+				bytesData := make([]byte, byteLength)
+				for i, vec := range vv {
+					bytes := math.Float32bits(vec)
+					common.Endian.PutUint32(bytesData[i*4:], bytes)
+				}
+				if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
+					builder.Append(bytesData)
+					return true
+				}
+				if builder, ok := b.(*array.BinaryBuilder); ok {
 					builder.Append(bytesData)
 					return true
 				}
@@ -987,7 +1002,16 @@ func newSingleFieldRecordWriter(field *schemapb.FieldSchema, writer io.Writer, o
 			[]string{fmt.Sprintf("%d", int32(elementType)), fmt.Sprintf("%d", dim)},
 		)
 	}
-	arrowType = serdeMap[field.DataType].arrowType(int(dim), elementType)
+
+	if field.GetNullable() && typeutil.IsVectorType(field.DataType) && !typeutil.IsSparseFloatVectorType(field.DataType) {
+		arrowType = arrow.BinaryTypes.Binary
+		fieldMetadata = arrow.NewMetadata(
+			[]string{"dim"},
+			[]string{fmt.Sprintf("%d", dim)},
+		)
+	} else {
+		arrowType = serdeMap[field.DataType].arrowType(int(dim), elementType)
+	}
 
 	w := &singleFieldRecordWriter{
 		fieldId: field.FieldID,
@@ -1199,10 +1223,40 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			elementType = field.GetElementType()
 		}
 
-		for j := 0; j < fieldData.RowNum(); j++ {
-			ok = typeEntry.serialize(fBuilder, fieldData.GetRow(j), elementType)
-			if !ok {
-				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+		if field.GetNullable() && typeutil.IsVectorType(field.DataType) {
+			var validData []bool
+			switch fd := fieldData.(type) {
+			case *FloatVectorFieldData:
+				validData = fd.ValidData
+			case *BinaryVectorFieldData:
+				validData = fd.ValidData
+			case *Float16VectorFieldData:
+				validData = fd.ValidData
+			case *BFloat16VectorFieldData:
+				validData = fd.ValidData
+			case *SparseFloatVectorFieldData:
+				validData = fd.ValidData
+			case *Int8VectorFieldData:
+				validData = fd.ValidData
+			}
+			// Use len(validData) as logical row count, GetRow takes logical index
+			for j := 0; j < len(validData); j++ {
+				if !validData[j] {
+					fBuilder.(*array.BinaryBuilder).AppendNull()
+				} else {
+					rowData := fieldData.GetRow(j)
+					ok = typeEntry.serialize(fBuilder, rowData, elementType)
+					if !ok {
+						return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+					}
+				}
+			}
+		} else {
+			for j := 0; j < fieldData.RowNum(); j++ {
+				ok = typeEntry.serialize(fBuilder, fieldData.GetRow(j), elementType)
+				if !ok {
+					return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+				}
 			}
 		}
 		return nil

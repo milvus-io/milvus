@@ -362,8 +362,14 @@ func handleBinaryArithExpr(op planpb.OpType, arithExpr *planpb.BinaryArithExpr, 
 
 func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb.ValueExpr) (*planpb.Expr, error) {
 	dataType := left.dataType
-	if typeutil.IsArrayType(dataType) && len(toColumnInfo(left).GetNestedPath()) != 0 {
-		dataType = toColumnInfo(left).GetElementType()
+	columnInfo := toColumnInfo(left)
+
+	// Use element type for casting in two cases:
+	// 1. Array with nested path (e.g., arr[0])
+	// 2. Array with element level flag (e.g., $[intField] in MATCH_ALL/ElementFilter)
+	if typeutil.IsArrayType(dataType) && columnInfo != nil &&
+		(len(columnInfo.GetNestedPath()) != 0 || columnInfo.GetIsElementLevel()) {
+		dataType = columnInfo.GetElementType()
 	}
 
 	if !left.expr.GetIsTemplate() && !isTemplateExpr(right) {
@@ -378,7 +384,6 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 		return handleBinaryArithExpr(op, leftArithExpr, left.dataType, right)
 	}
 
-	columnInfo := toColumnInfo(left)
 	if columnInfo == nil {
 		return nil, errors.New("not supported to combine multiple fields")
 	}

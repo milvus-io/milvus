@@ -132,6 +132,15 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
     boost::filesystem::path p(path_);
     boost::filesystem::directory_iterator end_iter;
 
+    // TODO: remove this log when #45590 is solved
+    auto segment_id = disk_file_manager_->GetFieldDataMeta().segment_id;
+    auto field_id = disk_file_manager_->GetFieldDataMeta().field_id;
+    LOG_INFO(
+        "InvertedIndexTantivy::Upload: segment_id={}, field_id={}, path={}",
+        segment_id,
+        field_id,
+        path_);
+
     for (boost::filesystem::directory_iterator iter(p); iter != end_iter;
          iter++) {
         if (boost::filesystem::is_directory(*iter)) {
@@ -184,6 +193,13 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                "index file paths is empty when load disk ann index data");
     auto inverted_index_files = index_files.value();
 
+    // TODO: remove this log when #45590 is solved
+    auto segment_id = disk_file_manager_->GetFieldDataMeta().segment_id;
+    auto field_id = disk_file_manager_->GetFieldDataMeta().field_id;
+    LOG_INFO("InvertedIndexTantivy::Load: segment_id={}, field_id={}",
+             segment_id,
+             field_id);
+
     LoadIndexMetas(inverted_index_files, config);
     RetainTantivyIndexFiles(inverted_index_files);
     auto load_priority =
@@ -202,6 +218,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         // the index is loaded in ram, so we can remove files in advance
         disk_file_manager_->RemoveIndexFiles();
     }
+    ComputeByteSize();
 }
 
 template <typename T>
@@ -548,6 +565,7 @@ InvertedIndexTantivy<T>::BuildWithRawDataForUT(size_t n,
     wrapper_->create_reader(milvus::index::SetBitsetSealed);
     finish();
     wrapper_->reload();
+    ComputeByteSize();
 }
 
 template <typename T>

@@ -197,6 +197,10 @@ func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
 // getCollectionAutoCompactionEnabled returns whether auto compaction for collection is enabled.
 // if not set, returns global auto compaction config.
 func getCollectionAutoCompactionEnabled(properties map[string]string) (bool, error) {
+	// when collection is on truncating, disable auto compaction.
+	if _, ok := properties[common.CollectionOnTruncatingKey]; ok {
+		return false, nil
+	}
 	v, ok := properties[common.CollectionAutoCompactionKey]
 	if ok {
 		enabled, err := strconv.ParseBool(v)
@@ -369,14 +373,17 @@ func getSortStatus(sorted bool) string {
 	return "unsorted"
 }
 
-func calculateIndexTaskSlot(segmentSize int64) int64 {
+func calculateIndexTaskSlot(fieldSize int64, isVectorIndex bool) int64 {
 	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	if segmentSize > 512*1024*1024 {
-		taskSlot := max(segmentSize/512/1024/1024, 1) * defaultSlots
+	if !isVectorIndex {
+		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
+	}
+	if fieldSize > 512*1024*1024 {
+		taskSlot := max(fieldSize/512/1024/1024, 1) * defaultSlots
 		return max(taskSlot, 1)
-	} else if segmentSize > 100*1024*1024 {
+	} else if fieldSize > 100*1024*1024 {
 		return max(defaultSlots/4, 1)
-	} else if segmentSize > 10*1024*1024 {
+	} else if fieldSize > 10*1024*1024 {
 		return max(defaultSlots/16, 1)
 	}
 	return max(defaultSlots/64, 1)

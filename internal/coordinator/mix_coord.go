@@ -75,9 +75,6 @@ type mixCoordImpl struct {
 
 	factory dependency.Factory
 
-	enableActiveStandBy bool
-	activateFunc        func() error
-
 	metricsRequest *metricsinfo.MetricsRequest
 
 	metaKVCreator  func() kv.MetaKv
@@ -97,13 +94,12 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 	dataCoordServer := datacoord.CreateServer(c, factory)
 
 	return &mixCoordImpl{
-		ctx:                 ctx,
-		cancel:              cancel,
-		rootcoordServer:     rootCoordServer,
-		queryCoordServer:    queryCoordServer,
-		datacoordServer:     dataCoordServer,
-		enableActiveStandBy: Params.MixCoordCfg.EnableActiveStandby.GetAsBool(),
-		factory:             factory,
+		ctx:              ctx,
+		cancel:           cancel,
+		rootcoordServer:  rootCoordServer,
+		queryCoordServer: queryCoordServer,
+		datacoordServer:  dataCoordServer,
+		factory:          factory,
 	}, nil
 }
 
@@ -115,21 +111,17 @@ func (s *mixCoordImpl) Register() error {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.MixCoordRole).Inc()
 		log.Info("MixCoord Register Finished")
 	}
-	if s.enableActiveStandBy {
-		go func() {
-			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-				if s.ctx.Err() == context.Canceled {
-					log.Info("standby process canceled due to server shutdown")
-					return
-				}
-				log.Error("failed to activate standby server", zap.Error(err))
-				panic(err)
+	go func() {
+		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+			if s.ctx.Err() == context.Canceled {
+				log.Info("standby process canceled due to server shutdown")
+				return
 			}
-			afterRegister()
-		}()
-	} else {
+			log.Error("failed to activate standby server", zap.Error(err))
+			panic(err)
+		}
 		afterRegister()
-	}
+	}()
 	return nil
 }
 
@@ -142,33 +134,25 @@ func (s *mixCoordImpl) Init() error {
 	s.factory.Init(Params)
 	s.initKVCreator()
 	s.initStreamingCoord()
-	if s.enableActiveStandBy {
-		s.activateFunc = func() error {
-			log.Info("mixCoord switch from standby to active, activating")
+	s.UpdateStateCode(commonpb.StateCode_StandBy)
+	log.Info("MixCoord enter standby mode successfully")
+	return nil
+}
 
-			var err error
-			s.initOnce.Do(func() {
-				if err = s.initInternal(); err != nil {
-					log.Error("mixCoord init failed", zap.Error(err))
-				}
-			})
-			if err != nil {
-				return err
-			}
-			log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
-			s.startAndUpdateHealthy()
-			return err
+func (s *mixCoordImpl) activateFunc() error {
+	log.Info("mixCoord switch from standby to active, activating")
+	var err error
+	s.initOnce.Do(func() {
+		if err = s.initInternal(); err != nil {
+			log.Error("mixCoord init failed", zap.Error(err))
 		}
-		s.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("MixCoord enter standby mode successfully")
-	} else {
-		s.initOnce.Do(func() {
-			if initErr = s.initInternal(); initErr != nil {
-				log.Error("mixCoord init failed", zap.Error(initErr))
-			}
-		})
+	})
+	if err != nil {
+		return err
 	}
-	return initErr
+	log.Info("mixCoord startup success", zap.String("address", s.session.GetAddress()))
+	s.startAndUpdateHealthy()
+	return err
 }
 
 func (s *mixCoordImpl) initInternal() error {
@@ -211,6 +195,10 @@ func (s *mixCoordImpl) initInternal() error {
 		log.Error("queryCoord start failed", zap.Error(err))
 		return err
 	}
+
+	if err := s.datacoordServer.SyncFileResources(s.ctx); err != nil {
+		log.Error("init file resources failed", zap.Error(err))
+	}
 	return nil
 }
 
@@ -231,9 +219,6 @@ func (s *mixCoordImpl) initKVCreator() {
 }
 
 func (s *mixCoordImpl) Start() error {
-	if !s.enableActiveStandBy {
-		s.startAndUpdateHealthy()
-	}
 	return nil
 }
 
@@ -376,15 +361,12 @@ func (s *mixCoordImpl) initStreamingCoord() {
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
 	s.session.Init(typeutil.MixCoordRole, s.address, true, true)
-	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+	s.session.SetEnableActiveStandBy(true)
 	s.rootcoordServer.SetSession(s.session)
 	s.datacoordServer.SetSession(s.session)
 	s.queryCoordServer.SetSession(s.session)
 
 	return nil
-}
-
-func (s *mixCoordImpl) startHealthCheck() {
 }
 
 func (s *mixCoordImpl) SetAddress(address string) {
@@ -530,6 +512,10 @@ func (s *mixCoordImpl) CreateAlias(ctx context.Context, in *milvuspb.CreateAlias
 
 func (s *mixCoordImpl) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.rootcoordServer.DescribeCollectionInternal(ctx, in)
+}
+
+func (s *mixCoordImpl) BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
+	return s.rootcoordServer.BackupEzk(ctx, in)
 }
 
 // DropAlias drop collection alias
@@ -883,6 +869,10 @@ func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 	return s.queryCoordServer.GetMetrics(ctx, in)
 }
 
+func (s *mixCoordImpl) SyncQcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	return s.queryCoordServer.SyncFileResource(ctx, resources, version)
+}
+
 // QueryCoordServer
 func (s *mixCoordImpl) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.ActivateChecker(ctx, req)
@@ -1210,8 +1200,12 @@ func (s *mixCoordImpl) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	return s.queryCoordServer.RunAnalyzer(ctx, req)
 }
 
-func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	return s.queryCoordServer.ValidateAnalyzer(ctx, req)
+}
+
+func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
 }
 
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
@@ -1236,4 +1230,19 @@ func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.List
 // CreateExternalCollection creates an external collection
 func (s *mixCoordImpl) CreateExternalCollection(ctx context.Context, req *msgpb.CreateCollectionRequest) (*datapb.CreateExternalCollectionResponse, error) {
 	return s.datacoordServer.CreateExternalCollection(ctx, req)
+}
+
+// TruncateCollection truncate collection
+func (s *mixCoordImpl) TruncateCollection(ctx context.Context, req *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error) {
+	return s.rootcoordServer.TruncateCollection(ctx, req)
+}
+
+// DropSegmentsByTime drop segments by time for TruncateCollection
+func (s *mixCoordImpl) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
+	return s.datacoordServer.DropSegmentsByTime(ctx, collectionID, flushTsList)
+}
+
+// ManualUpdateCurrentTarget manually update current target for TruncateCollection
+func (s *mixCoordImpl) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
+	return s.queryCoordServer.ManualUpdateCurrentTarget(ctx, collectionID)
 }

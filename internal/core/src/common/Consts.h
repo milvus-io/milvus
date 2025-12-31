@@ -56,11 +56,13 @@ const char HINTS[] = "hints";
 const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
 const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
 constexpr const char* JSON_STATS_ROOT_PATH = "json_stats";
-constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "2";
+// Version 3: metadata moved to separate meta.json file (instead of parquet metadata)
+constexpr const char* JSON_STATS_DATA_FORMAT_VERSION = "3";
 constexpr const char* JSON_STATS_SHARED_INDEX_PATH = "shared_key_index";
 constexpr const char* JSON_STATS_SHREDDING_DATA_PATH = "shredding_data";
+constexpr const char* JSON_STATS_META_FILE_NAME = "meta.json";
 constexpr const char* JSON_KEY_STATS_SHARED_FIELD_NAME = "__shared";
-// store key layout type in parquet file metadata
+// store key layout type in parquet file metadata (deprecated, now stored in separate file)
 inline constexpr const char* JSON_STATS_META_KEY_LAYOUT_TYPE_MAP =
     "key_layout_type_map";
 // start json stats field id for mock column
@@ -133,3 +135,4 @@ const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
 // EPSILON value for comparing float numbers
 const float EPSILON = 0.0000000119;
 const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
+const std::string MMAP_ENABLED_KEY = "mmap.enabled";

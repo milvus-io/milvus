@@ -17,6 +17,8 @@
 package model
 
 import (
+	"slices"
+
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -51,6 +53,14 @@ type Collection struct {
 	EnableDynamicField   bool
 	UpdateTimestamp      uint64
 	SchemaVersion        int32
+	ShardInfos           map[string]*ShardInfo
+	FileResourceIds      []int64
+}
+
+type ShardInfo struct {
+	PChannelName         string // the pchannel name of the shard, it is the same with the physical channel name.
+	VChannelName         string // the vchannel name of the shard, it is the same with the virtual channel name.
+	LastTruncateTimeTick uint64 // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
 }
 
 func (c *Collection) Available() bool {
@@ -82,10 +92,20 @@ func (c *Collection) ShallowClone() *Collection {
 		Functions:            c.Functions,
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
+		ShardInfos:           c.ShardInfos,
+		FileResourceIds:      c.FileResourceIds,
 	}
 }
 
 func (c *Collection) Clone() *Collection {
+	shardInfos := make(map[string]*ShardInfo, len(c.ShardInfos))
+	for channelName, shardInfo := range c.ShardInfos {
+		shardInfos[channelName] = &ShardInfo{
+			VChannelName:         channelName,
+			PChannelName:         shardInfo.PChannelName,
+			LastTruncateTimeTick: shardInfo.LastTruncateTimeTick,
+		}
+	}
 	return &Collection{
 		TenantID:             c.TenantID,
 		DBID:                 c.DBID,
@@ -110,6 +130,8 @@ func (c *Collection) Clone() *Collection {
 		Functions:            CloneFunctions(c.Functions),
 		UpdateTimestamp:      c.UpdateTimestamp,
 		SchemaVersion:        c.SchemaVersion,
+		ShardInfos:           shardInfos,
+		FileResourceIds:      slices.Clone(c.FileResourceIds),
 	}
 }
 
@@ -176,6 +198,22 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 			PartitionCreatedTimestamp: coll.PartitionCreatedTimestamps[idx],
 		}
 	}
+	shardInfos := make(map[string]*ShardInfo, len(coll.VirtualChannelNames))
+	for idx, channelName := range coll.VirtualChannelNames {
+		if len(coll.ShardInfos) == 0 {
+			shardInfos[channelName] = &ShardInfo{
+				VChannelName:         channelName,
+				PChannelName:         coll.PhysicalChannelNames[idx],
+				LastTruncateTimeTick: 0,
+			}
+		} else {
+			shardInfos[channelName] = &ShardInfo{
+				VChannelName:         channelName,
+				PChannelName:         coll.PhysicalChannelNames[idx],
+				LastTruncateTimeTick: coll.ShardInfos[idx].LastTruncateTimeTick,
+			}
+		}
+	}
 
 	return &Collection{
 		CollectionID:         coll.ID,
@@ -198,6 +236,8 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		EnableDynamicField:   coll.Schema.EnableDynamicField,
 		UpdateTimestamp:      coll.UpdateTimestamp,
 		SchemaVersion:        coll.Schema.Version,
+		ShardInfos:           shardInfos,
+		FileResourceIds:      coll.Schema.GetFileResourceIds(),
 	}
 }
 
@@ -249,6 +289,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		EnableDynamicField: coll.EnableDynamicField,
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
+		FileResourceIds:    coll.FileResourceIds,
 	}
 
 	if c.withFields {
@@ -261,6 +302,18 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		collSchema.StructArrayFields = structArrayFields
 	}
 
+	shardInfos := make([]*pb.CollectionShardInfo, len(coll.ShardInfos))
+	for idx, channelName := range coll.VirtualChannelNames {
+		if shard, ok := coll.ShardInfos[channelName]; ok {
+			shardInfos[idx] = &pb.CollectionShardInfo{
+				LastTruncateTimeTick: shard.LastTruncateTimeTick,
+			}
+		} else {
+			shardInfos[idx] = &pb.CollectionShardInfo{
+				LastTruncateTimeTick: 0,
+			}
+		}
+	}
 	collectionPb := &pb.CollectionInfo{
 		ID:                   coll.CollectionID,
 		DbId:                 coll.DBID,
@@ -274,6 +327,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		State:                coll.State,
 		Properties:           coll.Properties,
 		UpdateTimestamp:      coll.UpdateTimestamp,
+		ShardInfos:           shardInfos,
 	}
 
 	if c.withPartitions {

@@ -1579,7 +1579,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     for (auto q = 0; q < num_queries; q++) {
         for (auto k = 0; k < topk; k++) {
             auto offset = q * topk + k;
-            auto seg_offset = sub_result.get_seg_offsets()[offset];
+            auto seg_offset = sub_result.get_offsets()[offset];
             ASSERT_EQ(std::get<std::string>(sr->primary_keys_[offset]),
                       str_col[seg_offset]);
             ASSERT_EQ(retrieved_str_col[offset], str_col[seg_offset]);

@@ -31,6 +31,20 @@
 
 namespace milvus::storage {
 
+// Normalize path to be consistent with Go's path.Join behavior.
+// This handles two issues:
+// 1. Removes leading "./" when root_path is "."
+// 2. Removes trailing "/." that lexically_normal() may produce
+inline std::string
+NormalizePath(const boost::filesystem::path& path) {
+    auto result = path.lexically_normal().string();
+    // Remove trailing "/." if present
+    if (result.size() >= 2 && result.substr(result.size() - 2) == "/.") {
+        result = result.substr(0, result.size() - 1);
+    }
+    return result;
+}
+
 struct FileManagerContext {
     FileManagerContext() : chunkManagerPtr(nullptr) {
     }
@@ -179,7 +193,7 @@ class FileManagerImpl : public milvus::FileManager {
             std::to_string(index_meta_.index_version) + "/" +
             std::to_string(field_meta_.partition_id) + "/" +
             std::to_string(field_meta_.segment_id);
-        return (prefix / path / path1).string();
+        return NormalizePath(prefix / path / path1);
     }
 
     virtual std::string
@@ -198,7 +212,7 @@ class FileManagerImpl : public milvus::FileManager {
         if (bucket.empty()) {
             return v1_prefix;
         } else {
-            return (bucket / v1_prefix).string();
+            return NormalizePath(bucket / v1_prefix);
         }
     }
 
@@ -213,7 +227,7 @@ class FileManagerImpl : public milvus::FileManager {
             std::to_string(field_meta_.partition_id) + "/" +
             std::to_string(field_meta_.segment_id) + "/" +
             std::to_string(field_meta_.field_id);
-        return (prefix / path / path1).string();
+        return NormalizePath(prefix / path / path1);
     }
 
  protected:

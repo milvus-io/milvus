@@ -38,8 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/internal/util/textmatch"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -333,46 +335,25 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	var position *msgpb.MsgPosition
-	deleteCheckpoint := channel.GetDeleteCheckpoint()
-	channelCheckpoint := channel.GetSeekPosition()
-	if deleteCheckpoint == nil {
-		// for compatibility with old version coord, which doesn't have delete checkpoint in VchannelInfo
-		log.Info("no delete checkpoint found, use seek position to seek",
-			zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
-		)
-		position = &msgpb.MsgPosition{
-			ChannelName: channelCheckpoint.GetChannelName(),
-			MsgID:       channelCheckpoint.GetMsgID(),
-			Timestamp:   channelCheckpoint.GetTimestamp(),
-		}
-	} else {
-		if channelCheckpoint.GetTimestamp() > deleteCheckpoint.GetTimestamp() {
-			msg := "channel seek position is greater than delete checkpoint, use delete checkpoint to seek"
-			log.Info(msg,
-				zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
-				zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(deleteCheckpoint.GetTimestamp())),
-			)
-			position = &msgpb.MsgPosition{
-				ChannelName: deleteCheckpoint.GetChannelName(),
-				MsgID:       deleteCheckpoint.GetMsgID(),
-				Timestamp:   deleteCheckpoint.GetTimestamp(),
-			}
-		} else {
-			msg := "channel seek position is smaller than delete checkpoint, use seek position to seek"
-			log.Info(msg,
-				zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
-				zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(deleteCheckpoint.GetTimestamp())),
-			)
-			position = &msgpb.MsgPosition{
-				ChannelName: channelCheckpoint.GetChannelName(),
-				MsgID:       channelCheckpoint.GetMsgID(),
-				Timestamp:   channelCheckpoint.GetTimestamp(),
-			}
-		}
-	}
-
-	err = pipeline.ConsumeMsgStream(ctx, position)
+	// Use seekPosition directly to start consuming the message stream.
+	//
+	// Background:
+	// - seekPosition: channel checkpoint from DataCoord, represents the position where data has been persisted
+	// - deleteCheckpoint: the minimum startPosition among all L0 segments, indicates where unpersisted
+	//   delete records begin
+	//
+	// Why we can use seekPosition directly:
+	// - L0 segments have already been loaded above (loadL0Segments), which contain delete records
+	//   from [deleteCheckpoint, L0.endPosition]
+	// - The message stream will capture new delete records from [seekPosition, ∞)
+	// - DataCoord ensures that seekPosition is calculated based on channel checkpoint, which is updated
+	//   after data (including deletes) is flushed, so L0 segments should cover up to seekPosition
+	// - Using seekPosition avoids redundant message consumption when seekPosition > deleteCheckpoint
+	log.Info("use channel seek position to seek",
+		zap.Time("seekPosition", tsoutil.PhysicalTime(channel.GetSeekPosition().GetTimestamp())),
+		zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(channel.GetDeleteCheckpoint().GetTimestamp())),
+	)
+	err = pipeline.ConsumeMsgStream(ctx, channel.GetSeekPosition())
 	if err != nil {
 		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")
 		log.Warn(err.Error(),
@@ -528,14 +509,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 	defer node.manager.Collection.Unref(req.GetCollectionID(), 1)
 
-	if req.GetLoadScope() == querypb.LoadScope_Delta {
+	switch req.GetLoadScope() {
+	case querypb.LoadScope_Delta:
 		return node.loadDeltaLogs(ctx, req), nil
-	}
-	if req.GetLoadScope() == querypb.LoadScope_Index {
+	case querypb.LoadScope_Index:
 		return node.loadIndex(ctx, req), nil
-	}
-	if req.GetLoadScope() == querypb.LoadScope_Stats {
+	case querypb.LoadScope_Stats:
 		return node.loadStats(ctx, req), nil
+	case querypb.LoadScope_Reopen:
+		return node.reopenSegments(ctx, req), nil
 	}
 
 	// Actual load segment
@@ -877,13 +859,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 
-	tr.RecordSpan()
 	ret.Status = merr.Success()
 
-	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.
-		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
-		Observe(float64(reduceLatency.Milliseconds()))
 	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.SearchLabel).
 		Add(float64(proto.Size(req)))
 
@@ -1276,6 +1253,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 				return info.IndexInfo.IndexID, info.IndexInfo
 			}),
 			JsonStatsInfo: s.GetFieldJSONIndexStats(),
+			ManifestPath:  s.LoadInfo().GetManifestPath(),
 		})
 	}
 
@@ -1326,7 +1304,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
 			TargetVersion:          queryView.GetVersion(),
 			Status: &querypb.LeaderViewStatus{
-				Serviceable: queryView.Serviceable(),
+				Serviceable:             queryView.Serviceable(),
+				CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
 			},
 		})
 		return true
@@ -1661,24 +1640,27 @@ func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzer
 	}, nil
 }
 
-func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*commonpb.Status, error) {
+func (node *QueryNode) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest) (*querypb.ValidateAnalyzerResponse, error) {
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		return merr.Status(err), nil
+		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
 	defer node.lifetime.Done()
 
+	resourceSet := typeutil.NewSet[int64]()
+
 	for _, info := range req.AnalyzerInfos {
-		err := analyzer.ValidateAnalyzer(info.GetParams())
+		ids, err := analyzer.ValidateAnalyzer(info.GetParams())
 		if err != nil {
 			if info.GetName() != "" {
-				return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err)), nil
+				return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, name: %s, error: %v", info.GetField(), info.GetName(), err))}, nil
 			}
-			return merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err)), nil
+			return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("validate analyzer failed for field: %s, error: %v", info.GetField(), err))}, nil
 		}
+		resourceSet.Insert(ids...)
 	}
 
-	return merr.Status(nil), nil
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Status(nil), ResourceIds: resourceSet.Collect()}, nil
 }
 
 type deleteRequestStringer struct {
@@ -1772,5 +1754,65 @@ func (node *QueryNode) GetHighlight(ctx context.Context, req *querypb.GetHighlig
 	return &querypb.GetHighlightResponse{
 		Status:  merr.Success(),
 		Results: results,
+	}, nil
+}
+
+func (node *QueryNode) SyncFileResource(ctx context.Context, req *internalpb.SyncFileResourceRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Uint64("version", req.GetVersion()))
+	log.Info("sync file resource")
+
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		log.Warn("failed to sync file resource, QueryNode is not healthy")
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	err := fileresource.Sync(req.GetResources())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
+}
+
+func (node *QueryNode) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	defer node.lifetime.Done()
+
+	return node.computePhraseMatchSlopByParams(req)
+}
+
+func (node *QueryNode) computePhraseMatchSlopByParams(req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
+	query := req.GetQueryText()
+	datas := req.GetDataTexts()
+
+	if query == "" || len(datas) == 0 {
+		return &querypb.ComputePhraseMatchSlopResponse{
+			Status: merr.Success(), // Empty result
+		}, nil
+	}
+
+	isMatches := make([]bool, len(datas))
+	slops := make([]int64, len(datas))
+
+	for i, data := range datas {
+		slop, err := textmatch.ComputePhraseMatchSlop(req.GetAnalyzerParams(), query, data)
+		if err != nil {
+			isMatches[i] = false
+			slops[i] = -1
+		} else {
+			isMatches[i] = true
+			slops[i] = int64(slop)
+		}
+	}
+
+	return &querypb.ComputePhraseMatchSlopResponse{
+		Status:  merr.Success(),
+		IsMatch: isMatches,
+		Slops:   slops,
 	}, nil
 }

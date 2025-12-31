@@ -113,6 +113,18 @@ DiskFileManagerImpl::GetRemoteJsonStatsShreddingPrefix() {
     return (prefix / suffix).string();
 }
 
+std::string
+DiskFileManagerImpl::GetRemoteJsonStatsMetaPath(const std::string& file_name) {
+    namespace fs = std::filesystem;
+    fs::path prefix = GetRemoteJsonStatsLogPrefix();
+    return (prefix / file_name).string();
+}
+
+std::string
+DiskFileManagerImpl::GetLocalJsonStatsMetaPrefix() {
+    return GetLocalJsonStatsPrefix();
+}
+
 bool
 DiskFileManagerImpl::AddFileInternal(
     const std::string& file,
@@ -230,6 +242,38 @@ DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
 }
 
 bool
+DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    FILEMANAGER_TRY
+    if (!local_chunk_manager->Exist(file)) {
+        LOG_ERROR("local meta file {} not exists", file);
+        return false;
+    }
+
+    local_paths_.emplace_back(file);
+    auto fileName = GetFileName(file);
+    auto fileSize = local_chunk_manager->Size(file);
+    added_total_file_size_ += fileSize;
+
+    // Meta file is small, upload directly without slicing
+    auto remote_path = GetRemoteJsonStatsMetaPath(fileName);
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+    local_chunk_manager->Read(file, buf.get(), fileSize);
+    rcm_->Write(remote_path, buf.get(), fileSize);
+
+    remote_paths_to_size_[remote_path] = fileSize;
+    LOG_INFO("upload json stats meta file: {} to remote: {}, size: {}",
+             file,
+             remote_path,
+             fileSize);
+
+    FILEMANAGER_CATCH
+    FILEMANAGER_END
+    return true;
+}
+
+bool
 DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
     return AddFileInternal(
         file, [this](const std::string& file_name, int slice_num) {
@@ -317,6 +361,11 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         std::sort(slices.second.begin(), slices.second.end());
     }
 
+    // TODO: remove this log when #45590 is solved
+    LOG_INFO("CacheIndexToDisk: caching {} files to {}",
+             index_slices.size(),
+             local_index_prefix);
+
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
@@ -362,6 +411,8 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         }
 
         local_paths_.emplace_back(local_index_file_name);
+        // TODO: remove this log when #45590 is solved
+        LOG_INFO("CacheIndexToDisk: cached file {}", local_index_file_name);
     }
 }
 
@@ -395,6 +446,40 @@ DiskFileManagerImpl::CacheJsonStatsSharedIndexToDisk(
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files, GetLocalJsonStatsSharedIndexPrefix(), priority);
+}
+
+std::string
+DiskFileManagerImpl::CacheJsonStatsMetaToDisk(
+    const std::string& remote_file,
+    milvus::proto::common::LoadPriority priority) {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto local_prefix = GetLocalJsonStatsMetaPrefix();
+
+    auto file_name = remote_file.substr(remote_file.find_last_of('/') + 1);
+    auto local_file =
+        (std::filesystem::path(local_prefix) / file_name).string();
+
+    auto parent_path = std::filesystem::path(local_file).parent_path();
+    if (!local_chunk_manager->Exist(parent_path.string())) {
+        local_chunk_manager->CreateDir(parent_path.string());
+    }
+
+    auto remote_prefix = GetRemoteJsonStatsLogPrefix();
+    auto full_remote_path =
+        (std::filesystem::path(remote_prefix) / remote_file).string();
+
+    auto file_size = rcm_->Size(full_remote_path);
+    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[file_size]);
+    rcm_->Read(full_remote_path, buf.get(), file_size);
+    local_chunk_manager->Write(local_file, buf.get(), file_size);
+
+    LOG_INFO("Cached json stats meta file from {} to {}, size: {}",
+             full_remote_path,
+             local_file,
+             file_size);
+
+    return local_file;
 }
 
 template <typename DataType>
@@ -451,7 +536,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         int batch_size = batch_files.size();
         for (int i = 0; i < batch_size; i++) {
             auto field_data = field_datas[i].get()->GetFieldData();
-            num_rows += uint32_t(field_data->get_num_rows());
+            num_rows += uint32_t(field_data->get_valid_rows());
             cache_raw_data_to_disk_common<DataType>(
                 field_data,
                 local_chunk_manager,
@@ -549,7 +634,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
         auto sparse_rows =
             static_cast<const knowhere::sparse::SparseRow<SparseValueType>*>(
                 field_data->Data());
-        for (size_t i = 0; i < field_data->Length(); ++i) {
+        for (size_t i = 0; i < field_data->get_valid_rows(); ++i) {
             auto row = sparse_rows[i];
             auto row_byte_size = row.data_byte_size();
             uint32_t nnz = row.size();
@@ -604,7 +689,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_common(
     } else {
         dim = field_data->get_dim();
         auto data_size =
-            field_data->get_num_rows() * milvus::GetVecRowSize<DataType>(dim);
+            field_data->get_valid_rows() * milvus::GetVecRowSize<DataType>(dim);
         local_chunk_manager->Write(local_data_path,
                                    write_offset,
                                    const_cast<void*>(field_data->Data()),
@@ -676,7 +761,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                  fs_);
     }
     for (auto& field_data : field_datas) {
-        num_rows += uint32_t(field_data->get_num_rows());
+        num_rows += uint32_t(field_data->get_valid_rows());
         cache_raw_data_to_disk_common<T>(field_data,
                                          local_chunk_manager,
                                          local_data_path,

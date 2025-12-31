@@ -44,6 +44,8 @@ type ShardManager interface {
 
 	FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error)
 
+	FlushAllAndFenceSegmentAllocUntil(timetick uint64) ([]int64, error)
+
 	AsyncFlushSegment(signal utils.SealSegmentSignal)
 
 	Close()

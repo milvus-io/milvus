@@ -204,7 +204,6 @@ func TestWpMsgStream(t *testing.T) {
 	wpStream.Close()
 	wpStream.AsProducer(ctx, []string{"test-channel"})
 	wpStream.SetRepackFunc(nil)
-	wpStream.ForceEnableProduce(true)
 
 	// Test methods returning nil/empty values
 	msgID, err := wpStream.GetLatestMsgID("test-channel")

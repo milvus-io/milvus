@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -561,14 +560,16 @@ func constructSearchRequest(
 	}
 
 	return &milvuspb.SearchRequest{
-		Base:             nil,
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		PartitionNames:   nil,
-		Dsl:              expr,
-		PlaceholderGroup: plgBs,
-		DslType:          commonpb.DslType_BoolExprV1,
-		OutputFields:     nil,
+		Base:           nil,
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionNames: nil,
+		Dsl:            expr,
+		SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
+			PlaceholderGroup: plgBs,
+		},
+		DslType:      commonpb.DslType_BoolExprV1,
+		OutputFields: nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
 				Key:   common.MetricTypeKey,
@@ -1007,16 +1008,30 @@ func TestAddFieldTask(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
-		// not support vector field
 		fSchema = &schemapb.FieldSchema{
+			Name:     "vec_field",
 			DataType: schemapb.DataType_FloatVector,
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "128"},
+			},
 		}
 		bytes, err = proto.Marshal(fSchema)
 		assert.NoError(t, err)
 		task.Schema = bytes
 		err = task.PreExecute(ctx)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.NoError(t, err)
+
+		fSchema = &schemapb.FieldSchema{
+			Name:     "sparse_vec",
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: true,
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
 
 		// not support system field
 		fSchema = &schemapb.FieldSchema{
@@ -3067,6 +3082,61 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 	assert.NoError(t, dct.PostExecute(context.Background()))
 }
 
+func Test_truncateCollectionTask_PreExecute(t *testing.T) {
+	tct := &truncateCollectionTask{TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{
+		Base:           &commonpb.MsgBase{},
+		CollectionName: "valid",
+	}}
+	ctx := context.Background()
+	err := tct.PreExecute(ctx)
+	assert.NoError(t, err)
+
+	// Test invalid collection name
+	tct.CollectionName = "#0xc0de"
+	err = tct.PreExecute(ctx)
+	assert.Error(t, err)
+}
+
+func Test_truncateCollectionTask_Execute(t *testing.T) {
+	mockRC := mocks.NewMockMixCoordClient(t)
+	mockRC.On("TruncateCollection",
+		mock.Anything, // context.Context
+		mock.Anything, // *milvuspb.TruncateCollectionRequest
+		mock.Anything,
+	).Return(&milvuspb.TruncateCollectionResponse{
+		Status: merr.Success(),
+	}, func(ctx context.Context, request *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) error {
+		switch request.GetCollectionName() {
+		case "c1":
+			return errors.New("error mock TruncateCollection")
+		case "c2":
+			return merr.WrapErrCollectionNotFound("mock")
+		default:
+			return nil
+		}
+	})
+
+	ctx := context.Background()
+
+	tct := &truncateCollectionTask{mixCoord: mockRC, TruncateCollectionRequest: &milvuspb.TruncateCollectionRequest{CollectionName: "normal"}}
+	err := tct.Execute(ctx)
+	assert.NoError(t, err)
+
+	tct.TruncateCollectionRequest.CollectionName = "c1"
+	err = tct.Execute(ctx)
+	assert.Error(t, err)
+
+	tct.TruncateCollectionRequest.CollectionName = "c2"
+	err = tct.Execute(ctx)
+	assert.Error(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, tct.result.GetStatus().GetErrorCode())
+}
+
+func Test_truncateCollectionTask_PostExecute(t *testing.T) {
+	tct := &truncateCollectionTask{}
+	assert.NoError(t, tct.PostExecute(context.Background()))
+}
+
 func Test_loadCollectionTask_Execute(t *testing.T) {
 	rc := NewMixCoordMock()
 
@@ -4669,139 +4739,6 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 		alterTask := getAlterCollectionTask(colName, false)
 		assert.ErrorContains(t, alterTask.PreExecute(ctx),
 			"can not alter partition key isolation mode if the collection already has a vector index. Please drop the index first")
-	})
-}
-
-func TestAlterCollectionForReplicateProperty(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	mockCache := NewMockCache(t)
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-		replicateID: "local-mac-1",
-	}, nil).Maybe()
-	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Maybe()
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{}, nil).Maybe()
-	globalMetaCache = mockCache
-	ctx := context.Background()
-	mockRootcoord := mocks.NewMockMixCoordClient(t)
-	t.Run("invalid replicate id", func(t *testing.T) {
-		task := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.ReplicateIDKey,
-						Value: "xxxxx",
-					},
-				},
-			},
-			mixCoord: mockRootcoord,
-		}
-
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("empty replicate id", func(t *testing.T) {
-		task := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				CollectionName: "test",
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.ReplicateIDKey,
-						Value: "",
-					},
-				},
-			},
-			mixCoord: mockRootcoord,
-		}
-
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to alloc ts", func(t *testing.T) {
-		task := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				CollectionName: "test",
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.ReplicateEndTSKey,
-						Value: "100",
-					},
-				},
-			},
-			mixCoord: mockRootcoord,
-		}
-
-		mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("alloc wrong ts", func(t *testing.T) {
-		task := &alterCollectionTask{
-			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
-				CollectionName: "test",
-				Properties: []*commonpb.KeyValuePair{
-					{
-						Key:   common.ReplicateEndTSKey,
-						Value: "100",
-					},
-				},
-			},
-			mixCoord: mockRootcoord,
-		}
-
-		mockRootcoord.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
-			Status:    merr.Success(),
-			Timestamp: 99,
-		}, nil).Once()
-		err := task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-}
-
-func TestInsertForReplicate(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
-	mockCache := NewMockCache(t)
-	globalMetaCache = mockCache
-
-	t.Run("get replicate id fail", func(t *testing.T) {
-		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("err")).Once()
-		task := &insertTask{
-			insertMsg: &msgstream.InsertMsg{
-				InsertRequest: &msgpb.InsertRequest{
-					CollectionName: "foo",
-				},
-			},
-		}
-		err := task.PreExecute(context.Background())
-		assert.Error(t, err)
-	})
-	t.Run("insert with replicate id", func(t *testing.T) {
-		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-			schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Properties: []*commonpb.KeyValuePair{
-						{
-							Key:   common.ReplicateIDKey,
-							Value: "local-mac",
-						},
-					},
-				},
-			},
-			replicateID: "local-mac",
-		}, nil).Once()
-		task := &insertTask{
-			insertMsg: &msgstream.InsertMsg{
-				InsertRequest: &msgpb.InsertRequest{
-					CollectionName: "foo",
-				},
-			},
-		}
-		err := task.PreExecute(context.Background())
-		assert.Error(t, err)
 	})
 }
 

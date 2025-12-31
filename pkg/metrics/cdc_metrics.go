@@ -27,13 +27,13 @@ const (
 	CDCMetricReplicatedMessagesTotal  = "replicated_messages_total"
 	CDCMetricReplicatedBytesTotal     = "replicated_bytes_total"
 	CDCMetricReplicateEndToEndLatency = "replicate_end_to_end_latency"
-	CDCMetricReplicateLag             = "replicate_lag"
+	CDCMetricLastReplicatedTimeTick   = "last_replicated_time_tick"
 	CDCMetricStreamRPCConnections     = "stream_rpc_connections"
 	CDCMetricStreamRPCReconnectTimes  = "stream_rpc_reconnect_times"
 
 	// CDC metric labels
 	CDCLabelTargetCluster     = "target_cluster"
-	CDCLabelSourceChannelName = "source_channel_name"
+	CDCLabelSourceChannelName = WALChannelLabelName
 	CDCLabelTargetChannelName = "target_channel_name"
 	CDCLabelMsgType           = msgTypeLabelName
 	CDCLabelConnectionStatus  = "connection_status"
@@ -82,12 +82,12 @@ var CDCReplicateEndToEndLatency = prometheus.NewHistogramVec(
 	},
 )
 
-var CDCReplicateLag = prometheus.NewGaugeVec(
+var CDCLastReplicatedTimeTick = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: milvusNamespace,
 		Subsystem: typeutil.CDCRole,
-		Name:      CDCMetricReplicateLag,
-		Help:      "Lag in milliseconds between the latest synced Source message and the current time",
+		Name:      CDCMetricLastReplicatedTimeTick,
+		Help:      "The time tick in seconds of the last replicated message",
 	}, []string{
 		CDCLabelSourceChannelName,
 		CDCLabelTargetChannelName,
@@ -121,7 +121,7 @@ func RegisterCDC(registry *prometheus.Registry) {
 	registry.MustRegister(CDCReplicatedMessagesTotal)
 	registry.MustRegister(CDCReplicatedBytesTotal)
 	registry.MustRegister(CDCReplicateEndToEndLatency)
-	registry.MustRegister(CDCReplicateLag)
+	registry.MustRegister(CDCLastReplicatedTimeTick)
 	registry.MustRegister(CDCStreamRPCConnections)
 	registry.MustRegister(CDCStreamRPCReconnectTimes)
 }

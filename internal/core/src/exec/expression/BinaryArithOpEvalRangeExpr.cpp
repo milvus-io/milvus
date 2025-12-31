@@ -29,7 +29,11 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    switch (expr_->column_.data_type_) {
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecRangeVisitorImpl<bool>(input);
             break;
@@ -231,6 +235,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
             ValueType val,
             ValueType right_operand,
             const std::string& pointer) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // Nothing to do here since the caller has already handled valid_res.
+        if (data == nullptr) {
+            return;
+        }
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
@@ -598,6 +607,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValueType val,
             ValueType right_operand,
             int index) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // Nothing to do here since the caller has already handled valid_res.
+        if (data == nullptr) {
+            return;
+        }
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
@@ -1457,6 +1471,11 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
             TargetBitmapView valid_res,
             HighPrecisionType value,
             HighPrecisionType right_operand) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // Nothing to do here since the caller has already handled valid_res.
+        if (data == nullptr) {
+            return;
+        }
         switch (op_type) {
             case proto::plan::OpType::Equal: {
                 switch (arith_type) {
@@ -1825,14 +1844,27 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 skip_index_func,
-                                                 input,
-                                                 res,
-                                                 valid_res,
-                                                 value,
-                                                 right_operand);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering
+            processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             value,
+                                                             right_operand);
+        } else {
+            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
+                                                     skip_index_func,
+                                                     input,
+                                                     res,
+                                                     valid_res,
+                                                     value,
+                                                     right_operand);
+        }
     } else {
+        AssertInfo(!expr_->column_.element_level_,
+                   "Element-level filtering is not supported without offsets");
         processed_size = ProcessDataChunks<T>(execute_sub_batch,
                                               skip_index_func,
                                               res,

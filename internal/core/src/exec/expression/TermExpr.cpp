@@ -35,7 +35,11 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         result = ExecPkTermImpl();
         return;
     }
-    switch (expr_->column_.data_type_) {
+    auto data_type = expr_->column_.data_type_;
+    if (expr_->column_.element_level_) {
+        data_type = expr_->column_.element_type_;
+    }
+    switch (data_type) {
         case DataType::BOOL: {
             result = ExecVisitorImpl<bool>(context);
             break;
@@ -287,6 +291,12 @@ PhyTermFilterExpr::ExecTermArrayVariableInField(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const ValueType& target_val) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t offset) {
             for (int i = 0; i < data[offset].length(); i++) {
                 auto val = data[offset].template get_data<GetType>(i);
@@ -383,6 +393,12 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             int index,
             const std::shared_ptr<MultiElement>& term_set) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         for (int i = 0; i < size; ++i) {
             auto offset = i;
@@ -474,6 +490,12 @@ PhyTermFilterExpr::ExecTermJsonVariableInField(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const ValueType& target_val) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             auto doc = data[i].doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -566,9 +588,8 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
         auto segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
         auto vals = expr_->vals_;
-        pinned_json_stats_ = segment->GetJsonStats(op_ctx_, field_id);
-        auto* index = pinned_json_stats_.get();
-        Assert(index != nullptr);
+        auto index = segment->GetJsonStats(op_ctx_, field_id);
+        Assert(index.get() != nullptr);
 
         cached_index_chunk_res_ = std::make_shared<TargetBitmap>(active_count_);
         cached_index_chunk_valid_res_ =
@@ -601,13 +622,12 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                         }
                     }
                 };
-                index->template ExecutorForShreddingData<ColType>(
-                    op_ctx_,
-                    target_field,
-                    shredding_executor,
-                    nullptr,
-                    res_view,
-                    valid_res_view);
+                index->ExecutorForShreddingData<ColType>(op_ctx_,
+                                                         target_field,
+                                                         shredding_executor,
+                                                         nullptr,
+                                                         res_view,
+                                                         valid_res_view);
                 LOG_DEBUG("using shredding data's field: {} count {}",
                           target_field,
                           res_view.count());
@@ -687,7 +707,9 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
                 return;
             }
         };
-        index->ExecuteForSharedData(op_ctx_, pointer, shared_executor);
+
+        index->ExecuteForSharedData(
+            op_ctx_, bson_index_, pointer, shared_executor);
         cached_index_chunk_id_ = 0;
     }
 
@@ -749,6 +771,12 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string pointer,
             const std::shared_ptr<MultiElement>& terms) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         auto executor = [&](size_t i) {
             auto x = data[i].template at<GetType>(pointer);
             if (x.error()) {
@@ -944,6 +972,12 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::shared_ptr<MultiElement>& vals) {
+        // If data is nullptr, this chunk was skipped by SkipIndex.
+        // We only need to update processed_cursor for bitmap_input indexing.
+        if (data == nullptr) {
+            processed_cursor += size;
+            return;
+        }
         bool has_bitmap_input = !bitmap_input.empty();
         for (size_t i = 0; i < size; ++i) {
             auto offset = i;
@@ -971,13 +1005,25 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
-                                                 skip_index_func,
-                                                 input,
-                                                 res,
-                                                 valid_res,
-                                                 arg_set_);
+        if (expr_->column_.element_level_) {
+            // For element-level filtering
+            processed_size = ProcessElementLevelByOffsets<T>(execute_sub_batch,
+                                                             skip_index_func,
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             arg_set_);
+        } else {
+            processed_size = ProcessDataByOffsets<T>(execute_sub_batch,
+                                                     skip_index_func,
+                                                     input,
+                                                     res,
+                                                     valid_res,
+                                                     arg_set_);
+        }
     } else {
+        AssertInfo(!expr_->column_.element_level_,
+                   "Element-level filtering is not supported without offsets");
         processed_size = ProcessDataChunks<T>(
             execute_sub_batch, skip_index_func, res, valid_res, arg_set_);
     }
