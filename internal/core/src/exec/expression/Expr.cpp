@@ -215,8 +215,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             op_ctx,
             context->get_segment(),
             context->get_active_count(),
-            context->query_config()->get_expr_batch_size(),
-            context->get_query_timestamp());
+            context->query_config()->get_expr_batch_size());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TimestamptzArithCompareExpr>(expr)) {
         result = std::make_shared<PhyTimestamptzArithCompareExpr>(

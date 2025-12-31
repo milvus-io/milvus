@@ -31,14 +31,19 @@ PhyBinaryArithOpEvalRangeExprWithFields::Eval(EvalCtx& context,
 
 int64_t
 PhyBinaryArithOpEvalRangeExprWithFields::GetNextBatchSize() {
-    auto current_chunk = segment_chunk_reader_.segment_->is_chunked()
-                             ? left_current_chunk_id_
-                             : current_chunk_id_;
-    auto current_pos = segment_chunk_reader_.segment_->is_chunked()
-                           ? left_current_chunk_pos_
-                           : current_chunk_pos_;
-    return segment_chunk_reader_.GetNextBatchSize(
-        current_chunk, current_pos, num_chunk_, batch_size_);
+    auto* segment = segment_chunk_reader_.segment_;
+    if (segment->is_chunked()) {
+        // For chunked segments, we need to get the minimum batch size from both fields
+        // to ensure we don't read beyond chunk boundaries for either field
+        auto left_batch_size = segment_chunk_reader_.GetNextBatchSize(
+            left_current_chunk_id_, left_current_chunk_pos_, left_num_chunk_, batch_size_);
+        auto right_batch_size = segment_chunk_reader_.GetNextBatchSize(
+            right_current_chunk_id_, right_current_chunk_pos_, right_num_chunk_, batch_size_);
+        return std::min(left_batch_size, right_batch_size);
+    } else {
+        return segment_chunk_reader_.GetNextBatchSize(
+            current_chunk_id_, current_chunk_pos_, num_chunk_, batch_size_);
+    }
 }
 
 VectorPtr

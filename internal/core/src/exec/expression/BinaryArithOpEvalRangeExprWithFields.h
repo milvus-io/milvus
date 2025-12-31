@@ -75,12 +75,23 @@ struct ArithOpTwoFieldsElementFunc {
                 arith_result = static_cast<ResultType>(left[offset]) *
                                static_cast<ResultType>(right[offset]);
             } else if constexpr (arith_op == proto::plan::ArithOpType::Div) {
-                arith_result = static_cast<ResultType>(left[offset]) /
-                               static_cast<ResultType>(right[offset]);
+                auto right_val = static_cast<ResultType>(right[offset]);
+                // For division by zero: set result to false (element doesn't match filter)
+                if (right_val == static_cast<ResultType>(0)) {
+                    res[i] = false;
+                    continue;
+                }
+                arith_result = static_cast<ResultType>(left[offset]) / right_val;
             } else if constexpr (arith_op == proto::plan::ArithOpType::Mod) {
+                auto right_val = static_cast<ResultType>(right[offset]);
+                // For modulo by zero: set result to false (element doesn't match filter)
+                if (right_val == static_cast<ResultType>(0)) {
+                    res[i] = false;
+                    continue;
+                }
                 arith_result =
                     safe_mod_fields(static_cast<ResultType>(left[offset]),
-                                    static_cast<ResultType>(right[offset]));
+                                    right_val);
             } else {
                 ThrowInfo(OpTypeInvalid,
                           fmt::format("unsupported arith type:{} for "
@@ -121,8 +132,7 @@ class PhyBinaryArithOpEvalRangeExprWithFields : public Expr {
         milvus::OpContext* op_ctx,
         const segcore::SegmentInternalInterface* segment,
         int64_t active_count,
-        int64_t batch_size,
-        milvus::Timestamp query_timestamp)
+        int64_t batch_size)
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           left_field_(expr->left_column_.field_id_),
           right_field_(expr->right_column_.field_id_),
