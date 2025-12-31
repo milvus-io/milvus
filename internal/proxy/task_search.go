@@ -618,6 +618,13 @@ func (t *searchTask) addHighlightTask(highlighter *commonpb.Highlighter, metricT
 	switch highlighter.GetType() {
 	case commonpb.HighlightType_Lexical:
 		return t.createLexicalHighlighter(highlighter, metricType, annsField, placeholder, analyzerName)
+	case commonpb.HighlightType_Semantic:
+		h, err := newSemanticHighlighter(t, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("Create SemanticHighlight failed: %v ", err)
+		}
+		t.highlighter = h
+		return nil
 	default:
 		return merr.WrapErrParameterInvalidMsg("unsupported highlight type: %v", highlighter.GetType())
 	}
