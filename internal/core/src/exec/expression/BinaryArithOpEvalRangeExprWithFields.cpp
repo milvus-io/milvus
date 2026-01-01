@@ -33,16 +33,31 @@ int64_t
 PhyBinaryArithOpEvalRangeExprWithFields::GetNextBatchSize() {
     auto* segment = segment_chunk_reader_.segment_;
     if (segment->is_chunked()) {
-        // For chunked segments, we need to get the minimum batch size from both fields
-        // to ensure we don't read beyond chunk boundaries for either field
-        auto left_batch_size = segment_chunk_reader_.GetNextBatchSize(
-            left_current_chunk_id_, left_current_chunk_pos_, left_num_chunk_, batch_size_);
-        auto right_batch_size = segment_chunk_reader_.GetNextBatchSize(
-            right_current_chunk_id_, right_current_chunk_pos_, right_num_chunk_, batch_size_);
+        auto left_rows = segment->num_rows_until_chunk(left_field_,
+                                                       left_current_chunk_id_) +
+                         left_current_chunk_pos_;
+        auto right_rows =
+            segment->num_rows_until_chunk(right_field_,
+                                          right_current_chunk_id_) +
+            right_current_chunk_pos_;
+        auto left_batch_size =
+            left_rows + batch_size_ >= segment_chunk_reader_.active_count_
+                ? segment_chunk_reader_.active_count_ - left_rows
+                : batch_size_;
+        auto right_batch_size =
+            right_rows + batch_size_ >= segment_chunk_reader_.active_count_
+                ? segment_chunk_reader_.active_count_ - right_rows
+                : batch_size_;
         return std::min(left_batch_size, right_batch_size);
     } else {
-        return segment_chunk_reader_.GetNextBatchSize(
-            current_chunk_id_, current_chunk_pos_, num_chunk_, batch_size_);
+        auto current_rows =
+            segment->type() == SegmentType::Growing
+                ? current_chunk_id_ * segment_chunk_reader_.SizePerChunk() +
+                      current_chunk_pos_
+                : current_chunk_pos_;
+        return current_rows + batch_size_ >= segment_chunk_reader_.active_count_
+                   ? segment_chunk_reader_.active_count_ - current_rows
+                   : batch_size_;
     }
 }
 

@@ -186,10 +186,11 @@ class PhyBinaryArithOpEvalRangeExprWithFields : public Expr {
                     right_num_chunk_,
                     batch_size_);
             } else {
-                segment_chunk_reader_.MoveCursor(current_chunk_id_,
-                                                 current_chunk_pos_,
-                                                 num_chunk_,
-                                                 batch_size_);
+                segment_chunk_reader_.MoveCursorForSingleChunk(
+                    current_chunk_id_,
+                    current_chunk_pos_,
+                    num_chunk_,
+                    batch_size_);
             }
         }
     }
