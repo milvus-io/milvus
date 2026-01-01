@@ -228,7 +228,7 @@ class PhyBinaryArithOpEvalRangeExprWithFields : public Expr {
     int64_t left_current_chunk_pos_{0};
     int64_t right_current_chunk_id_{0};
     int64_t right_current_chunk_pos_{0};
-    SegmentChunkReader segment_chunk_reader_;
+    segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExprWithFields>
         expr_;

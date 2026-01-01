@@ -274,9 +274,9 @@ PhyBinaryArithOpEvalRangeExprWithFields::ExecArithOpEvalRangeForTwoFieldsImpl() 
     auto& value = expr_->value_;
     ResultType val;
     if constexpr (std::is_floating_point_v<ResultType>) {
-        val = milvus::query::GetValueFromProto<double>(value);
+        val = GetValueFromProto<double>(value);
     } else {
-        val = milvus::query::GetValueFromProto<int64_t>(value);
+        val = GetValueFromProto<int64_t>(value);
     }
 
     auto real_batch_size = GetNextBatchSize();
@@ -284,8 +284,8 @@ PhyBinaryArithOpEvalRangeExprWithFields::ExecArithOpEvalRangeForTwoFieldsImpl() 
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    auto res_vec = std::make_shared<ColumnVector>(
+        TargetBitmap(real_batch_size), TargetBitmap(real_batch_size));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     res.reset();
 
