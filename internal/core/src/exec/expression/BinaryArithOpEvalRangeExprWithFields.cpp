@@ -322,6 +322,10 @@ PhyBinaryArithOpEvalRangeExprWithFields::ExecArithOpEvalRangeForTwoFieldsImpl() 
         ArithOpTwoFieldsElementFunc<T, U, cmp_op, arith_op, FilterType::sequential>
             func;
         func(left_data, right_data, real_batch_size, val, res);
+
+        // Update cursor positions for chunked segments
+        left_current_chunk_pos_ += real_batch_size;
+        right_current_chunk_pos_ += real_batch_size;
     } else {
         auto left_pw =
             segment->chunk_data<T>(op_ctx_, left_field_, current_chunk_id_);
@@ -336,6 +340,9 @@ PhyBinaryArithOpEvalRangeExprWithFields::ExecArithOpEvalRangeForTwoFieldsImpl() 
         ArithOpTwoFieldsElementFunc<T, U, cmp_op, arith_op, FilterType::sequential>
             func;
         func(left_data, right_data, real_batch_size, val, res);
+
+        // Update cursor position for non-chunked segments
+        current_chunk_pos_ += real_batch_size;
     }
 
     return res_vec;
