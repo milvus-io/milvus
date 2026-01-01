@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -12,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -78,7 +80,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 		return nil, 0, err
 	}
 
-	collectionTTL, err := getCollectionTTL(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 	if err != nil {
 		log.Warn("failed to get collection ttl, use default", zap.Error(err))
 		collectionTTL = 0

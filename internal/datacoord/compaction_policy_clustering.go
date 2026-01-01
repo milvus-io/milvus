@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/util/clustering"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -138,7 +139,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			continue
 		}
 
-		collectionTTL, err := getCollectionTTL(collection.Properties)
+		collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 		if err != nil {
 			log.Warn("get collection ttl failed, skip to handle compaction")
 			return make([]CompactionView, 0), 0, err
