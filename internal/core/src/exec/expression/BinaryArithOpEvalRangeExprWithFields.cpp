@@ -309,8 +309,12 @@ PhyBinaryArithOpEvalRangeExprWithFields::ExecArithOpEvalRangeForTwoFieldsImpl() 
     // Get data from both columns
     if (segment->is_chunked()) {
         // For chunked segments, we need to handle the data differently
-        auto left_span = segment->chunk_data<T>(left_field_, left_current_chunk_id_);
-        auto right_span = segment->chunk_data<U>(right_field_, right_current_chunk_id_);
+        auto left_pw = segment->chunk_data<T>(
+            op_ctx_, left_field_, left_current_chunk_id_);
+        auto right_pw = segment->chunk_data<U>(
+            op_ctx_, right_field_, right_current_chunk_id_);
+        auto left_span = left_pw.get();
+        auto right_span = right_pw.get();
 
         const T* left_data = left_span.data() + left_current_chunk_pos_;
         const U* right_data = right_span.data() + right_current_chunk_pos_;
@@ -319,8 +323,12 @@ PhyBinaryArithOpEvalRangeExprWithFields::ExecArithOpEvalRangeForTwoFieldsImpl() 
             func;
         func(left_data, right_data, real_batch_size, val, res);
     } else {
-        auto left_span = segment->chunk_data<T>(left_field_, current_chunk_id_);
-        auto right_span = segment->chunk_data<U>(right_field_, current_chunk_id_);
+        auto left_pw =
+            segment->chunk_data<T>(op_ctx_, left_field_, current_chunk_id_);
+        auto right_pw =
+            segment->chunk_data<U>(op_ctx_, right_field_, current_chunk_id_);
+        auto left_span = left_pw.get();
+        auto right_span = right_pw.get();
 
         const T* left_data = left_span.data() + current_chunk_pos_;
         const U* right_data = right_span.data() + current_chunk_pos_;
