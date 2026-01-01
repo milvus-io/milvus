@@ -22,6 +22,7 @@ import (
 	"math/bits"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -602,6 +603,33 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 		return "", false
 	}
 	return kv.GetValue(), true
+}
+
+func GetCollectionTTL(kvs []*commonpb.KeyValuePair, defaultValue time.Duration) (time.Duration, error) {
+	value, parseErr, exist := GetInt64Value(kvs, CollectionTTLConfigKey)
+	if parseErr != nil {
+		return 0, parseErr
+	}
+
+	if !exist {
+		return defaultValue, nil
+	}
+
+	return time.Duration(value) * time.Second, nil
+}
+
+func GetCollectionTTLFromMap(kvs map[string]string, defaultValue time.Duration) (time.Duration, error) {
+	value, exist := kvs[CollectionTTLConfigKey]
+	if !exist {
+		return defaultValue, nil
+	}
+
+	ttlSeconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return time.Duration(ttlSeconds) * time.Second, nil
 }
 
 func CheckNamespace(schema *schemapb.CollectionSchema, namespace *string) error {

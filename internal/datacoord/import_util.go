@@ -875,7 +875,7 @@ func createSortCompactionTask(ctx context.Context,
 		return nil, err
 	}
 
-	collectionTTL, err := getCollectionTTL(collection.Properties)
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 	if err != nil {
 		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
 		return nil, err

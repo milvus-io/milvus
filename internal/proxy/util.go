@@ -2673,22 +2673,20 @@ func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string
 	return fields
 }
 
+// getCollectionTTL returns ttl if collection's ttl is specified
+// or return global ttl if collection's ttl is not specified
+// this is a helper util wrapping common.GetCollectionTTL without returning error
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
-	properties := make(map[string]string)
-	for _, pair := range pairs {
-		properties[pair.Key] = pair.Value
+	defaultTTL := paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second)
+	ttl, err := common.GetCollectionTTL(pairs, defaultTTL)
+	if err != nil {
+		log.Error("failed to get collection ttl, use default ttl", zap.Error(err))
+		ttl = defaultTTL
 	}
-
-	v, ok := properties[common.CollectionTTLConfigKey]
-	if ok {
-		ttl, err := strconv.Atoi(v)
-		if err != nil {
-			return 0
-		}
-		return uint64(time.Duration(ttl) * time.Second)
+	if ttl < 0 {
+		return 0
 	}
-
-	return 0
+	return uint64(ttl)
 }
 
 // reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
