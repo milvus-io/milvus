@@ -760,7 +760,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				zap.Int64("segmentID", segmentID),
 			)
 			sd.idfOracle.Register(segmentID, stats, segments.SegmentTypeSealed)
-			return false
+			// continue iterating to register all segments' stats
+			return true
 		})
 	}
 
