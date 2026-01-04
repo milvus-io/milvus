@@ -63,20 +63,15 @@ ExprSet::Eval(int32_t begin,
     }
 }
 
-// Add TTL field filtering expressions if schema has TTL field configured
-// This implements entity-level TTL by filtering out expired entities
+// Create TTL field filtering expression if schema has TTL field configured
 // Returns a single OR expression: ttl_field is null OR ttl_field > physical_us
 // This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
-inline void
-AddTTLFieldFilterExpressions(
-    QueryContext* query_context,
-    const std::unordered_set<std::string>& flatten_candidate,
-    bool enable_constant_folding,
-    std::vector<ExprPtr>& exprs) {
+inline expr::TypedExprPtr
+CreateTTLFieldFilterExpression(QueryContext* query_context) {
     auto segment = query_context->get_segment();
     auto& schema = segment->get_schema();
     if (!schema.get_ttl_field_id().has_value()) {
-        return;
+        return nullptr;
     }
 
     auto ttl_field_id = schema.get_ttl_field_id().value();
@@ -107,10 +102,7 @@ AddTTLFieldFilterExpressions(
         ttl_is_null_expr,
         ttl_greater_expr);
 
-    exprs.emplace_back(CompileExpression(ttl_or_expr,
-                                         query_context,
-                                         flatten_candidate,
-                                         enable_constant_folding));
+    return ttl_or_expr;
 }
 
 std::vector<ExprPtr>
@@ -121,18 +113,23 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
     std::vector<std::shared_ptr<Expr>> exprs;
     exprs.reserve(sources.size());
 
-    for (auto& source : sources) {
-        exprs.emplace_back(CompileExpression(source,
+    // Create TTL filter expression if schema has TTL field
+    auto ttl_expr =
+        CreateTTLFieldFilterExpression(context->get_query_context());
+
+    // Merge TTL expression with the first source expression if TTL exists
+    for (size_t i = 0; i < sources.size(); ++i) {
+        expr::TypedExprPtr expr_to_compile = sources[i];
+        if (i == 0 && ttl_expr != nullptr) {
+            // Merge TTL expression with the first expression using AND
+            expr_to_compile = std::make_shared<expr::LogicalBinaryExpr>(
+                expr::LogicalBinaryExpr::OpType::And, sources[i], ttl_expr);
+        }
+        exprs.emplace_back(CompileExpression(expr_to_compile,
                                              context->get_query_context(),
                                              flatten_candidate,
                                              enable_constant_folding));
     }
-
-    // Add TTL field filtering expressions if schema has TTL field
-    AddTTLFieldFilterExpressions(context->get_query_context(),
-                                 flatten_candidate,
-                                 enable_constant_folding,
-                                 exprs);
 
     if (OPTIMIZE_EXPR_ENABLED.load()) {
         OptimizeCompiledExprs(context, exprs);
