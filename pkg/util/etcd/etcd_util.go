@@ -253,20 +253,6 @@ func buildKvGroup(keys, values []string) (map[string]string, error) {
 	return ret, nil
 }
 
-// StartTestEmbedEtcdServer returns a newly created embed etcd server.
-// ### USED FOR UNIT TEST ONLY ###
-func StartTestEmbedEtcdServer() (*embed.Etcd, string, error) {
-	dir, err := os.MkdirTemp(os.TempDir(), "milvus_ut")
-	if err != nil {
-		return nil, "", err
-	}
-	config := embed.NewConfig()
-	config.Dir = dir
-	config.LogLevel = "warn"
-	server, err := embed.StartEtcd(config)
-	return server, dir, err
-}
-
 // GetEmbedEtcdEndpoints returns etcd listener address for endpoint config.
 func GetEmbedEtcdEndpoints(server *embed.Etcd) []string {
 	addrs := make([]string, 0, len(server.Clients))
