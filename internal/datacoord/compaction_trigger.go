@@ -239,7 +239,7 @@ func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 }
 
 func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
-	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties)
 	if err != nil {
 		return nil, err
 	}

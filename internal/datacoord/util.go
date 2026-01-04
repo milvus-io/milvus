@@ -146,20 +146,6 @@ func getZeroTime() time.Time {
 	return t
 }
 
-// getCollectionTTL returns ttl if collection's ttl is specified
-func getCollectionTTL(properties map[string]string) (time.Duration, error) {
-	v, ok := properties[common.CollectionTTLConfigKey]
-	if ok {
-		ttl, err := strconv.Atoi(v)
-		if err != nil {
-			return -1, err
-		}
-		return time.Duration(ttl) * time.Second, nil
-	}
-
-	return -1, nil
-}
-
 func UpdateCompactionSegmentSizeMetrics(segments []*datapb.CompactionSegment) {
 	var totalSize int64
 	for _, seg := range segments {

@@ -482,7 +482,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Validate collection ttl
-	_, err = common.GetCollectionTTL(t.GetProperties(), -1)
+	_, err = common.GetCollectionTTL(t.GetProperties())
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("collection ttl property value not valid, parse error: %s", err.Error())
 	}
@@ -1358,7 +1358,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 
-		_, err = common.GetCollectionTTL(t.GetProperties(), -1)
+		_, err = common.GetCollectionTTL(t.GetProperties())
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("collection ttl properties value not valid, parse error: %s", err.Error())
 		}

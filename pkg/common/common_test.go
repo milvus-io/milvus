@@ -1,7 +1,6 @@
 package common
 
 import (
-	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -267,13 +266,13 @@ func TestGetCollectionTTL(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.tag, func(t *testing.T) {
-			result, err := GetCollectionTTL([]*commonpb.KeyValuePair{{Key: CollectionTTLConfigKey, Value: tc.value}}, 0)
+			result, err := GetCollectionTTL([]*commonpb.KeyValuePair{{Key: CollectionTTLConfigKey, Value: tc.value}})
 			if tc.expectErr {
 				assert.Error(t, err)
 			} else {
 				assert.EqualValues(t, tc.expect, result)
 			}
-			result, err = GetCollectionTTLFromMap(map[string]string{CollectionTTLConfigKey: tc.value}, 0)
+			result, err = GetCollectionTTLFromMap(map[string]string{CollectionTTLConfigKey: tc.value})
 			if tc.expectErr {
 				assert.Error(t, err)
 			} else {
@@ -283,12 +282,11 @@ func TestGetCollectionTTL(t *testing.T) {
 	}
 
 	t.Run("not_config", func(t *testing.T) {
-		randValue := rand.Intn(100)
-		result, err := GetCollectionTTL([]*commonpb.KeyValuePair{}, time.Duration(randValue)*time.Second)
+		result, err := GetCollectionTTL([]*commonpb.KeyValuePair{})
 		assert.NoError(t, err)
-		assert.EqualValues(t, time.Duration(randValue)*time.Second, result)
-		result, err = GetCollectionTTLFromMap(map[string]string{}, time.Duration(randValue)*time.Second)
+		assert.EqualValues(t, -1, result)
+		result, err = GetCollectionTTLFromMap(map[string]string{})
 		assert.NoError(t, err)
-		assert.EqualValues(t, time.Duration(randValue)*time.Second, result)
+		assert.EqualValues(t, -1, result)
 	})
 }

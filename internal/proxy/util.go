@@ -2677,11 +2677,9 @@ func GetBM25FunctionOutputFields(collSchema *schemapb.CollectionSchema) []string
 // or return global ttl if collection's ttl is not specified
 // this is a helper util wrapping common.GetCollectionTTL without returning error
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
-	defaultTTL := paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second)
-	ttl, err := common.GetCollectionTTL(pairs, defaultTTL)
+	ttl, err := common.GetCollectionTTL(pairs)
 	if err != nil {
 		log.Error("failed to get collection ttl, use default ttl", zap.Error(err))
-		ttl = defaultTTL
 	}
 	if ttl < 0 {
 		return 0

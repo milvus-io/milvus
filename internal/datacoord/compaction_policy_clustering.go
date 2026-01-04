@@ -148,7 +148,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			continue
 		}
 
-		collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+		collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 		if err != nil {
 			log.Warn("get collection ttl failed, skip to handle compaction")
 			return make([]CompactionView, 0), 0, err
