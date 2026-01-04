@@ -282,7 +282,7 @@ func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_Int8Vector() {
 func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_BinaryVector() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = integration.IndexFaissBinIvfFlat
+	s.indexType = integration.IndexHNSW
 	s.metricType = metric.MaxSimHamming
 	s.vecType = schemapb.DataType_BinaryVector
 	s.run()
