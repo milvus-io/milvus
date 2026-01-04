@@ -1,4 +1,4 @@
-// Licensed to the LF AI & Data foundation under one
+// Licensed to the LF AI& Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -14,22 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+#pragma once
+#include <glog/logging.h>
 
-import "C"
-
-import (
-	"os"
-
-	"github.com/milvus-io/milvus/cmd/milvus"
-	_ "github.com/milvus-io/milvus/internal/util/cgo"
-)
-
-//export startEmbedded
-func startEmbedded() {
-	os.Setenv("MILVUSCONF", "/tmp/milvus/configs/")
-	milvus.RunMilvus([]string{"", "run", "embedded"})
-}
-
-func main() {
-}
+class GoZapSink : public google::LogSink {
+    void
+    send(google::LogSeverity severity,
+         const char* full_filename,
+         const char* base_filename,
+         int line,
+         const struct tm*,
+         const char* message,
+         size_t message_len) override;
+};

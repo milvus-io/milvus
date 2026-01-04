@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
 )
 
 var _ interfaces.Analyzer = (*CAnalyzer)(nil)
