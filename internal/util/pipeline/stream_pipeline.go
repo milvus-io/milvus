@@ -70,6 +70,11 @@ func (p *streamPipeline) work() {
 			}
 
 			p.lastAccessTime.Store(time.Now())
+			// Currently, milvus use the timetick to synchronize the system periodically,
+			// so the wal will still produce empty timetick message after the last write operation is done.
+			// When there're huge amount of vchannel in one pchannel, it will introduce a great overhead.
+			// So we filter out the empty time tick message as much as possible.
+			// TODO: After 3.0, we can remove the filter logic by LSN+MVCC.
 			if p.emptyTimeTickSlowdowner.Filter(msg) {
 				continue
 			}
