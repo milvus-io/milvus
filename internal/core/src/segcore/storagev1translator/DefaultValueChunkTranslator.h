@@ -64,11 +64,12 @@ class DefaultValueChunkTranslator
     int64_t
     value_size() const;
 
+    // preferred bytes per cell when splitting default-value column
+    static constexpr int64_t kTargetCellBytes = 64 * 1024;  // 64KB
+
  private:
     // total rows of this field in the segment
     int64_t total_rows_{0};
-    // preferred bytes per cell when splitting default-value column
-    static constexpr int64_t kTargetCellBytes = 64 * 1024;  // 64KB
 
     // Number of rows in the primary cell (all full-sized cells).
     // The last cell may contain fewer rows.

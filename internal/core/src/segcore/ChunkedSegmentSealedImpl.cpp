@@ -2899,7 +2899,11 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_data_info = FieldDataInfo(field_id.get(), size, mmap_dir_path);
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
-            get_segment_id(), field_meta, field_data_info, use_mmap);
+            get_segment_id(),
+            field_meta,
+            field_data_info,
+            use_mmap,
+            mmap_config.GetMmapPopulate());
     auto column =
         MakeChunkedColumnBase(data_type, std::move(translator), field_meta);
 
