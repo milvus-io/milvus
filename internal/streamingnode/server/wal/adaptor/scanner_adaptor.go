@@ -291,7 +291,11 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			// Push the confirmed messages into pending queue for consuming.
 			if s.logger.Level().Enabled(zap.DebugLevel) {
 				for _, m := range msgs {
-					s.logger.Debug("push committed message into pending queue", zap.Uint64("committedTimeTick", msg.TimeTick()), log.FieldMessage(m))
+					s.logger.Debug(
+						"push message into pending queue",
+						zap.Uint64("committedTimeTick", msg.TimeTick()),
+						log.FieldMessage(m),
+					)
 				}
 			}
 			s.pendingQueue.Add(msgs)
@@ -328,10 +332,4 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 	s.metrics.ObservePassedMessage(isTailing, msg.MessageType(), msg.EstimateSize())
-	if s.logger.Level().Enabled(zap.DebugLevel) {
-		// Log the message if the log level is debug.
-		s.logger.Debug("push message into reorder buffer",
-			log.FieldMessage(msg),
-			zap.Bool("tailing", isTailing))
-	}
 }

@@ -348,9 +348,6 @@ func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableInsertMessageV1)
 	for _, partition := range msg.Header().GetPartitions() {
 		if segment, ok := r.segments[partition.SegmentAssignment.SegmentId]; ok && segment.IsGrowing() {
 			segment.ObserveInsert(msg.TimeTick(), partition)
-			if r.Logger().Level().Enabled(zap.DebugLevel) {
-				r.Logger().Debug("insert entity", log.FieldMessage(msg), zap.Uint64("segmentRows", segment.Rows()), zap.Uint64("segmentBinary", segment.BinarySize()))
-			}
 		} else {
 			r.detectInconsistency(msg, "segment not found")
 		}
@@ -359,10 +356,6 @@ func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableInsertMessageV1)
 
 // handleDelete handles the delete message.
 func (r *recoveryStorageImpl) handleDelete(msg message.ImmutableDeleteMessageV1) {
-	// nothing, current delete operation is managed by flowgraph, not recovery storage.
-	if r.Logger().Level().Enabled(zap.DebugLevel) {
-		r.Logger().Debug("delete entity", log.FieldMessage(msg))
-	}
 }
 
 // handleCreateSegment handles the create segment message.
