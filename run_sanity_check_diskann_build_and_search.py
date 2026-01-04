@@ -42,7 +42,9 @@ for INDEX_TYPE in ["DISKANN"]:
             ids = list(range(N))
             vectors = [make_vec() for _ in range(N)]
             for i in range(N//1000):
-                coll.insert([ids[i:i+1000], vectors[i:i+1000]])
+                start = i*1000
+                end = min((i+1)*1000, N)
+                coll.insert([ids[start:end], vectors[start:end]])
             coll.flush()
 
             # ---------- CREATE INDEX ----------
@@ -69,7 +71,7 @@ for INDEX_TYPE in ["DISKANN"]:
             search_latency = search_end - search_start
 
             print(f"INDEX_TYPE={INDEX_TYPE}, D={DIM}, N={N}, build_latency = {build_latency:.4f}, search_latency = {search_latency:.4f}")
-            print("\nTop-5 nearest vectors:")
+            print("Top-5 nearest vectors:")
             search_results = []
             for hit in results[0]:
                 print(f"  id={hit.id}, distance={hit.distance:.4f}")
