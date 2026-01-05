@@ -256,12 +256,6 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	for _, segments := range collectionSegments {
 		numSegments += len(segments)
 		for _, segment := range segments {
-			// Convert old text log paths (full paths) to filenames to save memory
-			// This handles backward compatibility during recovery
-			for _, textStatsLog := range segment.GetTextStatsLogs() {
-				textStatsLog.Files = metautil.ExtractTextLogFilenames(textStatsLog.GetFiles())
-			}
-
 			// segments from catalog.ListSegments will not have logPath
 			m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
 			metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String(), getSortStatus(segment.GetIsSorted())).Inc()

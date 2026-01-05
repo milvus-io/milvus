@@ -742,14 +742,11 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		// Extract only filenames from full paths to save space
-		filenames := metautil.ExtractTextLogFilenames(lo.Keys(uploaded))
-
 		textIndexLogs[field.GetFieldID()] = &datapb.TextIndexStats{
 			FieldID: field.GetFieldID(),
 			Version: version,
 			BuildID: taskID,
-			Files:   filenames,
+			Files:   lo.Keys(uploaded),
 		}
 		elapse := st.tr.RecordSpan()
 		log.Info("field enable match, create text index done",

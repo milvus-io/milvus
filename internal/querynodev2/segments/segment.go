@@ -1178,28 +1178,11 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		return err
 	}
 
-	// Reconstruct full paths from filenames
-	// Files stored in TextIndexStats only contain filenames to save space
-	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
-	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
-		rootPath = paramtable.Get().LocalStorageCfg.Path.GetValue()
-	}
-	fullPaths := metautil.BuildTextLogPaths(
-		rootPath,
-		textLogs.GetBuildID(),
-		textLogs.GetVersion(),
-		s.Collection(),
-		s.Partition(),
-		s.ID(),
-		textLogs.GetFieldID(),
-		textLogs.GetFiles(),
-	)
-
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
 		BuildID:      textLogs.GetBuildID(),
-		Files:        fullPaths,
+		Files:        textLogs.GetFiles(),
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),

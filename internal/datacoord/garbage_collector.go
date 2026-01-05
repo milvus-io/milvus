@@ -474,7 +474,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		binlog.DecompressBinLogs(cloned.SegmentInfo)
 
 		logs := getLogs(cloned)
-		for key := range getTextLogs(cloned, gc) {
+		for key := range getTextLogs(cloned) {
 			logs[key] = struct{}{}
 		}
 
@@ -594,23 +594,11 @@ func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 	return logs
 }
 
-func getTextLogs(sinfo *SegmentInfo, gc *garbageCollector) map[string]struct{} {
+func getTextLogs(sinfo *SegmentInfo) map[string]struct{} {
 	textLogs := make(map[string]struct{})
 	for _, flog := range sinfo.GetTextStatsLogs() {
-		// Reconstruct full paths from filenames
-		// Files stored in TextIndexStats only contain filenames to save space
-		fullPaths := metautil.BuildTextLogPaths(
-			gc.option.cli.RootPath(),
-			flog.GetBuildID(),
-			flog.GetVersion(),
-			sinfo.GetCollectionID(),
-			sinfo.GetPartitionID(),
-			sinfo.GetID(),
-			flog.GetFieldID(),
-			flog.GetFiles(),
-		)
-		for _, fullPath := range fullPaths {
-			textLogs[fullPath] = struct{}{}
+		for _, file := range flog.GetFiles() {
+			textLogs[file] = struct{}{}
 		}
 	}
 
