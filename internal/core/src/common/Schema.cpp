@@ -90,6 +90,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     std::tie(schema->has_mmap_setting_, schema->mmap_enabled_) =
         GetBoolFromRepeatedKVs(schema_proto.properties(), MMAP_ENABLED_KEY);
 
+<<<<<<< HEAD
     // Parse collection-level warmup policies
     schema->warmup_vector_index_ = GetStringFromRepeatedKVs(
         schema_proto.properties(), WARMUP_VECTOR_INDEX_KEY);
@@ -99,6 +100,27 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         schema_proto.properties(), WARMUP_SCALAR_FIELD_KEY);
     schema->warmup_vector_field_ = GetStringFromRepeatedKVs(
         schema_proto.properties(), WARMUP_VECTOR_FIELD_KEY);
+=======
+    std::optional<std::string> ttl_field_name;
+    for (const auto& property : schema_proto.properties()) {
+        if (property.key() == COLLECTION_TTL_FIELD_KEY) {
+            ttl_field_name = property.value();
+            break;
+        }
+    }
+    if (ttl_field_name.has_value()) {
+        bool found = false;
+        for (const milvus::proto::schema::FieldSchema& child :
+             schema_proto.fields()) {
+            if (child.name() == ttl_field_name.value()) {
+                schema->set_ttl_field_id(FieldId(child.fieldid()));
+                found = true;
+                break;
+            }
+        }
+        AssertInfo(found, "ttl field name not found in schema fields");
+    }
+>>>>>>> a16d04f5d1 (feat: Support ttl field for entity level expiration (#46342))
 
     AssertInfo(schema->get_primary_field_id().has_value(),
                "primary key should be specified");

@@ -57,7 +57,11 @@ func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
+<<<<<<< HEAD
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
+=======
+	paramtable.Get().Reset("common.storage.enableV2")
+>>>>>>> a16d04f5d1 (feat: Support ttl field for entity level expiration (#46342))
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "stats_log")

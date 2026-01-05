@@ -42,6 +42,7 @@ type BinlogRecordWriter interface {
 		statsLog *datapb.FieldBinlog,
 		bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 		manifest string,
+		expirQuantiles []int64,
 	)
 	GetRowNum() int64
 	FlushChunk() error
@@ -77,6 +78,9 @@ type packedBinlogRecordWriterBase struct {
 	statsLog     *datapb.FieldBinlog
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog
 	manifest     string
+
+	ttlFieldID     int64
+	ttlFieldValues []int64
 }
 
 func (pw *packedBinlogRecordWriterBase) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
@@ -93,6 +97,10 @@ func (pw *packedBinlogRecordWriterBase) getColumnStatsFromRecord(r Record, allFi
 
 func (pw *packedBinlogRecordWriterBase) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
+}
+
+func (pw *packedBinlogRecordWriterBase) GetExpirQuantiles() []int64 {
+	return calculateExpirQuantiles(pw.ttlFieldID, pw.rowNum, pw.ttlFieldValues)
 }
 
 func (pw *packedBinlogRecordWriterBase) writeStats() error {
@@ -138,8 +146,9 @@ func (pw *packedBinlogRecordWriterBase) GetLogs() (
 	statsLog *datapb.FieldBinlog,
 	bm25StatsLog map[FieldID]*datapb.FieldBinlog,
 	manifest string,
+	expirQuantiles []int64,
 ) {
-	return pw.fieldBinlogs, pw.statsLog, pw.bm25StatsLog, pw.manifest
+	return pw.fieldBinlogs, pw.statsLog, pw.bm25StatsLog, pw.manifest, pw.GetExpirQuantiles()
 }
 
 func (pw *packedBinlogRecordWriterBase) GetRowNum() int64 {
@@ -180,6 +189,28 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		}
 		if ts > pw.tsTo {
 			pw.tsTo = ts
+		}
+	}
+
+	if pw.ttlFieldID >= common.StartOfUserFieldID {
+		ttlColumn := r.Column(pw.ttlFieldID)
+		// Defensive check to prevent panic
+		if ttlColumn == nil {
+			return merr.WrapErrServiceInternal("ttl field not found")
+		}
+		ttlArray, ok := ttlColumn.(*array.Int64)
+		if !ok {
+			return merr.WrapErrServiceInternal("ttl field is not int64")
+		}
+		for i := 0; i < rows; i++ {
+			if ttlArray.IsNull(i) {
+				continue
+			}
+			ttlValue := ttlArray.Value(i)
+			if ttlValue <= 0 {
+				continue
+			}
+			pw.ttlFieldValues = append(pw.ttlFieldValues, ttlValue)
 		}
 	}
 
@@ -291,6 +322,8 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 			storagePluginContext: storagePluginContext,
 			tsFrom:               typeutil.MaxTimestamp,
 			tsTo:                 0,
+			ttlFieldID:           getTTLFieldID(schema),
+			ttlFieldValues:       make([]int64, 0),
 		},
 	}
 
@@ -440,6 +473,8 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 			storagePluginContext: storagePluginContext,
 			tsFrom:               typeutil.MaxTimestamp,
 			tsTo:                 0,
+			ttlFieldID:           getTTLFieldID(schema),
+			ttlFieldValues:       make([]int64, 0),
 		},
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -82,7 +81,7 @@ func (policy *forceMergeCompactionPolicy) triggerOneCollection(
 		return nil, 0, err
 	}
 
-	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn("failed to get collection ttl, use default", zap.Error(err))
 		collectionTTL = 0
