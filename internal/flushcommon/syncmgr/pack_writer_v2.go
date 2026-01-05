@@ -163,15 +163,20 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	}
 
 	var logs map[int64]*datapb.FieldBinlog
-	retry.Do(ctx, func() error {
+	if err := retry.Do(ctx, func() error {
 		var err error
 		logs, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, columnGroups, rec, tsFrom, tsTo)
 		if err != nil {
-			log.Warn("failed to write inserts into storage", zap.Int64("collectionID", pack.collectionID), zap.Int64("segmentID", pack.segmentID), zap.Error(err))
+			log.Warn("failed to write inserts into storage",
+				zap.Int64("collectionID", pack.collectionID),
+				zap.Int64("segmentID", pack.segmentID),
+				zap.Error(err))
 			return err
 		}
 		return nil
-	}, bw.writeRetryOpts...)
+	}, bw.writeRetryOpts...); err != nil {
+		return nil, err
+	}
 	return logs, nil
 }
 
