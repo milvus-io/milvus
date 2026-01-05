@@ -768,7 +768,7 @@ create_chunk(const FieldMeta& field_meta,
                           ~(ChunkTarget::ALIGNED_SIZE - 1);
     std::shared_ptr<ChunkTarget> target;
     if (file_path.empty()) {
-        target = std::make_shared<MemChunkTarget>(aligned_size);
+        target = std::make_shared<MemChunkTarget>(aligned_size, mmap_populate);
     } else {
         auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
         target = std::make_shared<MmapChunkTarget>(
@@ -827,7 +827,8 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     }
     std::shared_ptr<ChunkTarget> target;
     if (file_path.empty()) {
-        target = std::make_shared<MemChunkTarget>(total_aligned_size);
+        target =
+            std::make_shared<MemChunkTarget>(total_aligned_size, mmap_populate);
     } else {
         target = std::make_shared<MmapChunkTarget>(
             file_path,

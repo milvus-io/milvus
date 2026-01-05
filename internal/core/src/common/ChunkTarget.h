@@ -12,6 +12,10 @@
 #pragma once
 #include <memory>
 #include <sys/mman.h>
+
+#ifndef MAP_POPULATE
+#define MAP_POPULATE 0
+#endif
 #include <sys/types.h>
 #include <unistd.h>
 #include <cstddef>
@@ -84,7 +88,11 @@ class MmapChunkTarget : public ChunkTarget {
 
 class MemChunkTarget : public ChunkTarget {
  public:
-    explicit MemChunkTarget(size_t cap) : cap_(cap) {
+    explicit MemChunkTarget(size_t cap, bool populate = true) : cap_(cap) {
+        auto mmap_flag = MAP_PRIVATE | MAP_ANON;
+        if (populate) {
+            mmap_flag |= MAP_POPULATE;
+        }
         auto m = mmap(nullptr,
                       cap,
                       PROT_READ | PROT_WRITE,
