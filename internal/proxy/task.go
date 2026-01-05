@@ -354,6 +354,54 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	return nil
 }
 
+func validateCollectionTTL(props []*commonpb.KeyValuePair) (bool, error) {
+	for _, pair := range props {
+		if pair.Key == common.CollectionTTLConfigKey {
+			_, err := strconv.Atoi(pair.Value)
+			if err != nil {
+				return true, merr.WrapErrParameterInvalidMsg("collection TTL is not a valid positive integer")
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func validateTTLField(props []*commonpb.KeyValuePair, fields []*schemapb.FieldSchema) (bool, error) {
+	for _, pair := range props {
+		if pair.Key == common.CollectionTTLFieldKey {
+			fieldName := pair.Value
+			for _, field := range fields {
+				if field.Name == fieldName {
+					if field.DataType != schemapb.DataType_Timestamptz {
+						return true, merr.WrapErrParameterInvalidMsg("ttl field must be timestamptz, field name = %s", fieldName)
+					}
+					return true, nil
+				}
+			}
+			return true, merr.WrapErrParameterInvalidMsg("ttl field name %s not found in schema", fieldName)
+		}
+	}
+	return false, nil
+}
+
+func (t *createCollectionTask) validateTTL() error {
+	hasCollectionTTL, err := validateCollectionTTL(t.GetProperties())
+	if err != nil {
+		return err
+	}
+
+	hasTTLField, err := validateTTLField(t.GetProperties(), t.schema.Fields)
+	if err != nil {
+		return err
+	}
+
+	if hasCollectionTTL && hasTTLField {
+		return merr.WrapErrParameterInvalidMsg("collection TTL and ttl field cannot be set at the same time")
+	}
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -434,7 +482,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Validate collection ttl
-	_, err = common.GetCollectionTTL(t.GetProperties(), -1)
+	_, err = common.GetCollectionTTL(t.GetProperties())
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("collection ttl property value not valid, parse error: %s", err.Error())
 	}
@@ -473,6 +521,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := validateLoadFieldsList(t.schema); err != nil {
+		return err
+	}
+
+	if err := t.validateTTL(); err != nil {
 		return err
 	}
 
@@ -1217,6 +1269,24 @@ func hasMmapProp(props ...*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func hasTTLProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.CollectionTTLConfigKey {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTTLFieldProp(props ...*commonpb.KeyValuePair) bool {
+	for _, p := range props {
+		if p.GetKey() == common.CollectionTTLFieldKey {
+			return true
+		}
+	}
+	return false
+}
+
 func hasLazyLoadProp(props ...*commonpb.KeyValuePair) bool {
 	for _, p := range props {
 		if p.GetKey() == common.LazyLoadEnableKey {
@@ -1288,7 +1358,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 
-		_, err = common.GetCollectionTTL(t.GetProperties(), -1)
+		_, err = common.GetCollectionTTL(t.GetProperties())
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg("collection ttl properties value not valid, parse error: %s", err.Error())
 		}
@@ -1307,6 +1377,24 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 		userDefinedTimezone, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.Properties)
 		if exist && !timestamptz.IsTimezoneValid(userDefinedTimezone) {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
+		}
+
+		hasTTL, err := validateCollectionTTL(t.GetProperties())
+		if err != nil {
+			return err
+		}
+		hasTTLField, err := validateTTLField(t.GetProperties(), collSchema.GetFields())
+		if err != nil {
+			return err
+		}
+		if hasTTL && hasTTLField {
+			return merr.WrapErrParameterInvalidMsg("collection TTL and ttl field cannot be set at the same time")
+		}
+		if hasTTL && hasTTLFieldProp(collSchema.GetProperties()...) {
+			return merr.WrapErrParameterInvalidMsg("ttl field is already exists, cannot be set collection TTL")
+		}
+		if hasTTLField && hasTTLProp(collSchema.GetProperties()...) {
+			return merr.WrapErrParameterInvalidMsg("collection TTL is already set, cannot be set ttl field")
 		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)

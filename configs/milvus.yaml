@@ -916,7 +916,6 @@ internaltls:
 common:
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
-  entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
   indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool

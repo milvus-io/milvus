@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <numeric>
 
 #include "common/Types.h"
 #include "common/IndexMeta.h"
@@ -24,6 +25,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "query/ExecPlanNodeVisitor.h"
 
 using namespace milvus::segcore;
 using namespace milvus;
@@ -970,4 +972,253 @@ TEST(GrowingTest, SearchVectorArray) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto sr_parsed = SearchResultToJson(*sr);
     std::cout << sr_parsed.dump(1) << std::endl;
+}
+
+TEST(Growing, TestMaskWithTTLField) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ, false);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    int64_t test_data_count = 100;
+
+    uint64_t base_ts = 1000000000ULL << 18;
+    std::vector<Timestamp> ts_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        ts_data[i] = base_ts + i;
+    }
+
+    std::vector<idx_t> row_ids(test_data_count);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+
+    std::vector<int64_t> pk_data(test_data_count);
+    std::iota(pk_data.begin(), pk_data.end(), 0);
+
+    uint64_t base_physical_us = (base_ts >> 18) * 1000;
+    std::vector<int64_t> ttl_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        if (i < test_data_count / 2) {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us - 10);
+        } else {
+            ttl_data[i] = static_cast<int64_t>(base_physical_us + 10);
+        }
+    }
+
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(test_data_count);
+
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(pk_fid.get());
+        field_data->set_type(proto::schema::DataType::Int64);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_long_data();
+        for (auto v : pk_data) {
+            data->add_data(v);
+        }
+    }
+
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(ttl_fid.get());
+        field_data->set_type(proto::schema::DataType::Timestamptz);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_timestamptz_data();
+        for (auto v : ttl_data) {
+            data->add_data(v);
+        }
+    }
+
+    auto offset = segment->PreInsert(test_data_count);
+    segment->Insert(offset,
+                    test_data_count,
+                    row_ids.data(),
+                    ts_data.data(),
+                    insert_record_proto.get());
+
+    // Test TTL field filtering using CompileExpressions pathway
+    Timestamp query_ts = base_ts + test_data_count;
+    int64_t active_count = segment->get_active_count(query_ts);
+
+    // Create an expression list with AlwaysTrueExpr - CompileExpressions will
+    // automatically add TTL field filtering expression
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    // Execute query expression - this will trigger CompileExpressions which
+    // automatically adds TTL field filtering expression
+    BitsetType bitset =
+        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+
+    // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
+    // means the row matches (not expired), bitset[i] = false means expired
+    BitsetTypeView bitset_view(bitset);
+
+    // Verify results:
+    // After ExecuteQueryExpr, bitset[i] = true means row matches (not expired)
+    // bitset[i] = false means row is filtered out (expired)
+    // - i < test_data_count / 2: expired (TTL < current time), should be expired (bitset_view[i] = false)
+    // - i >= test_data_count / 2: not expired, should NOT be expired (bitset_view[i] = true)
+    int expired_count = 0;
+    for (int i = 0; i < test_data_count; i++) {
+        if (!bitset_view[i]) {
+            expired_count++;
+        }
+    }
+
+    EXPECT_EQ(expired_count, test_data_count / 2);
+    for (int i = 0; i < test_data_count / 2; i++) {
+        EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should be expired";
+    }
+    for (int i = test_data_count / 2; i < test_data_count; i++) {
+        EXPECT_TRUE(bitset_view[i]) << "Row " << i << " should not be expired";
+    }
+}
+
+// Test TTL field filtering with nullable field for Growing segment
+TEST(Growing, TestMaskWithNullableTTLField) {
+    // Create schema with nullable TTL field
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto ttl_fid = schema->AddDebugField(
+        "ttl_field", DataType::TIMESTAMPTZ, true);  // nullable
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    int64_t test_data_count = 100;
+
+    // Generate timestamp data
+    uint64_t base_ts = 1000000000ULL << 18;
+    std::vector<Timestamp> ts_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        ts_data[i] = base_ts + i;
+    }
+
+    // Generate row IDs
+    std::vector<idx_t> row_ids(test_data_count);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+
+    // Generate PK data
+    std::vector<int64_t> pk_data(test_data_count);
+    std::iota(pk_data.begin(), pk_data.end(), 0);
+
+    // Generate TTL data with some nulls
+    uint64_t base_physical_us = (base_ts >> 18) * 1000;
+    std::vector<int64_t> ttl_data(test_data_count);
+    std::vector<bool> valid_data(test_data_count);
+    for (int i = 0; i < test_data_count; i++) {
+        if (i % 4 == 0) {
+            // Null value - should not expire
+            ttl_data[i] = 0;
+            valid_data[i] = false;
+        } else if (i % 4 == 1) {
+            // Expired
+            ttl_data[i] = static_cast<int64_t>(base_physical_us - 10);
+            valid_data[i] = true;
+        } else {
+            // Not expired
+            ttl_data[i] = static_cast<int64_t>(base_physical_us + 10);
+            valid_data[i] = true;
+        }
+    }
+
+    // Create insert record proto
+    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    insert_record_proto->set_num_rows(test_data_count);
+
+    // Add PK field data
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(pk_fid.get());
+        field_data->set_type(proto::schema::DataType::Int64);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_long_data();
+        for (auto v : pk_data) {
+            data->add_data(v);
+        }
+    }
+
+    // Add nullable TTL field data
+    {
+        auto field_data = insert_record_proto->add_fields_data();
+        field_data->set_field_id(ttl_fid.get());
+        field_data->set_type(proto::schema::DataType::Timestamptz);
+        auto* scalars = field_data->mutable_scalars();
+        auto* data = scalars->mutable_timestamptz_data();
+        for (auto v : ttl_data) {
+            data->add_data(v);
+        }
+        // Add valid_data for nullable field
+        // Note: valid_data[i] = false means null, valid_data[i] = true means non-null
+        for (size_t i = 0; i < valid_data.size(); ++i) {
+            field_data->add_valid_data(valid_data[i]);
+        }
+        // Verify valid_data was added correctly
+        ASSERT_EQ(field_data->valid_data_size(), test_data_count)
+            << "valid_data size mismatch: expected " << test_data_count
+            << ", got " << field_data->valid_data_size();
+    }
+
+    // Insert data
+    auto offset = segment->PreInsert(test_data_count);
+    segment->Insert(offset,
+                    test_data_count,
+                    row_ids.data(),
+                    ts_data.data(),
+                    insert_record_proto.get());
+
+    // Test TTL field filtering using CompileExpressions pathway
+    Timestamp query_ts = base_ts + test_data_count;
+    int64_t active_count = segment->get_active_count(query_ts);
+
+    // Create an expression list with AlwaysTrueExpr - CompileExpressions will
+    // automatically add TTL field filtering expression
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                       always_true_expr);
+
+    // Execute query expression - this will trigger CompileExpressions which
+    // automatically adds TTL field filtering expression
+    BitsetType bitset =
+        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+
+    // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
+    // means the row matches (not expired), bitset[i] = false means expired
+    BitsetTypeView bitset_view(bitset);
+
+    // Verify results:
+    // After ExecuteQueryExpr, bitset[i] = true means row matches (not expired)
+    // bitset[i] = false means row is filtered out (expired)
+    // - i % 4 == 0: null, should NOT be expired (bitset_view[i] = true)
+    // - i % 4 == 1: expired (TTL < current time), should be expired (bitset_view[i] = false)
+    // - i % 4 == 2 or 3: not expired, should NOT be expired (bitset_view[i] = true)
+    int expired_count = 0;
+    for (int i = 0; i < test_data_count; i++) {
+        if (i % 4 == 0) {
+            // Null value should not be expired (should match)
+            EXPECT_TRUE(bitset_view[i])
+                << "Row " << i << " (null) should not be expired";
+        } else if (i % 4 == 1) {
+            // Should be expired (should be filtered out)
+            EXPECT_FALSE(bitset_view[i]) << "Row " << i << " should be expired";
+            expired_count++;
+        } else {
+            // Should not be expired (should match)
+            EXPECT_TRUE(bitset_view[i])
+                << "Row " << i << " should not be expired";
+        }
+    }
+
+    EXPECT_EQ(expired_count, test_data_count / 4);
 }

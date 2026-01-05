@@ -66,6 +66,8 @@ type mixCompactionTask struct {
 
 	compactionParams compaction.Params
 	sortByFieldIDs   []int64
+
+	ttlFieldID int64
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -109,7 +111,7 @@ func (t *mixCompactionTask) preCompact() error {
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 	t.targetSize = t.plan.GetMaxSize()
 	t.bm25FieldIDs = GetBM25FieldIDs(t.plan.GetSchema())
-
+	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	currSize := int64(0)
 	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
 		for i, fieldBinlog := range segmentBinlog.GetFieldBinlogs() {
@@ -150,7 +152,12 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig), storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI))
+	mWriter, err := NewMultiSegmentWriter(ctx,
+		t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(),
+		t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096,
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +250,8 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer reader.Close()
 
+	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
+
 	for {
 		var r storage.Record
 		r, err = reader.Next()
@@ -257,11 +266,17 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		}
 
 		var (
-			pkArray    = r.Column(pkField.FieldID)
-			tsArray    = r.Column(common.TimeStampField).(*array.Int64)
+			pkArray = r.Column(pkField.FieldID)
+			tsArray = r.Column(common.TimeStampField).(*array.Int64)
+			ttlArr  *array.Int64
+
 			sliceStart = -1
 			rb         *storage.RecordBuilder
 		)
+
+		if hasTTLField {
+			ttlArr = r.Column(t.ttlFieldID).(*array.Int64)
+		}
 
 		for i := range r.Len() {
 			// Filtering deleted entities
@@ -275,7 +290,13 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				panic("invalid data type")
 			}
 			ts := typeutil.Timestamp(tsArray.Value(i))
-			if entityFilter.Filtered(pk, ts) {
+			expireTs := int64(-1)
+			if hasTTLField {
+				if ttlArr.IsValid(i) {
+					expireTs = ttlArr.Value(i)
+				}
+			}
+			if entityFilter.Filtered(pk, ts, expireTs) {
 				if rb == nil {
 					rb = storage.NewRecordBuilder(t.plan.GetSchema())
 				}
@@ -328,6 +349,9 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("MixCompact-%d", t.GetPlanID()))
 	defer span.End()
 	compactStart := time.Now()
+
+	log.Info("compact start", zap.Any("compactionParams", t.compactionParams),
+		zap.Any("plan", t.plan))
 
 	if err := t.preCompact(); err != nil {
 		log.Warn("compact wrong, failed to preCompact", zap.Error(err))

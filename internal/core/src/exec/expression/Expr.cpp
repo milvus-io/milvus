@@ -39,6 +39,7 @@
 #include "exec/expression/TimestamptzArithCompareExpr.h"
 #include "expr/ITypeExpr.h"
 #include "monitor/Monitor.h"
+#include "segcore/Utils.h"
 
 #include <memory>
 namespace milvus {
@@ -62,6 +63,48 @@ ExprSet::Eval(int32_t begin,
     }
 }
 
+// Create TTL field filtering expression if schema has TTL field configured
+// Returns a single OR expression: ttl_field is null OR ttl_field > physical_us
+// This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
+inline expr::TypedExprPtr
+CreateTTLFieldFilterExpression(QueryContext* query_context) {
+    auto segment = query_context->get_segment();
+    auto& schema = segment->get_schema();
+    if (!schema.get_ttl_field_id().has_value()) {
+        return nullptr;
+    }
+
+    auto ttl_field_id = schema.get_ttl_field_id().value();
+    auto& ttl_field_meta = schema[ttl_field_id];
+
+    // Convert query_timestamp to physical microseconds for TTL comparison
+    auto query_timestamp = query_context->get_query_timestamp();
+    int64_t physical_us =
+        static_cast<int64_t>(
+            milvus::segcore::TimestampToPhysicalMs(query_timestamp)) *
+        1000;
+
+    expr::ColumnInfo ttl_column_info(ttl_field_id,
+                                     ttl_field_meta.get_data_type(),
+                                     {},
+                                     ttl_field_meta.is_nullable());
+
+    auto ttl_is_null_expr = std::make_shared<expr::NullExpr>(
+        ttl_column_info, proto::plan::NullExpr_NullOp_IsNull);
+
+    proto::plan::GenericValue ttl_threshold;
+    ttl_threshold.set_int64_val(physical_us);
+    auto ttl_greater_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        ttl_column_info, proto::plan::OpType::GreaterThan, ttl_threshold);
+
+    auto ttl_or_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::Or,
+        ttl_is_null_expr,
+        ttl_greater_expr);
+
+    return ttl_or_expr;
+}
+
 std::vector<ExprPtr>
 CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                    ExecContext* context,
@@ -70,8 +113,19 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
     std::vector<std::shared_ptr<Expr>> exprs;
     exprs.reserve(sources.size());
 
-    for (auto& source : sources) {
-        exprs.emplace_back(CompileExpression(source,
+    // Create TTL filter expression if schema has TTL field
+    auto ttl_expr =
+        CreateTTLFieldFilterExpression(context->get_query_context());
+
+    // Merge TTL expression with the first source expression if TTL exists
+    for (size_t i = 0; i < sources.size(); ++i) {
+        expr::TypedExprPtr expr_to_compile = sources[i];
+        if (i == 0 && ttl_expr != nullptr) {
+            // Merge TTL expression with the first expression using AND
+            expr_to_compile = std::make_shared<expr::LogicalBinaryExpr>(
+                expr::LogicalBinaryExpr::OpType::And, sources[i], ttl_expr);
+        }
+        exprs.emplace_back(CompileExpression(expr_to_compile,
                                              context->get_query_context(),
                                              flatten_candidate,
                                              enable_constant_folding));

@@ -189,6 +189,7 @@ const (
 	CollectionTTLConfigKey      = "collection.ttl.seconds"
 	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
 	CollectionDescription       = "collection.description"
+	CollectionTTLFieldKey       = "ttl_field"
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -605,23 +606,23 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 	return kv.GetValue(), true
 }
 
-func GetCollectionTTL(kvs []*commonpb.KeyValuePair, defaultValue time.Duration) (time.Duration, error) {
+func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {
 	value, parseErr, exist := GetInt64Value(kvs, CollectionTTLConfigKey)
 	if parseErr != nil {
 		return 0, parseErr
 	}
 
 	if !exist {
-		return defaultValue, nil
+		return -1, nil
 	}
 
 	return time.Duration(value) * time.Second, nil
 }
 
-func GetCollectionTTLFromMap(kvs map[string]string, defaultValue time.Duration) (time.Duration, error) {
+func GetCollectionTTLFromMap(kvs map[string]string) (time.Duration, error) {
 	value, exist := kvs[CollectionTTLConfigKey]
 	if !exist {
-		return defaultValue, nil
+		return -1, nil
 	}
 
 	ttlSeconds, err := strconv.ParseInt(value, 10, 64)

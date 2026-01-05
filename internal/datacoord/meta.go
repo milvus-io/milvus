@@ -1731,6 +1731,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			IsInvisible:    true,
 			StorageVersion: seg.GetStorageVersion(),
 			ManifestPath:   seg.GetManifest(),
+			ExpirQuantiles: seg.GetExpirQuantiles(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1839,8 +1840,9 @@ func (m *meta) completeMixCompactionMutation(
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted:     compactToSegment.GetIsSorted(),
-				ManifestPath: compactToSegment.GetManifest(),
+				IsSorted:       compactToSegment.GetIsSorted(),
+				ManifestPath:   compactToSegment.GetManifest(),
+				ExpirQuantiles: compactToSegment.GetExpirQuantiles(),
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -1857,6 +1859,7 @@ func (m *meta) completeMixCompactionMutation(
 			zap.Int("statslog count", len(compactToSegmentInfo.GetStatslogs())),
 			zap.Int("deltalog count", len(compactToSegmentInfo.GetDeltalogs())),
 			zap.Int64("segment size", compactToSegmentInfo.getSegmentSize()),
+			zap.Int64s("expirQuantiles", compactToSegmentInfo.GetExpirQuantiles()),
 		)
 		compactToSegments = append(compactToSegments, compactToSegmentInfo)
 	}
@@ -2334,6 +2337,7 @@ func (m *meta) completeSortCompactionMutation(
 		CompactionFrom:            []int64{compactFromSegID},
 		IsSorted:                  true,
 		ManifestPath:              resultSegment.GetManifest(),
+		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
 	}
 
 	segment := NewSegmentInfo(segmentInfo)
@@ -2355,7 +2359,8 @@ func (m *meta) completeSortCompactionMutation(
 
 	log.Info("meta update: prepare for complete stats mutation - complete",
 		zap.Int64("num rows", segment.GetNumOfRows()),
-		zap.Int64("segment size", segment.getSegmentSize()))
+		zap.Int64("segment size", segment.getSegmentSize()),
+		zap.Int64s("expirQuantiles", segment.GetExpirQuantiles()))
 	if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo, segment.SegmentInfo}, metastore.BinlogsIncrement{Segment: segment.SegmentInfo}); err != nil {
 		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return nil, nil, err
