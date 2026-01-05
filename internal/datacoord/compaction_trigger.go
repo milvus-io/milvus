@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -238,7 +239,7 @@ func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 }
 
 func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
-	collectionTTL, err := getCollectionTTL(coll.Properties)
+	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties, paramtable.Get().CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 	if err != nil {
 		return nil, err
 	}
