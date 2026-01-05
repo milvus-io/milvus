@@ -17,6 +17,7 @@
 package http
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"net/http"
@@ -44,7 +45,17 @@ const (
 var (
 	metricsServer *http.ServeMux
 	server        *http.Server
+
+	// passwordVerifyFunc is a callback function to verify user password.
+	// This is set by the proxy package to avoid circular dependency.
+	passwordVerifyFunc func(ctx context.Context, username, password string) bool
 )
+
+// RegisterPasswordVerifyFunc registers a function to verify user password.
+// This should be called by the proxy package during initialization.
+func RegisterPasswordVerifyFunc(fn func(ctx context.Context, username, password string) bool) {
+	passwordVerifyFunc = fn
+}
 
 // Embedding all static files of webui folder to binary
 //
@@ -87,8 +98,31 @@ func registerDefaults() {
 	Register(&Handler{
 		Path: ExprPath,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// Check if expr endpoint is enabled
+			if !paramtable.Get().CommonCfg.ExprEnabled.GetAsBool() {
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"msg": "expr endpoint is disabled. Set common.security.exprEnabled to true to enable it."}`))
+				return
+			}
+
 			code := req.URL.Query().Get("code")
-			auth := req.URL.Query().Get("auth")
+			var auth string
+
+			// Check if this is a Proxy node (has password verify capability)
+			if expr.HasRegistered("proxy") && passwordVerifyFunc != nil {
+				// On Proxy node: require root user authentication via HTTP Basic Auth
+				if err := checkExprRootAuth(req); err != nil {
+					w.WriteHeader(http.StatusUnauthorized)
+					w.Write([]byte(fmt.Sprintf(`{"msg": "%s"}`, err.Error())))
+					return
+				}
+				// Use bypass since we've already authenticated
+				auth = expr.AuthBypass
+			} else {
+				// On non-Proxy nodes: use the original auth parameter
+				auth = req.URL.Query().Get("auth")
+			}
+
 			output, err := expr.Exec(code, auth)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -270,4 +304,43 @@ func getHTTPAddr() string {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.MetricsPort.Key, port)
 
 	return fmt.Sprintf(":%s", port)
+}
+
+// checkExprRootAuth verifies that the request is from the root user.
+// It supports HTTP Basic Auth and Bearer token formats.
+func checkExprRootAuth(req *http.Request) error {
+	// Try HTTP Basic Auth first
+	username, password, ok := req.BasicAuth()
+	if !ok {
+		// Try Bearer token format: "user:password"
+		auth := req.Header.Get("Authorization")
+		auth = strings.TrimPrefix(auth, "Bearer ")
+		parts := strings.SplitN(auth, ":", 2)
+		if len(parts) == 2 {
+			username, password = parts[0], parts[1]
+			ok = true
+		}
+	}
+
+	if !ok || username == "" || password == "" {
+		return fmt.Errorf("authentication required. Use HTTP Basic Auth with root credentials")
+	}
+
+	// Only root user can access /expr
+	if username != "root" {
+		log.Warn("non-root user attempted to access /expr", zap.String("username", username))
+		return fmt.Errorf("only root user can access /expr endpoint")
+	}
+
+	// Verify root password
+	if passwordVerifyFunc == nil {
+		return fmt.Errorf("password verification not available")
+	}
+	if !passwordVerifyFunc(context.Background(), username, password) {
+		log.Warn("invalid root password for /expr access")
+		return fmt.Errorf("invalid root password")
+	}
+
+	log.Info("root user authenticated for /expr access")
+	return nil
 }

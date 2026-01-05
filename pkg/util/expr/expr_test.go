@@ -100,4 +100,32 @@ func TestExec(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("%d", innerSize(mockMessage)), out)
 	})
+
+	t.Run("auth bypass", func(t *testing.T) {
+		// AuthBypass should allow execution without checking the auth key
+		out, err := Exec("foo", AuthBypass)
+		assert.NoError(t, err)
+		assert.Equal(t, "hello", out)
+	})
+}
+
+func TestHasRegistered(t *testing.T) {
+	// Before init, should return false
+	env = nil
+	assert.False(t, HasRegistered("foo"))
+
+	// After init
+	Init()
+	Register("testKey", "testValue")
+
+	// Registered key should return true
+	assert.True(t, HasRegistered("testKey"))
+
+	// Non-registered key should return false
+	assert.False(t, HasRegistered("nonExistentKey"))
+
+	// Check for "proxy" key (used to detect Proxy node)
+	assert.False(t, HasRegistered("proxy"))
+	Register("proxy", "mock_proxy")
+	assert.True(t, HasRegistered("proxy"))
 }
