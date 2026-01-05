@@ -2,6 +2,7 @@ package pulsar
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
@@ -19,9 +20,25 @@ const (
 
 var _ walimpls.OpenerImpls = (*openerImpl)(nil)
 
+// tenant is the tenant of pulsar.
+type tenant struct {
+	tenant    string
+	namespace string
+}
+
+// MustGetFullTopicName gets the full topic name of pulsar.
+// If the tenant or namespace or topic is empty, it will panic.
+func (t tenant) MustGetFullTopicName(topic string) string {
+	if len(t.tenant) == 0 || len(t.namespace) == 0 || len(topic) == 0 {
+		panic("tenant or namespace or topic is empty")
+	}
+	return fmt.Sprintf("%s/%s/%s", t.tenant, t.namespace, topic)
+}
+
 // openerImpl is the opener for pulsar wal.
 type openerImpl struct {
-	c pulsar.Client
+	tenant tenant
+	c      pulsar.Client
 }
 
 // Open opens a wal instance.
@@ -36,7 +53,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		if backlogAutoClearBytes <= 0 {
 			backlogAutoClearBytes = defaultBacklogSize
 		}
-		backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes)
+		backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes, o.tenant)
 	}
 	w := &walImpl{
 		WALHelper:          helper.NewWALHelper(opt),
@@ -44,6 +61,7 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		p:                  syncutil.NewFuture[pulsar.Producer](),
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
 		backlogClearHelper: backlogClearHelper,
+		tenant:             o.tenant,
 	}
 	// because the producer of pulsar cannot be created if the topic is backlog exceeded,
 	// so we need to set the producer at background with backoff retry.
