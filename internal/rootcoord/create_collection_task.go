@@ -305,8 +305,7 @@ func (t *createCollectionTask) handleNamespaceField(ctx context.Context, schema 
 	hasIsolation := hasIsolationProperty(t.Req.Properties...)
 	_, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	hasPartitionKey := err == nil
-	enabled := schema.GetEnableNamespace()
-	if !enabled {
+	if !schema.GetEnableNamespace() {
 		return nil
 	}
 
