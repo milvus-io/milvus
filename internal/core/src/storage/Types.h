@@ -136,6 +136,7 @@ struct MmapConfig {
     bool scalar_field_enable_mmap;
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
+    bool mmap_populate;
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -175,6 +176,10 @@ struct MmapConfig {
     void
     SetVectorFieldEnableMmap(bool flag) {
         this->vector_field_enable_mmap = flag;
+    }
+    [[nodiscard]] bool
+    GetMmapPopulate() const {
+        return mmap_populate;
     }
 
     std::string
