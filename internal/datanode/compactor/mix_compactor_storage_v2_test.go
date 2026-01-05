@@ -63,7 +63,6 @@ func (s *MixCompactionTaskStorageV2Suite) SetupTest() {
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TearDownTest() {
-	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
 	paramtable.Get().Reset("common.storageType")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")

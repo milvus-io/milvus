@@ -231,7 +231,6 @@ type commonConfig struct {
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
 	DefaultIndexName     ParamItem `refreshable:"true"`
-	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
 	StreamBudgetRatio                   ParamItem `refreshable:"true"`
@@ -539,23 +538,6 @@ It is recommended to change this parameter before starting Milvus for the first 
 		Export:       true,
 	}
 	p.DefaultIndexName.Init(base.mgr)
-
-	p.EntityExpirationTTL = ParamItem{
-		Key:          "common.entityExpiration",
-		Version:      "2.1.0",
-		DefaultValue: "-1",
-		Formatter: func(value string) string {
-			ttl := getAsInt(value)
-			if ttl < 0 {
-				return "-1"
-			}
-
-			return strconv.Itoa(ttl)
-		},
-		Doc:    "Entity expiration in seconds, CAUTION -1 means never expire",
-		Export: true,
-	}
-	p.EntityExpirationTTL.Init(base.mgr)
 
 	p.SimdType = ParamItem{
 		Key:          "common.simdType",
