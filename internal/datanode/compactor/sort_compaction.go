@@ -318,7 +318,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			Bm25Logs:            bm25StatsLogs,
 			Channel:             t.GetChannelName(),
 			IsSorted:            isSorted,
-			IsNamespaceSorted:   isNamespaceSorted,
+			IsSortedByNamespace: isNamespaceSorted,
 			StorageVersion:      t.storageVersion,
 			Manifest:            manifest,
 			ExpirQuantiles:      expirQuantiles,

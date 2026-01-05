@@ -327,7 +327,7 @@ func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.Com
 			CollectionID:        info.GetCollectionID(),
 			PartitionID:         info.GetPartitionID(),
 			IsSorted:            info.GetIsSorted(),
-			IsNamespaceSorted:   info.GetIsNamespaceSorted(),
+			IsSortedByNamespace: info.GetIsSortedByNamespace(),
 			Manifest:            info.GetManifestPath(),
 		})
 	}
@@ -361,15 +361,15 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 			return nil, merr.WrapErrSegmentNotFound(segID)
 		}
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
-			SegmentID:         segID,
-			CollectionID:      segInfo.GetCollectionID(),
-			PartitionID:       segInfo.GetPartitionID(),
-			Level:             segInfo.GetLevel(),
-			InsertChannel:     segInfo.GetInsertChannel(),
-			Deltalogs:         segInfo.GetDeltalogs(),
-			IsSorted:          segInfo.GetIsSorted(),
-			IsNamespaceSorted: segInfo.GetIsNamespaceSorted(),
-			Manifest:          segInfo.GetManifestPath(),
+			SegmentID:           segID,
+			CollectionID:        segInfo.GetCollectionID(),
+			PartitionID:         segInfo.GetPartitionID(),
+			Level:               segInfo.GetLevel(),
+			InsertChannel:       segInfo.GetInsertChannel(),
+			Deltalogs:           segInfo.GetDeltalogs(),
+			IsSorted:            segInfo.GetIsSorted(),
+			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
+			Manifest:            segInfo.GetManifestPath(),
 		})
 		segments = append(segments, segInfo)
 	}
