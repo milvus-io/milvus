@@ -228,7 +228,9 @@ class TestGroupSearch(TestMilvusClientV2Base):
                             assert len(set(group_values)) == 1
 
                 # when strict_group_size=false, it shall return results with group counts = limit
-                res1 = self.search(client, self.collection_name, data=search_vectors, anns_field=self.vector_fields[j],
+                res1 = self.search(client, self.collection_name,
+                                   data=search_vectors,
+                                   anns_field=self.vector_fields[j],
                                    search_params=search_params, limit=limit,
                                    group_by_field=group_by_field, filter=f"{output_field} is not null",
                                    group_size=group_size, strict_group_size=False,
@@ -537,7 +539,8 @@ class TestGroupSearch(TestMilvusClientV2Base):
         assert len(grpby_field_values) == len(set(grpby_field_values))
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_search_pagination_group_size(self):
+    @pytest.mark.parametrize("search_by_pk", [True, False])
+    def test_search_pagination_group_size(self, search_by_pk):
         """
         verify search group by works with pagination and group_size
         """
@@ -550,14 +553,22 @@ class TestGroupSearch(TestMilvusClientV2Base):
         default_search_exp = f"{self.primary_field} >= 0"
         grpby_field = self.inverted_string_field
         default_search_field = self.vector_fields[1]
+        ids_to_search = None
         search_vectors = cf.gen_vectors(1, dim=self.dims[1],
                                         vector_data_type=cf.get_field_dtype_by_field_name(collection_info,
                                                                                           self.vector_fields[1]))
+        if search_by_pk is True:
+            query_res = self.query(client, self.collection_name, limit=1, output_fields=[self.primary_field])[0]
+            ids_to_search = [query_res[0].get(self.primary_field)]
+            search_vectors = None
         all_pages_ids = []
         all_pages_grpby_field_values = []
         res_count = limit * group_size
         for r in range(page_rounds):
-            page_res = self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
+            page_res = self.search(client, self.collection_name,
+                                   data=search_vectors,
+                                   ids=ids_to_search,
+                                   anns_field=default_search_field,
                                    search_params=search_param, limit=limit, offset=limit * r,
                                    filter=default_search_exp,
                                    group_by_field=grpby_field, group_size=group_size,
@@ -578,7 +589,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
         assert hit_rate >= expect_hit_rate
 
         total_count = limit * group_size * page_rounds
-        total_res = self.search(client, self.collection_name, data=search_vectors, anns_field=default_search_field,
+        total_res = self.search(client, self.collection_name,
+                                data=search_vectors,
+                                ids=ids_to_search,
+                                anns_field=default_search_field,
                                 search_params=search_param, limit=limit * page_rounds,
                                 filter=default_search_exp,
                                 group_by_field=grpby_field, group_size=group_size,

@@ -264,7 +264,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                 # assert distances_tmp.count(1.0) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_range_search_cosine(self):
+    @pytest.mark.parametrize("search_by_pk", [True, False])
+    def test_range_search_cosine(self, search_by_pk):
         """
         target: test range search normal case
         method: create connection, collection, insert and search
@@ -278,9 +279,18 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 2. range search
         range_search_params = {"metric_type": "COSINE",
                                "params": {"radius": radius, "range_filter": range_filter}}
-        search_res = collection_w.search(vectors[:nq], default_search_field,
-                                         range_search_params, default_limit,
-                                         default_search_exp)[0]
+        vectors_to_search = vectors[:nq]
+        ids_to_search = None
+        if search_by_pk is True:
+            vectors_to_search = None
+            ids_to_search = [0, 1]
+        search_res = collection_w.search(
+            data=vectors_to_search,
+            ids=ids_to_search,
+            anns_field=default_search_field,
+            param=range_search_params,
+            limit=default_limit,
+            expr=default_search_exp)[0]
 
         # 3. check search results
         for hits in search_res:
