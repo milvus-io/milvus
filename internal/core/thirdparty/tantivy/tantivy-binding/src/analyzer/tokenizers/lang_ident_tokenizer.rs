@@ -241,7 +241,6 @@ impl<'a> LangIdentTokenizer<'a> {
     fn tokenize<'b>(&'b mut self, text: &'b str) -> BoxTokenStream<'b> {
         let language: String = self.identifier.0.detect(text);
         let analyzer = self.get_by_language(language.as_str());
-
         analyzer.token_stream(text)
     }
 }
@@ -277,7 +276,7 @@ mod tests {
         let mut analyzer = LangIdentTokenizer::new(BoxIdentifier::default());
         let result = || -> Result<()> {
             analyzer.add("default", create_analyzer(standard_params)?);
-            analyzer.add("cmn", create_analyzer(jieba_params)?);
+            analyzer.add("Mandarin", create_analyzer(jieba_params)?);
             Ok(())
         }();
 
@@ -294,7 +293,7 @@ mod tests {
                 "default": {
                     "tokenizer": "standard"
                 },
-                "cmn": {
+                "Mandarin": {
                     "tokenizer": "jieba"
                 }
             }
@@ -328,8 +327,8 @@ mod tests {
                 }
             },
             "mapping": {
-                "cmn": "jieba",
-                "eng": "en"
+                "Mandarin": "jieba",
+                "English": "en"
             }
         }"#;
 
