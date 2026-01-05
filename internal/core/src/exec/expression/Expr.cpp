@@ -563,18 +563,19 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         reorder.push_back(*namespace_expr_idx);
     }
     // Final reorder sequence:
-    // 1. Numeric column expressions (fastest to evaluate)
-    // 2. Indexed column expressions (can use index for efficient filtering)
-    // 3. String column expressions
-    // 4. Light conjunct expressions (conjunctions without heavy operations)
-    // 5. Other expressions
-    // 6. Array column expression
-    // 7. String like expression
-    // 8. Array like expression
-    // 9. JSON column expressions (expensive to evaluate)
-    // 10. JSON like expression (more expensive than common json compare)
-    // 11. Heavy conjunct expressions (conjunctions with heavy operations)
-    // 12. Compare filter expressions (most expensive, comparing two columns)
+    // 1. Namespace column expression (if exists)
+    // 2. Numeric column expressions (fastest to evaluate)
+    // 3. Indexed column expressions (can use index for efficient filtering)
+    // 4. String column expressions
+    // 5. Light conjunct expressions (conjunctions without heavy operations)
+    // 6. Other expressions
+    // 7. Array column expression
+    // 8. String like expression
+    // 9. Array like expression
+    // 10. JSON column expressions (expensive to evaluate)
+    // 11. JSON like expression (more expensive than common json compare)
+    // 12. Heavy conjunct expressions (conjunctions with heavy operations)
+    // 13. Compare filter expressions (most expensive, comparing two columns)
     reorder.insert(reorder.end(), numeric_expr.begin(), numeric_expr.end());
     reorder.insert(reorder.end(), indexed_expr.begin(), indexed_expr.end());
     reorder.insert(reorder.end(), string_expr.begin(), string_expr.end());

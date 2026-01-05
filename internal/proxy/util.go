@@ -2457,8 +2457,11 @@ func addNamespaceData(schema *schemapb.CollectionSchema, insertMsg *msgstream.In
 				ns = *insertMsg.InsertRequest.Namespace
 			}
 			scalars := fieldData.GetScalars()
+			if scalars == nil {
+				return fmt.Errorf("invalid namespace field data layout")
+			}
 			strData := scalars.GetStringData()
-			if scalars == nil || strData == nil {
+			if strData == nil {
 				return fmt.Errorf("invalid namespace field data layout")
 			}
 			for _, v := range strData.GetData() {

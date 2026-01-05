@@ -289,9 +289,11 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 		}
 		sortFields := []int64{pk.GetFieldID()}
 		if namespaceEnabled {
-			if partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema()); err == nil && partitionKey != nil {
-				sortFields = append([]int64{partitionKey.GetFieldID()}, sortFields...)
+			partitionKey, err := typeutil.GetPartitionKeyFieldSchema(req.GetSchema())
+			if err != nil {
+				return merr.Status(err), err
 			}
+			sortFields = append([]int64{partitionKey.GetFieldID()}, sortFields...)
 		}
 		task = compactor.NewSortCompactionTask(
 			taskCtx,
