@@ -93,12 +93,7 @@ class MemChunkTarget : public ChunkTarget {
         if (populate) {
             mmap_flag |= MAP_POPULATE;
         }
-        auto m = mmap(nullptr,
-                      cap,
-                      PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANON | MAP_POPULATE,
-                      -1,
-                      0);
+        auto m = mmap(nullptr, cap, PROT_READ | PROT_WRITE, mmap_flag, -1, 0);
         AssertInfo(m != MAP_FAILED,
                    "failed to map: {}, map_size={}",
                    strerror(errno),
