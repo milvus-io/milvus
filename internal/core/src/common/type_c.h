@@ -120,6 +120,7 @@ typedef struct CMmapConfig {
     bool scalar_field_enable_mmap;
     bool vector_index_enable_mmap;
     bool vector_field_enable_mmap;
+    bool mmap_populate;
 } CMmapConfig;
 
 typedef struct CTraceConfig {
