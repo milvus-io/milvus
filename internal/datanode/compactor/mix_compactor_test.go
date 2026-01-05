@@ -71,7 +71,6 @@ func (s *MixCompactionTaskStorageV1Suite) setupTest() {
 
 	s.meta = genTestCollectionMeta()
 
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EntityExpirationTTL.Key, "0")
 	params, err := compaction.GenerateJSONParams()
 	if err != nil {
 		panic(err)
@@ -139,7 +138,6 @@ func (s *MixCompactionTaskStorageV1Suite) SetupSubTest() {
 }
 
 func (s *MixCompactionTaskStorageV1Suite) TearDownTest() {
-	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
 	paramtable.Get().Reset("common.storageType")
 	paramtable.Get().Reset("common.storage.enablev2")
 }
