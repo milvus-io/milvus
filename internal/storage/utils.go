@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -1829,4 +1830,18 @@ func calculateExpirQuantiles(ttlFieldID int64, rowNum int64, ttlFieldValues []in
 	}
 
 	return result
+}
+
+func RecoverColumnGroup(binlogs []*datapb.FieldBinlog) []storagecommon.ColumnGroup {
+	columnGroups := make([]storagecommon.ColumnGroup, 0, len(binlogs))
+	for _, binlog := range binlogs {
+		columnGroups = append(columnGroups, storagecommon.ColumnGroup{
+			GroupID: binlog.GetFieldID(),
+			Fields:  binlog.GetChildFields(),
+		})
+	}
+	sort.Slice(columnGroups, func(i, j int) bool {
+		return columnGroups[i].GroupID < columnGroups[j].GroupID
+	})
+	return columnGroups
 }

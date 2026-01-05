@@ -120,6 +120,7 @@ func (iNode *insertNode) Operate(in Msg) Msg {
 		timeRange:     nodeMsg.timeRange,
 		schema:        nodeMsg.schema,
 		schemaVersion: nodeMsg.schemaVersion,
+		newIndexInfo:  nodeMsg.indexInfo,
 	}
 }
 

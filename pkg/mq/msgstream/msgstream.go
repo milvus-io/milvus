@@ -225,18 +225,16 @@ func NewMarshaledMsg(msg common.Message, group string) (ConsumeMsg, error) {
 
 	timestamp, err := strconv.ParseUint(tsStr, 10, 64)
 	if err != nil {
-		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
 		return nil, errors.New("parse minTs from msg properties failed")
 	}
 
 	idStr, ok := properties[common.MsgIdTypeKey]
 	if !ok {
-		return nil, errors.New("get msgType from msg properties failed")
+		return nil, errors.New("get msgID from msg properties failed")
 	}
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		log.Warn("parse message properties minTs failed, unknown message", zap.Error(err))
 		return nil, errors.New("parse minTs from msg properties failed")
 	}
 

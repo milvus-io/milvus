@@ -89,7 +89,6 @@ func (p *ResumableProducer) Produce(ctx context.Context, msg message.MutableMess
 		if err != nil {
 			return nil, err
 		}
-
 		produceResult, err := producerHandler.Append(ctx, msg)
 		if err == nil {
 			return produceResult, nil

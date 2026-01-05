@@ -578,6 +578,65 @@ func (_c *MockWorker_Stop_Call) RunAndReturn(run func()) *MockWorker_Stop_Call {
 	return _c
 }
 
+// UpdateIndex provides a mock function with given fields: ctx, req
+func (_m *MockWorker) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndex")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateIndexRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateIndexRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.UpdateIndexRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_UpdateIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndex'
+type MockWorker_UpdateIndex_Call struct {
+	*mock.Call
+}
+
+// UpdateIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.UpdateIndexRequest
+func (_e *MockWorker_Expecter) UpdateIndex(ctx interface{}, req interface{}) *MockWorker_UpdateIndex_Call {
+	return &MockWorker_UpdateIndex_Call{Call: _e.mock.On("UpdateIndex", ctx, req)}
+}
+
+func (_c *MockWorker_UpdateIndex_Call) Run(run func(ctx context.Context, req *querypb.UpdateIndexRequest)) *MockWorker_UpdateIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.UpdateIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockWorker_UpdateIndex_Call) Return(_a0 *commonpb.Status, _a1 error) *MockWorker_UpdateIndex_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_UpdateIndex_Call) RunAndReturn(run func(context.Context, *querypb.UpdateIndexRequest) (*commonpb.Status, error)) *MockWorker_UpdateIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateSchema provides a mock function with given fields: ctx, req
 func (_m *MockWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)

@@ -230,6 +230,7 @@ message AllocSegmentRequest {
   string vchannel = 4;
   int64 storage_version = 5;
   bool is_created_by_streaming = 6;
+  int32 schema_version = 7;
 }
 
 message AllocSegmentResponse {
@@ -415,7 +416,6 @@ message SegmentInfo {
   // For example, segments that have been clustered but haven't undergone stats yet.
   bool is_invisible = 28;
 
-
   // jsonKeyStats is used to record json key index for fields.
   map<int64, JsonKeyStats> jsonKeyStats = 29;
     // This field is used to indicate that the segment is created by streaming service.
@@ -434,6 +434,7 @@ message SegmentInfo {
   // expirQuantiles records the expiration timestamptz values of the segment
   // at the 20%, 40%, 60%, 80%, and 100% data distribution levels
   repeated int64 expirQuantiles = 33;
+  int32 schema_version = 33;
 }
 
 message SegmentStartPosition {
@@ -648,6 +649,7 @@ enum CompactionType {
   SortCompaction = 9;
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
+  BackfillCompaction = 12;
 }
 
 message CompactionStateRequest {
@@ -724,6 +726,7 @@ message CompactionPlan {
   string json_params = 22;
   int32 current_scalar_index_version = 23;
   repeated common.KeyValuePair plugin_context = 29;
+  repeated schema.FunctionSchema functions = 30;
 }
 
 message CompactionSegment {
@@ -1131,6 +1134,7 @@ message CompactionTask{
   int64 max_size = 26;
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
+  repeated schema.FunctionSchema diff_functions = 29;
 }
 
 message PartitionStatsInfo {

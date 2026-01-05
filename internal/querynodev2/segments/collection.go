@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -52,6 +53,8 @@ type CollectionManager interface {
 	Unref(collectionID int64, count uint32) bool
 	// UpdateSchema update the underlying collection schema of the provided collection.
 	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error
+	AppendIndexMeta(collectionID int64, indexInfo *indexpb.IndexInfo) error
+	UpdateIndex(collectionID int64, req *querypb.UpdateIndexRequest) error
 }
 
 type collectionManager struct {
@@ -134,6 +137,48 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return err
 	}
 	collection.schema.Store(schema)
+	return nil
+}
+
+func (m *collectionManager) AppendIndexMeta(collectionID int64, indexInfo *indexpb.IndexInfo) error {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+	}
+
+	if err := collection.ccollection.AppendIndexMeta(indexInfo); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *collectionManager) UpdateIndex(collectionID int64, req *querypb.UpdateIndexRequest) error {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
+	}
+
+	if req.GetAction() == nil {
+		return merr.WrapErrParameterInvalid("non-nil action", "nil", "action is required")
+	}
+
+	switch op := req.GetAction().GetOp().(type) {
+	case *querypb.UpdateIndexRequest_Action_AddIndexRequest:
+		if op.AddIndexRequest == nil || op.AddIndexRequest.GetIndexInfo() == nil {
+			return merr.WrapErrParameterInvalid("non-nil indexInfo", "nil", "indexInfo is required for AddIndex action")
+		}
+		if err := collection.ccollection.AppendIndexMeta(op.AddIndexRequest.GetIndexInfo()); err != nil {
+			return err
+		}
+	default:
+		return merr.WrapErrParameterInvalid("valid action", "unknown", "unknown UpdateIndexAction")
+	}
 	return nil
 }
 

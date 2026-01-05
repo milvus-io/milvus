@@ -929,6 +929,9 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 	)
 
+	if err = segment.SyncSchema(collection.Schema()); err != nil {
+		return errors.Wrap(err, "At SyncSchema")
+	}
 	if err = segment.Load(ctx); err != nil {
 		return errors.Wrap(err, "At Load")
 	}

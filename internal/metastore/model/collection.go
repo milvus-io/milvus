@@ -55,6 +55,7 @@ type Collection struct {
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
 	FileResourceIds      []int64
+	DoPhysicalBackfill   bool
 }
 
 type ShardInfo struct {
@@ -94,6 +95,7 @@ func (c *Collection) ShallowClone() *Collection {
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
 		FileResourceIds:      c.FileResourceIds,
+		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -132,6 +134,7 @@ func (c *Collection) Clone() *Collection {
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
+		DoPhysicalBackfill:   c.DoPhysicalBackfill,
 	}
 }
 
@@ -180,6 +183,7 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
+			c.DoPhysicalBackfill = updates.Schema.DoPhysicalBackfill
 		}
 	}
 }
@@ -238,6 +242,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
+		DoPhysicalBackfill:   coll.Schema.DoPhysicalBackfill,
 	}
 }
 
@@ -290,6 +295,7 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
 		FileResourceIds:    coll.FileResourceIds,
+		DoPhysicalBackfill: coll.DoPhysicalBackfill,
 	}
 
 	if c.withFields {

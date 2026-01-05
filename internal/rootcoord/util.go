@@ -569,3 +569,13 @@ func nextFieldID(coll *model.Collection) int64 {
 
 	return maxFieldID + 1
 }
+
+func nextFunctionID(coll *model.Collection) int64 {
+	maxFunctionID := int64(common.StartOfUserFunctionID)
+	for _, function := range coll.Functions {
+		if function.ID > maxFunctionID {
+			maxFunctionID = function.ID
+		}
+	}
+	return maxFunctionID + 1
+}

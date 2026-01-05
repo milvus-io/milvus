@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -32,6 +33,7 @@ type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
 	mockAlloc  *allocator.MockAllocator
+	mockBroker *broker.MockBroker
 	handler    Handler
 	inspector  *MockCompactionInspector
 	testLabel  *CompactionGroupLabel
@@ -43,6 +45,7 @@ type CompactionTriggerManagerSuite struct {
 
 func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.mockBroker = broker.NewMockBroker(s.T())
 	s.handler = NewNMockHandler(s.T())
 	s.inspector = NewMockCompactionInspector(s.T())
 
@@ -63,7 +66,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 	importMeta, err := NewImportMeta(context.TODO(), catalog, s.mockAlloc, s.meta)
 	s.Require().NoError(err)
 	s.importMeta = importMeta
-	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.importMeta)
+	s.triggerManager = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.inspector, s.meta, s.importMeta, s.mockBroker)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
@@ -323,6 +326,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 func TestCompactionAndImport(t *testing.T) {
 	paramtable.Init()
 	mockAlloc := allocator.NewMockAllocator(t)
+	mockBroker := broker.NewMockBroker(t)
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
 		ID: 1,
@@ -368,7 +372,7 @@ func TestCompactionAndImport(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	importMeta, err := NewImportMeta(context.TODO(), catalog, mockAlloc, meta)
 	assert.NoError(t, err)
-	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, importMeta)
+	triggerManager := NewCompactionTriggerManager(mockAlloc, handler, inspector, meta, importMeta, mockBroker)
 
 	Params.Save(Params.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.L0CompactionTriggerInterval.Key)

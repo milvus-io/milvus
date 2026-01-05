@@ -159,6 +159,11 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 	for _, index := range indexes {
 		if _, ok := indexIDToSegIndexes[index.IndexID]; !ok {
+			if index.MinSchemaVersion > segment.GetSchemaVersion() {
+				log.Ctx(ctx).Debug("index min schema version is greater than segment schema version, skip create index for now, wait for backfill complete",
+					zap.Int64("segmentID", segment.GetID()), zap.Int64("indexID", index.IndexID), zap.Int32("minSchemaVersion", index.MinSchemaVersion), zap.Int32("segmentSchemaVersion", segment.GetSchemaVersion()))
+				continue
+			}
 			if err := i.createIndexForSegment(ctx, segment, index.IndexID); err != nil {
 				log.Ctx(ctx).Warn("create index for segment fail", zap.Int64("segmentID", segment.ID),
 					zap.Int64("indexID", index.IndexID))

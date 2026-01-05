@@ -255,6 +255,11 @@ class Schema {
         this->schema_version_ = version;
     }
 
+    void
+    set_do_physical_backfill(bool do_physical_backfill) {
+        this->do_physical_backfill_ = do_physical_backfill;
+    }
+
     std::optional<FieldId>
     get_namespace_field_id() const {
         return this->namespace_field_id_opt_;
@@ -263,6 +268,11 @@ class Schema {
     uint64_t
     get_schema_version() const {
         return this->schema_version_;
+    }
+
+    bool
+    get_do_physical_backfill() const {
+        return this->do_physical_backfill_;
     }
 
     auto
@@ -287,6 +297,11 @@ class Schema {
                    "Cannot find field with field_id: " +
                        std::to_string(field_id.get()));
         return fields_.at(field_id);
+    }
+
+    bool
+    is_field_exist(FieldId field_id) const {
+        return fields_.find(field_id) != fields_.end();
     }
 
     FieldId
@@ -446,7 +461,6 @@ class Schema {
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;
-
     // mmap settings
     bool has_mmap_setting_ = false;
     bool mmap_enabled_ = false;
@@ -454,6 +468,7 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+    bool do_physical_backfill_ = false;
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;

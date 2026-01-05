@@ -932,6 +932,14 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		return merr.Status(err), nil
 	}
 
+	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+		log.Warn("schema version consistency check failed, cannot proceed with add collection field",
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Error(err))
+		return merr.Status(err), nil
+	}
+
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionField")
 	defer sp.End()
 
@@ -988,6 +996,257 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return task.result, nil
+}
+
+func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionSchema")
+	defer sp.End()
+
+	dresp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: request.DbName, CollectionName: request.CollectionName})
+	if err := merr.CheckRPCCall(dresp, err); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	// Check schema version consistency before proceeding with alter collection schema
+	if err := node.checkSchemaVersionConsistency(ctx, request.DbName, request.CollectionName); err != nil {
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	task := &alterCollectionSchemaTask{
+		ctx:                          ctx,
+		Condition:                    NewTaskCondition(ctx),
+		AlterCollectionSchemaRequest: request,
+		mixCoord:                     node.mixCoord,
+		oldSchema:                    dresp.GetSchema(),
+	}
+	method := "AlterCollectionSchema"
+	tr := timerecord.NewTimeRecorder(method)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+
+	log.Info(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", task.BeginTs()),
+			zap.Uint64("EndTs", task.EndTs()))
+		return &milvuspb.AlterCollectionSchemaResponse{
+			AlterStatus: merr.Status(err),
+		}, nil
+	}
+	log.Info(
+		rpcDone(method),
+		zap.Uint64("BeginTs", task.BeginTs()),
+		zap.Uint64("EndTs", task.EndTs()))
+
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	// After alterFunctionSchema is completed, check if we need to create index for fields
+	indexStatus := node.createIndexesForFields(ctx, request)
+
+	// Set IndexStatus in the response
+	if task.AlterCollectionSchemaResponse == nil {
+		task.AlterCollectionSchemaResponse = &milvuspb.AlterCollectionSchemaResponse{}
+	}
+	task.AlterCollectionSchemaResponse.IndexStatus = indexStatus
+
+	return task.AlterCollectionSchemaResponse, nil
+}
+
+// checkSchemaVersionConsistency checks if all segments have consistent schema version
+// Returns error if schema version consistency proportion is less than 1.0
+func (node *Proxy) checkSchemaVersionConsistency(ctx context.Context, dbName, collectionName string) error {
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", dbName),
+		zap.String("collection", collectionName))
+
+	// Get collection statistics to check schema version consistency
+	statsResp, err := node.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+		Base:           commonpbutil.NewMsgBase(),
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	if err != nil {
+		log.Warn("failed to get collection statistics for schema version consistency check", zap.Error(err))
+		return err
+	}
+	if err := merr.CheckRPCCall(statsResp, err); err != nil {
+		log.Warn("get collection statistics returned error", zap.Error(err))
+		return err
+	}
+
+	// Find schema_version_consistency_proportion from Stats
+	var consistencyProportion float64 = -1.0
+	for _, stat := range statsResp.GetStats() {
+		if stat.GetKey() == common.SchemaVersionConsistencyProportionKey {
+			value := stat.GetValue()
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				log.Warn("failed to parse schema_version_consistency_proportion",
+					zap.String("value", value),
+					zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg(
+					fmt.Sprintf("invalid schema_version_consistency_proportion value: %s", value))
+			}
+			consistencyProportion = parsed
+			break
+		}
+	}
+
+	log.Info("checked schema version consistency", zap.Float64("consistencyProportion", consistencyProportion))
+	if consistencyProportion < 0 {
+		return merr.WrapErrParameterInvalidMsg(
+			"schema version consistency proportion not found in collection statistics")
+	}
+	if consistencyProportion < 100 {
+		return merr.WrapErrParameterInvalidMsg(
+			fmt.Sprintf("schema version consistency check failed: proportion is %.2f%%, required 100%%", consistencyProportion))
+	}
+	return nil
+}
+
+// createIndexesForFields creates indexes for fields specified in AlterCollectionSchemaRequest
+// if the FieldInfo contains IndexName and ExtraParams
+// Returns a Status indicating the overall result of index creation
+func (node *Proxy) createIndexesForFields(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) *commonpb.Status {
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.GetDbName()),
+		zap.String("collection", request.CollectionName))
+
+	var firstError *commonpb.Status
+	var successCount, failureCount int
+	var errorMessages []string
+
+	// Check FieldInfos for IndexName and ExtraParams
+	action := request.GetAction()
+	if action == nil {
+		return merr.Success() // No action, no indexes to create
+	}
+	addRequest := action.GetAddRequest()
+	if addRequest == nil {
+		return merr.Success() // No add request, no indexes to create
+	}
+
+	for _, fieldInfo := range addRequest.GetFieldInfos() {
+		if fieldInfo == nil || fieldInfo.GetFieldSchema() == nil {
+			continue
+		}
+
+		indexName := fieldInfo.GetIndexName()
+		extraParams := fieldInfo.GetExtraParams()
+		fieldName := fieldInfo.GetFieldSchema().GetName()
+
+		// If IndexName and ExtraParams are set, create index for this field
+		if indexName != "" && len(extraParams) > 0 {
+			log.Info("creating index for field after alter collection schema",
+				zap.String("field", fieldName),
+				zap.String("indexName", indexName))
+
+			createIndexReq := &milvuspb.CreateIndexRequest{
+				Base:           commonpbutil.NewMsgBase(),
+				DbName:         request.GetDbName(),
+				CollectionName: request.GetCollectionName(),
+				FieldName:      fieldName,
+				IndexName:      indexName,
+				ExtraParams:    extraParams,
+			}
+
+			createIndexResp, err := node.CreateIndex(ctx, createIndexReq)
+			if err != nil {
+				log.Warn("failed to create index after alter collection schema",
+					zap.String("field", fieldName),
+					zap.String("indexName", indexName),
+					zap.Error(err))
+				failureCount++
+				errorMsg := fmt.Sprintf("failed to create index for field %s (index: %s): %v", fieldName, indexName, err)
+				errorMessages = append(errorMessages, errorMsg)
+				if firstError == nil {
+					firstError = merr.Status(err)
+				}
+				// Continue processing other fields even if one fails
+				continue
+			}
+
+			if createIndexResp.GetErrorCode() != commonpb.ErrorCode_Success {
+				log.Warn("create index returned error after alter collection schema",
+					zap.String("field", fieldName),
+					zap.String("indexName", indexName),
+					zap.String("error", createIndexResp.GetReason()))
+				failureCount++
+				errorMsg := fmt.Sprintf("failed to create index for field %s (index: %s): %s", fieldName, indexName, createIndexResp.GetReason())
+				errorMessages = append(errorMessages, errorMsg)
+				if firstError == nil {
+					firstError = createIndexResp
+				}
+				// Continue processing other fields even if one fails
+				continue
+			}
+
+			successCount++
+			log.Info("successfully created index for field after alter collection schema",
+				zap.String("field", fieldName),
+				zap.String("indexName", indexName))
+		}
+	}
+
+	// Return appropriate status based on results
+	if successCount == 0 && failureCount == 0 {
+		// No indexes to create
+		return merr.Success()
+	}
+
+	if failureCount == 0 {
+		// All indexes created successfully
+		return merr.Success()
+	}
+
+	// Some or all indexes failed
+	// Combine error messages if multiple failures
+	var reason string
+	if len(errorMessages) == 1 {
+		reason = errorMessages[0]
+	} else {
+		reason = fmt.Sprintf("multiple index creation failures (%d failed, %d succeeded): %s",
+			failureCount, successCount, errorMessages[0])
+		if len(errorMessages) > 1 {
+			reason += fmt.Sprintf("; and %d more", len(errorMessages)-1)
+		}
+	}
+
+	return &commonpb.Status{
+		ErrorCode: firstError.GetErrorCode(),
+		Reason:    reason,
+	}
 }
 
 // GetStatistics get the statistics, such as `num_rows`.

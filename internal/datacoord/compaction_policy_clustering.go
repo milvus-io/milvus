@@ -40,6 +40,9 @@ type clusteringCompactionPolicy struct {
 	handler   Handler
 }
 
+// Ensure clusteringCompactionPolicy implements CompactionPolicy interface
+var _ CompactionPolicy = (*clusteringCompactionPolicy)(nil)
+
 func newClusteringCompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *clusteringCompactionPolicy {
 	return &clusteringCompactionPolicy{meta: meta, allocator: allocator, handler: handler}
 }
@@ -48,6 +51,10 @@ func (policy *clusteringCompactionPolicy) Enable() bool {
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() &&
 		Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() &&
 		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool()
+}
+
+func (policy *clusteringCompactionPolicy) Name() string {
+	return "ClusteringCompactionPolicy"
 }
 
 func (policy *clusteringCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
@@ -170,6 +177,14 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			}
 		}
 
+		if !policy.checkGroupSchemaVersionConsistent(group) {
+			log.Debug("segments in group have inconsistent schema versions, skip clustering compaction for this group",
+				zap.Int64("collectionID", group.collectionID),
+				zap.Int64("partitionID", group.partitionID),
+				zap.String("channel", group.channelName))
+			continue
+		}
+
 		segmentViews := GetViewsByInfo(group.segments...)
 		view := &ClusteringSegmentsView{
 			label:              segmentViews[0].label,
@@ -183,6 +198,19 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 
 	log.Info("finish trigger collection clustering compaction", zap.Int("viewNum", len(views)))
 	return views, newTriggerID, nil
+}
+
+func (policy *clusteringCompactionPolicy) checkGroupSchemaVersionConsistent(group *chanPartSegments) bool {
+	if len(group.segments) == 0 {
+		return true
+	}
+	firstSchemaVersion := group.segments[0].GetSchemaVersion()
+	for _, segment := range group.segments {
+		if segment.GetSchemaVersion() != firstSchemaVersion {
+			return false
+		}
+	}
+	return true
 }
 
 func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {

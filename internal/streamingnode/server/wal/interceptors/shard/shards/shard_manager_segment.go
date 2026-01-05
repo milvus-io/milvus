@@ -124,6 +124,7 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 }
 
 // AssignSegment assigns a segment for a assign segment request.
+// It uses the latest schema version from collection info.
 func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -133,7 +134,14 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	if !ok {
 		return nil, ErrPartitionNotFound
 	}
-	result, err := pm.AssignSegment(req)
+
+	// Get the latest schema version from collection info
+	var schemaVersion int32
+	if collectionInfo, ok := m.collections[req.CollectionID]; ok && collectionInfo.Schema != nil {
+		schemaVersion = collectionInfo.Schema.GetSchema().GetVersion()
+	}
+
+	result, err := pm.AssignSegment(req, schemaVersion)
 	if err == nil {
 		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
 		return result, nil

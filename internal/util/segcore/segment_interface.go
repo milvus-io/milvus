@@ -8,7 +8,11 @@ package segcore
 */
 import "C"
 
-import "context"
+import (
+	"context"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+)
 
 // CSegment is the interface of a segcore segment.
 // TODO: We should separate the interface of CGrowingSegment and CSealedSegment,
@@ -84,6 +88,9 @@ type basicSegmentMethodSet interface {
 
 	// Load invokes segment managed loading.
 	Load(ctx context.Context) error
+
+	// SyncSchema syncs the schema of the segment.
+	SyncSchema(colSchmea *schemapb.CollectionSchema) error
 
 	// Release releases the segment.
 	Release()

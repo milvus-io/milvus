@@ -173,6 +173,14 @@ class SegmentInterface {
     HasFieldData(FieldId field_id) const = 0;
 
     virtual bool
+    HasIndex(FieldId field_id) const = 0;
+
+    bool
+    FieldAccessable(FieldId field_id) const {
+        return HasFieldData(field_id) || HasIndex(field_id);
+    }
+
+    virtual bool
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
@@ -230,6 +238,11 @@ class SegmentInterface {
 
     virtual void
     Reopen(const milvus::proto::segcore::SegmentLoadInfo& new_load_info) = 0;
+
+    // SyncSchema compares the input schema version with the current schema version,
+    // and replaces the current schema if the input schema version is greater.
+    virtual void
+    SyncSchema(SchemaPtr sch) = 0;
 
     // FinishLoad notifies the segment that all load operation are done
     // currently it's used to sync field data list with updated schema.
@@ -391,9 +404,6 @@ class SegmentInternalInterface : public SegmentInterface {
              const int64_t* offsets,
              int64_t size) const override;
 
-    virtual bool
-    HasIndex(FieldId field_id) const = 0;
-
     int64_t
     get_real_count() const override;
 
@@ -450,6 +460,28 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
+    const Schema&
+    get_schema() const override {
+        std::shared_lock lck(sch_mutex_);
+        return *schema_;
+    }
+
+    void
+    SyncSchema(SchemaPtr sch) override {
+        std::unique_lock lck(sch_mutex_);
+        if (sch->get_schema_version() > schema_->get_schema_version()) {
+            auto old_version = schema_->get_schema_version();
+            auto new_version = sch->get_schema_version();
+            LOG_INFO(
+                "sync schema for segment {}, old schema version {}, new schema "
+                "version {}",
+                get_segment_id(),
+                old_version,
+                new_version);
+            schema_ = sch;
+        }
+    }
 
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
@@ -670,7 +702,8 @@ class SegmentInternalInterface : public SegmentInterface {
 
  protected:
     // mutex protecting rw options on schema_
-    std::shared_mutex sch_mutex_;
+    mutable std::shared_mutex sch_mutex_;
+    SchemaPtr schema_;
 
     milvus::proto::segcore::SegmentLoadInfo load_info_;
 

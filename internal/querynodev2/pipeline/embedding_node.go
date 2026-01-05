@@ -33,6 +33,7 @@ import (
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -45,7 +46,8 @@ type embeddingNode struct {
 
 	manager *DataManager
 
-	functionRunners []function.FunctionRunner
+	functionRunners map[int64]function.FunctionRunner
+	curSchema       *schemapb.CollectionSchema
 }
 
 func newEmbeddingNode(collectionID int64, channelName string, manager *DataManager, maxQueueLength int32) (*embeddingNode, error) {
@@ -55,16 +57,13 @@ func newEmbeddingNode(collectionID int64, channelName string, manager *DataManag
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
-	if len(collection.Schema().GetFunctions()) == 0 {
-		return nil, nil
-	}
-
 	node := &embeddingNode{
 		BaseNode:        base.NewBaseNode(fmt.Sprintf("EmbeddingNode-%s", channelName), maxQueueLength),
 		collectionID:    collectionID,
 		channel:         channelName,
 		manager:         manager,
-		functionRunners: make([]function.FunctionRunner, 0),
+		functionRunners: make(map[int64]function.FunctionRunner),
+		curSchema:       collection.Schema(),
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {
@@ -75,7 +74,7 @@ func newEmbeddingNode(collectionID int64, channelName string, manager *DataManag
 		if functionRunner == nil {
 			continue
 		}
-		node.functionRunners = append(node.functionRunners, functionRunner)
+		node.functionRunners[tf.GetId()] = functionRunner
 	}
 	return node, nil
 }
@@ -84,7 +83,7 @@ func (eNode *embeddingNode) Name() string {
 	return fmt.Sprintf("embeddingNode-%s", eNode.channel)
 }
 
-func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, collection *Collection) error {
+func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.InsertData, msg *InsertMsg, schema *schemapb.CollectionSchema) error {
 	iData, ok := insertDatas[msg.SegmentID]
 	if !ok {
 		iData = &delegator.InsertData{
@@ -104,7 +103,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 		return err
 	}
 
-	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.Schema(), msg)
+	insertRecord, err := storage.TransferInsertMsgToInsertRecord(schema, msg)
 	if err != nil {
 		err = fmt.Errorf("failed to get primary keys, err = %v", err)
 		log.Error(err.Error(), zap.String("channel", eNode.channel))
@@ -122,7 +121,7 @@ func (eNode *embeddingNode) addInsertData(insertDatas map[UniqueID]*delegator.In
 		iData.InsertRecord.NumRows += insertRecord.NumRows
 	}
 
-	pks, err := segments.GetPrimaryKeys(msg, collection.Schema())
+	pks, err := segments.GetPrimaryKeys(msg, schema)
 	if err != nil {
 		log.Warn("failed to get primary keys from insert message", zap.String("channel", eNode.channel), zap.Error(err))
 		return err
@@ -159,13 +158,33 @@ func (eNode *embeddingNode) bm25Embedding(runner function.FunctionRunner, msg *m
 	if !ok {
 		return errors.New("BM25 runner return unknown type output")
 	}
-
 	if _, ok := stats[outputFieldID]; !ok {
 		stats[outputFieldID] = storage.NewBM25Stats()
 	}
 	stats[outputFieldID].AppendBytes(sparseArray.GetContents()...)
-	msg.FieldsData = append(msg.FieldsData, delegator.BuildSparseFieldData(outputField, sparseArray))
+	msg.FieldsData = append(msg.FieldsData, bm25.BuildSparseFieldData(outputField, sparseArray))
 	return nil
+}
+
+func (eNode *embeddingNode) setupFunctionRunners() (bool, error) {
+	if len(eNode.curSchema.GetFunctions()) > 0 {
+		// Close old runners before rebuilding
+		for _, runner := range eNode.functionRunners {
+			runner.Close()
+		}
+		eNode.functionRunners = make(map[int64]function.FunctionRunner)
+		for _, tf := range eNode.curSchema.GetFunctions() {
+			functionRunner, err := function.NewFunctionRunner(eNode.curSchema, tf)
+			if err != nil {
+				return false, err
+			}
+			if functionRunner == nil {
+				continue
+			}
+			eNode.functionRunners[tf.GetId()] = functionRunner
+		}
+	}
+	return len(eNode.functionRunners) > 0, nil
 }
 
 func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]*storage.BM25Stats) error {
@@ -188,16 +207,25 @@ func (eNode *embeddingNode) embedding(msg *msgstream.InsertMsg, stats map[int64]
 
 func (eNode *embeddingNode) Operate(in Msg) Msg {
 	nodeMsg := in.(*insertNodeMsg)
-	nodeMsg.insertDatas = make(map[int64]*delegator.InsertData)
+	if nodeMsg.schema != nil {
+		eNode.curSchema = nodeMsg.schema
+		if _, err := eNode.setupFunctionRunners(); err != nil {
+			log.Error("failed to setup function runners", zap.Error(err))
+			panic(err)
+		}
+	}
+	if len(eNode.functionRunners) == 0 {
+		return nodeMsg
+	}
 
+	nodeMsg.insertDatas = make(map[int64]*delegator.InsertData)
 	collection := eNode.manager.Collection.Get(eNode.collectionID)
 	if collection == nil {
 		log.Error("embeddingNode with collection not exist", zap.Int64("collection", eNode.collectionID))
 		panic("embeddingNode with collection not exist")
 	}
-
 	for _, msg := range nodeMsg.insertMsgs {
-		err := eNode.addInsertData(nodeMsg.insertDatas, msg, collection)
+		err := eNode.addInsertData(nodeMsg.insertDatas, msg, eNode.curSchema)
 		if err != nil {
 			panic(err)
 		}

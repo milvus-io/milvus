@@ -166,6 +166,8 @@ var (
 			return 1
 		case datapb.CompactionType_MixCompaction:
 			return 10
+		case datapb.CompactionType_BackfillCompaction:
+			return 10
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100
 		default:
@@ -178,6 +180,8 @@ var (
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
 		case datapb.CompactionType_MixCompaction:
+			return 1
+		case datapb.CompactionType_BackfillCompaction:
 			return 1
 		case datapb.CompactionType_ClusteringCompaction:
 			return 100

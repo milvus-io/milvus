@@ -400,6 +400,10 @@ func (s *Server) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequ
 	return s.querynode.UpdateSchema(ctx, req)
 }
 
+func (s *Server) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	return s.querynode.UpdateIndex(ctx, req)
+}
+
 func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return s.querynode.RunAnalyzer(ctx, req)
 }

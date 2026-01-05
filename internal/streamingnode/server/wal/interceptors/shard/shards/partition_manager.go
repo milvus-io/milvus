@@ -89,7 +89,8 @@ func (m *partitionManager) GetSegmentManager(segmentID int64) *segmentAllocManag
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
+// schemaVersion is the latest schema version from collection info.
+func (m *partitionManager) AssignSegment(req *AssignSegmentRequest, schemaVersion int32) (*AssignSegmentResult, error) {
 	// !!! We have promised that the fencedAssignTimeTick is always less than new incoming insert request by Barrier TimeTick of ManualFlush.
 	// So it's just a promise check here.
 	// If the request time tick is less than the fenced time tick, the assign operation is fenced.
@@ -97,7 +98,7 @@ func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	if req.TimeTick <= m.fencedAssignTimeTick {
 		return nil, ErrFencedAssign
 	}
-	return m.assignSegment(req)
+	return m.assignSegment(req, schemaVersion)
 }
 
 // WaitPendingGrowingSegmentReady waits until the growing segment is ready.
@@ -191,7 +192,8 @@ func (m *partitionManager) MustRemoveFlushedSegment(segmentID int64) {
 }
 
 // assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.
-func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
+// schemaVersion is the latest schema version from collection info.
+func (m *partitionManager) assignSegment(req *AssignSegmentRequest, schemaVersion int32) (*AssignSegmentResult, error) {
 	// Alloc segment for insert at allocated segments.
 	var lastErr error
 	for _, segment := range m.segments {
@@ -211,6 +213,6 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment()
+	m.asyncAllocSegment(schemaVersion)
 	return nil, ErrWaitForNewSegment
 }

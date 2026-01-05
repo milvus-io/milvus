@@ -565,6 +565,30 @@ func (node *QueryNode) UpdateSchema(ctx context.Context, req *querypb.UpdateSche
 	return merr.Status(err), nil
 }
 
+// UpdateIndex updates the index meta of the collection on the querynode.
+func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+
+	// check node healthy
+	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
+		return merr.Status(err), nil
+	}
+	defer node.lifetime.Done()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+	)
+
+	log.Info("querynode received update index request")
+
+	err := node.manager.Collection.UpdateIndex(req.GetCollectionID(), req)
+	if err != nil {
+		log.Warn("failed to update index", zap.Error(err))
+	}
+
+	return merr.Status(err), nil
+}
+
 // ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	if err := node.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
