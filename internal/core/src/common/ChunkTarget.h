@@ -54,9 +54,10 @@ class ChunkTarget {
 class MmapChunkTarget : public ChunkTarget {
  public:
     explicit MmapChunkTarget(std::string file_path,
+                             bool populate,
                              size_t cap,
                              storage::io::Priority io_prio)
-        : file_path_(std::move(file_path)), cap_(cap) {
+        : file_path_(std::move(file_path)), cap_(cap), populate_(populate) {
         file_writer_ =
             std::make_unique<storage::FileWriter>(file_path_, io_prio);
     }
@@ -78,6 +79,7 @@ class MmapChunkTarget : public ChunkTarget {
     std::string file_path_{};
     size_t cap_{0};
     size_t size_{0};
+    bool populate_{false};
 };
 
 class MemChunkTarget : public ChunkTarget {
@@ -86,7 +88,7 @@ class MemChunkTarget : public ChunkTarget {
         auto m = mmap(nullptr,
                       cap,
                       PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANON,
+                      MAP_PRIVATE | MAP_ANON | MAP_POPULATE,
                       -1,
                       0);
         AssertInfo(m != MAP_FAILED,

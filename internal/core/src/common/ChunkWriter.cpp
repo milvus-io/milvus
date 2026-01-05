@@ -760,6 +760,7 @@ std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
              const std::string& file_path,
+             bool mmap_populate,
              proto::common::LoadPriority load_priority) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
@@ -770,8 +771,8 @@ create_chunk(const FieldMeta& field_meta,
         target = std::make_shared<MemChunkTarget>(aligned_size);
     } else {
         auto io_prio = storage::io::GetPriorityFromLoadPriority(load_priority);
-        target =
-            std::make_shared<MmapChunkTarget>(file_path, aligned_size, io_prio);
+        target = std::make_shared<MmapChunkTarget>(
+            file_path, mmap_populate, aligned_size, io_prio);
     }
     cw->write_to_target(array_vec, target);
     auto data = target->release();
@@ -791,6 +792,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<FieldMeta>& field_metas,
                    const std::vector<arrow::ArrayVector>& array_vec,
                    const std::string& file_path,
+                   bool mmap_populate,
                    proto::common::LoadPriority load_priority) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
@@ -829,6 +831,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     } else {
         target = std::make_shared<MmapChunkTarget>(
             file_path,
+            mmap_populate,
             total_aligned_size,
             storage::io::GetPriorityFromLoadPriority(load_priority));
     }

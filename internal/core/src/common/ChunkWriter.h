@@ -294,6 +294,7 @@ std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
              const arrow::ArrayVector& array_vec,
              const std::string& file_path = "",
+             bool mmap_populate_ = true,
              proto::common::LoadPriority load_priority =
                  proto::common::LoadPriority::HIGH);
 
@@ -302,6 +303,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<FieldMeta>& field_metas,
                    const std::vector<arrow::ArrayVector>& array_vec,
                    const std::string& file_path = "",
+                   bool mmap_populate_ = true,
                    proto::common::LoadPriority load_priority =
                        proto::common::LoadPriority::HIGH);
 
