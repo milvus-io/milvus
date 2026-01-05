@@ -270,7 +270,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
 
         #  search again without specify anns_field
         error = {"err_code": 999,
-                 "err_msg": "anns_field is required for search by IDs"}
+                 "err_msg": "multiple vector fields exist, please specify anns_field in search_params"}
         self.search(
             client,
             collection_name,
@@ -356,7 +356,7 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         # search with duplicate primary key values
         # TODO: Update the error msg after #46740 fixed
         error = {"err_code": 999,
-                 "err_msg": "some of the provided primary key IDs do not exist: missing IDs = []"}
+                 "err_msg": "duplicate IDs found in search request"}
         self.search(
             client,
             collection_name,
