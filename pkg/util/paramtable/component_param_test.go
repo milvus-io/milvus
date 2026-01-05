@@ -669,6 +669,8 @@ func TestComponentParam(t *testing.T) {
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
 
+		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
+
 		// clustering compaction
 		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())

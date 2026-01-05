@@ -96,3 +96,12 @@ func CalculateNodeSlots() int64 {
 	}
 	return totalSlot
 }
+
+func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
+	for _, param := range indexParams {
+		if param.Key == common.IndexTypeKey {
+			return param.Value
+		}
+	}
+	return ""
+}

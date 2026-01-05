@@ -21,7 +21,6 @@ import (
 	"context"
 	"runtime/debug"
 	"sync"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -227,7 +226,7 @@ func getStateFromError(err error) indexpb.JobState {
 	return indexpb.JobState_JobStateRetry
 }
 
-func (sched *TaskScheduler) processTask(t Task, q TaskQueue) {
+func (sched *TaskScheduler) processTask(t Task) {
 	wrap := func(fn func(ctx context.Context) error) error {
 		select {
 		case <-t.Ctx().Done():
@@ -264,16 +263,15 @@ func (sched *TaskScheduler) indexBuildLoop() {
 			return
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
-			for {
-				totalSlot := CalculateNodeSlots()
-				availableSlot := totalSlot - sched.TaskQueue.GetActiveSlot()
-				if availableSlot >= t.GetSlot() || totalSlot == availableSlot {
-					go func(t Task) {
-						sched.processTask(t, sched.TaskQueue)
-					}(t)
-					break
-				}
-				time.Sleep(time.Millisecond * 50)
+			if t.IsVectorIndex() {
+				GetVecIndexBuildPool().Submit(func() (any, error) {
+					sched.processTask(t)
+					return nil, nil
+				})
+			} else {
+				go func(t Task) {
+					sched.processTask(t)
+				}(t)
 			}
 		}
 	}
