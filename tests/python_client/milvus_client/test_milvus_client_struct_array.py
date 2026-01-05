@@ -1839,7 +1839,7 @@ class TestMilvusClientStructArraySearch(TestMilvusClientV2Base):
 
         # Search using EmbeddingList
         error = {ct.err_code: 999,
-                ct.err_msg: "array of vector is not supported for search by IDs"}
+                 ct.err_msg: "array of vector is not supported for search by IDs"}
         self.search(client,
                     collection_name,
                     ids=[0, 1],
