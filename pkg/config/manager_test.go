@@ -150,8 +150,7 @@ func TestOnEvent(t *testing.T) {
 	os.WriteFile(yamlFile, []byte("a.b: aaa"), 0o600)
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "aaa"
+		return err == nil && value == "aaa"
 	}, time.Second*5, time.Second)
 
 	ctx := context.Background()
@@ -159,29 +158,25 @@ func TestOnEvent(t *testing.T) {
 
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "bbb"
+		return err == nil && value == "bbb"
 	}, time.Second*5, time.Second)
 
 	client.KV.Put(ctx, "test/config/a/b", "ccc")
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "ccc"
+		return err == nil && value == "ccc"
 	}, time.Second*5, time.Second)
 
 	os.WriteFile(yamlFile, []byte("a.b: ddd"), 0o600)
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "ccc"
+		return err == nil && value == "ccc"
 	}, time.Second*5, time.Second)
 
 	client.KV.Delete(ctx, "test/config/a/b")
 	assert.Eventually(t, func() bool {
 		_, value, err := mgr.GetConfig("a.b")
-		assert.NoError(t, err)
-		return value == "ddd"
+		return err == nil && value == "ddd"
 	}, time.Second*5, time.Second)
 }
 
@@ -269,9 +264,17 @@ func TestCachedConfig(t *testing.T) {
 
 		// after refresh, the cached value should be reset
 		os.WriteFile(yamlFile, []byte("a.b: xxx"), 0o600)
-		time.Sleep(time.Second)
-		_, exist = mgr.GetCachedValue("a.b")
-		assert.False(t, exist)
+		assert.Eventually(t, func() bool {
+			// make sure the config is refreshed
+			_, value, err := mgr.GetConfig("a.b")
+			if err != nil || value != "xxx" {
+				return false
+			}
+
+			// make sure the cached value is evicted
+			_, exist := mgr.GetCachedValue("a.b")
+			return !exist
+		}, time.Second*5, 500*time.Millisecond)
 	}
 	client := v3client.New(e.Server)
 	{
@@ -282,11 +285,18 @@ func TestCachedConfig(t *testing.T) {
 		assert.True(t, exist)
 
 		// after refresh, the cached value should be reset
-		ctx := context.Background()
-		client.KV.Put(ctx, "test/config/c/d", "www")
-		time.Sleep(time.Second)
-		_, exist = mgr.GetCachedValue("cd")
-		assert.False(t, exist)
+		client.KV.Put(t.Context(), "test/config/c/d", "www")
+		assert.Eventually(t, func() bool {
+			// make sure the config is refreshed
+			_, value, err := mgr.GetConfig("cd")
+			if err != nil || value != "www" {
+				return false
+			}
+
+			// make sure the cached value is evicted
+			_, exist := mgr.GetCachedValue("cd")
+			return !exist
+		}, time.Second*5, 500*time.Millisecond)
 	}
 }
 

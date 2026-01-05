@@ -14,22 +14,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
-
-import "C"
+package logging
 
 import (
-	"os"
+	"testing"
 
-	"github.com/milvus-io/milvus/cmd/milvus"
-	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 )
 
-//export startEmbedded
-func startEmbedded() {
-	os.Setenv("MILVUSCONF", "/tmp/milvus/configs/")
-	milvus.RunMilvus([]string{"", "run", "embedded"})
-}
-
-func main() {
+func TestLogging(t *testing.T) {
+	require.Equal(t, zapcore.InfoLevel, mapGlogSeverity(0))
+	require.Equal(t, zapcore.WarnLevel, mapGlogSeverity(1))
+	require.Equal(t, zapcore.ErrorLevel, mapGlogSeverity(2))
+	require.Equal(t, zapcore.ErrorLevel, mapGlogSeverity(3))
+	require.Equal(t, zapcore.InfoLevel, mapGlogSeverity(4))
 }

@@ -1,4 +1,4 @@
-// Licensed to the LF AI & Data foundation under one
+// Licensed to the LF AI& Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
 // regarding copyright ownership. The ASF licenses this file
@@ -14,37 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testutils
+#pragma once
+#include <glog/logging.h>
 
-import (
-	"os"
-
-	"go.etcd.io/etcd/server/v3/embed"
-
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
-)
-
-type EmbedEtcdUtil struct {
-	server  *embed.Etcd
-	tempDir string
-}
-
-func (util *EmbedEtcdUtil) SetupEtcd() ([]string, error) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		return nil, err
-	}
-	util.server, util.tempDir = embedetcdServer, tempDir
-
-	return etcd.GetEmbedEtcdEndpoints(embedetcdServer), nil
-}
-
-func (util *EmbedEtcdUtil) TearDownEmbedEtcd() {
-	if util.server != nil {
-		util.server.Close()
-	}
-	if util.tempDir != "" {
-		os.RemoveAll(util.tempDir)
-	}
-}
+class GoZapSink : public google::LogSink {
+    void
+    send(google::LogSeverity severity,
+         const char* full_filename,
+         const char* base_filename,
+         int line,
+         const struct tm*,
+         const char* message,
+         size_t message_len) override;
+};

@@ -3,6 +3,7 @@ package common
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -246,4 +247,46 @@ func TestIsDisableFuncRuntimeCheck(t *testing.T) {
 	disable, err = IsDisableFuncRuntimeCheck([]*commonpb.KeyValuePair{{Key: DisableFuncRuntimeCheck, Value: "Error"}}...)
 	assert.Error(t, err)
 	assert.False(t, disable)
+}
+
+func TestGetCollectionTTL(t *testing.T) {
+	type testCase struct {
+		tag       string
+		value     string
+		expect    time.Duration
+		expectErr bool
+	}
+
+	cases := []testCase{
+		{tag: "normal_case", value: "3600", expect: time.Duration(3600) * time.Second, expectErr: false},
+		{tag: "error_value", value: "error value", expectErr: true},
+		{tag: "out_of_int64_range", value: "10000000000000000000000000000000000000000000000000000000000000000000000000000", expectErr: true},
+		{tag: "negative", value: "-1", expect: -1 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			result, err := GetCollectionTTL([]*commonpb.KeyValuePair{{Key: CollectionTTLConfigKey, Value: tc.value}})
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.EqualValues(t, tc.expect, result)
+			}
+			result, err = GetCollectionTTLFromMap(map[string]string{CollectionTTLConfigKey: tc.value})
+			if tc.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.EqualValues(t, tc.expect, result)
+			}
+		})
+	}
+
+	t.Run("not_config", func(t *testing.T) {
+		result, err := GetCollectionTTL([]*commonpb.KeyValuePair{})
+		assert.NoError(t, err)
+		assert.EqualValues(t, -1, result)
+		result, err = GetCollectionTTLFromMap(map[string]string{})
+		assert.NoError(t, err)
+		assert.EqualValues(t, -1, result)
+	})
 }

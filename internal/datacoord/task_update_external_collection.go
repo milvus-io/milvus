@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"

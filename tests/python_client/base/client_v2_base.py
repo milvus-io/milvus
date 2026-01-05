@@ -171,10 +171,10 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     @trace()
-    def search(self, client, collection_name, data, limit=10, filter=None, output_fields=None, search_params=None,
+    def search(self, client, collection_name, data=None, limit=10, filter=None, output_fields=None, search_params=None,
                timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        kwargs.update({"timeout": timeout})
+        # kwargs.update({"timeout": timeout})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.search, collection_name, data, filter, limit,

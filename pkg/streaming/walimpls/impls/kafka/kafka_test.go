@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,9 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestKafka(t *testing.T) {
+	if os.Getenv("MILVUS_UT_WITHOUT_KAFKA") != "" {
+		t.Skip("there's no kafka broker available, skipping kafka test")
+	}
 	walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
 }
 

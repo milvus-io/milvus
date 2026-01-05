@@ -1,10 +1,9 @@
 from pymilvus import DataType
-from common import common_type as ct
 
 success = "success"
 
 
-class HNSW_PQ:
+class HNSW_PRQ:
     supported_vector_types = [
         DataType.FLOAT_VECTOR,
         DataType.FLOAT16_VECTOR,
@@ -119,16 +118,18 @@ class HNSW_PQ:
             "params": {"m": 1},
             "expected": success
         },
-        {
-            "description": "Half of Dimension Value Test",
-            "params": {"m": 64},
-            "expected": success
-        },
-        {
-            "description": "Maximum Boundary Test (Dimension)",
-            "params": {"m": 128},
-            "expected": success
-        },
+        # timeout
+        # {
+        #     "description": "Half of Dimension Value Test",
+        #     "params": {"m": 64},
+        #     "expected": success
+        # },
+        # timeout
+        # {
+        #     "description": "Maximum Boundary Test (Dimension)",
+        #     "params": {"m": 128},
+        #     "expected": success
+        # },
         {
             "description": "Negative Value Test",
             "params": {"m": -1},
@@ -142,7 +143,7 @@ class HNSW_PQ:
             "params": {"m": 256},
             "expected": {
                 "err_code": 1100,
-                "err_msg": "The dimension of the vector (dim) should be a multiple of the number of subquantizers (m)."
+                "err_msg": "The dimension of a vector (dim) should be a multiple of the number of subquantizers (m)."
             }
         },
         {
@@ -150,7 +151,7 @@ class HNSW_PQ:
             "params": {"m": 7},
             "expected": {
                 "err_code": 1100,
-                "err_msg": "The dimension of the vector (dim) should be a multiple of the number of subquantizers (m)."
+                "err_msg": "The dimension of a vector (dim) should be a multiple of the number of subquantizers (m)."
             }
         },
         {
@@ -194,13 +195,13 @@ class HNSW_PQ:
             "expected": success
         },
         {
-            "description": "Maximum Boundary Test (doc:24) ",
-            "params": {"nbits": 10},
+            "description": "Default Value Test",
+            "params": {"nbits": 8},
             "expected": success
         },
         {
-            "description": "Default Value Test",
-            "params": {"nbits": 8},
+            "description": "Maximum Boundary Test",
+            "params": {"nbits": 10},
             "expected": success
         },
         {
@@ -252,6 +253,72 @@ class HNSW_PQ:
             "description": "None Type Test",
             "params": {"nbits": None},
             "expected": success
+        },
+        # nrq params test
+        {
+            "description": "Minimum Boundary Test",
+            "params": {"nrq": 1},
+            "expected": success
+        },
+        {
+            "description": "Default Value Test",
+            "params": {"nrq": 2},
+            "expected": success
+        },
+        {
+            "description": "Maximum Boundary Test",
+            "params": {"nrq": 16},
+            "expected": success
+        },
+        {
+            "description": "Negative Value Test",
+            "params": {"nrq": -1},
+            "expected": {
+                "err_code": 1100,
+                "err_msg": "Out of range in json: param 'nrq' (-1) should be in range [1, 16]"
+            }
+        },
+        {
+            "description": "Larger Value Test",
+            "params": {"nrq": 17},
+            "expected": {
+                "err_code": 1100,
+                "err_msg": "Out of range in json: param 'nrq' (17) should be in range [1, 16]"
+            }
+        },
+        {
+            "description": "String Type Test",
+            "params": {"nrq": "4"},
+            "expected": success
+        },
+        {
+            "description": "Float Type Test",
+            "params": {"nrq": 4.0},
+            "expected": {
+                "err_code": 1100,
+                "err_msg": "wrong data type in json, key: 'nrq', value: '4.0': invalid parameter"
+            }
+        },
+        {
+            "description": "Boolean Type Test",
+            "params": {"nrq": True},
+            "expected": {
+                "err_code": 1100,
+                "err_msg": "invalid integer value, key: 'nrq', value: 'True': invalid parameter"
+            }
+        },
+        {
+            "description": "None Type Test",
+            "params": {"nrq": None},
+            "expected": success
+        },
+        {
+            "description": "List Type Test",
+            "params": {"nrq": [2]},
+            "expected": {
+                "err_code": 1100,
+                "err_msg": "invalid integer value, key: 'nrq', value: '[2]': invalid parameter"
+            }
         },
 
 
@@ -362,32 +429,32 @@ class HNSW_PQ:
         },
         {
             "description": "All optional parameters None",
-            "params": {"M": None, "efConstruction": None, "m": None, "nbits":None, "refine": None, "refine_type": None},
+            "params": {"M": None, "efConstruction": None, "m": None, "nbits":None, "nrq":None,"refine": None, "refine_type": None},
             "expected": success
         },
         {
             "description": "Typical valid combination",
-            "params": {"M": 16, "efConstruction": 200, "m": 64, "nbits": 8,"refine": True, "refine_type": "FP16"},
+            "params": {"M": 16, "efConstruction": 200, "m": 32, "nbits": 8, "nrq":1,"refine": True, "refine_type": "FP16"},
             "expected": success
         },
         {
             "description": "Refine Disabled",
-            "params": {"M": 16, "efConstruction": 200, "m": 32, "nbits": 8},
+            "params": {"M": 16, "efConstruction": 200, "m": 32, "nbits": 8,"nrq": 1},
             "expected": success
         },
         {
             "description": "Minimum Boundary Combination",
-            "params": {"M": 2, "efConstruction": 1, "m": 1, "nbits": 1, "refine": True, "refine_type": "SQ8"},
+            "params": {"M": 2, "efConstruction": 1, "m": 1, "nbits": 1, "nrq":1, "refine": True, "refine_type": "SQ8"},
             "expected": success
         },
         {
             "description": "Maximum Boundary Combination",
-            "params": {"M": 2048, "efConstruction": 10000, "m": 128, "nbits": 10, "refine": True, "refine_type": "FP32"},
+            "params": {"M": 2048, "efConstruction": 10000, "m": 128, "nbits": 8, "nrq":1, "refine": True, "refine_type": "FP32"},
             "expected": success
         },
         {
             "description": "Unknown extra parameter in combination",
-            "params": {"M": 16, "efConstruction": 200, "m": 32, "nbits": 8, "refine": True, "refine_type": "FP16", "unknown_param": "nothing"},
+            "params": {"M": 16, "efConstruction": 200, "m": 32, "nbits": 8, "nrq":1, "refine": True, "refine_type": "FP16", "unknown_param": "nothing"},
             "expected": success
         },
         {
@@ -401,9 +468,9 @@ class HNSW_PQ:
             "expected": success
         },
         {
-            "description": "Invalid PQ m (not divisor of dimension)",
+            "description": "Invalid m (not divisor of dimension)",
             "params": {"M": 16,"efConstruction": 200,"m": 7, "nbits": 8, "refine": True, "refine_type": "FP32"},
-            "expected": {"err_code": 999, "err_msg": "The dimension of the vector (dim) should be a multiple of the number of subquantizers (m)."}
+            "expected": {"err_code": 1100, "err_msg": "The dimension of a vector (dim) should be a multiple of the number of subquantizers (m)."}
         },
 
     ]

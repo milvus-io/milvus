@@ -1135,7 +1135,9 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Warn("failed to describe collection", zap.Error(err))
+		if !errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Warn("failed to describe collection", zap.Error(err))
+		}
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(err),
