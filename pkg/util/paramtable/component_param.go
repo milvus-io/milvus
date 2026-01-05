@@ -283,7 +283,6 @@ type commonConfig struct {
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	// storage v2
-	EnableStorageV2                      ParamItem `refreshable:"false"`
 	Stv2SplitSystemColumn                ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePK            ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePartitionKey  ParamItem `refreshable:"true"`
@@ -946,14 +945,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
-
-	p.EnableStorageV2 = ParamItem{
-		Key:          "common.storage.enablev2",
-		Version:      "2.3.1",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.EnableStorageV2.Init(base.mgr)
 
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
