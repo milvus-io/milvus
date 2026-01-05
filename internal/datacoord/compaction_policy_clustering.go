@@ -139,7 +139,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 			!segment.GetIsInvisible() &&
-			(!namespaceEnabled || segment.IsNamespaceSorted)
+			(!namespaceEnabled || segment.GetIsSortedByNamespace())
 	}))
 
 	views := make([]CompactionView, 0)

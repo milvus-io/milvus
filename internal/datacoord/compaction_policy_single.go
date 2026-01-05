@@ -109,7 +109,7 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 			zap.String("state", segment.GetState().String()),
 			zap.String("level", segment.GetLevel().String()),
 			zap.Bool("isSorted", segment.GetIsSorted()),
-			zap.Bool("isNamespaceSorted", segment.GetIsNamespaceSorted()),
+			zap.Bool("isNamespaceSorted", segment.GetIsSortedByNamespace()),
 			zap.Bool("isImporting", segment.GetIsImporting()),
 			zap.Bool("isCompacting", segment.isCompacting),
 			zap.Bool("isInvisible", segment.GetIsInvisible()))

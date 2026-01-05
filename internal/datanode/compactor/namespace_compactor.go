@@ -17,7 +17,7 @@ type NamespaceCompactor struct {
 
 func checkInputSorted(plan *datapb.CompactionPlan) bool {
 	for _, segment := range plan.GetSegmentBinlogs() {
-		if !segment.GetIsNamespaceSorted() {
+		if !segment.GetIsSortedByNamespace() {
 			return false
 		}
 	}
