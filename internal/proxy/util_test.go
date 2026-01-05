@@ -802,7 +802,7 @@ func TestGetCurUserFromContext(t *testing.T) {
 
 	root := "root"
 	password := "123456"
-	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeparator, password)))
 	assert.NoError(t, err)
 	assert.Equal(t, "root", username)
 }
@@ -2371,6 +2371,63 @@ func TestAppendUserInfoForRPC(t *testing.T) {
 	assert.True(t, ok)
 	expectAuth := crypto.Base64Encode("root:root")
 	assert.Equal(t, expectAuth, authorization[0])
+}
+
+func TestNewContextWithMetadata(t *testing.T) {
+	t.Run("with username and dbName", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewContextWithMetadata(ctx, "testuser", "testdb")
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+
+		// Check dbName
+		dbNameKey := strings.ToLower(util.HeaderDBName)
+		dbNameVal, ok := md[dbNameKey]
+		assert.True(t, ok)
+		assert.Equal(t, "testdb", dbNameVal[0])
+
+		// Check authorization
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authVal, ok := md[authKey]
+		assert.True(t, ok)
+		expectedAuth := crypto.Base64Encode("testuser:testuser")
+		assert.Equal(t, expectedAuth, authVal[0])
+	})
+
+	t.Run("with empty username", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewContextWithMetadata(ctx, "", "testdb")
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+
+		// Check dbName is set
+		dbNameKey := strings.ToLower(util.HeaderDBName)
+		dbNameVal, ok := md[dbNameKey]
+		assert.True(t, ok)
+		assert.Equal(t, "testdb", dbNameVal[0])
+
+		// Check authorization is not set
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		_, ok = md[authKey]
+		assert.False(t, ok)
+	})
+
+	t.Run("with empty dbName", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = NewContextWithMetadata(ctx, "testuser", "")
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		assert.True(t, ok)
+
+		// Check authorization is set
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authVal, ok := md[authKey]
+		assert.True(t, ok)
+		expectedAuth := crypto.Base64Encode("testuser:testuser")
+		assert.Equal(t, expectedAuth, authVal[0])
+	})
 }
 
 func TestGetCostValue(t *testing.T) {

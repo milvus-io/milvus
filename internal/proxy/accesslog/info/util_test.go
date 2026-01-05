@@ -17,11 +17,16 @@
 package info
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 )
 
 func TestGetSdkTypeByUserAgent(t *testing.T) {
@@ -147,5 +152,58 @@ func TestGetLengthFromTemplateValue(t *testing.T) {
 		}
 
 		assert.Equal(t, 1, getLengthFromTemplateValue(tv))
+	})
+}
+
+func TestGetCurUserFromContext(t *testing.T) {
+	t.Run("valid context with user info", func(t *testing.T) {
+		ctx := context.Background()
+		token := crypto.Base64Encode("testuser:testpassword")
+		md := metadata.New(map[string]string{
+			strings.ToLower(util.HeaderAuthorize): token,
+		})
+		ctx = metadata.NewIncomingContext(ctx, md)
+
+		username, err := getCurUserFromContext(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, "testuser", username)
+	})
+
+	t.Run("no metadata in context", func(t *testing.T) {
+		ctx := context.Background()
+		_, err := getCurUserFromContext(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("no authorization in metadata", func(t *testing.T) {
+		ctx := context.Background()
+		md := metadata.New(map[string]string{})
+		ctx = metadata.NewIncomingContext(ctx, md)
+
+		_, err := getCurUserFromContext(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid token format", func(t *testing.T) {
+		ctx := context.Background()
+		md := metadata.New(map[string]string{
+			strings.ToLower(util.HeaderAuthorize): "invalid_base64!@#",
+		})
+		ctx = metadata.NewIncomingContext(ctx, md)
+
+		_, err := getCurUserFromContext(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("token without separator", func(t *testing.T) {
+		ctx := context.Background()
+		token := crypto.Base64Encode("tokenwithoutseparator")
+		md := metadata.New(map[string]string{
+			strings.ToLower(util.HeaderAuthorize): token,
+		})
+		ctx = metadata.NewIncomingContext(ctx, md)
+
+		_, err := getCurUserFromContext(ctx)
+		assert.Error(t, err)
 	})
 }

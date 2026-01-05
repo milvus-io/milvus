@@ -46,7 +46,7 @@ const (
 
 	HeaderAuthorize     = "authorization"
 	HeaderToken         = "token"
-	CredentialSeperator = ":"
+	CredentialSeparator = ":"
 	UserRoot            = "root"
 	PasswordHolder      = "___"
 	DefaultTenant       = ""
