@@ -408,7 +408,8 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				blobsWriter, allocator, maxRowNum,
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
-				pluginContext)
+				pluginContext,
+			)
 		} else {
 			return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 				blobsWriter, allocator, maxRowNum,

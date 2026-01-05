@@ -25,10 +25,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -211,4 +213,23 @@ func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
 		}
 		base[fID].Binlogs = append(base[fID].Binlogs, fpath.GetBinlogs()...)
 	}
+}
+
+func getTTLFieldID(schema *schemapb.CollectionSchema) int64 {
+	ttlFieldName := ""
+	for _, pair := range schema.GetProperties() {
+		if pair.GetKey() == common.CollectionTTLFieldKey {
+			ttlFieldName = pair.GetValue()
+			break
+		}
+	}
+	if ttlFieldName == "" {
+		return -1
+	}
+	for _, field := range schema.GetFields() {
+		if field.GetName() == ttlFieldName && field.GetDataType() == schemapb.DataType_Timestamptz {
+			return field.GetFieldID()
+		}
+	}
+	return -1
 }

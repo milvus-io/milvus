@@ -121,7 +121,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			return err
 		}
 
-		fieldBinlogs, statsLog, bm25Logs, manifest := writer.GetLogs()
+		fieldBinlogs, statsLog, bm25Logs, manifest, expirQuantiles := writer.GetLogs()
 		rowNum := writer.GetRowNum()
 		writtenUncompressed := writer.GetWrittenUncompressed()
 
@@ -134,6 +134,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 			Bm25Logs:            lo.Values(bm25Logs),
 			StorageVersion:      w.storageVersion,
 			Manifest:            manifest,
+			ExpirQuantiles:      expirQuantiles,
 		}
 
 		w.res = append(w.res, result)
