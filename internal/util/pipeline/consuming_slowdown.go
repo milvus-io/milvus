@@ -17,10 +17,15 @@
 package pipeline
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -28,8 +33,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
-// Set 1 minute as a threshold for the consuming slowdowner of delegator.
-const thresholdUpdateIntervalMs = int64(60 * 1000)
+var (
+	thresholdUpdateIntervalMs        = atomic.NewInt64(60 * 1000)
+	thresholdUpdateIntervalWatchOnce = &sync.Once{}
+)
 
 type LastestMVCCTimeTickGetter interface {
 	GetLatestRequiredMVCCTimeTick() uint64
@@ -37,6 +44,8 @@ type LastestMVCCTimeTickGetter interface {
 
 // newEmptyTimeTickSlowdowner creates a new consumingSlowdowner instance.
 func newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter LastestMVCCTimeTickGetter, vChannel string) *emptyTimeTickSlowdowner {
+	thresholdUpdateIntervalWatchOnce.Do(updateThresholdWithConfiguration)
+
 	nodeID := paramtable.GetStringNodeID()
 	pchannel := funcutil.ToPhysicalChannel(vChannel)
 	emptyTimeTickFilteredCounter := metrics.WALDelegatorEmptyTimeTickFilteredTotal.WithLabelValues(nodeID, pchannel)
@@ -51,6 +60,24 @@ func newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter LastestMVCCTimeTickGet
 		emptyTimeTickFilteredCounter:   emptyTimeTickFilteredCounter,
 		tsafeTimeTickUnfilteredCounter: tsafeTimeTickUnfilteredCounter,
 	}
+}
+
+func updateThresholdWithConfiguration() {
+	params := paramtable.Get()
+	interval := params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
+	log.Info("delegator empty time tick max filter interval initialized", zap.Duration("interval", interval))
+	thresholdUpdateIntervalMs.Store(interval.Milliseconds())
+	params.Watch(params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.Key, config.NewHandler(
+		params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.Key,
+		func(_ *config.Event) {
+			previousInterval := thresholdUpdateIntervalMs.Load()
+			newInterval := params.StreamingCfg.DelegatorEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
+			log.Info("delegator empty time tick max filter interval updated",
+				zap.Duration("previousInterval", time.Duration(previousInterval)),
+				zap.Duration("interval", newInterval))
+			thresholdUpdateIntervalMs.Store(newInterval.Milliseconds())
+		},
+	))
 }
 
 type emptyTimeTickSlowdowner struct {
@@ -104,7 +131,7 @@ func (sd *emptyTimeTickSlowdowner) Filter(msg *msgstream.MsgPack) (filtered bool
 	}
 
 	// For monitoring, we should sync the time tick at least once every threshold.
-	return tsoutil.CalculateDuration(timetick, sd.lastConsumedTimeTick) < thresholdUpdateIntervalMs
+	return tsoutil.CalculateDuration(timetick, sd.lastConsumedTimeTick) < thresholdUpdateIntervalMs.Load()
 }
 
 func (sd *emptyTimeTickSlowdowner) updateLastestMVCCTimeTick() {

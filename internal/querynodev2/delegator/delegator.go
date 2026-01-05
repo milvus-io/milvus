@@ -173,8 +173,7 @@ type shardDelegator struct {
 
 	// latest required mvcc timestamp for the delegator
 	// for slow down the delegator consumption and reduce the timetick dispatch frequency.
-	latestRequiredMVCCTimeTickMu sync.Mutex
-	latestRequiredMVCCTimeTick   uint64
+	latestRequiredMVCCTimeTick *atomic.Uint64
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -1014,9 +1013,6 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 
 // GetLatestRequiredMVCCTimeTick returns the latest required mvcc timestamp for the delegator.
 func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
-	sd.latestRequiredMVCCTimeTickMu.Lock()
-	defer sd.latestRequiredMVCCTimeTickMu.Unlock()
-
 	if sd.catchingUpStreamingData.Load() {
 		// delegator need to catch up the streaming data when startup,
 		// If the empty timetick is filtered, the load operation will be blocked.
@@ -1024,16 +1020,19 @@ func (sd *shardDelegator) GetLatestRequiredMVCCTimeTick() uint64 {
 		// so we always return the current time as the latest required mvcc timestamp.
 		return tsoutil.GetCurrentTime()
 	}
-	return sd.latestRequiredMVCCTimeTick
+	return sd.latestRequiredMVCCTimeTick.Load()
 }
 
 // updateLatestRequiredMVCCTimestamp updates the latest required mvcc timestamp for the delegator.
 func (sd *shardDelegator) updateLatestRequiredMVCCTimestamp(ts uint64) {
-	sd.latestRequiredMVCCTimeTickMu.Lock()
-	defer sd.latestRequiredMVCCTimeTickMu.Unlock()
-
-	if ts > sd.latestRequiredMVCCTimeTick {
-		sd.latestRequiredMVCCTimeTick = ts
+	for {
+		previousTs := sd.latestRequiredMVCCTimeTick.Load()
+		if ts <= previousTs {
+			return
+		}
+		if sd.latestRequiredMVCCTimeTick.CompareAndSwap(previousTs, ts) {
+			return
+		}
 	}
 }
 
@@ -1251,18 +1250,19 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
-		pkOracle:                pkoracle.NewPkOracle(),
-		latestTsafe:             atomic.NewUint64(startTs),
-		loader:                  loader,
-		queryHook:               queryHook,
-		chunkManager:            chunkManager,
-		partitionStats:          make(map[UniqueID]*storage.PartitionStatsSnapshot),
-		excludedSegments:        excludedSegments,
-		functionRunners:         make(map[int64]function.FunctionRunner),
-		analyzerRunners:         make(map[UniqueID]function.Analyzer),
-		isBM25Field:             make(map[int64]bool),
-		l0ForwardPolicy:         policy,
-		catchingUpStreamingData: atomic.NewBool(true),
+		pkOracle:                   pkoracle.NewPkOracle(),
+		latestTsafe:                atomic.NewUint64(startTs),
+		loader:                     loader,
+		queryHook:                  queryHook,
+		chunkManager:               chunkManager,
+		partitionStats:             make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		excludedSegments:           excludedSegments,
+		functionRunners:            make(map[int64]function.FunctionRunner),
+		analyzerRunners:            make(map[UniqueID]function.Analyzer),
+		isBM25Field:                make(map[int64]bool),
+		l0ForwardPolicy:            policy,
+		catchingUpStreamingData:    atomic.NewBool(true),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
 	for _, tf := range collection.Schema().GetFunctions() {

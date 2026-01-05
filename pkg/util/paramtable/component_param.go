@@ -6548,6 +6548,10 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+
+	// Empty TimeTick Filtering configration
+	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
+	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6903,6 +6907,29 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.DelegatorEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.delegator.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of delegator, 1m by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.`,
+		DefaultValue: "1m",
+		Export:       true,
+	}
+	p.DelegatorEmptyTimeTickMaxFilterInterval.Init(base.mgr)
+
+	p.FlushEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.flush.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of flush, 1s by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.
+Because current flusher need the empty time tick to trigger the cp update,
+too huge threshold will block the GetFlushState operation,
+so we set 1 second here as a threshold.`,
+		DefaultValue: "1s",
+		Export:       false,
+	}
+	p.FlushEmptyTimeTickMaxFilterInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

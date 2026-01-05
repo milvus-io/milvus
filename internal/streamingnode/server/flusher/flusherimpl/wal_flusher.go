@@ -27,11 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
-// Because current flusher need the empty time tick to trigger the cp update,
-// too huge threshold will block the GetFlushState operation,
-// so we set 1 second here as a threshold.
-const thresholdUpdateIntervalMs = 1000
-
 var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable")
 
 // RecoverWALFlusherParam is the parameter for building wal flusher.
@@ -224,7 +219,8 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// which will waste a lot of cpu resources.
 		// So we only dispatch the timetick message when the timetick-lastDispatchTimeTick is greater than a threshold.
 		timetick := msg.TimeTick()
-		if tsoutil.CalculateDuration(timetick, impl.lastDispatchTimeTick) < thresholdUpdateIntervalMs {
+		threshold := paramtable.Get().StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
+		if tsoutil.CalculateDuration(timetick, impl.lastDispatchTimeTick) < threshold.Milliseconds() {
 			impl.emptyTimeTickCounter.Inc()
 			return
 		}
