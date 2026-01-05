@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -132,6 +133,16 @@ func (kc *Catalog) listSegments(ctx context.Context, collectionID int64) ([]*dat
 		if err != nil {
 			return err
 		}
+
+		// Restore full paths for text index logs (compatible with old version)
+		// segments from etcd may have filenames only in TextStatsLogs
+		metautil.BuildTextLogPaths(
+			kc.ChunkManagerRootPath,
+			segmentInfo.GetCollectionID(),
+			segmentInfo.GetPartitionID(),
+			segmentInfo.GetID(),
+			segmentInfo.GetTextStatsLogs(),
+		)
 
 		segments = append(segments, segmentInfo)
 		return nil
@@ -382,11 +393,11 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 		noBinlogsSegment, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
 		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
-		segBytes, err := proto.Marshal(noBinlogsSegment)
+		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
 		if err != nil {
 			return fmt.Errorf("failed to marshal segment: %d, err: %w", s.GetID(), err)
 		}
-		kvs[key] = string(segBytes)
+		kvs[key] = segBytes
 	}
 
 	saveFn := func(partialKvs map[string]string) error {
