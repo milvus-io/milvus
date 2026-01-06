@@ -588,12 +588,16 @@ func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
 	}
 }
 
+// Search executes a search on the segment.
+// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
+	filterOnly := searchReq.FilterOnly()
 	log := log.Ctx(ctx).WithLazy(
 		zap.Uint64("mvcc", searchReq.MVCC()),
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
+		zap.Bool("filterOnly", filterOnly),
 	)
 
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
@@ -613,7 +617,11 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 		return nil, err
 	}
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Debug("search segment done")
+	if filterOnly {
+		log.Debug("search filter only segment done", zap.Int64("validCount", result.ValidCount()))
+	} else {
+		log.Debug("search segment done")
+	}
 	return result, nil
 }
 

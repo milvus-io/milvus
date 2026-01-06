@@ -667,4 +667,41 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
     }
 }
 
+std::shared_ptr<plan::PlanNode>
+ProtoParser::ExtractFilterOnlyPlan(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    if (!root_node) {
+        return nullptr;
+    }
+
+    // Find VectorSearchNode and extract its source subtree.
+    // This preserves the original plan node sequence (pre-filter nodes chain).
+    std::function<std::shared_ptr<plan::PlanNode>(
+        const std::shared_ptr<plan::PlanNode>&)>
+        find_prefilter_subtree =
+            [&](const std::shared_ptr<plan::PlanNode>& node)
+        -> std::shared_ptr<plan::PlanNode> {
+        if (!node) {
+            return nullptr;
+        }
+        if (node->name() == "VectorSearchNode") {
+            auto sources = node->sources();
+            if (sources.empty()) {
+                return nullptr;
+            }
+            // Return the pre-filter subtree directly without modification
+            return sources[0];
+        }
+        for (const auto& source : node->sources()) {
+            auto result = find_prefilter_subtree(source);
+            if (result) {
+                return result;
+            }
+        }
+        return nullptr;
+    };
+
+    return find_prefilter_subtree(root_node);
+}
+
 }  // namespace milvus::query

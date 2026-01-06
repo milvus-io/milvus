@@ -224,3 +224,46 @@ func TestGetIndexParam_DefaultValue(t *testing.T) {
 		assert.NotEmpty(t, jsonMap[MetricTypeKey], "metric_type should not be empty")
 	})
 }
+
+func TestTwoStageSearchParams(t *testing.T) {
+	var CParams ComponentParam
+	bt := NewBaseTable(SkipRemote(true))
+	CParams.Init(bt)
+
+	t.Run("test default values", func(t *testing.T) {
+		// Check default values
+		assert.Equal(t, "false", CParams.AutoIndexConfig.TwoStageSearchEnabled.GetValue())
+		assert.Equal(t, "2000", CParams.AutoIndexConfig.TwoStageSearchMinTopk.GetValue())
+		assert.Equal(t, "5", CParams.AutoIndexConfig.TwoStageSearchMinNumSegments.GetValue())
+	})
+
+	t.Run("test enable two-stage search", func(t *testing.T) {
+		err := bt.Save(CParams.AutoIndexConfig.TwoStageSearchEnabled.Key, "true")
+		assert.NoError(t, err)
+		assert.True(t, CParams.AutoIndexConfig.TwoStageSearchEnabled.GetAsBool())
+
+		err = bt.Save(CParams.AutoIndexConfig.TwoStageSearchEnabled.Key, "false")
+		assert.NoError(t, err)
+		assert.False(t, CParams.AutoIndexConfig.TwoStageSearchEnabled.GetAsBool())
+	})
+
+	t.Run("test min topk configuration", func(t *testing.T) {
+		err := bt.Save(CParams.AutoIndexConfig.TwoStageSearchMinTopk.Key, "1000")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1000), CParams.AutoIndexConfig.TwoStageSearchMinTopk.GetAsInt64())
+
+		err = bt.Save(CParams.AutoIndexConfig.TwoStageSearchMinTopk.Key, "5000")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(5000), CParams.AutoIndexConfig.TwoStageSearchMinTopk.GetAsInt64())
+	})
+
+	t.Run("test min num segments configuration", func(t *testing.T) {
+		err := bt.Save(CParams.AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "3")
+		assert.NoError(t, err)
+		assert.Equal(t, 3, CParams.AutoIndexConfig.TwoStageSearchMinNumSegments.GetAsInt())
+
+		err = bt.Save(CParams.AutoIndexConfig.TwoStageSearchMinNumSegments.Key, "10")
+		assert.NoError(t, err)
+		assert.Equal(t, 10, CParams.AutoIndexConfig.TwoStageSearchMinNumSegments.GetAsInt())
+	})
+}

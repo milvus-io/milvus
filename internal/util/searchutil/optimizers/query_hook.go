@@ -24,7 +24,9 @@ type QueryHook interface {
 	DeleteTuningConfig(string) error
 }
 
-func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
+// isFilterOnlyMode is true when we perform two-stage search, refer to delegator_twostage.go
+// at this time, we need to set WithFilterKey to false to allow some aggressive optimizations
+func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int, isFilterOnlyMode bool) (*querypb.SearchRequest, error) {
 	// no hook applied or disabled, just return
 	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		req.Req.IsTopkReduce = false
@@ -67,7 +69,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			common.TopKKey:         queryInfo.GetTopk(),
 			common.SearchParamKey:  queryInfo.GetSearchParams(),
 			common.SegmentNumKey:   estSegmentNum,
-			common.WithFilterKey:   withFilter,
+			common.WithFilterKey:   withFilter && !isFilterOnlyMode,
 			common.DataTypeKey:     int32(plan.GetVectorAnns().GetVectorType()),
 			common.WithOptimizeKey: paramtable.Get().AutoIndexConfig.EnableOptimize.GetAsBool() && req.GetReq().GetIsTopkReduce() && queryInfo.GetGroupByFieldId() < 0,
 			common.CollectionKey:   req.GetReq().GetCollectionID(),
@@ -82,7 +84,7 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 			return nil, merr.WrapErrServiceUnavailable(err.Error(), "queryHook execution failed")
 		}
 		finalTopk := params[common.TopKKey].(int64)
-		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk())
+		isTopkReduce := req.GetReq().GetIsTopkReduce() && (finalTopk < queryInfo.GetTopk()) && !isFilterOnlyMode
 		queryInfo.Topk = finalTopk
 		queryInfo.SearchParams = params[common.SearchParamKey].(string)
 		serializedExprPlan, err := proto.Marshal(&plan)
@@ -102,4 +104,52 @@ func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, query
 		log.Warn("not supported node type", zap.String("nodeType", fmt.Sprintf("%T", plan.GetNode())))
 	}
 	return req, nil
+}
+
+// CalculateEffectiveSegmentNum finds the maximum segmentNum such that the total retrieved items >= topk.
+// For each segment, it returns min(topk/segmentNum, rowCount).
+// This represents the "effective" number of segments that can contribute to search results.
+// A larger segmentNum means more segments can fully contribute their share (topk/segmentNum items each).
+func CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int {
+	n := len(rowCounts)
+	if n == 0 {
+		return 0
+	}
+
+	// Helper function to calculate total items for a given segmentNum
+	calcTotal := func(segmentNum int) int64 {
+		perSegmentLimit := topk / int64(segmentNum)
+		total := int64(0)
+		for _, rowCount := range rowCounts {
+			if rowCount >= perSegmentLimit {
+				total += perSegmentLimit
+			} else {
+				total += rowCount
+			}
+		}
+		return total
+	}
+
+	// Fast path: check if len(rowCounts) works (common case)
+	// This avoids binary search when all segments can contribute
+	if calcTotal(n) >= topk {
+		return n
+	}
+
+	// Binary search for the maximum segmentNum where total >= topk
+	// As segmentNum increases, perSegmentLimit decreases, so total decreases
+	left, right := 1, n-1
+	result := 0
+
+	for left <= right {
+		mid := (left + right) / 2
+		if calcTotal(mid) >= topk {
+			result = mid
+			left = mid + 1 // Try to find a larger segmentNum
+		} else {
+			right = mid - 1 // Need smaller segmentNum for larger total
+		}
+	}
+
+	return result
 }
