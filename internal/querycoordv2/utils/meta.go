@@ -111,7 +111,7 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
 	}
 
-	if streamingutil.IsStreamingServiceEnabled() {
+	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
 		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
 		if replicaNumber > int32(streamingNodeCount) {
 			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
