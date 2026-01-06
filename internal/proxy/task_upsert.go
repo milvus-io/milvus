@@ -217,10 +217,11 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 			PartitionIDs:     partitionIDs,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
 		},
-		request:  queryReq,
-		plan:     plan,
-		mixCoord: t.node.(*Proxy).mixCoord,
-		lb:       t.node.(*Proxy).lbPolicy,
+		request:        queryReq,
+		plan:           plan,
+		mixCoord:       t.node.(*Proxy).mixCoord,
+		lb:             t.node.(*Proxy).lbPolicy,
+		shardclientMgr: t.node.(*Proxy).shardMgr,
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
