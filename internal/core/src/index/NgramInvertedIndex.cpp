@@ -410,6 +410,13 @@ std::optional<TargetBitmap>
 NgramInvertedIndex::MatchQuery(const std::string& literal,
                                exec::SegmentExpr* segment,
                                const TargetBitmap* pre_filter) {
+    if (auto root_span = tracer::GetRootSpan()) {
+        root_span->SetAttribute("match_query_literal_length",
+                                static_cast<int>(literal.length()));
+        root_span->SetAttribute("match_query_min_gram", min_gram_);
+        root_span->SetAttribute("match_query_max_gram", max_gram_);
+    }
+
     auto total_count = static_cast<size_t>(Count());
     if (total_count == 0) {
         return TargetBitmap{};
