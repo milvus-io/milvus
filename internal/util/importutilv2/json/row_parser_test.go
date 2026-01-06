@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -584,7 +583,7 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 					continue
 				}
 			case schemapb.DataType_Geometry:
-				wkbValue, err := pkgcommon.ConvertWKTToWKB(rawVal.(string))
+				wkbValue, err := common.ConvertWKTToWKB(rawVal.(string))
 				suite.NoError(err)
 				suite.Equal(wkbValue, val)
 			default:

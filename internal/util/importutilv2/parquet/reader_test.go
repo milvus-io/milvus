@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/nullutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -231,7 +230,7 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 					}
 				} else if fieldDataType == schemapb.DataType_Geometry && expect != nil {
 					expectData := expect.([]byte)
-					wkbValue, err := pkgcommon.ConvertWKTToWKB(string(expectData))
+					wkbValue, err := common.ConvertWKTToWKB(string(expectData))
 					if err != nil {
 						s.Fail("marshal wkb failed")
 					}

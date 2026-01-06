@@ -291,22 +291,26 @@ func TestGetCollectionTTL(t *testing.T) {
 	})
 }
 
-func TestConvertWKTToWKB(t *testing.T) {
-	wkt := "POINT EMPTY"
-	wkb, err := ConvertWKTToWKB(wkt)
-	assert.NoError(t, err)
-	assert.NotNil(t, wkb)
+func TestWKTWKBConversion(t *testing.T) {
+	testCases := []struct {
+		name string
+		wkt  string
+	}{
+		{"Point Empty", "POINT EMPTY"},
+		{"Polygon Empty", "POLYGON EMPTY"},
+		{"Point with coords", "POINT (1 2)"},
+		{"Polygon with coords", "POLYGON ((30 10, 40 40, 20 40, 10 20, 30 10))"},
+	}
 
-	wktResult, err := ConvertWKBToWKT(wkb)
-	assert.NoError(t, err)
-	assert.Equal(t, wkt, wktResult)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wkb, err := ConvertWKTToWKB(tc.wkt)
+			assert.NoError(t, err)
+			assert.NotNil(t, wkb)
 
-	wkt2 := "POLYGON EMPTY"
-	wkb2, err := ConvertWKTToWKB(wkt2)
-	assert.NoError(t, err)
-	assert.NotNil(t, wkb2)
-
-	wktResult2, err := ConvertWKBToWKT(wkb2)
-	assert.NoError(t, err)
-	assert.Equal(t, wkt2, wktResult2)
+			wktResult, err := ConvertWKBToWKT(wkb)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.wkt, wktResult)
+		})
+	}
 }
