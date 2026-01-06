@@ -1793,8 +1793,9 @@ func TestServer_AddFileResource(t *testing.T) {
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
 			mixCoord:    newMockMixCoord(),
 			meta: &meta{
-				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
-				catalog:      mockCatalog,
+				resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+				resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
+				catalog:       mockCatalog,
 			},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -1836,8 +1837,9 @@ func TestServer_AddFileResource(t *testing.T) {
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
 			meta: &meta{
-				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
-				catalog:      mockCatalog,
+				resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+				resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
+				catalog:       mockCatalog,
 			},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -1860,8 +1862,9 @@ func TestServer_AddFileResource(t *testing.T) {
 		server := &Server{
 			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
 			meta: &meta{
-				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
-				catalog:      mockCatalog,
+				resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+				resourceIDMap: make(map[int64]*internalpb.FileResourceInfo),
+				catalog:       mockCatalog,
 			},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -1895,6 +1898,9 @@ func TestServer_AddFileResource(t *testing.T) {
 				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"test_resource": existingResource,
 				},
+				resourceIDMap: map[int64]*internalpb.FileResourceInfo{
+					1: existingResource,
+				},
 				catalog: mockCatalog,
 			},
 		}
@@ -1926,6 +1932,9 @@ func TestServer_RemoveFileResource(t *testing.T) {
 			meta: &meta{
 				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"test_resource": existingResource,
+				},
+				resourceIDMap: map[int64]*internalpb.FileResourceInfo{
+					1: existingResource,
 				},
 				catalog: mockCatalog,
 			},
@@ -1963,8 +1972,9 @@ func TestServer_RemoveFileResource(t *testing.T) {
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
-				catalog:      mockCatalog,
+				resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+				resourceIDMap: map[int64]*internalpb.FileResourceInfo{},
+				catalog:       mockCatalog,
 			},
 			mixCoord: newMockMixCoord(),
 		}
@@ -1993,6 +2003,9 @@ func TestServer_RemoveFileResource(t *testing.T) {
 				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"test_resource": existingResource,
 				},
+				resourceIDMap: map[int64]*internalpb.FileResourceInfo{
+					1: existingResource,
+				},
 				catalog: mockCatalog,
 			},
 		}
@@ -2016,8 +2029,9 @@ func TestServer_ListFileResources(t *testing.T) {
 
 		server := &Server{
 			meta: &meta{
-				resourceMeta: make(map[string]*internalpb.FileResourceInfo),
-				catalog:      mockCatalog,
+				resourceMeta:  make(map[string]*internalpb.FileResourceInfo),
+				resourceIDMap: map[int64]*internalpb.FileResourceInfo{},
+				catalog:       mockCatalog,
 			},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -2052,6 +2066,10 @@ func TestServer_ListFileResources(t *testing.T) {
 				resourceMeta: map[string]*internalpb.FileResourceInfo{
 					"resource1": resource1,
 					"resource2": resource2,
+				},
+				resourceIDMap: map[int64]*internalpb.FileResourceInfo{
+					1: resource1,
+					2: resource2,
 				},
 				catalog: mockCatalog,
 			},

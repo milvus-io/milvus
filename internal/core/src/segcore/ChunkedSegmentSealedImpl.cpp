@@ -1857,8 +1857,8 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
 
     index->Reload();
 
-    index->RegisterTokenizer("milvus_tokenizer",
-                             field_meta.get_analyzer_params().c_str());
+    index->RegisterAnalyzer("milvus_tokenizer",
+                            field_meta.get_analyzer_params().c_str());
 
     text_indexes_[field_id] = std::make_shared<index::TextMatchIndexHolder>(
         std::move(index), cfg.GetScalarIndexEnableMmap());

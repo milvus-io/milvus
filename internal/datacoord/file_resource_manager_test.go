@@ -63,6 +63,7 @@ func (suite *FileResourceManagerSuite) SetupTest() {
 	suite.testMeta = &meta{
 		catalog:         suite.mockCatalog,
 		resourceMeta:    make(map[string]*internalpb.FileResourceInfo),
+		resourceIDMap:   make(map[int64]*internalpb.FileResourceInfo),
 		resourceVersion: 0,
 	}
 

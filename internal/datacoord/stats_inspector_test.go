@@ -222,11 +222,11 @@ func (s *statsInspectorSuite) TestStart() {
 
 func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	// Test submitting a valid stats task
-	err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true)
+	err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true, nil)
 	s.NoError(err)
 
 	// Test submitting a task for non-existent segment
-	err = s.inspector.SubmitStatsTask(999, 999, indexpb.StatsSubJob_Sort, true)
+	err = s.inspector.SubmitStatsTask(999, 999, indexpb.StatsSubJob_Sort, true, nil)
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrSegmentNotFound), "Error should be ErrSegmentNotFound")
 
@@ -242,7 +242,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	})
 
 	// Simulate duplicate task error
-	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true)
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_Sort, true, nil)
 	s.NoError(err) // Duplicate tasks are handled as success
 }
 

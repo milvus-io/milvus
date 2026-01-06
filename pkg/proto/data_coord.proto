@@ -733,6 +733,7 @@ message CompactionPlan {
   string json_params = 22;
   int32 current_scalar_index_version = 23;
   repeated common.KeyValuePair plugin_context = 29;
+  repeated internal.FileResourceInfo file_resources = 30;
 }
 
 message CompactionSegment {
@@ -1349,12 +1350,6 @@ message PartitionStatsInfo {
 
 message DropCompactionPlanRequest {
   int64 planID = 1;
-}
-
-message FileResourceInfo {
-  string name = 1;
-  string path = 2;
-  int64 resource_id = 3;
 }
 
 message CreateExternalCollectionResponse {
