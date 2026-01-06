@@ -779,6 +779,91 @@ func (kc *Catalog) DropImportTask(ctx context.Context, taskID int64) error {
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) SaveCopySegmentJob(ctx context.Context, job *datapb.CopySegmentJob) error {
+	key := buildCopySegmentJobKey(job.GetJobId())
+	value, err := proto.Marshal(job)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListCopySegmentJobs(ctx context.Context) ([]*datapb.CopySegmentJob, error) {
+	jobs := make([]*datapb.CopySegmentJob, 0)
+	applyFn := func(key []byte, value []byte) error {
+		job := &datapb.CopySegmentJob{}
+		err := proto.Unmarshal(value, job)
+		if err != nil {
+			return err
+		}
+		jobs = append(jobs, job)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, CopySegmentJobPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+func (kc *Catalog) DropCopySegmentJob(ctx context.Context, jobID int64) error {
+	key := buildCopySegmentJobKey(jobID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) SaveCopySegmentTask(ctx context.Context, task *datapb.CopySegmentTask) error {
+	key := buildCopySegmentTaskKey(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) SaveCopySegmentTasksBatch(ctx context.Context, tasks []*datapb.CopySegmentTask) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	kvs := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		key := buildCopySegmentTaskKey(task.GetTaskId())
+		value, err := proto.Marshal(task)
+		if err != nil {
+			return err
+		}
+		kvs[key] = string(value)
+	}
+
+	return kc.MetaKv.MultiSave(ctx, kvs)
+}
+
+func (kc *Catalog) ListCopySegmentTasks(ctx context.Context) ([]*datapb.CopySegmentTask, error) {
+	tasks := make([]*datapb.CopySegmentTask, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.CopySegmentTask{}
+		err := proto.Unmarshal(value, task)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, CopySegmentTaskPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) DropCopySegmentTask(ctx context.Context, taskID int64) error {
+	key := buildCopySegmentTaskKey(taskID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 // GcConfirm returns true if related collection/partition is not found.
 // DataCoord will remove all the meta eventually after GC is finished.
 func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool {
@@ -1081,4 +1166,38 @@ func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileReso
 
 func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
+}
+
+func (kc *Catalog) SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error {
+	key := buildSnapshotKey(snapshot.GetCollectionId(), snapshot.GetId())
+	value, err := proto.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error {
+	key := buildSnapshotKey(collectionID, snapshotID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error) {
+	snapshots := make([]*datapb.SnapshotInfo, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		snapshot := &datapb.SnapshotInfo{}
+		err := proto.Unmarshal(value, snapshot)
+		if err != nil {
+			return err
+		}
+		snapshots = append(snapshots, snapshot)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, SnapshotPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return snapshots, nil
 }

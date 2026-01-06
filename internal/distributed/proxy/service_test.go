@@ -1130,6 +1130,36 @@ func TestNotImplementedAPIs(t *testing.T) {
 	})
 }
 
+func TestSnapshotAPIs(t *testing.T) {
+	ctx := context.Background()
+	server := getServer(t)
+	mockProxy := server.proxy.(*mocks.MockProxy)
+
+	t.Run("GetRestoreSnapshotState", func(t *testing.T) {
+		req := &milvuspb.GetRestoreSnapshotStateRequest{}
+		mockResp := &milvuspb.GetRestoreSnapshotStateResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}
+		mockProxy.EXPECT().GetRestoreSnapshotState(mock.Anything, req).Return(mockResp, nil)
+		resp, err := server.GetRestoreSnapshotState(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, mockResp, resp)
+	})
+
+	t.Run("ListRestoreSnapshotJobs", func(t *testing.T) {
+		req := &milvuspb.ListRestoreSnapshotJobsRequest{}
+		mockResp := &milvuspb.ListRestoreSnapshotJobsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}
+		mockProxy.EXPECT().ListRestoreSnapshotJobs(mock.Anything, req).Return(mockResp, nil)
+		resp, err := server.ListRestoreSnapshotJobs(ctx, req)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, mockResp, resp)
+	})
+}
+
 func TestHttpAuthenticate(t *testing.T) {
 	paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
 	defer paramtable.Get().Reset(proxy.Params.CommonCfg.AuthorizationEnabled.Key)

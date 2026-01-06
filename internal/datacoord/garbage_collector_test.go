@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -572,6 +574,7 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
+	meta.snapshotMeta = &snapshotMeta{}
 	return meta
 }
 
@@ -591,6 +594,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
+		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+		defer mockIsRefIndexLoaded.UnPatch()
+		mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]UniqueID{}).Build()
+		defer mockGetSnapshotByIndex.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
 
@@ -609,6 +616,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
 			cli: mockChunkManager,
 		})
+		mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+		defer mockIsRefIndexLoaded.UnPatch()
+		mockGetSnapshotByIndex := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).Return([]UniqueID{}).Build()
+		defer mockGetSnapshotByIndex.UnPatch()
 		gc.recycleUnusedSegIndexes(context.TODO(), nil)
 	})
 }
@@ -1113,9 +1124,10 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: channelCPs,
-		segments:   NewSegmentsInfo(),
+		catalog:      catalog,
+		channelCPs:   channelCPs,
+		segments:     NewSegmentsInfo(),
+		snapshotMeta: &snapshotMeta{},
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
 			catalog:          catalog,
@@ -1397,6 +1409,10 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+	mockGetSnapshotBySegment := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).Return([]UniqueID{}).Build()
+	defer mockGetSnapshotBySegment.UnPatch()
 	gc.recycleDroppedSegments(context.TODO(), signal)
 
 	/*
@@ -1812,4 +1828,257 @@ func (s *GarbageCollectorSuite) TestAvoidGCLoadedSegments() {
 
 func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
+}
+
+// TestGarbageCollector_recycleDroppedSegments_SnapshotReference tests that segments referenced by snapshots are not garbage collected
+func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T) {
+	// Setup
+	ctx := context.Background()
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Create necessary components
+	catalog := &datacoord.Catalog{}
+	handler := &ServerHandler{}
+
+	// Mock newSnapshotMeta
+	smMeta := &snapshotMeta{}
+
+	// Create meta
+	meta := &meta{
+		catalog:      catalog,
+		snapshotMeta: smMeta,
+		segments: &SegmentsInfo{
+			segments: make(map[int64]*SegmentInfo),
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	// Create garbage collector
+	gc := newGarbageCollector(meta, handler, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    0, // Set to 0 to immediately consider segments for GC
+	})
+
+	// Add dropped segments to meta
+	droppedSegment1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1001,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			InsertChannel: "ch1",
+		},
+	}
+	droppedSegment2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1002,
+			CollectionID:  100,
+			PartitionID:   10,
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			InsertChannel: "ch1",
+		},
+	}
+
+	meta.segments.segments[1001] = droppedSegment1
+	meta.segments.segments[1002] = droppedSegment2
+
+	// Setup mocks
+	mock1 := mockey.Mock(meta.GetSnapshotMeta).Return(smMeta).Build()
+	defer mock1.UnPatch()
+
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
+	mock2 := mockey.Mock((*snapshotMeta).GetSnapshotBySegment).To(func(ctx context.Context, collectionID, segmentID int64) []int64 {
+		if segmentID == 1001 {
+			return []int64{1, 2} // Segment 1001 is referenced by snapshots 1 and 2
+		}
+		return []int64{} // Segment 1002 is not referenced
+	}).Build()
+	defer mock2.UnPatch()
+
+	mock3 := mockey.Mock((*ServerHandler).ListLoadedSegments).To(func(h *ServerHandler, ctx context.Context) ([]int64, error) {
+		return []int64{}, nil
+	}).Build()
+	defer mock3.UnPatch()
+
+	mock4 := mockey.Mock((*datacoord.Catalog).ListChannelCheckpoint).To(func(c *datacoord.Catalog, ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
+		return map[string]*msgpb.MsgPosition{}, nil
+	}).Build()
+	defer mock4.UnPatch()
+
+	mock5 := mockey.Mock((*datacoord.Catalog).ListIndexes).To(func(c *datacoord.Catalog, ctx context.Context) ([]*model.Index, error) {
+		return []*model.Index{}, nil
+	}).Build()
+	defer mock5.UnPatch()
+
+	mock6 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context) ([]*model.SegmentIndex, error) {
+		return []*model.SegmentIndex{}, nil
+	}).Build()
+	defer mock6.UnPatch()
+
+	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).To(func(c *datacoord.Catalog, ctx context.Context, channel string) bool {
+		return true
+	}).Build()
+	defer mock7.UnPatch()
+
+	dropSegmentCalled := false
+	var droppedSegment *datapb.SegmentInfo
+	mock8 := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
+		dropSegmentCalled = true
+		droppedSegment = segment
+		return nil
+	}).Build()
+	defer mock8.UnPatch()
+
+	mock9 := mockey.Mock((*garbageCollector).removeObjectFiles).To(func(gc *garbageCollector, ctx context.Context, logs map[string]struct{}) error {
+		return nil
+	}).Build()
+	defer mock9.UnPatch()
+
+	// Execute
+	gc.recycleDroppedSegments(ctx, nil)
+
+	// Verify
+	// Segment 1001 should still exist (not GC'd due to snapshot reference)
+	assert.NotNil(t, meta.GetSegment(ctx, 1001))
+	// Segment 1002 should be removed (GC'd)
+	assert.Nil(t, meta.GetSegment(ctx, 1002))
+	assert.True(t, dropSegmentCalled)
+	if droppedSegment != nil {
+		assert.Equal(t, int64(1002), droppedSegment.ID)
+	}
+}
+
+// TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference tests that indexes referenced by snapshots are not garbage collected
+func TestGarbageCollector_recycleUnusedSegIndexes_SnapshotReference(t *testing.T) {
+	// Setup
+	ctx := context.Background()
+
+	// Create storage manager
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
+
+	// Create necessary components
+	catalog := &datacoord.Catalog{}
+	handler := &ServerHandler{}
+
+	// Mock newSnapshotMeta
+	smMeta := &snapshotMeta{}
+
+	// Mock newIndexMeta
+	idxMeta := &indexMeta{}
+
+	// Create meta
+	meta := &meta{
+		catalog:      catalog,
+		snapshotMeta: smMeta,
+		indexMeta:    idxMeta,
+		segments: &SegmentsInfo{
+			segments: make(map[int64]*SegmentInfo),
+		},
+		channelCPs: newChannelCps(),
+	}
+
+	// Create garbage collector
+	gc := newGarbageCollector(meta, handler, GcOption{
+		cli:              cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    0,
+	})
+
+	// Create segment indexes
+	segIdx1 := &model.SegmentIndex{
+		SegmentID:    2001,
+		CollectionID: 200,
+		PartitionID:  20,
+		IndexID:      301,
+		BuildID:      401,
+		NodeID:       501,
+	}
+	segIdx2 := &model.SegmentIndex{
+		SegmentID:    2002,
+		CollectionID: 200,
+		PartitionID:  20,
+		IndexID:      302,
+		BuildID:      402,
+		NodeID:       502,
+	}
+
+	// Setup mocks
+	mockIsRefIndexLoaded := mockey.Mock((*snapshotMeta).IsRefIndexLoaded).Return(true).Build()
+	defer mockIsRefIndexLoaded.UnPatch()
+
+	mock1 := mockey.Mock((*snapshotMeta).GetSnapshotByIndex).To(func(ctx context.Context, collectionID, indexID int64) []int64 {
+		if indexID == 301 {
+			return []int64{3, 4} // Index 301 is referenced by snapshots 3 and 4
+		}
+		return []int64{} // Index 302 is not referenced
+	}).Build()
+	defer mock1.UnPatch()
+
+	mock2 := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).To(func(c *datacoord.Catalog, ctx context.Context) ([]*model.SegmentIndex, error) {
+		return []*model.SegmentIndex{segIdx1, segIdx2}, nil
+	}).Build()
+	defer mock2.UnPatch()
+
+	mock3 := mockey.Mock(meta.GetSegment).To(func(ctx context.Context, segmentID int64) *SegmentInfo {
+		return nil // All segments are not found
+	}).Build()
+	defer mock3.UnPatch()
+
+	mock4 := mockey.Mock((*indexMeta).IsIndexExist).To(func(collID, indexID int64) bool {
+		return false
+	}).Build()
+	defer mock4.UnPatch()
+
+	mock5 := mockey.Mock((*indexMeta).GetAllSegIndexes).To(func() map[int64]*model.SegmentIndex {
+		return map[int64]*model.SegmentIndex{
+			segIdx1.BuildID: segIdx1,
+			segIdx2.BuildID: segIdx2,
+		}
+	}).Build()
+	defer mock5.UnPatch()
+
+	mock6 := mockey.Mock((*garbageCollector).getAllIndexFilesOfIndex).To(func(gc *garbageCollector, segIdx *model.SegmentIndex) map[string]struct{} {
+		return map[string]struct{}{
+			fmt.Sprintf("index_%d", segIdx.BuildID): {},
+		}
+	}).Build()
+	defer mock6.UnPatch()
+
+	removeCallCount := 0
+	mock7 := mockey.Mock((*garbageCollector).removeObjectFiles).To(func(gc *garbageCollector, ctx context.Context, logs map[string]struct{}) error {
+		removeCallCount++
+		return nil
+	}).Build()
+	defer mock7.UnPatch()
+
+	removeSegmentIndexCalled := false
+	removedBuildID := int64(0)
+	mock8 := mockey.Mock((*indexMeta).RemoveSegmentIndex).To(func(ctx context.Context, buildID int64) error {
+		removeSegmentIndexCalled = true
+		removedBuildID = buildID
+		return nil
+	}).Build()
+	defer mock8.UnPatch()
+
+	// Execute
+	gc.recycleUnusedSegIndexes(ctx, nil)
+
+	// Verify
+	// Only segIdx2 should have its files removed (segIdx1 is protected by snapshot)
+	assert.Equal(t, 1, removeCallCount)
+	assert.True(t, removeSegmentIndexCalled)
+	assert.Equal(t, int64(402), removedBuildID)
 }

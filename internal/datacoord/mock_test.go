@@ -973,6 +973,35 @@ func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, collection
 	panic("implement me")
 }
 
+// Snapshot related methods
+func (s *mockMixCoord) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsRequest) (*datapb.ListSnapshotsResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnapshotRequest) (*datapb.DescribeSnapshotResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) RestoreSnapshot(ctx context.Context, req *datapb.RestoreSnapshotRequest) (*datapb.RestoreSnapshotResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) GetRestoreSnapshotState(ctx context.Context, req *datapb.GetRestoreSnapshotStateRequest) (*datapb.GetRestoreSnapshotStateResponse, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListRestoreSnapshotJobs(ctx context.Context, req *datapb.ListRestoreSnapshotJobsRequest) (*datapb.ListRestoreSnapshotJobsResponse, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 	meta *meta
 }
@@ -1016,6 +1045,19 @@ func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChan
 }
 
 func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
+	return nil, nil
+}
+
+func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*SnapshotData, error) {
+	return &SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Name:         "test_snapshot",
+			CollectionId: collectionID,
+		},
+	}, nil
+}
+
+func (h *mockHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error) {
 	return nil, nil
 }
 

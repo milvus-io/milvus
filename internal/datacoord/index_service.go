@@ -210,19 +210,43 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		}
 	}
 
-	indexID, err := s.meta.indexMeta.CanCreateIndex(req, isJson)
-	if err != nil {
-		if errors.Is(err, errIndexOperationIgnored) {
-			log.Info("index already exists",
-				zap.Int64("collectionID", req.GetCollectionID()),
-				zap.Int64("fieldID", req.GetFieldID()),
-				zap.String("indexName", req.GetIndexName()))
-			metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-			return merr.Success(), nil
+	// Allocate or use provided index ID
+	var indexID int64
+	if req.GetPreserveIndexId() {
+		// For snapshot restore: use provided index ID instead of allocating a new one
+		indexID = req.GetIndexId()
+		if indexID <= 0 {
+			log.Warn("invalid index ID provided for preserve",
+				zap.Int64("indexID", indexID))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(merr.WrapErrParameterInvalidMsg("index_id must be positive when preserve_index_id is true")), nil
 		}
-		log.Error("Check CanCreateIndex fail", zap.Error(err))
-		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		log.Info("using preserved index ID for snapshot restore",
+			zap.Int64("indexID", indexID))
+	} else {
+		// Normal path: allocate new index ID
+		var err error
+		indexID, err = s.allocator.AllocID(ctx)
+		if err != nil {
+			log.Warn("failed to alloc indexID", zap.Error(err))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
+
+		indexID, err = s.meta.indexMeta.CanCreateIndex(req, isJson)
+		if err != nil {
+			if errors.Is(err, errIndexOperationIgnored) {
+				log.Info("index already exists",
+					zap.Int64("collectionID", req.GetCollectionID()),
+					zap.Int64("fieldID", req.GetFieldID()),
+					zap.String("indexName", req.GetIndexName()))
+				metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+				return merr.Success(), nil
+			}
+			log.Error("Check CanCreateIndex fail", zap.Error(err))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
 	}
 	if indexID == 0 {
 		if indexID, err = s.allocator.AllocID(ctx); err != nil {
