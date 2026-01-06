@@ -143,6 +143,13 @@ func (lim *Limiter) HasUpdated() bool {
 	return lim.hasUpdated
 }
 
+// SetHasUpdated sets the hasUpdated flag to the specified value.
+func (lim *Limiter) SetHasUpdated(updated bool) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.hasUpdated = updated
+}
+
 // advance calculates and returns an updated state for lim resulting from the passage of time.
 // lim is not changed. advance requires that lim.mu is held.
 func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time, newTokens float64) {
