@@ -6914,7 +6914,7 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Doc: `The max filter interval for empty time tick of delegator, 1m by default.
 If the interval since last timetick is less than this config, the empty time tick will be filtered.`,
 		DefaultValue: "1m",
-		Export:       true,
+		Export:       false,
 	}
 	p.DelegatorEmptyTimeTickMaxFilterInterval.Init(base.mgr)
 
