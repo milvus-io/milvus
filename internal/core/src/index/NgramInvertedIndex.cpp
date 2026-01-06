@@ -191,6 +191,10 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
         return std::nullopt;
     }
 
+    if (Count() == 0) {
+        return TargetBitmap{};
+    }
+
     switch (op_type) {
         case proto::plan::OpType::Match:
             return MatchQuery(literal, segment, pre_filter);
@@ -323,10 +327,6 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
                                               bool need_post_filter,
                                               const TargetBitmap* pre_filter) {
     auto total_count = static_cast<size_t>(Count());
-    if (total_count == 0) {
-        return TargetBitmap{};
-    }
-
     // Phase 1: ngram index filtering
     TargetBitmap bitset{total_count};
     wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
@@ -418,9 +418,6 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     }
 
     auto total_count = static_cast<size_t>(Count());
-    if (total_count == 0) {
-        return TargetBitmap{};
-    }
 
     // Phase 1: ngram index filtering
     TargetBitmap bitset(total_count, true);
