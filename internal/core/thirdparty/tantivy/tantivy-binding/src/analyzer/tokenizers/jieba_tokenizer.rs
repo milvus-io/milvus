@@ -2,8 +2,8 @@ use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
 use serde_json as json;
-use std::borrow::Cow;
 use std::io::BufReader;
+use std::sync::Arc;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 use crate::error::{Result, TantivyBindingError};
@@ -142,7 +142,7 @@ impl JiebaTokenizer {
         }
     }
 
-    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<JiebaTokenizer<'a>> {
+    pub fn from_json(params: &json::Map<String, json::Value>) -> Result<JiebaTokenizer> {
         let (dict, system_dict) = get_jieba_dict(params)?;
 
         let mut tokenizer =
