@@ -327,5 +327,6 @@ func getCollectionInfo(ctx context.Context, dbName string, collectionName string
 	if err != nil {
 		return nil, err
 	}
+	coll.schema.DbName = dbName
 	return coll, nil
 }
