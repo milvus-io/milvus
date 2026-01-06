@@ -102,7 +102,7 @@ func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFl
 	if err := impl.wbMgr.SealSegments(context.Background(), vchannel, flushMsg.Header().SegmentIds); err != nil {
 		return errors.Wrap(err, "failed to seal segments")
 	}
-	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.Header().FlushTs); err != nil {
+	if err := impl.wbMgr.FlushChannel(context.Background(), vchannel, flushMsg.TimeTick()); err != nil {
 		return errors.Wrap(err, "failed to flush channel")
 	} // may be redundant.
 	return nil

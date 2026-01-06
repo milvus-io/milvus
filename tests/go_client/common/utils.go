@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/x448/float16"
 	"go.uber.org/zap"
@@ -16,19 +15,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
-var (
-	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	r           *rand.Rand
-)
-
-func init() {
-	r = rand.New(rand.NewSource(time.Now().UnixNano()))
-}
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 func GenRandomString(prefix string, n int) string {
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = letterRunes[r.Intn(len(letterRunes))]
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
 	}
 	str := fmt.Sprintf("%s_%s", prefix, string(b))
 	return str
