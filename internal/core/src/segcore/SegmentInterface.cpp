@@ -122,9 +122,14 @@ SegmentInternalInterface::Search(
     const folly::CancellationToken& cancel_token,
     int32_t consistency_level,
     Timestamp collection_ttl,
-    int64_t entity_ttl_physical_time_us) const {
+    int64_t entity_ttl_physical_time_us,
+    bool filter_only) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
+
+    auto results = std::make_unique<SearchResult>();
+    results->segment_ = (void*)this;
+
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this,
                                        timestamp,
@@ -133,7 +138,7 @@ SegmentInternalInterface::Search(
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
-    auto results = std::make_unique<SearchResult>();
+    visitor.SetFilterOnly(filter_only);
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
     return results;

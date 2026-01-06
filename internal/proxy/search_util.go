@@ -105,6 +105,7 @@ type SearchInfo struct {
 	isIterator    bool
 	collectionID  int64
 	orderByFields []OrderByField
+	iterativeFilter bool
 }
 
 // parseOrderByFields parses the order_by_fields parameter from search params.
@@ -498,6 +499,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	var jsonPath string
 	var jsonType schemapb.DataType
 	var strictCast bool
+	var isRangeSearch bool
+	var isIterativeFilter bool
 	if isAdvanced {
 		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
@@ -520,7 +523,10 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do groupBy when doing iteration")
 	}
-	if strings.Contains(searchParamStr, radiusKey) && groupByFieldId > 0 {
+
+	isRangeSearch = strings.Contains(searchParamStr, radiusKey)
+	isIterativeFilter = (hints == iterativeFilterKey) || strings.Contains(searchParamStr, iterativeFilterKey)
+	if isRangeSearch && groupByFieldId > 0 {
 		return nil, merr.WrapErrParameterInvalid("", "",
 			"Not allowed to do range-search when doing search-group-by")
 	}
@@ -535,7 +541,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	if annsFieldName != "" {
 		annField := typeutil.GetFieldByName(schema, annsFieldName)
 		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-			if strings.Contains(searchParamStr, radiusKey) {
+			if isRangeSearch {
 				return nil, merr.WrapErrParameterInvalid("", "",
 					"range search is not supported for vector array (embedding list) fields, fieldName:", annsFieldName)
 			}
@@ -583,6 +589,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		isIterator:    isIterator,
 		collectionID:  collectionId,
 		orderByFields: orderByFields,
+		iterativeFilter: isIterativeFilter,
 	}, nil
 }
 

@@ -49,7 +49,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		mockey.Mock((*searchTask).tryGeneratePlan).To(func(_ *searchTask, _ []*commonpb.KeyValuePair, _ string, _ map[string]*schemapb.TemplateValue) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, error) {
 			capturedPlan = &planpb.PlanNode{}
 			qi := &planpb.QueryInfo{Topk: 10, MetricType: "L2", QueryFieldId: 101, GroupByFieldId: -1}
-			return capturedPlan, qi, 0, false, nil, nil
+			return capturedPlan, qi, 0, false, nil, internalpb.SearchType_DEFAULT, nil
 		}).Build()
 
 		// Build task
