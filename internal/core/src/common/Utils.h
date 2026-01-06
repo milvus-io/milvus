@@ -352,4 +352,9 @@ class Defer {
 
 #define DeferLambda(fn) Defer Defer_##__COUNTER__(fn);
 
+inline bool
+IsStructSubField(const std::string& fieldName) {
+    return fieldName.find('[') != std::string::npos;
+}
+
 }  // namespace milvus
