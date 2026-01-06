@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // Copy Segment Task for Snapshot Restore
@@ -229,10 +230,16 @@ func (t *CopySegmentTask) Cancel() {
 	t.cancel()
 }
 
-// Clone creates a shallow copy of the task.
+// Clone creates a copy of the task with deep-copied segmentResults.
 // Note: This shares references to manager, cm, and other components.
-// Used for task state inspection without modifying the original.
+// The segmentResults map is deep-copied to avoid concurrent map access.
 func (t *CopySegmentTask) Clone() Task {
+	// Deep copy segmentResults to avoid concurrent map access
+	results := make(map[int64]*datapb.CopySegmentResult)
+	for id, result := range t.segmentResults {
+		results[id] = typeutil.Clone(result)
+	}
+
 	return &CopySegmentTask{
 		ctx:            t.ctx,
 		cancel:         t.cancel,
@@ -243,7 +250,7 @@ func (t *CopySegmentTask) Clone() Task {
 		state:          t.state,
 		reason:         t.reason,
 		slots:          t.slots,
-		segmentResults: t.segmentResults,
+		segmentResults: results,
 		req:            t.req,
 		manager:        t.manager,
 		cm:             t.cm,
@@ -253,7 +260,12 @@ func (t *CopySegmentTask) Clone() Task {
 // GetSegmentResults returns the copy results for all target segments.
 // This is called by DataCoord to retrieve binlog/index metadata after task completion.
 func (t *CopySegmentTask) GetSegmentResults() map[int64]*datapb.CopySegmentResult {
-	return t.segmentResults
+	// Return a copy to avoid concurrent map access during iteration
+	results := make(map[int64]*datapb.CopySegmentResult)
+	for id, result := range t.segmentResults {
+		results[id] = result
+	}
+	return results
 }
 
 // ============================================================================
