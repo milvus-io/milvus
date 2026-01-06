@@ -353,6 +353,10 @@ func (m *mockMixCoord) AlterCollectionField(ctx context.Context, request *milvus
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockMixCoord) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockMixCoord) AddCollectionFunction(ctx context.Context, request *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
