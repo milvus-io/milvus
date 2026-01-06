@@ -314,6 +314,9 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	case message.MessageTypeManualFlush:
 		immutableMsg := message.MustAsImmutableManualFlushMessageV2(msg)
 		r.handleManualFlush(immutableMsg)
+	case message.MessageTypeFlushAll:
+		immutableMsg := message.MustAsImmutableFlushAllMessageV2(msg)
+		r.handleFlushAll(immutableMsg)
 	case message.MessageTypeCreateCollection:
 		immutableMsg := message.MustAsImmutableCreateCollectionMessageV1(msg)
 		r.handleCreateCollection(immutableMsg)
@@ -386,13 +389,21 @@ func (r *recoveryStorageImpl) handleManualFlush(msg message.ImmutableManualFlush
 	r.flushSegments(msg, segments)
 }
 
+// handleFlushAll handles the flush all message.
+func (r *recoveryStorageImpl) handleFlushAll(msg message.ImmutableFlushAllMessageV2) {
+	segments := lo.MapValues(r.segments, func(segment *segmentRecoveryInfo, _ int64) struct{} {
+		return struct{}{}
+	})
+	r.flushSegments(msg, segments)
+}
+
 // flushSegments flushes the segments in the recovery storage.
 func (r *recoveryStorageImpl) flushSegments(msg message.ImmutableMessage, sealSegmentIDs map[int64]struct{}) {
 	segmentIDs := make([]int64, 0)
 	rows := make([]uint64, 0)
 	binarySize := make([]uint64, 0)
-	for _, segment := range r.segments {
-		if _, ok := sealSegmentIDs[segment.meta.SegmentId]; ok {
+	for segmentID := range sealSegmentIDs {
+		if segment, ok := r.segments[segmentID]; ok {
 			segment.ObserveFlush(msg.TimeTick())
 			segmentIDs = append(segmentIDs, segment.meta.SegmentId)
 			rows = append(rows, segment.Rows())
@@ -402,7 +413,11 @@ func (r *recoveryStorageImpl) flushSegments(msg message.ImmutableMessage, sealSe
 	if len(segmentIDs) != len(sealSegmentIDs) {
 		r.detectInconsistency(msg, "flush segments not exist", zap.Int64s("wanted", lo.Keys(sealSegmentIDs)), zap.Int64s("actually", segmentIDs))
 	}
-	r.Logger().Info("flush all segments of collection by manual flush", log.FieldMessage(msg), zap.Uint64s("rows", rows), zap.Uint64s("binarySize", binarySize))
+	r.Logger().Info("flush segments of collection by flush", log.FieldMessage(msg),
+		zap.Uint64s("rows", rows),
+		zap.Uint64s("binarySize", binarySize),
+		zap.Int("flushedSegmentCount", len(segmentIDs)),
+	)
 }
 
 // handleCreateCollection handles the create collection message.
