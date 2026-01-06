@@ -294,6 +294,7 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 		Req:             sd.shallowCopySearchRequest(req.GetReq(), targetID),
 		FromShardLeader: req.FromShardLeader,
 		TotalChannelNum: req.TotalChannelNum,
+		FilterOnly:      req.FilterOnly,
 	}
 	return nodeReq
 }
@@ -340,6 +341,41 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	}
 }
 
+// executeSearchSubTasks is a helper that encapsulates the common pattern of
+// organizeSubTask + executeSubTasks for search operations.
+// Used by both normal search and two-stage search to reduce code duplication.
+func (sd *shardDelegator) executeSearchSubTasks(
+	ctx context.Context,
+	req *querypb.SearchRequest,
+	sealed []SnapshotItem,
+	growing []SegmentEntry,
+	sealedRowCount map[int64]int64,
+) ([]*internalpb.SearchResults, error) {
+	log := sd.getLogger(ctx)
+	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
+	if err != nil {
+		log.Warn("Search organizeSubTask failed", zap.Error(err))
+		return nil, err
+	}
+
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
+		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
+			resp, err := worker.SearchSegments(ctx, req)
+			st, ok := status.FromError(err)
+			if ok && st.Code() == codes.Unavailable {
+				sd.markSegmentOffline(req.GetSegmentIDs()...)
+			}
+			return resp, err
+		}, "Search", log)
+	if err != nil {
+		log.Warn("Delegator search failed", zap.Error(err))
+		return nil, err
+	}
+
+	log.Debug("Delegator search done", zap.Int("results", len(results)))
+	return results, nil
+}
+
 // Search preforms search operation on shard.
 func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -382,37 +418,41 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 
 	// get final sealedNum after possible segment prune
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
+
+	rowCounts := make([]int64, 0, sealedNum)
+	for _, item := range sealed {
+		for _, seg := range item.Segments {
+			rowCounts = append(rowCounts, sealedRowCount[seg.SegmentID])
+		}
+	}
+	effectiveSegmentNum := optimizers.CalculateEffectiveSegmentNum(sd.queryHook, rowCounts, req.GetReq().GetTopk())
+
 	log.Debug("search segments...",
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
+		zap.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
-	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
+		results, fallback, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		if err != nil {
+			return nil, err
+		}
+		if !fallback {
+			return results, nil
+		}
+		// fallback: continue with normal single-stage search below
+		log.Debug("Two-stage search requested fallback, continuing with normal search")
+	}
+
+	const isSecondStageSearch = false
+	req, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifySearchRequest)
-	if err != nil {
-		log.Warn("Search organizeSubTask failed", zap.Error(err))
-		return nil, err
-	}
-	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		resp, err := worker.SearchSegments(ctx, req)
-		status, ok := status.FromError(err)
-		if ok && status.Code() == codes.Unavailable {
-			sd.markSegmentOffline(req.GetSegmentIDs()...)
-		}
-		return resp, err
-	}, "Search", log)
-	if err != nil {
-		log.Warn("Delegator search failed", zap.Error(err))
-		return nil, err
-	}
 
-	log.Debug("Delegator search done", zap.Int("results", len(results)))
-
-	return results, nil
+	return sd.executeSearchSubTasks(ctx, req, sealed, growing, sealedRowCount)
 }
 
 // Search preforms search operation on shard.
@@ -501,6 +541,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				IsIterator:              req.GetReq().GetIsIterator(),
 				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
 				AnalyzerName:            subReq.GetAnalyzerName(),
+				SearchType:              subReq.GetSearchType(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{

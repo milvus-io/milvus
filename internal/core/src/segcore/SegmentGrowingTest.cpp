@@ -1264,6 +1264,102 @@ TEST(Growing, TestMaskWithNullableTTLField) {
     EXPECT_EQ(expired_count, test_data_count / 4);
 }
 
+TEST(Growing, FilterOnlySearchUsesEntityTTLPhysicalTime) {
+    using namespace milvus::query;
+
+    auto schema = std::make_shared<Schema>();
+    auto dim = 4;
+    auto metric_type = knowhere::metric::L2;
+    schema->AddDebugField("vec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64, false);
+    auto ttl_fid =
+        schema->AddDebugField("ttl_field", DataType::TIMESTAMPTZ, false);
+    schema->set_primary_field_id(pk_fid);
+    schema->set_ttl_field_id(ttl_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(dynamic_cast<SegmentGrowingImpl*>(segment.get()), nullptr);
+
+    constexpr int64_t test_data_count = 100;
+    // 90/10 split: first 10 rows expire before the TTL cutoff,
+    // remaining 90 are still alive.  An inverted-bitset bug would
+    // report 10 instead of 90.
+    constexpr int64_t expired_count = 10;
+    constexpr int64_t expected_valid_count =
+        test_data_count - expired_count;  // 90
+    auto dataset = DataGen(schema, test_data_count);
+
+    constexpr int64_t entity_ttl_physical_time_us = 1770026400000000LL;
+    for (auto& field_data : *dataset.raw_->mutable_fields_data()) {
+        if (field_data.field_id() != ttl_fid.get()) {
+            continue;
+        }
+
+        auto* ttl_values =
+            field_data.mutable_scalars()->mutable_timestamptz_data();
+        ttl_values->clear_data();
+        for (int i = 0; i < test_data_count; ++i) {
+            ttl_values->add_data(i < expired_count
+                                     ? entity_ttl_physical_time_us - 10
+                                     : entity_ttl_physical_time_us + 10);
+        }
+    }
+
+    segment->PreInsert(test_data_count);
+    segment->Insert(0,
+                    test_data_count,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    Timestamp query_ts = test_data_count + 10;
+    int64_t active_count = segment->get_active_count(query_ts);
+    ASSERT_EQ(active_count, test_data_count);
+
+    // Cross-check via ExecuteQueryExpr to confirm the expected count.
+    auto always_true_expr = std::make_shared<expr::AlwaysTrueExpr>();
+    auto expected_plan = std::make_shared<plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, always_true_expr);
+    auto expected_bitset = query::ExecuteQueryExpr(expected_plan,
+                                                   segment.get(),
+                                                   active_count,
+                                                   query_ts,
+                                                   entity_ttl_physical_time_us);
+    BitsetTypeView expected_matches(expected_bitset);
+    int64_t cross_check_count = 0;
+    for (int i = 0; i < test_data_count; ++i) {
+        if (expected_matches[i]) {
+            ++cross_check_count;
+        }
+    }
+    ASSERT_EQ(cross_check_count, expected_valid_count);
+
+    milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "pk >= 0", "vec", test_data_count, metric_type, R"({"nprobe": 10})", 3);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    ASSERT_NE(plan, nullptr);
+
+    auto query_data = generate_float_vector(1, dim);
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(1, dim, query_data.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    ASSERT_NE(ph_group, nullptr);
+
+    auto search_result = segment->Search(plan.get(),
+                                         ph_group.get(),
+                                         query_ts,
+                                         folly::CancellationToken(),
+                                         0,
+                                         0,
+                                         entity_ttl_physical_time_us,
+                                         true);
+
+    EXPECT_EQ(search_result->valid_count_, expected_valid_count);
+}
+
 // Resource tracking tests for growing segments
 TEST(Growing, EmptySegmentResourceEstimation) {
     auto schema = std::make_shared<Schema>();
