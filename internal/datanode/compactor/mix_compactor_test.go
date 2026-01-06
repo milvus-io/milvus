@@ -47,6 +47,7 @@ import (
 )
 
 func TestMixCompactionTaskSuite(t *testing.T) {
+	t.Skip("v1 format shall not be written anymore")
 	suite.Run(t, new(MixCompactionTaskStorageV1Suite))
 }
 

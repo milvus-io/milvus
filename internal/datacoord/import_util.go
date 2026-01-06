@@ -171,11 +171,6 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		segmentLevel = datapb.SegmentLevel_L0
 	}
 
-	storageVersion := storage.StorageV1
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
-
 	// alloc new segments
 	segments := make([]int64, 0)
 	addSegment := func(vchannel string, partitionID int64, size int64) error {
@@ -184,7 +179,7 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
 				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
-				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storage.StorageV2)
 			if err != nil {
 				return err
 			}
@@ -360,10 +355,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return fileStat.GetImportFile()
 	})
 
-	storageVersion := storage.StorageV1
-	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
 	req := &datapb.ImportRequest{
 		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 		JobID:           task.GetJobID(),
@@ -379,7 +370,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storageVersion,
+		StorageVersion:  storage.StorageV2,
 		PluginContext:   GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:      Params.CommonCfg.UseLoonFFI.GetAsBool(),
 	}

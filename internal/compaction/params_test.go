@@ -34,12 +34,8 @@ func TestGetJSONParams(t *testing.T) {
 	var result Params
 	err = json.Unmarshal([]byte(jsonStr), &result)
 	assert.NoError(t, err)
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
 	assert.Equal(t, Params{
-		StorageVersion:            storageVersion,
+		StorageVersion:            storage.StorageV2,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
@@ -84,12 +80,8 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	emptyJSON := ``
 	result, err := ParseParamsFromJSON(emptyJSON)
 	assert.NoError(t, err)
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
 	assert.Equal(t, Params{
-		StorageVersion:            storageVersion,
+		StorageVersion:            storage.StorageV2,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
