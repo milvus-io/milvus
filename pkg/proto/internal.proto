@@ -83,6 +83,12 @@ message CreateIndexRequest {
   repeated common.KeyValuePair extra_params = 8;
 }
 
+// search type will used by optimizer to determine the optimization rule in delegator
+enum SearchType {
+  DEFAULT = 0;
+  PURE_ANN_SEARCH_NO_FILTER = 1;   // pure ann search without filter, including range search/groupby/iterator/iterative_filter cases
+  PURE_ANN_SEARCH_WITH_FILTER = 2; // pure ann search with filter, excluding range search/groupby/iterator/iterative_filter cases
+}
 
 message SubSearchRequest {
   string dsl = 1;
@@ -100,6 +106,7 @@ message SubSearchRequest {
   int64 field_id = 12;
   bool ignore_growing = 13;
   string analyzer_name = 14;
+  SearchType search_type = 15;
 }
 
 message SearchRequest {
@@ -134,6 +141,7 @@ message SearchRequest {
   bool is_iterator = 28;
   string analyzer_name = 29;
   uint64 collection_ttl_timestamps = 30;
+  SearchType search_type = 31;
 }
 
 message SubSearchResults {
@@ -173,6 +181,9 @@ message SearchResults {
   bool is_recall_evaluation = 19;
   int64 scanned_remote_bytes = 20;
   int64 scanned_total_bytes = 21;
+  // Per-segment filter valid counts for two-stage search (filter-only mode).
+  // Index corresponds to sealed_segmentIDs_searched.
+  repeated int64 filter_valid_counts = 22;
 }
 
 message CostAggregation {
