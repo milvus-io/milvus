@@ -26,11 +26,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkt"
 	"github.com/x448/float16"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -176,13 +175,11 @@ func GenerateGeometryArray(numRows int) [][]byte {
 	for i := 0; i < numRows; i++ {
 		// data of wkt string bytes ,consider to be process by proxy
 		if i == numRows-1 {
-			geomT, _ := wkt.Unmarshal("POINT (-84.036 39.997)") // add a special point finally for test
-			wkbdata, _ := wkb.Marshal(geomT, wkb.NDR)
+			wkbdata, _ := common.ConvertWKTToWKB("POINT (-84.036 39.997)") // add a special point finally for test
 			ret = append(ret, wkbdata)
 			continue
 		}
-		geomT, _ := wkt.Unmarshal(wktArray[i%6])
-		wkbdata, _ := wkb.Marshal(geomT, wkb.NDR)
+		wkbdata, _ := common.ConvertWKTToWKB(wktArray[i%6])
 		ret = append(ret, wkbdata)
 	}
 	return ret

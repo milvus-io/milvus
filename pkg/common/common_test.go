@@ -290,3 +290,23 @@ func TestGetCollectionTTL(t *testing.T) {
 		assert.EqualValues(t, -1, result)
 	})
 }
+
+func TestConvertWKTToWKB(t *testing.T) {
+	wkt := "POINT EMPTY"
+	wkb, err := ConvertWKTToWKB(wkt)
+	assert.NoError(t, err)
+	assert.NotNil(t, wkb)
+
+	wktResult, err := ConvertWKBToWKT(wkb)
+	assert.NoError(t, err)
+	assert.Equal(t, wkt, wktResult)
+
+	wkt2 := "POLYGON EMPTY"
+	wkb2, err := ConvertWKTToWKB(wkt2)
+	assert.NoError(t, err)
+	assert.NotNil(t, wkb2)
+
+	wktResult2, err := ConvertWKBToWKT(wkb2)
+	assert.NoError(t, err)
+	assert.Equal(t, wkt2, wktResult2)
+}
