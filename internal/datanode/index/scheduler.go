@@ -263,16 +263,16 @@ func (sched *TaskScheduler) indexBuildLoop() {
 			return
 		case <-sched.TaskQueue.utChan():
 			t := sched.TaskQueue.PopUnissuedTask()
-			if t.IsVectorIndex() {
-				GetVecIndexBuildPool().Submit(func() (any, error) {
+			go func(t Task) {
+				if t.IsVectorIndex() {
+					GetVecIndexBuildPool().Submit(func() (any, error) {
+						sched.processTask(t)
+						return nil, nil
+					})
+				} else {
 					sched.processTask(t)
-					return nil, nil
-				})
-			} else {
-				go func(t Task) {
-					sched.processTask(t)
-				}(t)
-			}
+				}
+			}(t)
 		}
 	}
 }
