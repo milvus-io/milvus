@@ -216,7 +216,9 @@ func (node *DataNode) Init() error {
 		err := index.InitSegcore(serverID)
 		if err != nil {
 			initError = err
+			return
 		}
+
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError

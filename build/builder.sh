@@ -4,6 +4,9 @@ set -eo pipefail
 
 source ./build/util.sh
 
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_rsa
+
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
@@ -33,15 +36,37 @@ PLATFORM_ARCH="${PLATFORM_ARCH:-${IMAGE_ARCH}}"
 
 export IMAGE_ARCH=${PLATFORM_ARCH}
 
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan"
-chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
+# Define the base volume directory
+DOCKER_BASE_DIR="${DOCKER_VOLUME_DIRECTORY:-.docker}"
+VOLUME_PREFIX="${DOCKER_BASE_DIR}/${IMAGE_ARCH}-${OS_NAME}"
 
-$DOCKER_COMPOSE_COMMAND pull builder
+# Array of volume names
+VOLUMES=(
+    "ccache"
+    "go-mod"
+    "vscode-extensions"
+    "conan"
+)
+
+# Loop through the volume names
+for VOL_NAME in "${VOLUMES[@]}"; do
+    TARGET_DIR="${VOLUME_PREFIX}-${VOL_NAME}"
+    
+    # Check if the directory exists before trying to create it
+    if [ ! -d "$TARGET_DIR" ]; then
+        # Create the directory. The -p flag handles parent directories.
+        mkdir -p "$TARGET_DIR"
+        
+        # Apply permissions (chmod 777) only to the newly created directory
+        echo "Created and set permissions for: $TARGET_DIR"
+        chmod 777 "$TARGET_DIR"
+    fi
+done
+
 if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
     $DOCKER_COMPOSE_COMMAND build builder
+else
+    $DOCKER_COMPOSE_COMMAND pull builder
 fi
 
 $DOCKER_COMPOSE_COMMAND run --no-deps --rm builder "$@"

@@ -131,16 +131,26 @@ template <typename DataType = float>
 inline auto
 generate_load_conf(const milvus::IndexType& index_type,
                    const milvus::MetricType& metric_type,
-                   int64_t nb) {
+                   int64_t nb,
+                   bool ncs_enable = false) {
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        return knowhere::Json{
+        auto j = knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {milvus::index::DISK_ANN_LOAD_THREAD_NUM, std::to_string(2)},
             {milvus::index::DISK_ANN_SEARCH_CACHE_BUDGET,
              std::to_string(0.05 * sizeof(DataType) * nb /
                             (1024.0 * 1024.0 * 1024.0))},
+            {milvus::index::NCS_ENABLE, ncs_enable},
         };
+        if(ncs_enable){
+            j.update({
+                {milvus::index::NCS_KIND, "in_memory"},
+                {milvus::index::NCS_EXTRAS,
+                    knowhere::Json{{"note", "unit test"}}},
+            });
+        }
+        return j;
     }
     return knowhere::Json{
         {knowhere::meta::METRIC_TYPE, metric_type},

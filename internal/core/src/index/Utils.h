@@ -102,6 +102,20 @@ GetValueFromConfig(const Config& cfg, const std::string& key) {
             // compatibility for boolean string
             return boost::algorithm::to_lower_copy(value.get<std::string>()) ==
                    "true";
+        } else if constexpr (std::is_same_v<T, nlohmann::json>) {
+            // If expecting json but value is a string, parse it
+            if (value.is_string()) {
+                try {
+                    return nlohmann::json::parse(value.get<std::string>());
+                } catch (const nlohmann::json::parse_error& e) {
+                    ThrowInfo(ErrorCode::UnexpectedError,
+                              "failed to parse JSON string for key {}: {}",
+                              key,
+                              e.what());
+                }
+            }
+            // Otherwise return the json value directly
+            return value;
         }
         return value.get<T>();
     } catch (const nlohmann::json::type_error& e) {

@@ -16,8 +16,8 @@ from pymilvus import (
 pymilvus_version = pymilvus.__version__
 
 
-all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW"]
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"M": 48, "efConstruction": 200}]
+all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW", "DISKANN"]
+default_index_params = [{"nlist": 128}, {"nlist": 128}, {"M": 48, "efConstruction": 200}, {}]
 index_params_map = dict(zip(all_index_types, default_index_params))
 
 
@@ -49,6 +49,10 @@ def gen_search_param(index_type, metric_type="L2"):
         for search_k in [1000]:
             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
+    elif index_type == "DISKANN":
+        for search_list in [150]:
+            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
+            search_params.append(diskann_search_param)
     else:
         logger.info("Invalid index_type.")
         raise Exception("Invalid index_type.")
@@ -151,7 +155,8 @@ def milvus_recall_test(host='127.0.0.1', index_type="HNSW"):
     # define output_fields of search result
     for i in range(3):
         t0 = time.time()
-        logger.info(f"Search...")
+        logger.info(f"Search... TIMEOUT={TIMEOUT}")
+        logger.info(f"params={current_search_params}")
         res = collection.search(
             test[:nq], "float_vector", current_search_params, topK, output_fields=["int64"], timeout=TIMEOUT
         )
@@ -196,6 +201,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     host = args.host
     tasks = []
-    for index_type in ["HNSW"]:
+    for index_type in ["HNSW", "DISKANN"]:
         milvus_recall_test(host, index_type)
 

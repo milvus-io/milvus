@@ -25,6 +25,7 @@ package initcore
 #include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
 #include "segcore/arrow_fs_c.h"
+#include "ncs/ncs_c.h"
 */
 import "C"
 
@@ -660,4 +661,23 @@ func InitPluginLoader() error {
 
 func CleanPluginLoader() {
 	C.CleanPluginLoader()
+}
+
+// InitNcsSingleton initializes the NCS singleton with the specified kind and extras.
+// This should be called during node initialization before any NCS operations.
+func InitNcsSingleton(ncsKind string, ncsExtras string) error {
+	cNcsKind := C.CString(ncsKind)
+	defer C.free(unsafe.Pointer(cNcsKind))
+
+	cNcsExtras := C.CString(ncsExtras)
+	defer C.free(unsafe.Pointer(cNcsExtras))
+
+	status := C.initNcsSingleton(cNcsKind, cNcsExtras)
+	err := HandleCStatus(&status, "failed to initialize NCS singleton")
+	if err != nil {
+		return err
+	}
+
+	log.Info("NCS singleton initialized successfully", zap.String("ncsKind", ncsKind), zap.String("ncsExtras", ncsExtras))
+	return nil
 }
