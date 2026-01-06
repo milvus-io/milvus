@@ -25,6 +25,7 @@ package initcore
 #include "segcore/segcore_init_c.h"
 #include "storage/storage_c.h"
 #include "segcore/arrow_fs_c.h"
+#include "exec/expression/function/init_c.h"
 */
 import "C"
 
@@ -48,6 +49,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func InitExecExpressionFunctionFactory() {
+	C.InitExecExpressionFunctionFactory()
+}
 
 func InitLocalChunkManager(path string) {
 	CLocalRootPath := C.CString(path)

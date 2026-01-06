@@ -227,7 +227,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         const VectorBase* vec_raw,
                         const int64_t* seg_offsets,
                         int64_t count,
-                        T* output) const;
+                        T* output,
+                        bool small_int_raw_type = false) const;
 
     template <typename S>
     void
@@ -237,6 +238,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<std::string>* dst) const;
+
+    template <typename S, typename T = S>
+    void
+    bulk_subscript_ptr_impl(const VectorBase* vec_raw,
+                            const int64_t* seg_offsets,
+                            int64_t count,
+                            T* dst) const;
 
     // for scalar array vectors
     template <typename T>
@@ -282,6 +290,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const override;
+
+    void
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
+                   DataType data_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* data,
+                   TargetBitmap& valid_map,
+                   bool small_int_raw_type = false) const override;
 
     std::unique_ptr<DataArray>
     bulk_subscript(milvus::OpContext* op_ctx,
@@ -454,7 +472,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override {
+    find_first(int64_t limit, const BitsetTypeView& bitset) const override {
         return insert_record_.pk2offset_->find_first(limit, bitset);
     }
 

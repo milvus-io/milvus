@@ -24,6 +24,7 @@ import (
 
 func TestGrowingSegment(t *testing.T) {
 	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 	err := initcore.InitMmapManager(paramtable.Get(), 1)

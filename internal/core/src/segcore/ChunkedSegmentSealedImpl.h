@@ -301,7 +301,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
            const Timestamp* timestamps) override;
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
-    find_first(int64_t limit, const BitsetType& bitset) const override;
+    find_first(int64_t limit, const BitsetTypeView& bitset) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
@@ -386,6 +386,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count,
                    void* output) const override;
+
+    void
+    bulk_subscript(milvus::OpContext* op_ctx,
+                   FieldId field_id,
+                   DataType data_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* data,
+                   TargetBitmap& valid_map,
+                   bool small_int_raw_type = false) const override;
 
     void
     check_search(const query::Plan* plan) const override;
@@ -840,7 +850,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         ChunkedColumnInterface* field,
                         const int64_t* seg_offsets,
                         int64_t count,
-                        T* dst_raw);
+                        T* dst_raw,
+                        bool small_int_raw_type = false);
 
     static void
     bulk_subscript_impl(milvus::OpContext* op_ctx,
@@ -858,6 +869,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<std::string>* dst_raw);
+
+    template <typename S, typename T = S>
+    static void
+    bulk_subscript_ptr_impl(milvus::OpContext* op_ctx,
+                            const ChunkedColumnInterface* field,
+                            const int64_t* seg_offsets,
+                            int64_t count,
+                            T* dst);
 
     template <typename T>
     static void
