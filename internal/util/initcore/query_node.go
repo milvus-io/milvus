@@ -152,11 +152,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		err = InitStorageV2FileSystem(paramtable.Get())
-		if err != nil {
-			return err
-		}
+	err = InitStorageV2FileSystem(paramtable.Get())
+	if err != nil {
+		return err
 	}
 
 	err = InitMmapManager(paramtable.Get(), nodeID)
