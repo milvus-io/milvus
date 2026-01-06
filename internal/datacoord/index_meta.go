@@ -556,12 +556,13 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 		m.fieldIndexLock.RUnlock()
 		return nil
 	}
+	allIndexes := lo.Values(fieldIndexes)
 	m.fieldIndexLock.RUnlock()
 
 	fieldIDSet := typeutil.NewUniqueSet(fieldIDs...)
 	matchedFields := typeutil.NewUniqueSet()
 
-	targetIndices := lo.Filter(lo.Values(fieldIndexes), func(index *model.Index, _ int) bool {
+	targetIndices := lo.Filter(allIndexes, func(index *model.Index, _ int) bool {
 		return fieldIDSet.Contain(index.FieldID)
 	})
 	for _, index := range targetIndices {
