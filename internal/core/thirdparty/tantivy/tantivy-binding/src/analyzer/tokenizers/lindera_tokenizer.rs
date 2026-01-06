@@ -203,7 +203,7 @@ impl LinderaTokenizer {
         kind: &DictionaryKind,
         params: &json::Map<String, json::Value>,
     ) -> Result<()> {
-        match params.get(FILTER_KEY) {
+        match params.get(FILTERKEY) {
             Some(v) => {
                 let filter_list = v.as_array().ok_or_else(|| {
                     TantivyBindingError::InvalidArgument(format!("lindera filters should be array"))
@@ -226,7 +226,8 @@ impl Tokenizer for LinderaTokenizer {
     type TokenStream<'a> = LinderaTokenStream<'a>;
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> LinderaTokenStream<'a> {
-        // Setment a text.
+        self.token.reset();
+        // Segment a text.
         let mut tokens = self
             .segmenter
             .segment(Cow::<'a, str>::Borrowed(text))
