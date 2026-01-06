@@ -224,7 +224,8 @@ impl Tokenizer for LinderaTokenizer {
     type TokenStream<'a> = LinderaTokenStream<'a>;
 
     fn token_stream<'a>(&'a mut self, text: &'a str) -> LinderaTokenStream<'a> {
-        // Setment a text.
+        self.token.reset();
+        // Segment a text.
         let mut tokens = self
             .segmenter
             .segment(Cow::<'a, str>::Borrowed(text))

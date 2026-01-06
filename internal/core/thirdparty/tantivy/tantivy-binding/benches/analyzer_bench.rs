@@ -112,8 +112,8 @@ fn bench_lindera_tokenizer_clone(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    // bench_lindua_language_identifier_tokenizer,
-    // bench_whatlang_language_identifier_tokenizer,
+    bench_lindua_language_identifier_tokenizer,
+    bench_whatlang_language_identifier_tokenizer,
     bench_jieba_tokenizer_clone,
     bench_lindera_tokenizer_clone
 );
