@@ -75,6 +75,7 @@ message FieldIndexMeta {
   repeated common.KeyValuePair index_params = 5;
   bool is_auto_index = 6;
   repeated common.KeyValuePair user_index_params = 7;
+  int64 index_id = 8;
 }
 
 message CollectionIndexMeta {
