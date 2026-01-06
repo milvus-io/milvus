@@ -173,6 +173,7 @@ service QueryNode {
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
+    rpc UpdateIndex(UpdateIndexRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
@@ -1011,6 +1012,24 @@ message UpdateSchemaRequest {
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
     uint64 version = 4;
+}
+
+message UpdateIndexRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    message AddIndex {
+        index.IndexInfo index_info = 1;
+    }
+    message DropIndex {
+        int64 index_id = 1;
+    }
+    message Action {
+        oneof op {
+            AddIndex add_index_request = 1;
+            DropIndex drop_index_request = 2;
+        }
+    }
+    Action action = 3;
 }
 
 message RunAnalyzerRequest{
