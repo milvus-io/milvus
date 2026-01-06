@@ -1506,10 +1506,11 @@ GetFieldDatasFromManifest(
 
     // TODO remove manual check after loon support read null for non-exists field
     bool field_exists = false;
+    const auto field_id_to_find = std::to_string(field_meta.field_id);
     for (size_t i = 0; i < column_groups->size() && !field_exists; i++) {
         auto column_group = column_groups->get_column_group(i);
-        for (auto& column : column_group->columns) {
-            if (column == std::to_string((field_meta.field_id))) {
+        for (const auto& column : column_group->columns) {
+            if (column == field_id_to_find) {
                 field_exists = true;
                 break;
             }
