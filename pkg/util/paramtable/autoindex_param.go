@@ -61,6 +61,11 @@ type AutoIndexConfig struct {
 	ScalarTimestampTzIndexType ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
+
+	// two-stage search
+	TwoStageSearchEnabled        ParamItem `refreshable:"true"`
+	TwoStageSearchMinTopk        ParamItem `refreshable:"true"`
+	TwoStageSearchMinNumSegments ParamItem `refreshable:"true"`
 }
 
 const (
@@ -306,6 +311,33 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarBoolIndexType.Init(base.mgr)
+
+	p.TwoStageSearchEnabled = ParamItem{
+		Key:          "autoIndex.twoStageSearch.enabled",
+		Version:      "2.6.10",
+		DefaultValue: "false",
+		Doc:          `Enable two-stage search optimization. When enabled, search first executes filter-only to get actual filter selectivity, then uses this info to optimize search parameters before executing vector search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchEnabled.Init(base.mgr)
+
+	p.TwoStageSearchMinTopk = ParamItem{
+		Key:          "autoIndex.twoStageSearch.minTopk",
+		Version:      "2.6.10",
+		DefaultValue: "2000",
+		Doc:          `Minimum topk for two-stage search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchMinTopk.Init(base.mgr)
+
+	p.TwoStageSearchMinNumSegments = ParamItem{
+		Key:          "autoIndex.twoStageSearch.minNumSegments",
+		Version:      "2.6.10",
+		DefaultValue: "5",
+		Doc:          `Minimum number of segments for two-stage search.`,
+		Export:       true,
+	}
+	p.TwoStageSearchMinNumSegments.Init(base.mgr)
 }
 
 func setDefaultIfNotExist(params map[string]string, key string, defaultValue string) {

@@ -1,7 +1,5 @@
 package tasks
 
-// TODO: rename this file into search_task.go
-
 import "C"
 
 import (
@@ -139,6 +137,7 @@ func (t *SearchTask) Execute() error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
+
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
 	req := t.req
@@ -181,6 +180,36 @@ func (t *SearchTask) Execute() error {
 	}
 	defer segments.DeleteSearchResults(results)
 
+	// In filter-only mode, extract filter results and return early
+	if searchReq.FilterOnly() {
+		segmentIDs := make([]int64, 0, len(searchedSegments))
+		validCounts := make([]int64, 0, len(searchedSegments))
+		for i, result := range results {
+			if i < len(searchedSegments) {
+				segmentIDs = append(segmentIDs, searchedSegments[i].ID())
+				validCounts = append(validCounts, result.ValidCount())
+			}
+		}
+		// Set result for all merged tasks (similar to non-filter-only mode)
+		for i := range t.originNqs {
+			var task *SearchTask
+			if i == 0 {
+				task = t
+			} else {
+				task = t.others[i-1]
+			}
+			task.result = &internalpb.SearchResults{
+				Status:                   merr.Success(),
+				SealedSegmentIDsSearched: segmentIDs,
+				FilterValidCounts:        validCounts,
+				CostAggregation:          &internalpb.CostAggregation{},
+			}
+		}
+		log.Debug("filter-only search completed", zap.Int("segments", len(segmentIDs)))
+		return nil
+	}
+
+	// Normal search mode: reduce and return results
 	// plan.MetricType is accurate, though req.MetricType may be empty
 	metricType := searchReq.Plan().GetMetricType()
 
@@ -290,7 +319,8 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	ratio := float64(after) / float64(pre)
 
 	// Check mergeable
-	if t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
+	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
+		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||

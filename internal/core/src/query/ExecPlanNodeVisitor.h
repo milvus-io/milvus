@@ -95,6 +95,16 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return expr_use_pk_index_;
     }
 
+    void
+    SetFilterOnly(bool filter_only) {
+        filter_only_ = filter_only;
+    }
+
+    bool
+    GetFilterOnly() {
+        return filter_only_;
+    }
+
     static RowVectorPtr
     ExecuteTask(plan::PlanFragment& plan,
                 std::shared_ptr<milvus::exec::QueryContext> query_context);
@@ -118,6 +128,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     RetrieveResultOpt retrieve_result_opt_;
 
     bool expr_use_pk_index_ = false;
+    bool filter_only_ = false;
 };
 
 // for test use only
