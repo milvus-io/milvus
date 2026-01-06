@@ -713,3 +713,100 @@ func TestParseISO8601Duration(t *testing.T) {
 		})
 	}
 }
+
+func Test_combineBinaryArithExprWithFields(t *testing.T) {
+	leftColumnInfo := &planpb.ColumnInfo{
+		FieldId:  101,
+		DataType: schemapb.DataType_Int64,
+	}
+	rightColumnInfo := &planpb.ColumnInfo{
+		FieldId:  102,
+		DataType: schemapb.DataType_Int64,
+	}
+	valueExpr := &planpb.ValueExpr{
+		Value: &planpb.GenericValue{
+			Val: &planpb.GenericValue_Int64Val{
+				Int64Val: 100,
+			},
+		},
+	}
+
+	t.Run("multiply two fields", func(t *testing.T) {
+		result, err := combineBinaryArithExprWithFields(
+			planpb.OpType_GreaterThan,
+			planpb.ArithOpType_Mul,
+			leftColumnInfo,
+			rightColumnInfo,
+			valueExpr,
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotNil(t, result.GetBinaryArithOpEvalRangeExprWithFields())
+		expr := result.GetBinaryArithOpEvalRangeExprWithFields()
+		assert.Equal(t, planpb.OpType_GreaterThan, expr.Op)
+		assert.Equal(t, planpb.ArithOpType_Mul, expr.ArithOp)
+		assert.Equal(t, leftColumnInfo.FieldId, expr.LeftColumnInfo.FieldId)
+		assert.Equal(t, rightColumnInfo.FieldId, expr.RightColumnInfo.FieldId)
+		assert.Equal(t, int64(100), expr.Value.GetInt64Val())
+	})
+
+	t.Run("add two fields", func(t *testing.T) {
+		result, err := combineBinaryArithExprWithFields(
+			planpb.OpType_Equal,
+			planpb.ArithOpType_Add,
+			leftColumnInfo,
+			rightColumnInfo,
+			valueExpr,
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		expr := result.GetBinaryArithOpEvalRangeExprWithFields()
+		assert.Equal(t, planpb.OpType_Equal, expr.Op)
+		assert.Equal(t, planpb.ArithOpType_Add, expr.ArithOp)
+	})
+
+	t.Run("subtract two fields", func(t *testing.T) {
+		result, err := combineBinaryArithExprWithFields(
+			planpb.OpType_LessThan,
+			planpb.ArithOpType_Sub,
+			leftColumnInfo,
+			rightColumnInfo,
+			valueExpr,
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		expr := result.GetBinaryArithOpEvalRangeExprWithFields()
+		assert.Equal(t, planpb.OpType_LessThan, expr.Op)
+		assert.Equal(t, planpb.ArithOpType_Sub, expr.ArithOp)
+	})
+
+	t.Run("divide two fields", func(t *testing.T) {
+		result, err := combineBinaryArithExprWithFields(
+			planpb.OpType_GreaterEqual,
+			planpb.ArithOpType_Div,
+			leftColumnInfo,
+			rightColumnInfo,
+			valueExpr,
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		expr := result.GetBinaryArithOpEvalRangeExprWithFields()
+		assert.Equal(t, planpb.OpType_GreaterEqual, expr.Op)
+		assert.Equal(t, planpb.ArithOpType_Div, expr.ArithOp)
+	})
+
+	t.Run("modulo two fields", func(t *testing.T) {
+		result, err := combineBinaryArithExprWithFields(
+			planpb.OpType_NotEqual,
+			planpb.ArithOpType_Mod,
+			leftColumnInfo,
+			rightColumnInfo,
+			valueExpr,
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		expr := result.GetBinaryArithOpEvalRangeExprWithFields()
+		assert.Equal(t, planpb.OpType_NotEqual, expr.Op)
+		assert.Equal(t, planpb.ArithOpType_Mod, expr.ArithOp)
+	})
+}

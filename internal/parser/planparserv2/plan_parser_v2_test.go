@@ -784,6 +784,41 @@ func TestExpr_BinaryArith(t *testing.T) {
 	}
 }
 
+func TestExpr_BinaryArithBetweenTwoFields(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// Test arithmetic operations between two fields
+	// These should now be valid expressions
+	exprStrs := []string{
+		`Int64Field + Int32Field > 100`,
+		`Int64Field - Int32Field < 50`,
+		`Int64Field * Int32Field >= 1000`,
+		`Int64Field / Int32Field <= 10`,
+		`Int64Field % Int32Field == 0`,
+		`FloatField + DoubleField > 100.0`,
+		`FloatField * DoubleField != 0`,
+		`Int8Field + Int16Field > 0`,
+		`Int32Field - Int64Field < 100`,
+	}
+	for _, exprStr := range exprStrs {
+		assertValidExpr(t, helper, exprStr)
+	}
+
+	// Verify that the expression creates BinaryArithOpEvalRangeExprWithFields
+	expr, err := ParseExpr(helper, `Int64Field * Int32Field > 100`, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, expr)
+	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExprWithFields())
+	twoFieldExpr := expr.GetBinaryArithOpEvalRangeExprWithFields()
+	assert.Equal(t, planpb.OpType_GreaterThan, twoFieldExpr.Op)
+	assert.Equal(t, planpb.ArithOpType_Mul, twoFieldExpr.ArithOp)
+	assert.NotNil(t, twoFieldExpr.LeftColumnInfo)
+	assert.NotNil(t, twoFieldExpr.RightColumnInfo)
+	assert.Equal(t, int64(100), twoFieldExpr.Value.GetInt64Val())
+}
+
 func TestExpr_Value(t *testing.T) {
 	schema := newTestSchema(true)
 	helper, err := typeutil.CreateSchemaHelper(schema)

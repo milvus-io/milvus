@@ -691,6 +691,45 @@ class BinaryArithOpEvalRangeExpr : public ITypeFilterExpr {
     const proto::plan::GenericValue value_;
 };
 
+// Expression for arithmetic operations between two columns: (col1 arith col2) op value
+// Example: price * quantity > 100
+class BinaryArithOpEvalRangeExprWithFields : public ITypeFilterExpr {
+ public:
+    BinaryArithOpEvalRangeExprWithFields(
+        const ColumnInfo& left_column,
+        const ColumnInfo& right_column,
+        const proto::plan::OpType op_type,
+        const proto::plan::ArithOpType arith_op_type,
+        const proto::plan::GenericValue value)
+        : left_column_(left_column),
+          right_column_(right_column),
+          op_type_(op_type),
+          arith_op_type_(arith_op_type),
+          value_(value) {
+    }
+
+    std::string
+    ToString() const override {
+        std::stringstream ss;
+        ss << "BinaryArithOpEvalRangeExprWithFields:[Left Column: "
+           << left_column_.ToString()
+           << ", Right Column: " << right_column_.ToString()
+           << ", Operator Type: " << milvus::proto::plan::OpType_Name(op_type_)
+           << ", Arith Operator Type: "
+           << milvus::proto::plan::ArithOpType_Name(arith_op_type_)
+           << ", Value: " << value_.ShortDebugString() << "]";
+
+        return ss.str();
+    }
+
+ public:
+    const ColumnInfo left_column_;
+    const ColumnInfo right_column_;
+    const proto::plan::OpType op_type_;
+    const proto::plan::ArithOpType arith_op_type_;
+    const proto::plan::GenericValue value_;
+};
+
 class TimestamptzArithCompareExpr : public ITypeFilterExpr {
  public:
     TimestamptzArithCompareExpr(const ColumnInfo& timestamp_column,
