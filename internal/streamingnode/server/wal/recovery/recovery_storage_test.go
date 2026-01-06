@@ -572,10 +572,8 @@ func (b *streamBuilder) createFlushAll() message.ImmutableMessage {
 		return nil
 	}
 	for _, collection := range b.collectionIDs {
-		segmentIDs := make([]int64, 0)
 		for partitionID := range collection {
 			for segmentID := range collection[partitionID] {
-				segmentIDs = append(segmentIDs, segmentID)
 				delete(collection[partitionID], segmentID)
 			}
 		}
