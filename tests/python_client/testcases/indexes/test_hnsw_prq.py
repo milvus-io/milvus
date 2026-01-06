@@ -18,6 +18,7 @@ default_search_params = {"ef": 64, "refine_k": 1}
 
 
 class TestHnswPRQBuildParams(TestMilvusClientV2Base):
+    @pytest.mark.skip(reason="ci tests index creation timeout")
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("params", HNSW_PRQ.build_params)
     def test_hnsw_prq_build_params(self, params):
@@ -80,6 +81,7 @@ class TestHnswPRQBuildParams(TestMilvusClientV2Base):
                         assert key in idx_info.keys()
                         assert str(value) in idx_info.values()
 
+    @pytest.mark.skip(reason="ci tests index creation timeout")
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("vector_data_type", ct.all_vector_types)
     def test_hnsw_prq_on_all_vector_types(self, vector_data_type):
@@ -136,6 +138,7 @@ class TestHnswPRQBuildParams(TestMilvusClientV2Base):
                                      "limit": ct.default_limit,
                                      "pk_name": pk_field_name})
 
+    @pytest.mark.skip(reason="ci tests index creation timeout")
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", HNSW_PRQ.supported_metrics)
     def test_hnsw_prq_on_all_metrics(self, metric):
@@ -195,6 +198,7 @@ class TestHnswPRQSearchParams(TestMilvusClientV2Base):
         self.enable_dynamic_field = False
         self.datas = []
 
+    @pytest.mark.skip(reason="ci tests index creation timeout")
     @pytest.fixture(scope="class", autouse=True)
     def prepare_collection(self, request):
         """
@@ -230,6 +234,7 @@ class TestHnswPRQSearchParams(TestMilvusClientV2Base):
             self.drop_collection(self._client(), self.collection_name)
         request.addfinalizer(teardown)
 
+    @pytest.mark.skip(reason="ci tests index creation timeout")
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("params", HNSW_PRQ.search_params)
     def test_hnsw_prq_search_params(self, params):

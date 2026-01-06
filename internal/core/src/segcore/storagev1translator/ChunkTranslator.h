@@ -64,6 +64,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     FieldDataInfo field_data_info,
                     std::vector<FileInfo>&& file_infos,
                     bool use_mmap,
+                    bool mmap_populate,
                     milvus::proto::common::LoadPriority load_priority);
 
     size_t
@@ -102,6 +103,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     int64_t field_id_;
     std::string key_;
     bool use_mmap_;
+    bool mmap_populate_;
     CTMeta meta_;
     FieldMeta field_meta_;
     std::string mmap_dir_path_;

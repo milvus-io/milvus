@@ -58,7 +58,11 @@ MmapChunkTarget::release() {
     flush();
 
     auto file = File::Open(file_path_, O_RDWR);
-    auto m = mmap(nullptr, cap_, PROT_READ, MAP_SHARED, file.Descriptor(), 0);
+    auto mmap_flag = MAP_SHARED;
+    if (populate_) {
+        mmap_flag |= MAP_POPULATE;
+    }
+    auto m = mmap(nullptr, cap_, PROT_READ, mmap_flag, file.Descriptor(), 0);
     AssertInfo(m != MAP_FAILED,
                "failed to map: {}, map_size={}",
                strerror(errno),
