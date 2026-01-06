@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -110,49 +111,54 @@ func Test_singleTypeChannelsMgr_getAllChannels(t *testing.T) {
 	})
 }
 
-func Test_singleTypeChannelsMgr_getPChans(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
+func Test_singleTypeChannelsMgr_ensureChannels(t *testing.T) {
+	t.Run("hit cache", func(t *testing.T) {
 		m := &singleTypeChannelsMgr{
+			infos: map[UniqueID]streamInfos{
+				100: {channelInfos: channelInfos{vchans: []string{"111"}, pchans: []string{"p111"}}},
+			},
 			getChannelsFunc: func(collectionID UniqueID) (channelInfos, error) {
-				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"111"}}, nil
+				return channelInfos{}, errors.New("should not be called")
 			},
 		}
-		got, err := m.getPChans(100)
+		got, err := m.ensureChannels(100)
 		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111"}, got)
+		assert.ElementsMatch(t, []string{"111"}, got.vchans)
+		assert.ElementsMatch(t, []string{"p111"}, got.pchans)
 	})
 
-	t.Run("error case", func(t *testing.T) {
+	t.Run("load and cache", func(t *testing.T) {
+		called := atomic.Int32{}
 		m := &singleTypeChannelsMgr{
+			infos: make(map[UniqueID]streamInfos),
 			getChannelsFunc: func(collectionID UniqueID) (channelInfos, error) {
-				return channelInfos{}, errors.New("mock")
+				called.Add(1)
+				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"p111", "p222"}}, nil
 			},
 		}
-		_, err := m.getPChans(100)
-		assert.Error(t, err)
-	})
-}
-
-func Test_singleTypeChannelsMgr_getVChans(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		m := &singleTypeChannelsMgr{
-			getChannelsFunc: func(collectionID UniqueID) (channelInfos, error) {
-				return channelInfos{vchans: []string{"111", "222"}, pchans: []string{"111"}}, nil
-			},
-		}
-		got, err := m.getVChans(100)
+		got, err := m.ensureChannels(100)
 		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"111", "222"}, got)
+		assert.ElementsMatch(t, []string{"111", "222"}, got.vchans)
+		assert.ElementsMatch(t, []string{"p111", "p222"}, got.pchans)
+		assert.Equal(t, int32(1), called.Load())
+
+		// ensure the cached value is returned without extra fetches.
+		got, err = m.ensureChannels(100)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"111", "222"}, got.vchans)
+		assert.Equal(t, int32(1), called.Load())
 	})
 
-	t.Run("error case", func(t *testing.T) {
+	t.Run("propagate error", func(t *testing.T) {
+		expErr := errors.New("mock")
 		m := &singleTypeChannelsMgr{
+			infos: make(map[UniqueID]streamInfos),
 			getChannelsFunc: func(collectionID UniqueID) (channelInfos, error) {
-				return channelInfos{}, errors.New("mock")
+				return channelInfos{}, expErr
 			},
 		}
-		_, err := m.getVChans(100)
-		assert.Error(t, err)
+		_, err := m.ensureChannels(1)
+		assert.ErrorIs(t, err, expErr)
 	})
 }
 

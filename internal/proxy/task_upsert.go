@@ -872,8 +872,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	// set upsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
-	rowIDBegin, rowIDEnd, _ := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
+	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	if allocateErr != nil {
+		log.Ctx(ctx).Warn("failed to allocate auto id for upsert",
+			zap.String("collectionName", collectionName),
+			zap.Int64("collectionID", it.upsertMsg.InsertMsg.CollectionID),
+			zap.Uint32("rowNums", rowNums),
+			zap.Error(allocateErr))
+		return allocateErr
+	}
 
 	it.upsertMsg.InsertMsg.RowIDs = make([]UniqueID, rowNums)
 	it.rowIDs = make([]UniqueID, rowNums)
