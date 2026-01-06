@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_pipeline"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -50,7 +51,9 @@ func (suite *StreamPipelineSuite) SetupTest() {
 	suite.msgDispatcher = msgdispatcher.NewMockClient(suite.T())
 	suite.msgDispatcher.EXPECT().Register(mock.Anything, mock.Anything).Return(suite.inChannel, nil)
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
-	suite.pipeline = NewPipelineWithStream(suite.msgDispatcher, 0, false, suite.channel)
+	getter := mock_pipeline.NewMockLastestMVCCTimeTickGetter(suite.T())
+	getter.EXPECT().GetLatestRequiredMVCCTimeTick().Return(0)
+	suite.pipeline = NewPipelineWithStream(suite.msgDispatcher, 0, false, suite.channel, getter)
 	suite.length = 4
 }
 

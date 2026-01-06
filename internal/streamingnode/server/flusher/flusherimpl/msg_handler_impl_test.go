@@ -84,7 +84,7 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
-	im, err := message.AsImmutableManualFlushMessageV2(msg.IntoImmutableMessage(msgID))
+	im, err := message.AsImmutableManualFlushMessageV2(msg.WithTimeTick(1000).IntoImmutableMessage(msgID))
 	assert.NoError(t, err)
 	err = handler.HandleManualFlush(im)
 	assert.Error(t, err)
