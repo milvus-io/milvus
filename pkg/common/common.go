@@ -493,3 +493,11 @@ func ConvertWKTToWKB(wktStr string) ([]byte, error) {
 	}
 	return wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
 }
+
+func ConvertWKBToWKT(wkbData []byte) (string, error) {
+	geomT, err := wkb.Unmarshal(wkbData, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+	if err != nil {
+		return "", err
+	}
+	return wkt.Marshal(geomT)
+}

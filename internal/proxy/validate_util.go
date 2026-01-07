@@ -5,8 +5,6 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -61,16 +59,9 @@ func validateGeometryFieldSearchResult(fieldData **schemapb.FieldData) error {
 		if validData != nil && !validData[i] {
 			continue
 		}
-		geomT, err := wkb.Unmarshal(data)
+		wktStr, err := common.ConvertWKBToWKT(data)
 		if err != nil {
-			log.Error("translate the wkb format search result into geometry failed",
-				zap.Int("offset", i), zap.Error(err))
-			return err
-		}
-		// now remove MaxDecimalDigits limit
-		wktStr, err := wkt.Marshal(geomT)
-		if err != nil {
-			log.Error("translate the geomery  into its wkt failed")
+			log.Error("translate the geomery into its wkt failed")
 			return err
 		}
 		wktArray[i] = wktStr
