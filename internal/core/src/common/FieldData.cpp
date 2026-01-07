@@ -230,17 +230,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "inconsistent data type");
             auto string_array =
                 std::dynamic_pointer_cast<arrow::StringArray>(array);
-            std::vector<std::string> values(element_count);
-            for (size_t index = 0; index < element_count; ++index) {
-                values[index] = string_array->GetString(index);
-            }
-            if (nullable_) {
-                return FillFieldData(values.data(),
-                                     array->null_bitmap_data(),
-                                     element_count,
-                                     array->offset());
-            }
-            return FillFieldData(values.data(), element_count);
+            return FillFieldData(string_array);
         }
         case DataType::JSON: {
             // The code here is not referenced.
