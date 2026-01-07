@@ -433,6 +433,13 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", tz)
 	}
 
+	// Validate mmap.enabled property
+	if hasMmapProp(t.GetProperties()...) {
+		if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+			return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
+		}
+	}
+
 	// validate clustering key
 	if err := t.validateClusteringKey(ctx); err != nil {
 		return err
@@ -1198,6 +1205,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.CollectionID = collectionID
 
 	if len(t.GetProperties()) > 0 {
+		if hasMmapProp(t.Properties...) {
+			if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+				return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
+			}
+		}
 		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
@@ -1226,6 +1238,9 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
 		if key != "" {
+			if key == common.MmapEnabledKey && !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+				return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be modified by user")
+			}
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
 				return err
@@ -1463,6 +1478,9 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		// Check the value type based on the key
 		switch prop.Key {
 		case common.MmapEnabledKey:
+			if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+				return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
+			}
 			loaded, err := isCollectionLoadedFn()
 			if err != nil {
 				return err
@@ -1520,6 +1538,10 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	deleteKeys := make([]string, 0)
 	for _, key := range t.DeleteKeys {
 		updatedKey := updateKey(key)
+		// Check if mmap.enabled deletion is allowed
+		if updatedKey == common.MmapEnabledKey && !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+			return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be modified by user")
+		}
 		if !IsKeyAllowDrop(updatedKey) {
 			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
 		}

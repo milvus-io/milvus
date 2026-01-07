@@ -3289,6 +3289,7 @@ type queryNodeConfig struct {
 	GrowingMmapEnabled                  ParamItem `refreshable:"false"`
 	FixedFileSizeForMmapManager         ParamItem `refreshable:"false"`
 	MaxMmapDiskPercentageForMmapManager ParamItem `refreshable:"false"`
+	MmapUserControlEnabled              ParamItem `refreshable:"false"`
 
 	LazyLoadEnabled                      ParamItem `refreshable:"false"`
 	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
@@ -4063,6 +4064,16 @@ However, this optimization may come at the cost of a slight decrease in query la
 		Export:       true,
 	}
 	p.MaxMmapDiskPercentageForMmapManager.Init(base.mgr)
+
+	p.MmapUserControlEnabled = ParamItem{
+		Key:          "queryNode.mmap.userControlEnabled",
+		Version:      "2.6.8",
+		DefaultValue: "true",
+		Doc:          "Whether to allow users to control mmap behavior via mmap.enabled property on collections, fields, and indexes. When set to false, the system-level mmap settings will be used and users cannot override them.",
+		Export:       true,
+		Forbidden:    true,
+	}
+	p.MmapUserControlEnabled.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyload.enabled",

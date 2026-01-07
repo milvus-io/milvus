@@ -5076,6 +5076,155 @@ func TestAlterCollectionField(t *testing.T) {
 	}
 }
 
+func TestMmapUserControlEnabled(t *testing.T) {
+	qc := NewMixCoordMock()
+	InitMetaCache(context.Background(), qc)
+	collectionName := "test_mmap_user_control_enabled"
+
+	// Create collection with string field
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "int64_field",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "string_field",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "100"},
+				},
+			},
+			{
+				FieldID:  102,
+				Name:     "float_vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
+	schemaBytes, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColReq := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+		ShardsNum:      1,
+	}
+	_, err = qc.CreateCollection(context.Background(), createColReq)
+	assert.NoError(t, err)
+
+	t.Run("mmap.enabled allowed when MmapUserControlEnabled is true", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		task := &alterCollectionFieldTask{
+			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName,
+				FieldName:      "string_field",
+				Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := task.PreExecute(context.Background())
+		assert.NoError(t, err)
+		// Verify mmap.enabled property is preserved
+		assert.Len(t, task.Properties, 1)
+		assert.Equal(t, common.MmapEnabledKey, task.Properties[0].Key)
+	})
+
+	t.Run("mmap.enabled rejected when MmapUserControlEnabled is false - set property", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		task := &alterCollectionFieldTask{
+			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName,
+				FieldName:      "string_field",
+				Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("mmap.enabled rejected when MmapUserControlEnabled is false - delete property", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		task := &alterCollectionFieldTask{
+			AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName,
+				FieldName:      "string_field",
+				DeleteKeys:     []string{common.MmapEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("alter collection mmap.enabled rejected when MmapUserControlEnabled is false", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		task := &alterCollectionTask{
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("create collection with mmap.enabled rejected when MmapUserControlEnabled is false", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		task := &createCollectionTask{
+			Condition: NewTaskCondition(context.Background()),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: collectionName + "_new",
+				Schema:         schemaBytes,
+				ShardsNum:      1,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+			},
+			ctx:      context.Background(),
+			mixCoord: qc,
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+}
+
 // constructCollectionSchemaWithStructArrayField constructs a collection schema specifically for testing StructArrayField
 func constructCollectionSchemaWithStructArrayField(collectionName string, structArrayFieldName string, autoID bool) *schemapb.CollectionSchema {
 	// Primary key field
