@@ -74,8 +74,8 @@ class FunctionFactory {
     Initialize();
 
     void
-    RegisterFilterFunction(std::string func_name,
-                           std::vector<DataType> func_param_type_list,
+    RegisterFilterFunction(const std::string& func_name,
+                           const std::vector<DataType>& func_param_type_list,
                            FilterFunctionPtr func);
 
     const FilterFunctionPtr
