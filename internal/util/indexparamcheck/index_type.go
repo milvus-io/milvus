@@ -17,6 +17,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // IndexType string.
@@ -73,6 +74,10 @@ func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string)
 	mmapEnable, ok := indexParams[common.MmapEnabledKey]
 	if !ok {
 		return nil
+	}
+	// Check if user is allowed to control mmap settings
+	if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+		return fmt.Errorf("mmap.enabled property is not allowed to be set by user")
 	}
 	enable, err := strconv.ParseBool(mmapEnable)
 	if err != nil {

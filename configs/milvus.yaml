@@ -530,6 +530,7 @@ queryNode:
     growingMmapEnabled: false
     fixedFileSizeForMmapAlloc: 1 # tmp file size for mmap chunk manager
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
+    userControlEnabled: true # Whether to allow users to control mmap behavior via mmap.enabled property on collections, fields, and indexes. When set to false, the system-level mmap settings will be used and users cannot override them.
   lazyload:
     enabled: false # Enable lazyload for loading data
     waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve

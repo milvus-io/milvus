@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestIsScalarMmapIndex(t *testing.T) {
@@ -71,5 +72,32 @@ func TestValidateMmapTypeParams(t *testing.T) {
 			common.MmapEnabledKey: "true",
 		})
 		assert.NoError(t, err)
+	})
+
+	t.Run("mmap.enabled rejected when MmapUserControlEnabled is false", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		params := map[string]string{
+			common.MmapEnabledKey: "true",
+		}
+		err := ValidateMmapIndexParams(IndexINVERTED, params)
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("mmap.enabled allowed when MmapUserControlEnabled is true", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		params := map[string]string{
+			common.MmapEnabledKey: "true",
+		}
+		err := ValidateMmapIndexParams(IndexINVERTED, params)
+		assert.NoError(t, err)
+		// Verify mmap.enabled is preserved
+		_, exists := params[common.MmapEnabledKey]
+		assert.True(t, exists)
 	})
 }
