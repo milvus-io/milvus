@@ -5482,14 +5482,7 @@ func TestMmapUserControlEnabled(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
 
-		cache := NewMockCache(t)
-		cache.On("GetCollectionID",
-			mock.Anything,
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(UniqueID(100), nil)
-		globalMetaCache = cache
-
+		// Note: GetCollectionID is not called because mmap check happens before it
 		task := &alterIndexTask{
 			req: &milvuspb.AlterIndexRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterIndex},
@@ -5510,14 +5503,7 @@ func TestMmapUserControlEnabled(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
 
-		cache := NewMockCache(t)
-		cache.On("GetCollectionID",
-			mock.Anything,
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(UniqueID(100), nil)
-		globalMetaCache = cache
-
+		// Note: GetCollectionID is not called because mmap check happens before it
 		task := &alterIndexTask{
 			req: &milvuspb.AlterIndexRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterIndex},
