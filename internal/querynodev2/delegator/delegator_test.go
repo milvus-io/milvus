@@ -1934,7 +1934,8 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		isBM25Field: map[int64]bool{101: true},
+		isBM25Field:                map[int64]bool{101: true},
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
 	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
@@ -2049,7 +2050,8 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 	t.Run("initial state is catching up", func(t *testing.T) {
 		// Create a minimal delegator to test CatchingUpStreamingData
 		sd := &shardDelegator{
-			catchingUpStreamingData: atomic.NewBool(true),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 		assert.True(t, sd.CatchingUpStreamingData())
 	})
@@ -2060,10 +2062,11 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		defer mockParam.UnPatch()
 
 		sd := &shardDelegator{
-			vchannelName:            "test-channel",
-			latestTsafe:             atomic.NewUint64(0),
-			catchingUpStreamingData: atomic.NewBool(true),
-			tsCond:                  sync.NewCond(&sync.Mutex{}),
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
 		// Initially catching up
@@ -2083,10 +2086,11 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		defer mockParam.UnPatch()
 
 		sd := &shardDelegator{
-			vchannelName:            "test-channel",
-			latestTsafe:             atomic.NewUint64(0),
-			catchingUpStreamingData: atomic.NewBool(true),
-			tsCond:                  sync.NewCond(&sync.Mutex{}),
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
 		// Initially catching up
@@ -2106,10 +2110,11 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 		defer mockParam.UnPatch()
 
 		sd := &shardDelegator{
-			vchannelName:            "test-channel",
-			latestTsafe:             atomic.NewUint64(0),
-			catchingUpStreamingData: atomic.NewBool(true),
-			tsCond:                  sync.NewCond(&sync.Mutex{}),
+			vchannelName:               "test-channel",
+			latestTsafe:                atomic.NewUint64(0),
+			catchingUpStreamingData:    atomic.NewBool(true),
+			tsCond:                     sync.NewCond(&sync.Mutex{}),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 		}
 
 		// Initially catching up
