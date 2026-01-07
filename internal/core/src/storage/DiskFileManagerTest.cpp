@@ -125,7 +125,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     auto conf = milvus_storage::ArrowFileSystemConfig();
     conf.storage_type = "local";
-    conf.root_path = "/tmp";
+    conf.root_path = "/tmp/diskann";
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
@@ -133,12 +133,13 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
-        "/tmp/diskann/index_files/1000/small_index_file";
+        "/tmp/diskann/index_files/1000/1/2/3/small_index_file";
     std::string large_index_file_path =
-        "/tmp/diskann/index_files/1000/large_index_file";
+        "/tmp/diskann/index_files/1000/1/2/3/large_index_file";
     auto exist = lcm->Exist(large_index_file_path);
 
-    std::string index_file_path = "/tmp/diskann/index_files/1000/index_file";
+    std::string index_file_path =
+        "/tmp/diskann/index_files/1000/1/2/3/index_file";
     boost::filesystem::path localPath(index_file_path);
     auto local_file_name = localPath.filename().string();
 
@@ -165,7 +166,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
-        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs_));
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_, fs));
 
     auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
     size_t write_offset = 0;
@@ -207,7 +208,7 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     EXPECT_EQ(read_small_index_size, small_index_size);
     EXPECT_EQ(is->Tell(), read_offset);
     std::string small_index_file_path_read =
-        "/tmp/diskann/index_files/1000/small_index_file_read";
+        "/tmp/diskann/index_files/1000/1/2/3/small_index_file_read";
     lcm->CreateFile(small_index_file_path_read);
     int fd_read = open(small_index_file_path_read.c_str(), O_WRONLY);
     ASSERT_NE(fd_read, -1);
