@@ -1058,6 +1058,17 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		Segments: []*datapb.SegmentDescription{},
 	}
 
+	// Mock ReadSnapshotData to return snapshot data
+	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		name string,
+	) (*SnapshotData, error) {
+		assert.Equal(t, "test_snapshot", name)
+		return snapshotData, nil
+	}).Build()
+	defer mockReadSnapshotData.UnPatch()
+
 	// Mock copySegmentMeta.GetJob to return nil (job doesn't exist)
 	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
 		cm *copySegmentMeta,
@@ -1110,7 +1121,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+	jobID, err := sm.RestoreData(ctx, snapshotData.SnapshotInfo.GetName(), 200, 12345)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(12345), jobID)
@@ -1146,7 +1157,7 @@ func TestSnapshotManager_RestoreData_Idempotent(t *testing.T) {
 	}
 
 	// Should return immediately without creating a new job
-	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+	jobID, err := sm.RestoreData(ctx, snapshotData.SnapshotInfo.GetName(), 200, 12345)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(12345), jobID)
@@ -1163,6 +1174,17 @@ func TestSnapshotManager_RestoreData_PartitionMappingError(t *testing.T) {
 	}
 
 	expectedErr := errors.New("partition mapping error")
+
+	// Mock ReadSnapshotData to return snapshot data
+	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		name string,
+	) (*SnapshotData, error) {
+		assert.Equal(t, "test_snapshot", name)
+		return snapshotData, nil
+	}).Build()
+	defer mockReadSnapshotData.UnPatch()
 
 	// Mock copySegmentMeta.GetJob to return nil
 	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
@@ -1189,7 +1211,7 @@ func TestSnapshotManager_RestoreData_PartitionMappingError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+	jobID, err := sm.RestoreData(ctx, snapshotData.SnapshotInfo.GetName(), 200, 12345)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -1207,6 +1229,17 @@ func TestSnapshotManager_RestoreData_ChannelMappingError(t *testing.T) {
 	}
 
 	expectedErr := errors.New("channel mapping error")
+
+	// Mock ReadSnapshotData to return snapshot data
+	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		name string,
+	) (*SnapshotData, error) {
+		assert.Equal(t, "test_snapshot", name)
+		return snapshotData, nil
+	}).Build()
+	defer mockReadSnapshotData.UnPatch()
 
 	// Mock copySegmentMeta.GetJob to return nil
 	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
@@ -1244,7 +1277,7 @@ func TestSnapshotManager_RestoreData_ChannelMappingError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+	jobID, err := sm.RestoreData(ctx, snapshotData.SnapshotInfo.GetName(), 200, 12345)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
@@ -1262,6 +1295,17 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 	}
 
 	expectedErr := errors.New("create job error")
+
+	// Mock ReadSnapshotData to return snapshot data
+	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		name string,
+	) (*SnapshotData, error) {
+		assert.Equal(t, "test_snapshot", name)
+		return snapshotData, nil
+	}).Build()
+	defer mockReadSnapshotData.UnPatch()
 
 	// Mock copySegmentMeta.GetJob to return nil
 	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
@@ -1313,11 +1357,48 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	jobID, err := sm.RestoreData(ctx, snapshotData, 200, 12345)
+	jobID, err := sm.RestoreData(ctx, snapshotData.SnapshotInfo.GetName(), 200, 12345)
 
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), jobID)
 	assert.Contains(t, err.Error(), "restore job creation failed")
+}
+
+func TestSnapshotManager_RestoreData_ReadSnapshotDataError(t *testing.T) {
+	ctx := context.Background()
+
+	expectedErr := errors.New("snapshot read error")
+
+	// Mock copySegmentMeta.GetJob to return nil
+	mockGetJob := mockey.Mock((*copySegmentMeta).GetJob).To(func(
+		cm *copySegmentMeta,
+		ctx context.Context,
+		jobID int64,
+	) CopySegmentJob {
+		return nil
+	}).Build()
+	defer mockGetJob.UnPatch()
+
+	// Mock ReadSnapshotData to return error
+	mockReadSnapshotData := mockey.Mock((*snapshotManager).ReadSnapshotData).To(func(
+		sm *snapshotManager,
+		ctx context.Context,
+		name string,
+	) (*SnapshotData, error) {
+		assert.Equal(t, "test_snapshot", name)
+		return nil, expectedErr
+	}).Build()
+	defer mockReadSnapshotData.UnPatch()
+
+	sm := &snapshotManager{
+		copySegmentMeta: &copySegmentMeta{},
+	}
+
+	jobID, err := sm.RestoreData(ctx, "test_snapshot", 200, 12345)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), jobID)
+	assert.Contains(t, err.Error(), "failed to read snapshot data")
 }
 
 // --- Test buildPartitionMapping ---

@@ -4658,15 +4658,16 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection     ParamItem `refreshable:"false"`
-	GCInterval                  ParamItem `refreshable:"false"`
-	GCMissingTolerance          ParamItem `refreshable:"false"`
-	GCDropTolerance             ParamItem `refreshable:"false"`
-	GCRemoveConcurrent          ParamItem `refreshable:"false"`
-	GCScanIntervalInHour        ParamItem `refreshable:"false"`
-	GCSlowDownCPUUsageThreshold ParamItem `refreshable:"false"`
-	SnapshotPendingTimeout      ParamItem `refreshable:"true"`
-	EnableActiveStandby         ParamItem `refreshable:"false"`
+	EnableGarbageCollection      ParamItem `refreshable:"false"`
+	GCInterval                   ParamItem `refreshable:"false"`
+	GCMissingTolerance           ParamItem `refreshable:"false"`
+	GCDropTolerance              ParamItem `refreshable:"false"`
+	GCRemoveConcurrent           ParamItem `refreshable:"false"`
+	GCScanIntervalInHour         ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold  ParamItem `refreshable:"false"`
+	SnapshotPendingTimeout       ParamItem `refreshable:"true"`
+	SnapshotRefIndexLoadInterval ParamItem `refreshable:"true"`
+	EnableActiveStandby          ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -5454,6 +5455,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.SnapshotPendingTimeout.Init(base.mgr)
+
+	p.SnapshotRefIndexLoadInterval = ParamItem{
+		Key:          "dataCoord.snapshot.refIndexLoadInterval",
+		Version:      "2.6.10",
+		DefaultValue: "60s",
+		Doc:          "The interval for loading snapshot RefIndex from S3",
+	}
+	p.SnapshotRefIndexLoadInterval.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",

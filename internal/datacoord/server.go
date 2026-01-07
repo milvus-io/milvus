@@ -1105,6 +1105,11 @@ func (s *Server) Stop() error {
 	s.garbageCollector.close()
 	log.Info("datacoord garbage collector stopped")
 
+	if s.meta != nil {
+		s.meta.GetSnapshotMeta().Close()
+		log.Info("datacoord snapshot meta closed")
+	}
+
 	s.stopServerLoop()
 	log.Info("datacoord stopServerLoop stopped")
 
