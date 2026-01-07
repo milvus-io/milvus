@@ -255,7 +255,13 @@ InvertedIndexTantivy<T>::LoadIndexMetas(
         if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
             null_offset_files.push_back(file);
         }
+
+        // add slice meta file for null offset file compact
+        if (file_name == INDEX_FILE_SLICE_META) {
+            null_offset_files.push_back(file);
+        }
     }
+
     if (null_offset_files.size() > 0) {
         // null offset file is sliced
         auto index_datas = mem_file_manager_->LoadIndexToMemory(
@@ -283,6 +289,10 @@ InvertedIndexTantivy<T>::RetainTantivyIndexFiles(
                 auto file_name =
                     boost::filesystem::path(file).filename().string();
                 return file_name == "index_type" ||
+                       // Slice meta is only used to compact null_offset files and non_exist_offset files.
+                       // It can be removed after compaction is complete.
+                       // Other index files are compacted by slice index instead of meta.
+                       file_name == INDEX_FILE_SLICE_META ||
                        file_name.find(INDEX_NULL_OFFSET_FILE_NAME) !=
                            std::string::npos;
             }),
