@@ -584,13 +584,6 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// Check if mmap.enabled is allowed to be set by user
-	if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
-		if hasMmapProp(cit.newTypeParams...) {
-			return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
-		}
-	}
-
 	// check index param, not accurate, only some static rules
 	err = cit.parseIndexParams(ctx)
 	if err != nil {
