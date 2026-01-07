@@ -722,7 +722,10 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 		}
 	}
 	if idx == -1 {
-		return errors.New("primary key is not specified")
+		// External collections may not have a primary key
+		if !typeutil.IsExternalCollection(coll) {
+			return errors.New("primary key is not specified")
+		}
 	}
 
 	for _, structArrayField := range coll.StructArrayFields {

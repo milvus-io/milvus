@@ -149,7 +149,7 @@ func newWriteNode(
 	// pkfield is a immutable property of the collection, so we can get it from any schema
 	collSchema := config.metacache.GetSchema(0)
 	pkField, err := typeutil.GetPrimaryFieldSchema(collSchema)
-	if err != nil {
+	if err != nil && !typeutil.IsExternalCollection(collSchema) {
 		return nil, err
 	}
 
