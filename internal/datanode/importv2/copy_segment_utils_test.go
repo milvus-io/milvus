@@ -645,7 +645,6 @@ func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {
 					Binlogs: []*datapb.Binlog{
 						{LogPath: "files/insert_log/111/222/333/1/10001", LogSize: 100},
 						{LogPath: "files/insert_log/111/222/333/1/10002", LogSize: 200},
-						{LogPath: "files/insert_log/111/222/333/1/10003", LogSize: 300},
 					},
 				},
 			},
