@@ -27,6 +27,10 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
     AssertInfo(is_desc == PositivelyRelated(metric_type_),
                "[SubSearchResult]Metric type isn't desc");
 
+    // Pre-allocate buffers outside the loop to avoid per-iteration allocations
+    std::vector<float> buf_distances(topk_);
+    std::vector<int64_t> buf_ids(topk_);
+
     for (int64_t qn = 0; qn < num_queries_; ++qn) {
         auto offset = qn * topk_;
 
@@ -35,9 +39,6 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
 
         auto right_ids = right.get_ids() + offset;
         auto right_distances = right.get_distances() + offset;
-
-        std::vector<float> buf_distances(topk_);
-        std::vector<int64_t> buf_ids(topk_);
 
         auto lit = 0;  // left iter
         auto rit = 0;  // right iter
