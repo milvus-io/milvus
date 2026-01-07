@@ -22,9 +22,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkbcommon"
-	"github.com/twpayne/go-geom/encoding/wkt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -586,9 +583,7 @@ func (suite *RowParserSuite) runValid(c *testCase) {
 					continue
 				}
 			case schemapb.DataType_Geometry:
-				geomT, err := wkt.Unmarshal(rawVal.(string))
-				suite.NoError(err)
-				wkbValue, err := wkb.Marshal(geomT, wkb.NDR, wkbcommon.WKBOptionEmptyPointHandling(wkbcommon.EmptyPointHandlingNaN))
+				wkbValue, err := common.ConvertWKTToWKB(rawVal.(string))
 				suite.NoError(err)
 				suite.Equal(wkbValue, val)
 			default:
