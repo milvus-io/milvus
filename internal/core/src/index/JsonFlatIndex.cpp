@@ -23,6 +23,9 @@ JsonFlatIndex::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     int64_t offset = 0;
     auto tokens = parse_json_pointer(nested_path_);
+    // Scratch buffer for nested JSON serialization - reused across iterations
+    // to avoid repeated heap allocations
+    simdjson::padded_string scratch_buffer(256);
     for (const auto& data : field_datas) {
         auto n = data->get_num_rows();
         for (int i = 0; i < n; i++) {
@@ -47,8 +50,20 @@ JsonFlatIndex::build_index_for_json(
                 if (err != simdjson::SUCCESS) {
                     wrapper_->add_json_array_data(nullptr, 0, offset++);
                 } else {
-                    auto str = simdjson::to_json_string(res.value()).value();
-                    Json subpath_json = Json(simdjson::padded_string(str));
+                    auto str_result = simdjson::to_json_string(res.value());
+                    if (str_result.error() != simdjson::SUCCESS) {
+                        wrapper_->add_json_array_data(nullptr, 0, offset++);
+                        continue;
+                    }
+                    std::string_view str = str_result.value();
+                    // Resize scratch buffer if needed (with some growth factor)
+                    if (scratch_buffer.size() < str.size()) {
+                        scratch_buffer =
+                            simdjson::padded_string(str.size() * 2);
+                    }
+                    std::memcpy(scratch_buffer.data(), str.data(), str.size());
+                    // Create Json referencing scratch buffer (non-owning)
+                    Json subpath_json(scratch_buffer.data(), str.size());
                     wrapper_->add_json_data(&subpath_json, 1, offset++);
                 }
             }
