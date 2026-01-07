@@ -351,6 +351,17 @@ class SegmentExpr : public Expr {
                    : batch_size_;
     }
 
+    int64_t
+    GetNextRealBatchSize(const OffsetVector* input, bool element_level) {
+        if (input != nullptr) {
+            return input->size();
+        } else if (element_level) {
+            auto [_, elem_count] = GetNextBatchSizeForElementLevel();
+            return elem_count;
+        }
+        return GetNextBatchSize();
+    }
+
     // Get the next batch size for element-level processing
     // Returns: (batch_rows, elem_count) where batch_rows is number of rows to process
     // and elem_count is the total number of elements in those rows

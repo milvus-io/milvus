@@ -123,7 +123,7 @@ ArrayOffsetsSealed::RowOffsetsToElementOffsets(
 
     int32_t row_count = GetRowCount();
     int64_t avg_elem_per_row =
-        row_count > 0
+        (row_count > 0)
             ? static_cast<int64_t>(element_row_ids_.size()) / row_count
             : 1;
     element_offsets.reserve(row_offsets.size() * avg_elem_per_row);

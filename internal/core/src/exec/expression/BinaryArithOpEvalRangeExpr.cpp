@@ -916,15 +916,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
                                int64_t,
                                T>
         HighPrecisionType;
-    int64_t real_batch_size;
-    if (has_offset_input_) {
-        real_batch_size = input->size();
-    } else if (expr_->column_.element_level_) {
-        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
-        real_batch_size = elem_count;
-    } else {
-        real_batch_size = GetNextBatchSize();
-    }
+    auto real_batch_size =
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -1445,16 +1438,8 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForData(
                                T>
         HighPrecisionType;
 
-    int64_t real_batch_size;
-    if (has_offset_input_) {
-        real_batch_size = input->size();
-    } else if (expr_->column_.element_level_) {
-        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
-        real_batch_size = elem_count;
-    } else {
-        real_batch_size = GetNextBatchSize();
-    }
-
+    auto real_batch_size =
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
     if (real_batch_size == 0) {
         return nullptr;
     }

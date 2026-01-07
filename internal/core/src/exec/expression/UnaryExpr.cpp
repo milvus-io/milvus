@@ -1380,13 +1380,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
 
-    int64_t real_batch_size;
-    if (expr_->column_.element_level_) {
-        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
-        real_batch_size = elem_count;
-    } else {
-        real_batch_size = GetNextBatchSize();
-    }
+    auto real_batch_size =
+        GetNextRealBatchSize(nullptr, expr_->column_.element_level_);
     if (real_batch_size == 0) {
         return nullptr;
     }
@@ -1539,16 +1534,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         return res;
     }
 
-    int64_t real_batch_size;
-    if (has_offset_input_) {
-        real_batch_size = input->size();
-    } else if (expr_->column_.element_level_) {
-        auto [_, elem_count] = GetNextBatchSizeForElementLevel();
-        real_batch_size = elem_count;
-    } else {
-        real_batch_size = GetNextBatchSize();
-    }
-
+    auto real_batch_size =
+        GetNextRealBatchSize(input, expr_->column_.element_level_);
     if (real_batch_size == 0) {
         return nullptr;
     }
