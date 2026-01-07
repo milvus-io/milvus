@@ -321,6 +321,21 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "inconsistent data type");
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<knowhere::sparse::SparseRow<SparseValueType>> values;
+            values.reserve(element_count);
+
+            if (nullable_) {
+                for (int64_t i = 0; i < element_count; ++i) {
+                    if (arr->IsValid(i)) {
+                        auto view = arr->GetString(i);
+                        values.push_back(
+                            CopyAndWrapSparseRow(view.data(), view.size()));
+                    }
+                }
+                return FillFieldData(values.data(),
+                                     arr->null_bitmap_data(),
+                                     arr->length(),
+                                     arr->offset());
+            }
             for (size_t index = 0; index < element_count; ++index) {
                 auto view = arr->GetString(index);
                 values.push_back(
