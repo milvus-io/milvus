@@ -292,7 +292,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Success() {
 
 	ctx := context.Background()
 	data := []string{"Machine learning is a subset of AI", "Machine learning is powerful"}
-	highlights, err := highlight.processOneQuery(ctx, "machine learning", data, nil)
+	highlights, err := highlight.processOneQuery(ctx, "machine learning", data)
 
 	s.NoError(err)
 	s.Equal(expectedHighlights, highlights)
@@ -337,7 +337,7 @@ func (s *SemanticHighlightSuite) TestProcessOneQuery_Error() {
 
 	ctx := context.Background()
 	data := []string{"test document"}
-	highlights, err := highlight.processOneQuery(ctx, "test query", data, nil)
+	highlights, err := highlight.processOneQuery(ctx, "test query", data)
 
 	s.Error(err)
 	s.Nil(highlights)
@@ -393,7 +393,7 @@ func (s *SemanticHighlightSuite) TestProcess_Success() {
 
 	ctx := context.Background()
 	data := []string{"Machine learning document", "Deep learning document"}
-	highlights, err := highlight.Process(ctx, []int64{1, 1}, data, nil)
+	highlights, err := highlight.Process(ctx, []int64{1, 1}, data)
 
 	s.NoError(err)
 	s.NotNil(highlights)
@@ -432,7 +432,7 @@ func (s *SemanticHighlightSuite) TestProcess_NqMismatch() {
 
 	ctx := context.Background()
 	data := []string{"test document"}
-	highlights, err := highlight.Process(ctx, []int64{1, 1, 1}, data, nil) // nq=3 but queries has only 1
+	highlights, err := highlight.Process(ctx, []int64{1, 1, 1}, data) // nq=3 but queries has only 1
 
 	s.Error(err)
 	s.Nil(highlights)
@@ -478,7 +478,7 @@ func (s *SemanticHighlightSuite) TestProcess_ProviderError() {
 
 	ctx := context.Background()
 	data := []string{"test document"}
-	highlights, err := highlight.Process(ctx, []int64{1}, data, nil)
+	highlights, err := highlight.Process(ctx, []int64{1}, data)
 
 	s.Error(err)
 	s.Nil(highlights)
@@ -522,14 +522,14 @@ func (s *SemanticHighlightSuite) TestProcess_EmptyData() {
 
 	ctx := context.Background()
 	data := []string{}
-	highlights, err := highlight.Process(ctx, []int64{0, 0, 0}, data, nil)
+	highlights, err := highlight.Process(ctx, []int64{0, 0, 0}, data)
 
 	s.NoError(err)
 	s.NotNil(highlights)
 
 	data2 := []string{"test document"}
 
-	highlights2, err := highlight.Process(ctx, []int64{0, 1, 0}, data2, nil)
+	highlights2, err := highlight.Process(ctx, []int64{0, 1, 0}, data2)
 
 	s.NoError(err)
 	s.Equal(1, len(highlights2))

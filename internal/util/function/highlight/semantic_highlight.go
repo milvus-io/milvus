@@ -29,7 +29,7 @@ import (
 )
 
 type semanticHighlightProvider interface {
-	highlight(ctx context.Context, query string, texts []string, params map[string]string) ([][]string, error)
+	highlight(ctx context.Context, query string, texts []string) ([][]string, error)
 	maxBatch() int
 }
 
@@ -42,9 +42,10 @@ func (provider *baseSemanticHighlightProvider) maxBatch() int {
 }
 
 type SemanticHighlight struct {
-	fieldIDs []int64
-	provider semanticHighlightProvider
-	queries  []string
+	fieldNames map[int64]string
+	fieldIDs   []int64
+	provider   semanticHighlightProvider
+	queries    []string
 }
 
 const (
@@ -77,8 +78,10 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 	}
 
 	fieldIDMap := make(map[string]*schemapb.FieldSchema)
+	fieldIDNameMap := make(map[int64]string)
 	for _, field := range collSchema.Fields {
 		fieldIDMap[field.Name] = field
+		fieldIDNameMap[field.FieldID] = field.Name
 	}
 
 	fieldIDs := []int64{}
@@ -100,18 +103,22 @@ func NewSemanticHighlight(collSchema *schemapb.CollectionSchema, params []*commo
 		return nil, err
 	}
 
-	return &SemanticHighlight{fieldIDs: fieldIDs, provider: provider, queries: queries}, nil
+	return &SemanticHighlight{fieldNames: fieldIDNameMap, fieldIDs: fieldIDs, provider: provider, queries: queries}, nil
 }
 
 func (highlight *SemanticHighlight) FieldIDs() []int64 {
 	return highlight.fieldIDs
 }
 
-func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, data []string, params map[string]string) ([][]string, error) {
+func (highlight *SemanticHighlight) GetFieldName(id int64) string {
+	return highlight.fieldNames[id]
+}
+
+func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query string, data []string) ([][]string, error) {
 	if len(data) == 0 {
 		return [][]string{}, nil
 	}
-	highlights, err := highlight.provider.highlight(ctx, query, data, params)
+	highlights, err := highlight.provider.highlight(ctx, query, data)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +128,7 @@ func (highlight *SemanticHighlight) processOneQuery(ctx context.Context, query s
 	return highlights, nil
 }
 
-func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, data []string, params map[string]string) ([][]string, error) {
+func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, data []string) ([][]string, error) {
 	nq := len(topks)
 	if len(highlight.queries) != nq {
 		return nil, fmt.Errorf("nq must equal to queries size, but got nq [%d], queries size [%d], queries: [%v]", nq, len(highlight.queries), highlight.queries)
@@ -135,7 +142,7 @@ func (highlight *SemanticHighlight) Process(ctx context.Context, topks []int64, 
 
 	for i, query := range highlight.queries {
 		size := topks[i]
-		singleHighlights, err := highlight.processOneQuery(ctx, query, data[start:start+size], params)
+		singleHighlights, err := highlight.processOneQuery(ctx, query, data[start:start+size])
 		if err != nil {
 			return nil, err
 		}
