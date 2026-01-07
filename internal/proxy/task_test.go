@@ -5530,6 +5530,9 @@ func TestMmapUserControlEnabled(t *testing.T) {
 		).Return(UniqueID(100), nil)
 		globalMetaCache = cache
 
+		mixCoord := NewMixCoordMock()
+		defer mixCoord.Close()
+
 		task := &alterIndexTask{
 			req: &milvuspb.AlterIndexRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterIndex},
@@ -5539,6 +5542,7 @@ func TestMmapUserControlEnabled(t *testing.T) {
 					{Key: common.MmapEnabledKey, Value: "true"},
 				},
 			},
+			mixCoord: mixCoord,
 		}
 		err := task.PreExecute(context.Background())
 		// No error should be returned for mmap check (may fail for other reasons in test env)
