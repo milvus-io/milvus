@@ -5378,6 +5378,188 @@ func TestMmapUserControlEnabled(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
 	})
+
+	t.Run("create index with mmap.enabled rejected when MmapUserControlEnabled is false", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "float_vec",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		}), nil)
+		globalMetaCache = cache
+
+		task := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateIndex},
+				CollectionName: collectionName,
+				FieldName:      "float_vec",
+				IndexName:      "test_index",
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: "nlist", Value: "1024"},
+					{Key: common.MmapEnabledKey, Value: "true"},
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("create index with mmap.enabled allowed when MmapUserControlEnabled is true", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		cache.On("GetCollectionSchema",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(newSchemaInfo(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "float_vec",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		}), nil)
+		globalMetaCache = cache
+
+		task := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateIndex},
+				CollectionName: collectionName,
+				FieldName:      "float_vec",
+				IndexName:      "test_index",
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "IVF_FLAT"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: "nlist", Value: "1024"},
+					{Key: common.MmapEnabledKey, Value: "true"},
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		// No error should be returned for mmap check (may fail for other reasons in test env)
+		if err != nil {
+			assert.NotContains(t, err.Error(), "mmap.enabled property is not allowed")
+		}
+	})
+
+	t.Run("alter index with mmap.enabled rejected when MmapUserControlEnabled is false - set property", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		globalMetaCache = cache
+
+		task := &alterIndexTask{
+			req: &milvuspb.AlterIndexRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterIndex},
+				CollectionName: collectionName,
+				IndexName:      "test_index",
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MmapEnabledKey, Value: "true"},
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("alter index with mmap.enabled rejected when MmapUserControlEnabled is false - delete property", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "false")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		globalMetaCache = cache
+
+		task := &alterIndexTask{
+			req: &milvuspb.AlterIndexRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterIndex},
+				CollectionName: collectionName,
+				IndexName:      "test_index",
+				DeleteKeys:     []string{common.MmapEnabledKey},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		// Error should be returned
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mmap.enabled property is not allowed")
+	})
+
+	t.Run("alter index with mmap.enabled allowed when MmapUserControlEnabled is true", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.Key)
+
+		cache := NewMockCache(t)
+		cache.On("GetCollectionID",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(UniqueID(100), nil)
+		globalMetaCache = cache
+
+		task := &alterIndexTask{
+			req: &milvuspb.AlterIndexRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterIndex},
+				CollectionName: collectionName,
+				IndexName:      "test_index",
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.MmapEnabledKey, Value: "true"},
+				},
+			},
+		}
+		err := task.PreExecute(context.Background())
+		// No error should be returned for mmap check (may fail for other reasons in test env)
+		if err != nil {
+			assert.NotContains(t, err.Error(), "mmap.enabled property is not allowed")
+		}
+	})
 }
 
 // constructCollectionSchemaWithStructArrayField constructs a collection schema specifically for testing StructArrayField
