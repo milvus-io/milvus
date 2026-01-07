@@ -455,12 +455,12 @@ func (op *semanticHighlightOperator) run(ctx context.Context, span trace.Span, i
 			return nil, errors.Errorf("get highlight failed, text field not in output field %d", fieldID)
 		}
 		texts := fieldDatas.GetScalars().GetStringData().GetData()
-		highlights, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts, nil)
+		highlights, err := op.highlight.Process(ctx, result.Results.GetTopks(), texts)
 		if err != nil {
 			return nil, err
 		}
 		singeFieldHighlights := &commonpb.HighlightResult{
-			FieldName: fieldDatas.FieldName,
+			FieldName: op.highlight.GetFieldName(fieldID),
 			Datas:     make([]*commonpb.HighlightData, 0, len(highlights)),
 		}
 		for _, highlight := range highlights {
