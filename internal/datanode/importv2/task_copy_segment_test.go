@@ -244,8 +244,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 		_, err := futures[0].Await()
 		assert.NoError(t, err)
 
-		// Verify segment results are updated
-		copyTask := task.(*CopySegmentTask)
+		// Verify segment results are updated (get updated task from manager)
+		copyTask := mockManager.Get(task.GetTaskID()).(*CopySegmentTask)
 		segmentResults := copyTask.GetSegmentResults()
 		assert.Equal(t, 1, len(segmentResults))
 		assert.NotNil(t, segmentResults[666])
@@ -336,8 +336,8 @@ func TestCopySegmentTaskExecute(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		// Verify both segment results are updated
-		copyTask := task.(*CopySegmentTask)
+		// Verify both segment results are updated (get updated task from manager)
+		copyTask := mockManager.Get(task.GetTaskID()).(*CopySegmentTask)
 		segmentResults := copyTask.GetSegmentResults()
 		assert.Equal(t, 2, len(segmentResults))
 
@@ -994,8 +994,8 @@ func TestCopySegmentTaskEdgeCases(t *testing.T) {
 		_, err := futures[0].Await()
 		assert.NoError(t, err)
 
-		// Verify total rows
-		copyTask := task.(*CopySegmentTask)
+		// Verify total rows (get updated task from manager)
+		copyTask := mockManager.Get(task.GetTaskID()).(*CopySegmentTask)
 		segmentResults := copyTask.GetSegmentResults()
 		assert.Equal(t, int64(10000), segmentResults[666].ImportedRows) // 100 files * 100 rows each
 	})
