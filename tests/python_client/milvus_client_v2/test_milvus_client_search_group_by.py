@@ -176,10 +176,10 @@ class TestGroupSearch(TestMilvusClientV2Base):
         request.addfinalizer(teardown)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, inverted_string_field_name
-                                                # TODO: need to run after #46605 $46614 #46616 fixed
-                                                # , DataType.JSON.name, indexed_json_field_name
-                                                # , f"{DataType.JSON.name}['number']"
+    @pytest.mark.parametrize("group_by_field", [DataType.VARCHAR.name, inverted_string_field_name,
+                                                DataType.JSON.name,
+                                                indexed_json_field_name#,
+                                                #f"{DataType.JSON.name}['number']"
                                                 # , dyna_filed_name1, f"{dyna_filed_name2}['string']"
                                                 ])
     def test_search_group_size(self, group_by_field):
