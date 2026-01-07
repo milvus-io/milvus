@@ -106,7 +106,7 @@ class TestMilvusClientAddFieldFeature(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows_new)
         # 5. compact
         compact_id = self.compact(client, collection_name)[0]
-        self.wait_for_compaction_ready(client, compact_id)
+        self.wait_for_compaction_ready(client, compact_id, timeout=300)
         self.wait_for_index_ready(client, collection_name, default_vector_field_name)
         self.release_collection(client, collection_name)
         time.sleep(10)

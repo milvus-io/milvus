@@ -1888,6 +1888,9 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
+        # Skip use_numpy_float parameter when new_field_data_type is DOUBLE
+        if new_field_data_type == DataType.DOUBLE and not use_numpy_float:
+            pytest.skip("DOUBLE type doesn't need to consider use_numpy_float parameter")
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.using_database(client, "default")
@@ -1928,8 +1931,6 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         if new_field_data_type == DataType.FLOAT:
             if use_numpy_float:
                 default_value = np.float32(1.0)
-            else:
-                default_value = 1.0
         elif new_field_data_type == DataType.DOUBLE:
             default_value = np.float64(1.0)
         self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,

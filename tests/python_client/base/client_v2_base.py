@@ -572,7 +572,7 @@ class TestMilvusClientV2Base(Base):
         timeout = TIMEOUT if timeout is None else timeout
         start_time = time.time()
         while start_time + timeout > time.time():
-            res = self.get_compaction_state(client, compact_id)[0]
+            res = self.get_compaction_state(client, compact_id, **kwargs)[0]
             if res == "Completed":
                 return True
             time.sleep(2)
