@@ -45,6 +45,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -110,12 +112,18 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
+	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
+	retryOpts := []retry.Option{
+		retry.Attempts(writeRetryAttempts), // default retry always
+		retry.MaxSleepTime(10 * time.Second),
+	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
-		WithStorageConfig(storageConfig)
+		WithStorageConfig(storageConfig).
+		WithWriteRetryOptions(retryOpts...)
 	return task, nil
 }
 
