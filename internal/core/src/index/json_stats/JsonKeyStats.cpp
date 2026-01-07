@@ -905,7 +905,7 @@ JsonKeyStats::LoadShreddingMeta(
     }
 
     auto remote_prefix =
-        AddBucketName(disk_file_manager_->GetRemoteJsonStatsShreddingPrefix());
+        disk_file_manager_->GetRemoteJsonStatsShreddingPrefix();
 
     // load common meta from parquet only if key_field_map_ is not already populated
     // (for backward compatibility with old data that doesn't have separate meta file)

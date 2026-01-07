@@ -126,10 +126,10 @@ TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
     auto conf = milvus_storage::ArrowFileSystemConfig();
     conf.storage_type = "local";
     conf.root_path = "/tmp/diskann";
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    EXPECT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
 
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     std::string small_index_file_path =
