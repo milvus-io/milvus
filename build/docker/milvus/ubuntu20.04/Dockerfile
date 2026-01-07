@@ -21,8 +21,8 @@ RUN apt-get update && \
     apt-get update && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 libopenblas-dev && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
-        ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
-        echo "Etc/UTC" > /etc/timezone && \
+    ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
+    echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
@@ -45,8 +45,9 @@ ENV MALLOC_CONF=background_thread:true
 # Change user to milvus
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     mkdir -p /var/lib/milvus && \
-    chown -R milvus:milvus /milvus /var/lib/milvus
-USER milvus:milvus
+    chown -R milvus:0 /milvus /var/lib/milvus && \
+    chmod -R g=u /milvus /var/lib/milvus
+USER milvus
 
 ENTRYPOINT ["/tini", "--"]
 
