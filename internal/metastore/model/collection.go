@@ -55,6 +55,8 @@ type Collection struct {
 	SchemaVersion        int32
 	ShardInfos           map[string]*ShardInfo
 	FileResourceIds      []int64
+	ExternalSource       string
+	ExternalSpec         string
 }
 
 type ShardInfo struct {
@@ -94,6 +96,8 @@ func (c *Collection) ShallowClone() *Collection {
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           c.ShardInfos,
 		FileResourceIds:      c.FileResourceIds,
+		ExternalSource:       c.ExternalSource,
+		ExternalSpec:         c.ExternalSpec,
 	}
 }
 
@@ -132,6 +136,8 @@ func (c *Collection) Clone() *Collection {
 		SchemaVersion:        c.SchemaVersion,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      slices.Clone(c.FileResourceIds),
+		ExternalSource:       c.ExternalSource,
+		ExternalSpec:         c.ExternalSpec,
 	}
 }
 
@@ -180,6 +186,8 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			c.Functions = UnmarshalFunctionModels(updates.Schema.Functions)
 			c.StructArrayFields = UnmarshalStructArrayFieldModels(updates.Schema.StructArrayFields)
 			c.SchemaVersion = updates.Schema.Version
+			c.ExternalSource = updates.Schema.ExternalSource
+			c.ExternalSpec = updates.Schema.ExternalSpec
 		}
 	}
 }
@@ -238,6 +246,8 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		SchemaVersion:        coll.Schema.Version,
 		ShardInfos:           shardInfos,
 		FileResourceIds:      coll.Schema.GetFileResourceIds(),
+		ExternalSource:       coll.Schema.ExternalSource,
+		ExternalSpec:         coll.Schema.ExternalSpec,
 	}
 }
 
@@ -290,6 +300,8 @@ func marshalCollectionModelWithConfig(coll *Collection, c *config) *pb.Collectio
 		DbName:             coll.DBName,
 		Version:            coll.SchemaVersion,
 		FileResourceIds:    coll.FileResourceIds,
+		ExternalSource:     coll.ExternalSource,
+		ExternalSpec:       coll.ExternalSpec,
 	}
 
 	if c.withFields {
