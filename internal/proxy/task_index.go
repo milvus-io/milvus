@@ -200,6 +200,15 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		return err
 	}
 
+	// Check if mmap.enabled is allowed to be set by user
+	if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+		for k := range indexParamsMap {
+			if k == common.MmapEnabledKey {
+				return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
+			}
+		}
+	}
+
 	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 	if exist && specifyIndexType != "" {
 		// todo(SpadeA): mmap check for struct array index
@@ -673,12 +682,22 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 
 	if len(t.req.GetExtraParams()) > 0 {
 		for _, param := range t.req.GetExtraParams() {
+			if param.GetKey() == common.MmapEnabledKey {
+				if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+					return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
+				}
+			}
 			if !indexparams.IsConfigableIndexParam(param.GetKey()) {
 				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param.GetKey())
 			}
 		}
 	} else if len(t.req.GetDeleteKeys()) > 0 {
 		for _, param := range t.req.GetDeleteKeys() {
+			if param == common.MmapEnabledKey {
+				if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+					return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be modified by user")
+				}
+			}
 			if !indexparams.IsConfigableIndexParam(param) {
 				return merr.WrapErrParameterInvalidMsg("%s is not a configable index property", param)
 			}
