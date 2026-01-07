@@ -234,6 +234,10 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             std::string::npos) {
             non_exist_offset_files.push_back(file);
         }
+        // add slice meta file for null offset file compact
+        if (file_name == INDEX_FILE_SLICE_META) {
+            non_exist_offset_files.push_back(file);
+        }
     }
     if (non_exist_offset_files.size() > 0) {
         // null offset file is sliced
