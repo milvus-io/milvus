@@ -368,7 +368,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 
 	// Mock SemanticHighlight methods
 	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
-		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string, params map[string]string) ([][]string, error) {
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, error) {
 			return [][]string{
 				{"<em>highlighted</em> text 1"},
 				{"<em>highlighted</em> text 2"},
@@ -381,6 +381,11 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOp() {
 		return []int64{101}
 	}).Build()
 	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).To(func(h *highlight.SemanticHighlight, id int64) string {
+		return testVarCharField
+	}).Build()
+	defer mockGetFieldName.UnPatch()
 
 	// Create operator
 	op := &semanticHighlightOperator{
@@ -479,7 +484,7 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMultipleFields() {
 	// Use a counter to return different results for different calls
 	callCount := 0
 	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
-		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string, params map[string]string) ([][]string, error) {
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, error) {
 			callCount++
 			return [][]string{
 				{fmt.Sprintf("<em>highlighted</em> text field%d-1", callCount)},
@@ -490,6 +495,14 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpMultipleFields() {
 
 	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101, 102}).Build()
 	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).To(func(h *highlight.SemanticHighlight, id int64) string {
+		if id == 101 {
+			return "field1"
+		}
+		return "field2"
+	}).Build()
+	defer mockGetFieldName.UnPatch()
 
 	op := &semanticHighlightOperator{
 		highlight: &highlight.SemanticHighlight{},
@@ -558,13 +571,18 @@ func (s *SearchPipelineSuite) TestSemanticHighlightOpEmptyResults() {
 
 	// Mock Process to return empty results
 	mockProcess := mockey.Mock((*highlight.SemanticHighlight).Process).To(
-		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string, params map[string]string) ([][]string, error) {
+		func(h *highlight.SemanticHighlight, ctx context.Context, topks []int64, texts []string) ([][]string, error) {
 			return [][]string{}, nil
 		}).Build()
 	defer mockProcess.UnPatch()
 
 	mockFieldIDs := mockey.Mock((*highlight.SemanticHighlight).FieldIDs).Return([]int64{101}).Build()
 	defer mockFieldIDs.UnPatch()
+
+	mockGetFieldName := mockey.Mock((*highlight.SemanticHighlight).GetFieldName).To(func(h *highlight.SemanticHighlight, id int64) string {
+		return testVarCharField
+	}).Build()
+	defer mockGetFieldName.UnPatch()
 
 	op := &semanticHighlightOperator{
 		highlight: &highlight.SemanticHighlight{},
