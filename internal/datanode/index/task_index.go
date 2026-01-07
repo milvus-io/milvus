@@ -143,6 +143,11 @@ func (it *indexBuildTask) GetSlot() int64 {
 	return it.req.GetTaskSlot()
 }
 
+func (it *indexBuildTask) IsVectorIndex() bool {
+	indexType := GetIndexType(it.req.GetIndexParams())
+	return vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
+}
+
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	it.queueDur = it.tr.RecordSpan()
 	log.Ctx(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.req.GetBuildID()),
