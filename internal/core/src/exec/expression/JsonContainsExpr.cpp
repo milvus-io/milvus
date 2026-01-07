@@ -439,6 +439,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
             auto sort_arg_set =
                 std::dynamic_pointer_cast<SortVectorElement<int64_t>>(arg_set_);
             std::vector<double> double_vals;
+            double_vals.reserve(sort_arg_set->GetElements().size());
             for (const auto& val : sort_arg_set->GetElements()) {
                 double_vals.emplace_back(static_cast<double>(val));
             }
@@ -660,6 +661,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
         return nullptr;
     }
     std::vector<proto::plan::Array> elements;
+    elements.reserve(expr_->vals_.size());
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     for (auto const& element : expr_->vals_) {
         elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
@@ -1126,7 +1128,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
             TargetBitmapView valid_res,
             const std::string& pointer,
             const std::vector<proto::plan::GenericValue>& elements,
-            const std::unordered_set<int> elements_index) {
+            const std::unordered_set<int>& elements_index) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1443,6 +1445,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     std::vector<proto::plan::Array> elements;
+    elements.reserve(expr_->vals_.size());
     for (auto const& element : expr_->vals_) {
         elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
     }
@@ -1547,6 +1550,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByStats() {
     }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::vector<proto::plan::Array> elements;
+    elements.reserve(expr_->vals_.size());
     for (auto const& element : expr_->vals_) {
         elements.emplace_back(GetValueFromProto<proto::plan::Array>(element));
     }

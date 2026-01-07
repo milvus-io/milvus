@@ -334,6 +334,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                        "inconsistent data type");
             auto arr = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
             std::vector<knowhere::sparse::SparseRow<SparseValueType>> values;
+            values.reserve(element_count);
 
             if (nullable_) {
                 for (int64_t i = 0; i < element_count; ++i) {
