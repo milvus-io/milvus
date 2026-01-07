@@ -649,6 +649,25 @@ func TestAnyToColumns(t *testing.T) {
 		assert.Equal(t, true, strings.HasPrefix(err.Error(), "no need to pass pk field"))
 	})
 
+	t.Run("insert,autoid==true,allow_insert_auto_id=true", func(t *testing.T) {
+		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
+		req := InsertReq{}
+		coll := generateCollectionSchema(schemapb.DataType_Int64, true, true)
+		coll.Properties = append(coll.Properties, &commonpb.KeyValuePair{
+			Key:   common.AllowInsertAutoIDKey,
+			Value: "true",
+		})
+		var err error
+		err, req.Data, _ = checkAndSetData(body, coll, false)
+		assert.Equal(t, nil, err)
+		assert.Equal(t, int64(0), req.Data[0]["id"])
+		assert.Equal(t, int64(1), req.Data[0]["book_id"])
+		assert.Equal(t, int64(2), req.Data[0]["word_count"])
+		t.Log(req.Data)
+		_, err = anyToColumns(req.Data, nil, coll, true, false)
+		assert.NoError(t, err)
+	})
+
 	t.Run("pass more field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
 		coll := generateCollectionSchema(schemapb.DataType_Int64, true, false)
