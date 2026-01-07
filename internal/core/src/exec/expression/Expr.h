@@ -1022,6 +1022,47 @@ class SegmentExpr : public Expr {
         return size;
     }
 
+    // Helper function to get index pointer for JSON and non-JSON types
+    template <typename IndexInnerType>
+    struct IndexPtrResult {
+        index::ScalarIndex<IndexInnerType>* index_ptr;
+        std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
+            executor;
+    };
+
+    template <typename IndexInnerType>
+    IndexPtrResult<IndexInnerType>
+    GetIndexPtrForChunk(size_t chunk_id) {
+        using Index = index::ScalarIndex<IndexInnerType>;
+        IndexPtrResult<IndexInnerType> result{nullptr, nullptr};
+
+        if (field_type_ == DataType::JSON) {
+            auto pointer = milvus::Json::pointer(nested_path_);
+            PinWrapper<const index::IndexBase*> json_pw =
+                pinned_index_[chunk_id];
+            // check if it is a json flat index, if so, create a json flat index query executor
+            auto json_flat_index =
+                dynamic_cast<const index::JsonFlatIndex*>(json_pw.get());
+
+            if (json_flat_index) {
+                auto index_path = json_flat_index->GetNestedPath();
+                result.executor =
+                    json_flat_index->template create_executor<IndexInnerType>(
+                        pointer.substr(index_path.size()));
+                result.index_ptr = result.executor.get();
+            } else {
+                auto json_index = const_cast<index::IndexBase*>(json_pw.get());
+                result.index_ptr = dynamic_cast<Index*>(json_index);
+            }
+        } else {
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[chunk_id].get());
+            result.index_ptr = const_cast<Index*>(scalar_index);
+        }
+
+        return result;
+    }
+
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
@@ -1038,40 +1079,9 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                Index* index_ptr = nullptr;
-                PinWrapper<const index::IndexBase*> json_pw;
-                PinWrapper<const Index*> pw;
-                // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
-                std::shared_ptr<
-                    index::JsonFlatIndexQueryExecutor<IndexInnerType>>
-                    executor;
+                auto index_result = GetIndexPtrForChunk<IndexInnerType>(i);
+                Index* index_ptr = index_result.index_ptr;
 
-                if (field_type_ == DataType::JSON) {
-                    auto pointer = milvus::Json::pointer(nested_path_);
-
-                    json_pw = pinned_index_[i];
-                    // check if it is a json flat index, if so, create a json flat index query executor
-                    auto json_flat_index =
-                        dynamic_cast<const index::JsonFlatIndex*>(
-                            json_pw.get());
-
-                    if (json_flat_index) {
-                        auto index_path = json_flat_index->GetNestedPath();
-                        executor =
-                            json_flat_index
-                                ->template create_executor<IndexInnerType>(
-                                    pointer.substr(index_path.size()));
-                        index_ptr = executor.get();
-                    } else {
-                        auto json_index =
-                            const_cast<index::IndexBase*>(json_pw.get());
-                        index_ptr = dynamic_cast<Index*>(json_index);
-                    }
-                } else {
-                    auto scalar_index =
-                        dynamic_cast<const Index*>(pinned_index_[i].get());
-                    index_ptr = const_cast<Index*>(scalar_index);
-                }
                 cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
                     std::move(func(index_ptr, values...)));
                 auto valid_result = index_ptr->IsNotNull();
@@ -1330,8 +1340,11 @@ class SegmentExpr : public Expr {
     template <typename T>
     TargetBitmap
     ProcessIndexChunksForValid() {
-        using IndexInnerType = std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+        using IndexInnerType =
+            std::conditional_t<std::is_same_v<T, std::string_view> ||
+                                   std::is_same_v<T, milvus::Json>,
+                               std::string,
+                               T>;
         using Index = index::ScalarIndex<IndexInnerType>;
         int processed_rows = 0;
         TargetBitmap valid_result;
@@ -1342,9 +1355,9 @@ class SegmentExpr : public Expr {
             // It avoids indexing execute for every batch because indexing
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
-                auto scalar_index =
-                    dynamic_cast<const Index*>(pinned_index_[i].get());
-                auto* index_ptr = const_cast<Index*>(scalar_index);
+                auto index_result = GetIndexPtrForChunk<IndexInnerType>(i);
+                Index* index_ptr = index_result.index_ptr;
+
                 auto execute_sub_batch = [](Index* index_ptr) {
                     TargetBitmap res = index_ptr->IsNotNull();
                     return res;
