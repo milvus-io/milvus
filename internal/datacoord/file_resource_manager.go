@@ -22,11 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -40,8 +38,7 @@ type storageClient interface {
 }
 
 type FileResourceManager struct {
-	ctx  context.Context
-	meta *meta
+	ctx context.Context
 
 	// version distribution
 	nodeManager  session.NodeManager
@@ -50,78 +47,27 @@ type FileResourceManager struct {
 	notifyCh chan struct{}
 	sf       conc.Singleflight[any]
 	once     sync.Once
+	meta     *meta
 
-	storage storageClient
-
-	mixCoord types.MixCoord
-	qnMode   fileresource.Mode // query node and streaming node file resource mode
-	dnMode   fileresource.Mode // data node file resource mode
+	mode fileresource.Mode // data node file resource mode
 	// close
 	closeCh chan struct{}
 	wg      sync.WaitGroup
 }
 
-func NewFileResourceManager(ctx context.Context, mixCoord types.MixCoord, meta *meta, nodeManager session.NodeManager, storage storageClient) *FileResourceManager {
+func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session.NodeManager) *FileResourceManager {
 	return &FileResourceManager{
 		ctx:          ctx,
-		meta:         meta,
 		nodeManager:  nodeManager,
+		meta:         meta,
 		distribution: map[int64]uint64{},
 
-		closeCh:  make(chan struct{}),
-		sf:       conc.Singleflight[any]{},
-		qnMode:   fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()),
-		dnMode:   fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
-		storage:  storage,
-		mixCoord: mixCoord,
+		closeCh: make(chan struct{}),
+		sf:      conc.Singleflight[any]{},
+		mode:    fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
 
 		notifyCh: make(chan struct{}, 1),
 	}
-}
-
-func (m *FileResourceManager) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
-	exist, err := m.storage.Exist(ctx, resource.Path)
-	if err != nil {
-		return err
-	}
-
-	if !exist {
-		return merr.WrapErrAsInputError(errors.Errorf("add file resource failed: file path %s not exist", resource.Path))
-	}
-
-	err = m.meta.AddFileResource(ctx, resource)
-	if err != nil {
-		return err
-	}
-
-	m.Notify()
-	m.syncQcFileResource(ctx)
-	return nil
-}
-
-func (m *FileResourceManager) RemoveFileResource(ctx context.Context, name string) error {
-	err := m.meta.RemoveFileResource(ctx, name)
-	if err != nil {
-		return err
-	}
-
-	m.Notify()
-	m.syncQcFileResource(ctx)
-	return nil
-}
-
-func (m *FileResourceManager) syncQcFileResource(ctx context.Context) error {
-	if m.qnMode != fileresource.SyncMode {
-		return nil
-	}
-	resources, version := m.meta.ListFileResource(ctx)
-	err := m.mixCoord.SyncQcFileResource(ctx, resources, version)
-	if err != nil {
-		log.Warn("sync qc file resource failed", zap.Error(err))
-		return err
-	}
-	log.Info("finish sync qc file resource to query node", zap.Uint64("version", version), zap.Int("resources", len(resources)))
-	return nil
 }
 
 func (m *FileResourceManager) syncLoop() {
@@ -147,7 +93,7 @@ func (m *FileResourceManager) syncLoop() {
 }
 
 func (m *FileResourceManager) Start() {
-	if fileresource.IsSyncMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) {
+	if m.mode == fileresource.SyncMode {
 		m.once.Do(func() {
 			m.wg.Add(1)
 			go m.syncLoop()
@@ -160,15 +106,22 @@ func (m *FileResourceManager) Close() {
 	m.wg.Wait()
 }
 
+func (m *FileResourceManager) UpdateResources(resources []*internalpb.FileResourceInfo, version uint64) {
+	m.meta.UpdateFileResources(m.ctx, resources, version)
+	m.Notify()
+}
+
 // notify sync file resource to datanode
 // if file resource mode was Sync
 func (m *FileResourceManager) Notify() {
-	if m == nil || m.dnMode != fileresource.SyncMode {
+	if m == nil || m.mode != fileresource.SyncMode {
+		log.Info("notify sync file resource to datanode, but file resource mode is not sync")
 		return
 	}
 
 	select {
 	case m.notifyCh <- struct{}{}:
+		log.Info("notify sync file resource to datanode")
 	default:
 	}
 }
@@ -178,7 +131,7 @@ func (m *FileResourceManager) sync() error {
 
 	var syncErr error
 
-	resources, version := m.meta.ListFileResource(m.ctx)
+	resources, version := m.meta.ListFileResources(m.ctx)
 
 	newDistribution := make(map[int64]uint64)
 	for _, node := range nodes {
