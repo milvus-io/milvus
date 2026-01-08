@@ -29,57 +29,81 @@ const (
 var (
 	LoggingMetricsRegisterOnce sync.Once
 
-	LoggingPendingWriteLength = prometheus.NewGauge(prometheus.GaugeOpts{
+	LoggingPendingWriteTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: milvusNamespace,
 		Subsystem: loggingMetricSubsystem,
-		Name:      "pending_write_length",
+		Name:      "pending_write_total",
 		Help:      "The length of pending writes in the logging buffer",
 	})
 
-	LoggingPendingWriteBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+	LoggingTruncatedWriteTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: milvusNamespace,
 		Subsystem: loggingMetricSubsystem,
-		Name:      "pending_write_bytes",
-		Help:      "The total bytes of pending writes in the logging buffer",
-	})
-
-	LoggingTruncatedWrites = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: milvusNamespace,
-		Subsystem: loggingMetricSubsystem,
-		Name:      "truncated_writes",
+		Name:      "truncated_write_total",
 		Help:      "The number of truncated writes due to exceeding the max bytes per log",
 	})
 
-	LoggingTruncatedWriteBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+	LoggingTruncatedWriteBytes = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: milvusNamespace,
 		Subsystem: loggingMetricSubsystem,
 		Name:      "truncated_write_bytes",
 		Help:      "The total bytes of truncated writes due to exceeding the max bytes per log",
 	})
 
-	LoggingDroppedWrites = prometheus.NewGauge(prometheus.GaugeOpts{
+	LoggingDroppedWriteTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: milvusNamespace,
 		Subsystem: loggingMetricSubsystem,
-		Name:      "dropped_writes",
+		Name:      "dropped_write_total",
 		Help:      "The number of dropped writes due to buffer full or write timeout",
 	})
 
-	LoggingIOFailure = prometheus.NewGauge(prometheus.GaugeOpts{
+	LoggingIOFailureTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: milvusNamespace,
 		Subsystem: loggingMetricSubsystem,
-		Name:      "io_failures",
+		Name:      "io_failure_total",
 		Help:      "The number of IO failures due to underlying write syncer is blocked or write timeout",
+	})
+
+	LoggingWriteTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: loggingMetricSubsystem,
+		Name:      "write_total",
+		Help:      "The total number of writes",
+	})
+
+	LoggingWriteBytes = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: loggingMetricSubsystem,
+		Name:      "write_bytes",
+		Help:      "The total bytes of written logs",
+	})
+
+	LoggingCGOWriteTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: loggingMetricSubsystem,
+		Name:      "cgo_write_total",
+		Help:      "The total number of CGO writes",
+	})
+
+	LoggingCGOWriteBytes = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: loggingMetricSubsystem,
+		Name:      "cgo_write_bytes",
+		Help:      "The total bytes of CGO write logs, the bytes is calculated before encoding, only considers the length of the message, so the actual bytes may be greater than the value",
 	})
 )
 
 // RegisterLoggingMetrics registers logging metrics
 func RegisterLoggingMetrics(registry *prometheus.Registry) {
 	LoggingMetricsRegisterOnce.Do(func() {
-		registry.MustRegister(LoggingPendingWriteLength)
-		registry.MustRegister(LoggingPendingWriteBytes)
-		registry.MustRegister(LoggingTruncatedWrites)
+		registry.MustRegister(LoggingPendingWriteTotal)
+		registry.MustRegister(LoggingTruncatedWriteTotal)
 		registry.MustRegister(LoggingTruncatedWriteBytes)
-		registry.MustRegister(LoggingDroppedWrites)
-		registry.MustRegister(LoggingIOFailure)
+		registry.MustRegister(LoggingDroppedWriteTotal)
+		registry.MustRegister(LoggingIOFailureTotal)
+		registry.MustRegister(LoggingWriteTotal)
+		registry.MustRegister(LoggingWriteBytes)
+		registry.MustRegister(LoggingCGOWriteTotal)
+		registry.MustRegister(LoggingCGOWriteBytes)
 	})
 }

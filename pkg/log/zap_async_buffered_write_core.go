@@ -130,10 +130,9 @@ func (s *asyncTextIOCore) Write(ent zapcore.Entry, fields []zapcore.Field) error
 	}
 	select {
 	case s.pending <- entry:
-		metrics.LoggingPendingWriteLength.Inc()
-		metrics.LoggingPendingWriteBytes.Add(float64(length))
+		metrics.LoggingPendingWriteTotal.Inc()
 	case <-writeDroppedTimeout:
-		metrics.LoggingDroppedWrites.Inc()
+		metrics.LoggingDroppedWriteTotal.Inc()
 		// drop the entry if the write is dropped due to timeout
 		buf.Free()
 	}
@@ -165,15 +164,20 @@ func (s *asyncTextIOCore) background() {
 // consumeEntry write the entry to the underlying buffered write syncer and free the buffer.
 func (s *asyncTextIOCore) consumeEntry(ent *entryItem) {
 	length := ent.buf.Len()
-	metrics.LoggingPendingWriteLength.Dec()
-	metrics.LoggingPendingWriteBytes.Sub(float64(length))
+	metrics.LoggingPendingWriteTotal.Dec()
+
 	writes := s.getWriteBytes(ent)
 	if _, err := s.bws.Write(writes); err != nil {
-		metrics.LoggingIOFailure.Inc()
+		metrics.LoggingIOFailureTotal.Inc()
+	} else {
+		metrics.LoggingWriteTotal.Inc()
+		metrics.LoggingWriteBytes.Add(float64(length))
 	}
 	ent.buf.Free()
 	if ent.level > zapcore.ErrorLevel {
-		s.bws.Sync()
+		if err := s.bws.Sync(); err != nil {
+			metrics.LoggingIOFailureTotal.Inc()
+		}
 	}
 }
 
@@ -186,7 +190,7 @@ func (s *asyncTextIOCore) getWriteBytes(ent *entryItem) []byte {
 
 	if length > s.maxBytesPerLog {
 		// truncate the write if it exceeds the max bytes per log
-		metrics.LoggingTruncatedWrites.Inc()
+		metrics.LoggingTruncatedWriteTotal.Inc()
 		metrics.LoggingTruncatedWriteBytes.Add(float64(length - s.maxBytesPerLog))
 
 		end := writes[length-1]
@@ -211,7 +215,7 @@ func (s *asyncTextIOCore) flushPendingWriteWithTimeout() {
 func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 	defer func() {
 		if err := s.bws.Stop(); err != nil {
-			metrics.LoggingIOFailure.Inc()
+			metrics.LoggingIOFailureTotal.Inc()
 		}
 		close(done)
 	}()
