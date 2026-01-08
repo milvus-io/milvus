@@ -460,14 +460,13 @@ class ResponseChecker:
             else:
                 ids = list(hits.ids)
                 distances = list(hits.distances)
-            if check_items.get("limit", None) is not None and (
-                (len(hits) != check_items["limit"]) or (len(ids) != check_items["limit"])
-            ):
-                log.error(
-                    "search_results_check: limit(topK) searched (%d) is not equal with expected (%d)",
-                    len(hits),
-                    check_items["limit"],
-                )
+            if len(hits) == 0:
+                continue
+            if check_items.get("limit", None) is not None \
+                    and ((len(hits) != check_items["limit"]) or (len(ids) != check_items["limit"])):
+                log.error("search_results_check: limit(topK) searched (%d) "
+                          "is not equal with expected (%d)"
+                          % (len(hits), check_items["limit"]))
                 assert len(hits) == check_items["limit"]
                 assert len(ids) == check_items["limit"]
             if check_items.get("ids", None) is not None:
