@@ -244,6 +244,8 @@ class TestVectorArrayStorageV2 : public testing::Test {
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         fs->DeleteDir("/tmp/test_vector_array_for_storage_v2");
+
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
     }
 
  protected:
