@@ -107,11 +107,6 @@ service DataCoord {
   rpc ImportV2(internal.ImportRequestInternal) returns(internal.ImportResponse){}
   rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
   rpc ListImports(internal.ListImportsRequestInternal) returns(internal.ListImportsResponse){}
-
-  // File Resource Management
-  rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
-  rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
-  rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
   
   // snapshot
   rpc CreateSnapshot(CreateSnapshotRequest) returns(common.Status){}

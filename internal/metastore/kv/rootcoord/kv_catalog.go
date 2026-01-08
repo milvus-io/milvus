@@ -1690,6 +1690,75 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 	return privGroups, nil
 }
 
+func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {
+	kvs := make(map[string]string)
+
+	k := BuildFileResourceKey(resource.Id)
+	v, err := proto.Marshal(resource)
+	if err != nil {
+		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
+		return err
+	}
+	kvs[k] = string(v)
+	kvs[FileResourceVersionKey] = fmt.Sprint(version)
+
+	if err = kc.Txn.MultiSave(ctx, kvs); err != nil {
+		log.Ctx(ctx).Warn("fail to save resource info", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error {
+	k := BuildFileResourceKey(resourceID)
+	if err := kc.Txn.MultiSaveAndRemove(ctx, map[string]string{FileResourceVersionKey: fmt.Sprint(version)}, []string{k}); err != nil {
+		log.Ctx(ctx).Warn("fail to remove resource info", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(ctx, FileResourceMetaPrefix)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var version uint64 = 0
+	exist, err := kc.Txn.Has(ctx, FileResourceVersionKey)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if exist {
+		strVersion, err := kc.Txn.Load(ctx, FileResourceVersionKey)
+		if err != nil {
+			return nil, 0, err
+		}
+		v, err := strconv.ParseUint(strVersion, 10, 64)
+		if err != nil {
+			return nil, 0, err
+		}
+		version = v
+	}
+
+	infos := make([]*internalpb.FileResourceInfo, 0, len(values))
+	for _, v := range values {
+		info := &internalpb.FileResourceInfo{}
+		err := proto.Unmarshal([]byte(v), info)
+		if err != nil {
+			return nil, 0, err
+		}
+		infos = append(infos, info)
+	}
+
+	return infos, version, nil
+}
+
+func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
+}
+
 func (kc *Catalog) Close() {
 	// do nothing
 }
