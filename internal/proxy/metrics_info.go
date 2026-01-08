@@ -164,18 +164,6 @@ func getSystemInfoMetrics(
 
 	identifierMap := make(map[string]int)
 
-	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, paramtable.GetNodeID())
-	identifierMap[proxyRoleName] = int(node.session.ServerID)
-
-	// FIXME:All proxy metrics are retrieved from RootCoord, while single proxy metrics are obtained from the proxy itself.
-	proxyInfo := getProxyMetricInfo(ctx, node, nil)
-	proxyTopologyNode := metricsinfo.SystemTopologyNode{
-		Identifier: int(node.session.ServerID),
-		Connected:  make([]metricsinfo.ConnectionEdge, 0),
-		Infos:      proxyInfo,
-	}
-	metricsinfo.FillDeployMetricsWithEnv(&(proxyTopologyNode.Infos.(*metricsinfo.ProxyInfos).SystemInfo))
-
 	var wg sync.WaitGroup
 
 	var queryCoordResp *milvuspb.GetMetricsResponse
@@ -236,12 +224,6 @@ func getSystemInfoMetrics(
 	identifierMap[rootCoordRoleName] = int(rootCoordTopology.Self.ID)
 
 	if queryCoordErr == nil && queryCoordResp != nil {
-		proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
-			ConnectedIdentifier: identifierMap[queryCoordRoleName],
-			Type:                metricsinfo.Forward,
-			TargetType:          typeutil.QueryCoordRole,
-		})
-
 		// QueryCoord in system topology graph
 		queryCoordTopologyNode := metricsinfo.SystemTopologyNode{
 			Identifier: identifierMap[queryCoordRoleName],
@@ -300,12 +282,6 @@ func getSystemInfoMetrics(
 	}
 
 	if dataCoordErr == nil && dataCoordResp != nil {
-		proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
-			ConnectedIdentifier: identifierMap[dataCoordRoleName],
-			Type:                metricsinfo.Forward,
-			TargetType:          typeutil.DataCoordRole,
-		})
-
 		// DataCoord in system topology graph
 		dataCoordTopologyNode := metricsinfo.SystemTopologyNode{
 			Identifier: identifierMap[dataCoordRoleName],
@@ -382,12 +358,6 @@ func getSystemInfoMetrics(
 	}
 
 	if rootCoordErr == nil && rootCoordResp != nil {
-		proxyTopologyNode.Connected = append(proxyTopologyNode.Connected, metricsinfo.ConnectionEdge{
-			ConnectedIdentifier: identifierMap[rootCoordRoleName],
-			Type:                metricsinfo.Forward,
-			TargetType:          typeutil.RootCoordRole,
-		})
-
 		// root coord in system topology graph
 		rootCoordTopologyNode := metricsinfo.SystemTopologyNode{
 			Identifier: identifierMap[rootCoordRoleName],
@@ -395,40 +365,52 @@ func getSystemInfoMetrics(
 			Infos:      &rootCoordTopology.Self,
 		}
 
-		// fill connection edge, a little trick here
-		for _, edge := range rootCoordTopology.Connections.ConnectedComponents {
-			switch edge.TargetType {
-			case typeutil.RootCoordRole:
-				rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-					ConnectedIdentifier: identifierMap[rootCoordRoleName],
-					Type:                metricsinfo.Forward,
-					TargetType:          typeutil.RootCoordRole,
-				})
-			case typeutil.DataCoordRole:
-				if dataCoordErr == nil && dataCoordResp != nil {
-					rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-						ConnectedIdentifier: identifierMap[dataCoordRoleName],
-						Type:                metricsinfo.Forward,
-						TargetType:          typeutil.DataCoordRole,
-					})
-				}
-			case typeutil.QueryCoordRole:
-				if queryCoordErr == nil && queryCoordResp != nil {
-					rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
-						ConnectedIdentifier: identifierMap[queryCoordRoleName],
-						Type:                metricsinfo.Forward,
-						TargetType:          typeutil.QueryCoordRole,
-					})
-				}
+		// add all proxy nodes to system topology graph
+		for _, proxyInfo := range rootCoordTopology.ConnectedProxies {
+			proxy := proxyInfo
+			identifier := int(proxy.ID)
+			identifierMap[proxy.Name] = identifier
+
+			proxyNode := metricsinfo.SystemTopologyNode{
+				Identifier: identifier,
+				Connected:  make([]metricsinfo.ConnectionEdge, 0),
+				Infos:      &proxy,
 			}
+
+			// Each proxy connects to RootCoord, QueryCoord, DataCoord
+			proxyNode.Connected = append(proxyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifierMap[rootCoordRoleName],
+				Type:                metricsinfo.Forward,
+				TargetType:          typeutil.RootCoordRole,
+			})
+			if queryCoordErr == nil && queryCoordResp != nil {
+				proxyNode.Connected = append(proxyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: identifierMap[queryCoordRoleName],
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.QueryCoordRole,
+				})
+			}
+			if dataCoordErr == nil && dataCoordResp != nil {
+				proxyNode.Connected = append(proxyNode.Connected, metricsinfo.ConnectionEdge{
+					ConnectedIdentifier: identifierMap[dataCoordRoleName],
+					Type:                metricsinfo.Forward,
+					TargetType:          typeutil.DataCoordRole,
+				})
+			}
+
+			systemTopology.NodesInfo = append(systemTopology.NodesInfo, proxyNode)
+
+			// RootCoord connects to this proxy
+			rootCoordTopologyNode.Connected = append(rootCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
+				ConnectedIdentifier: identifier,
+				Type:                metricsinfo.CoordConnectToNode,
+				TargetType:          typeutil.ProxyRole,
+			})
 		}
 
 		// add root coord to system topology graph
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, rootCoordTopologyNode)
 	}
-
-	// add proxy to system topology graph
-	systemTopology.NodesInfo = append(systemTopology.NodesInfo, proxyTopologyNode)
 
 	resp, err := metricsinfo.MarshalTopology(systemTopology)
 	if err != nil {
