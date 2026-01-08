@@ -572,6 +572,28 @@ func (s *TextEmbeddingFunctionSuite) TestNewTextEmbeddings() {
 		s.Error(err)
 	}
 
+	{
+		fSchema := &schemapb.FunctionSchema{
+			Name:             "test",
+			Type:             schemapb.FunctionType_TextEmbedding,
+			InputFieldNames:  []string{"text"},
+			OutputFieldNames: []string{"vector"},
+			InputFieldIds:    []int64{101},
+			OutputFieldIds:   []int64{102},
+			Params: []*commonpb.KeyValuePair{
+				{Key: Provider, Value: arkProvider},
+				{Key: models.ModelNameParamKey, Value: TestModel},
+				{Key: models.CredentialParamKey, Value: "mock"},
+			},
+		}
+
+		_, err := NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.NoError(err)
+		fSchema.Params = []*commonpb.KeyValuePair{}
+		_, err = NewTextEmbeddingFunction(s.schema, fSchema, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.Error(err)
+	}
+
 	// Invalid params
 	{
 		fSchema := &schemapb.FunctionSchema{
