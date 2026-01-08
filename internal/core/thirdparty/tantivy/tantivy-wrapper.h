@@ -1008,6 +1008,53 @@ struct TantivyIndexWrapper {
             "TantivyIndexWrapper.ngram_match_query: invalid result type");
     }
 
+    // Tokenize literals into ngram terms and return them sorted by doc_freq (ascending).
+    // For Match type queries like `%xxx%yyy%`, literals = ["xxx", "yyy"].
+    // For InnerMatch type queries like `%xxx%`, literals = ["xxx"].
+    std::vector<std::string>
+    ngram_tokenize(const std::vector<std::string>& literals,
+                   uintptr_t min_gram,
+                   uintptr_t max_gram) {
+        std::vector<const char*> c_literals;
+        c_literals.reserve(literals.size());
+        for (const auto& lit : literals) {
+            c_literals.push_back(lit.c_str());
+        }
+
+        auto array = tantivy_ngram_tokenize(
+            reader_, c_literals.data(), c_literals.size(), min_gram, max_gram);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.ngram_tokenize: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::RustStringArray,
+            "TantivyIndexWrapper.ngram_tokenize: invalid result type");
+
+        // Convert RustStringArray to std::vector<std::string>
+        auto& rust_array = res.result_->value.rust_string_array._0;
+        std::vector<std::string> result;
+        result.reserve(rust_array.len);
+        for (size_t i = 0; i < rust_array.len; i++) {
+            result.emplace_back(rust_array.array[i]);
+        }
+        return result;
+    }
+
+    // Get the posting list for a single ngram term.
+    void
+    ngram_term_posting_list(const std::string& term, void* bitset) {
+        auto array =
+            tantivy_ngram_term_posting_list(reader_, term.c_str(), bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.ngram_term_posting_list: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.ngram_term_posting_list: invalid result type");
+    }
+
     // json query
     template <typename T>
     void
