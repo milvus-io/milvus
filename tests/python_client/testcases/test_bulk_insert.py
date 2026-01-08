@@ -2736,7 +2736,7 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
     @pytest.mark.parametrize("file_format", ["json", "parquet", "numpy"])
     @pytest.mark.parametrize("add_field", [True, False])
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_without_embedding(self, tei_endpoint, minio_host, file_format, add_field):
+    def test_import_without_embedding(self, tei_endpoint, minio_host, minio_bucket, file_format, add_field):
         """
         target: test import data without embedding
         method: 1. create collection
@@ -2778,7 +2778,7 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
             schema=schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
-                bucket_name="milvus-bucket",
+                bucket_name=minio_bucket,
                 endpoint=f"{minio_host}:9000",
                 access_key="minioadmin",
                 secret_key="minioadmin",
@@ -2839,7 +2839,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
 
     @pytest.mark.parametrize("file_format", ["json", "parquet"])
     @pytest.mark.tags(CaseLabel.L2)
-    def test_import_for_bm25_function_with_output_field(self, tei_endpoint, minio_host, file_format):
+    def test_import_for_bm25_function_with_output_field(self, tei_endpoint, minio_host, minio_bucket, file_format):
         """
         target: test import data for bm25 with output field
         method: 1. create collection
@@ -2880,7 +2880,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
             schema=invalid_schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
-                bucket_name="milvus-bucket",
+                bucket_name=minio_bucket,
                 endpoint=f"{minio_host}:9000",
                 access_key="minioadmin",
                 secret_key="minioadmin",
@@ -2914,7 +2914,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
 
     @pytest.mark.parametrize("file_format", ["json", "parquet"])
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_for_text_embedding_function_with_output_field(self, tei_endpoint, minio_host, file_format):
+    def test_import_for_text_embedding_function_with_output_field(self, tei_endpoint, minio_host, minio_bucket, file_format):
         """
         target: test import data for text embedding function with output field
         method: 1. create collection
@@ -2957,7 +2957,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
             schema=invalid_schema,
             remote_path="bulk_data",
             connect_param=RemoteBulkWriter.ConnectParam(
-                bucket_name="milvus-bucket",
+                bucket_name=minio_bucket,
                 endpoint=f"{minio_host}:9000",
                 access_key="minioadmin",
                 secret_key="minioadmin",

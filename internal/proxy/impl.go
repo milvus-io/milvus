@@ -3590,10 +3590,16 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Convert to PlaceholderGroup
-	placeholderBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(vectorFieldData)
+	placeholderBytes, vectorCount, err := funcutil.FieldDataToPlaceholderGroupBytesWithCount(vectorFieldData)
 	if err != nil {
 		return err
 	}
+
+	if vectorCount == 0 {
+		return merr.WrapErrParameterInvalidMsg("cannot search: all provided IDs have null vector values in field '%s'", annsFieldName)
+	}
+
+	request.Nq = int64(vectorCount)
 
 	// Transform request: replace IDs with PlaceholderGroup
 	// Now the request is ready for normal search pipeline

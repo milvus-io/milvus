@@ -1183,6 +1183,32 @@ func TestAddFieldTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		oldSchemaWithVectors := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
+		for i := 0; i < Params.ProxyCfg.MaxVectorFieldNum.GetAsInt(); i++ {
+			oldSchemaWithVectors.Fields = append(oldSchemaWithVectors.Fields, &schemapb.FieldSchema{
+				Name:     fmt.Sprintf("vec_%d", i),
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			})
+		}
+		task.oldSchema = oldSchemaWithVectors
+		fSchema = &schemapb.FieldSchema{
+			Name:     "new_vec_field",
+			DataType: schemapb.DataType_FloatVector,
+			Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "128"},
+			},
+		}
+		bytes, err = proto.Marshal(fSchema)
+		assert.NoError(t, err)
+		task.Schema = bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "maximum vector field's number should be limited to")
 	})
 }
 

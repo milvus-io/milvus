@@ -1860,6 +1860,7 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 	suite.NoError(err)
 
 	sd1 := delegator.NewMockShardDelegator(suite.T())
+	sd1.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	sd1.EXPECT().Collection().Return(100)
 	sd1.EXPECT().GetDeleteBufferSize().Return(10, 1000)
 	sd1.EXPECT().GetTSafe().Return(100)
@@ -1868,6 +1869,7 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_0_100v0")
 
 	sd2 := delegator.NewMockShardDelegator(suite.T())
+	sd2.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	sd2.EXPECT().Collection().Return(100)
 	sd2.EXPECT().GetTSafe().Return(200)
 	sd2.EXPECT().GetDeleteBufferSize().Return(10, 1000)
