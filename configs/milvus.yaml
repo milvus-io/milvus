@@ -1021,7 +1021,7 @@ common:
         enabled: true # enable split system column policy in storage v2
         includePK: true # whether split system column policy include pk field
       splitByAvgSize:
-        enabled: false # enable split by average size policy in storage v2
+        enabled: true # enable split by average size policy in storage v2
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
   traceLogMode: 0 # trace request info
