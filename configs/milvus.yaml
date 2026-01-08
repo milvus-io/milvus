@@ -1015,7 +1015,6 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    enablev2: true
     stv2:
       splitSystemColumn:
         enabled: true # enable split system column policy in storage v2
