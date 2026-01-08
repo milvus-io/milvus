@@ -995,7 +995,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.Stv2SplitByAvgSize = ParamItem{
 		Key:          "common.storage.stv2.splitByAvgSize.enabled",
 		Version:      "2.6.2",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "enable split by average size policy in storage v2",
 		Export:       true,
 	}
