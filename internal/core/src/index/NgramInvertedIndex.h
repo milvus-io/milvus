@@ -21,6 +21,7 @@ class SegmentExpr;
 }  // namespace milvus::exec
 
 namespace milvus::index {
+
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
     // for string/varchar type
@@ -90,11 +91,19 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                exec::SegmentExpr* segment,
                const TargetBitmap* pre_filter);
 
+    void
+    ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,
+                              size_t total_count,
+                              TargetBitmap& bitset);
+
+    bool
+    ShouldUseBatchStrategy(double pre_filter_hit_rate) const;
+
  private:
     uintptr_t min_gram_{0};
     uintptr_t max_gram_{0};
     int64_t field_id_{0};
-    size_t avg_row_size_{5000};  // kDefaultAvgRowSize for compatibility
+    size_t avg_row_size_{0};
     std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
 
     // for json type

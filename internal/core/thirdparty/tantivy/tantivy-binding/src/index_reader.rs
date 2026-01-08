@@ -631,9 +631,10 @@ impl IndexReaderWrapper {
             }
         }
 
-        if all_term_pairs.is_empty() {
-            return Ok(vec![]);
-        }
+        assert!(
+            !all_term_pairs.is_empty(),
+            "ngram_tokenize should not produce empty terms for valid literals"
+        );
 
         // Get doc_freq for each term and sort
         let searcher = self.reader.searcher();

@@ -1027,9 +1027,8 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_tokenize: {}",
                    res.result_->error);
-        AssertInfo(
-            res.result_->value.tag == Value::Tag::RustStringArray,
-            "TantivyIndexWrapper.ngram_tokenize: invalid result type");
+        AssertInfo(res.result_->value.tag == Value::Tag::RustStringArray,
+                   "TantivyIndexWrapper.ngram_tokenize: invalid result type");
 
         // Convert RustStringArray to std::vector<std::string>
         auto& rust_array = res.result_->value.rust_string_array._0;

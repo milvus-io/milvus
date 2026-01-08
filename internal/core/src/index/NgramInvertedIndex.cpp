@@ -414,6 +414,48 @@ handle_batch(const T* data,
     }
 }
 
+void
+NgramInvertedIndex::ApplyIterativeNgramFilter(
+    const std::vector<std::string>& sorted_terms,
+    size_t total_count,
+    TargetBitmap& bitset) {
+    auto max_iterations = kMaxIterations;
+    if (avg_row_size_ < kSmallRowThreshold) {
+        max_iterations = kMaxIterationsForSmallRow;
+    } else if (avg_row_size_ < kMediumRowThreshold) {
+        max_iterations = kMaxIterationsForMediumRow;
+    }
+
+    for (size_t i = 0; i < std::min(sorted_terms.size(), max_iterations); i++) {
+        TargetBitmap term_bitset{total_count};
+        wrapper_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
+        bitset &= term_bitset;
+
+        double current_hit_rate = 1.0 * bitset.count() / total_count;
+        if (current_hit_rate < kBreakThreshold) {
+            break;
+        }
+        if (avg_row_size_ < kSmallRowThreshold &&
+            current_hit_rate < kBreakThresholdForSmallRow) {
+            break;
+        }
+    }
+}
+
+// Strategy selection based on avg_row_size and pre_filter_hit_rate:
+// - Batch strategy: query all ngram terms at once via ngram_match_query.
+//   Used for large rows (>= 5KB) where full matching is efficient, or for
+//   medium rows (>= 1KB) with high pre_filter_hit_rate (> 20%).
+// - Iterative strategy: query terms one by one, sorted by doc_freq (rarest first).
+//   Used for small/medium rows with low pre_filter_hit_rate, allowing early
+//   termination when hit_rate drops below threshold.
+bool
+NgramInvertedIndex::ShouldUseBatchStrategy(double pre_filter_hit_rate) const {
+    return avg_row_size_ >= kLargeRowThreshold ||
+           (avg_row_size_ >= kMediumRowThreshold &&
+            pre_filter_hit_rate > kPreFilterHitRateThreshold);
+}
+
 template <typename T, typename Predicate>
 std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
@@ -422,6 +464,8 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
                                               bool need_post_filter,
                                               const TargetBitmap* pre_filter) {
     auto total_count = static_cast<size_t>(Count());
+
+    AssertInfo(total_count > 0, "total_count should be greater than 0");
 
     // Calculate pre_filter stats for strategy selection
     size_t candidate_count = (pre_filter != nullptr && !pre_filter->empty())
@@ -435,54 +479,18 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
         bitset &= *pre_filter;
     }
 
-    // Strategy selection based on avg_row_size and pre_filter_hit_rate:
-    // - Batch strategy: query all ngram terms at once via ngram_match_query.
-    //   Used for large rows (>= 5KB) where full matching is efficient, or for
-    //   medium rows (>= 1KB) with high pre_filter_hit_rate (> 20%).
-    // - Iterative strategy: query terms one by one, sorted by doc_freq (rarest first).
-    //   Used for small/medium rows with low pre_filter_hit_rate, allowing early
-    //   termination when hit_rate drops below threshold.
-    if (avg_row_size_ >= kLargeRowThreshold ||
-        (avg_row_size_ >= kMediumRowThreshold &&
-         pre_filter_hit_rate > kPreFilterHitRateThreshold)) {
-        // Batch strategy
+    if (ShouldUseBatchStrategy(pre_filter_hit_rate)) {
         TargetBitmap ngram_bitset{total_count};
         wrapper_->ngram_match_query(
             literal, min_gram_, max_gram_, &ngram_bitset);
         bitset &= ngram_bitset;
     } else {
-        // Iterative strategy: query terms sorted by doc_freq (rarest first)
         std::vector<std::string> literals_vec = {literal};
         auto sorted_terms =
             wrapper_->ngram_tokenize(literals_vec, min_gram_, max_gram_);
         AssertInfo(!sorted_terms.empty(),
                    "ngram_tokenize should not return empty for valid literal");
-
-        auto max_iterations = kMaxIterations;
-        if (avg_row_size_ < kSmallRowThreshold) {
-            max_iterations = kMaxIterationsForSmallRow;
-        } else if (avg_row_size_ < kMediumRowThreshold) {
-            max_iterations = kMaxIterationsForMediumRow;
-        }
-        for (size_t i = 0; i < std::min(sorted_terms.size(), max_iterations);
-             i++) {
-            TargetBitmap term_bitset{total_count};
-            wrapper_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
-            bitset &= term_bitset;
-
-            // Early termination when hit_rate drops below threshold
-            double current_hit_rate =
-                total_count > 0 ? 1.0 * bitset.count() / total_count : 0;
-            if (current_hit_rate < kBreakThreshold) {
-                break;
-            }
-
-            // Early termination for small rows with more relaxed threshold
-            if (avg_row_size_ < kSmallRowThreshold &&
-                current_hit_rate < kBreakThresholdForSmallRow) {
-                break;
-            }
-        }
+        ApplyIterativeNgramFilter(sorted_terms, total_count, bitset);
     }
 
     if (bitset.none()) {
@@ -507,16 +515,9 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(const std::string& literal,
         final_result_count = bitset.count();
     }
     if (auto root_span = tracer::GetRootSpan()) {
-        size_t pre_filter_count =
-            (pre_filter != nullptr && !pre_filter->empty())
-                ? pre_filter->count()
-                : total_count;
-        double pre_filter_hit_rate =
-            total_count > 0 ? 1.0 * pre_filter_count / total_count : 0;
         double hit_rate_before_phase2 =
-            total_count > 0 ? 1.0 * after_pre_filter_count / total_count : 0;
-        double final_hit_rate =
-            total_count > 0 ? 1.0 * final_result_count / total_count : 0;
+            1.0 * after_pre_filter_count / total_count;
+        double final_hit_rate = 1.0 * final_result_count / total_count;
 
         root_span->SetAttribute("need_post_filter", need_post_filter);
         root_span->SetAttribute("pre_filter_hit_rate", pre_filter_hit_rate);
@@ -571,12 +572,7 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     }
 
     auto total_count = static_cast<size_t>(Count());
-
-    // Calculate pre_filter stats for strategy selection
-    size_t candidate_count = (pre_filter != nullptr && !pre_filter->empty())
-                                 ? pre_filter->count()
-                                 : total_count;
-    double pre_filter_hit_rate = 1.0 * candidate_count / total_count;
+    AssertInfo(total_count > 0, "total_count should be greater than 0");
 
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
@@ -585,60 +581,30 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
         }
     }
 
+    // Calculate pre_filter stats for strategy selection
+    size_t candidate_count = (pre_filter != nullptr && !pre_filter->empty())
+                                 ? pre_filter->count()
+                                 : total_count;
+    double pre_filter_hit_rate = 1.0 * candidate_count / total_count;
+
     TargetBitmap bitset(total_count, true);
     if (pre_filter != nullptr && !pre_filter->empty()) {
         bitset &= *pre_filter;
     }
 
-    // Strategy selection based on avg_row_size and pre_filter_hit_rate:
-    // - Batch strategy: query all ngram terms at once via ngram_match_query.
-    //   Used for large rows (>= 5KB) where full matching is efficient, or for
-    //   medium rows (>= 1KB) with high pre_filter_hit_rate (> 20%).
-    // - Iterative strategy: query terms one by one, sorted by doc_freq (rarest first).
-    //   Used for small/medium rows with low pre_filter_hit_rate, allowing early
-    //   termination when hit_rate drops below threshold.
-    if (avg_row_size_ >= kLargeRowThreshold ||
-        (avg_row_size_ >= kMediumRowThreshold &&
-         pre_filter_hit_rate > kPreFilterHitRateThreshold)) {
-        // Batch strategy
+    if (ShouldUseBatchStrategy(pre_filter_hit_rate)) {
         for (const auto& l : literals) {
             TargetBitmap tmp_bitset{total_count};
             wrapper_->ngram_match_query(l, min_gram_, max_gram_, &tmp_bitset);
             bitset &= tmp_bitset;
         }
     } else {
-        // Iterative strategy: query terms sorted by doc_freq (rarest first)
         auto sorted_terms =
             wrapper_->ngram_tokenize(literals, min_gram_, max_gram_);
         AssertInfo(!sorted_terms.empty(),
                    "ngram_tokenize returned empty sorted_terms for iterative "
                    "strategy");
-
-        auto max_iterations = kMaxIterations;
-        if (avg_row_size_ < kSmallRowThreshold) {
-            max_iterations = kMaxIterationsForSmallRow;
-        } else if (avg_row_size_ < kMediumRowThreshold) {
-            max_iterations = kMaxIterationsForMediumRow;
-        }
-        for (size_t i = 0; i < std::min(sorted_terms.size(), max_iterations);
-             i++) {
-            TargetBitmap term_bitset{total_count};
-            wrapper_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
-            bitset &= term_bitset;
-
-            // Early termination when hit_rate drops below threshold
-            double current_hit_rate =
-                total_count > 0 ? 1.0 * bitset.count() / total_count : 0;
-            if (current_hit_rate < kBreakThreshold) {
-                break;
-            }
-
-            // Early termination for small rows with more relaxed threshold
-            if (avg_row_size_ < kSmallRowThreshold &&
-                current_hit_rate < kBreakThresholdForSmallRow) {
-                break;
-            }
-        }
+        ApplyIterativeNgramFilter(sorted_terms, total_count, bitset);
     }
 
     if (bitset.none()) {
@@ -688,16 +654,9 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     auto final_result_count = bitset.count();
 
     if (auto root_span = tracer::GetRootSpan()) {
-        size_t pre_filter_count =
-            (pre_filter != nullptr && !pre_filter->empty())
-                ? pre_filter->count()
-                : total_count;
-        double pre_filter_hit_rate =
-            total_count > 0 ? 1.0 * pre_filter_count / total_count : 0;
         double hit_rate_before_phase2 =
-            total_count > 0 ? 1.0 * after_pre_filter_count / total_count : 0;
-        double final_hit_rate =
-            total_count > 0 ? 1.0 * final_result_count / total_count : 0;
+            1.0 * after_pre_filter_count / total_count;
+        double final_hit_rate = 1.0 * final_result_count / total_count;
 
         root_span->SetAttribute("match_pre_filter_hit_rate",
                                 pre_filter_hit_rate);
