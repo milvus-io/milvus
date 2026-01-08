@@ -615,11 +615,6 @@ ChunkedSegmentSealedImpl::num_chunk(FieldId field_id) const {
 }
 
 int64_t
-ChunkedSegmentSealedImpl::size_per_chunk() const {
-    return get_row_count();
-}
-
-int64_t
 ChunkedSegmentSealedImpl::chunk_size(FieldId field_id, int64_t chunk_id) const {
     if (!get_bit(field_data_ready_bitset_, field_id)) {
         return 0;

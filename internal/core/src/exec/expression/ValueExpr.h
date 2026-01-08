@@ -76,11 +76,21 @@ class PhyValueExpr : public Expr {
         return std::nullopt;
     }
 
+    bool
+    CanExecuteAllAtOnce() const override {
+        return true;
+    }
+
+    void
+    SetExecuteAllAtOnce() override {
+        batch_size_ = active_count_;
+    }
+
  private:
     std::shared_ptr<const milvus::expr::ValueExpr> expr_;
-    const int64_t active_count_;
+    int64_t active_count_;
     int64_t current_pos_{0};
-    const int64_t batch_size_;
+    int64_t batch_size_;
 };
 
 }  //namespace exec

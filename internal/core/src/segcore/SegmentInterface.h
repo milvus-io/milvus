@@ -494,9 +494,12 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::pair<int64_t, int64_t>
     get_chunk_by_offset(FieldId field_id, int64_t offset) const = 0;
 
-    // element size in each chunk
+    // fixed chunk size for growing segment only.
     virtual int64_t
-    size_per_chunk() const = 0;
+    size_per_chunk() const {
+        ThrowInfo(NotImplemented,
+                  "size_per_chunk() is only valid for growing segment");
+    }
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
