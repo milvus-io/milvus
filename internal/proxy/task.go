@@ -489,8 +489,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// Validate mmap.enabled property
-	if hasMmapProp(t.GetProperties()...) {
-		if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+	if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+		if hasMmapProp(t.GetProperties()...) {
 			return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
 		}
 	}
@@ -1366,12 +1366,13 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 	t.CollectionID = collectionID
 
 	if len(t.GetProperties()) > 0 {
-		if hasMmapProp(t.Properties...) {
-			if !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
-				return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
-			}
+		hasMMap := hasMmapProp(t.Properties...)
+		if hasMMap && !paramtable.Get().QueryNodeCfg.MmapUserControlEnabled.GetAsBool() {
+			return merr.WrapErrParameterInvalidMsg("mmap.enabled property is not allowed to be set by user")
 		}
-		if hasMmapProp(t.Properties...) || hasLazyLoadProp(t.Properties...) {
+
+		hasLazyLoad := hasLazyLoadProp(t.Properties...)
+		if hasMMap || hasLazyLoad {
 			loaded, err := isCollectionLoaded(ctx, t.mixCoord, t.CollectionID)
 			if err != nil {
 				return err
