@@ -26,8 +26,10 @@ mode = Release
 # macOS (Darwin) does not support aio, so disable disk_index
 ifeq ($(OS),Darwin)
     use_disk_index = OFF
+    planparser_rpath_flag = -Wl,-rpath,@loader_path
 else
     use_disk_index = ON
+    planparser_rpath_flag = -Wl,-rpath,'$$ORIGIN'
 endif
 
 # Allow manual override via disk_index variable
@@ -406,10 +408,10 @@ plan-parser-so:
 		GO111MODULE=on $(GO) build -buildmode=c-shared -o $(PWD)/internal/core/output/lib/libmilvus-planparser.so $(PWD)/internal/parser/planparserv2/cwrapper/wrapper.go && \
 		mv $(PWD)/internal/core/output/lib/libmilvus-planparser.h $(PWD)/internal/core/output/include/libmilvus-planparser.h && \
 		cp $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.h $(PWD)/internal/core/output/include/ && \
-		g++ -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
+		g++ -std=c++17 -shared -fPIC -o $(PWD)/internal/core/output/lib/libmilvus-planparser-cpp.so $(PWD)/internal/parser/planparserv2/cwrapper/milvus_plan_parser.cpp \
 			-I$(PWD)/internal/core/output/include \
 			-L$(PWD)/internal/core/output/lib -lmilvus-planparser \
-			-Wl,-rpath,'$$ORIGIN'
+			$(planparser_rpath_flag)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp
