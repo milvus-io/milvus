@@ -30,6 +30,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
           fmt::format("seg_{}_f_{}_def", segment_id, field_data_info.field_id)),
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
+      mmap_dir_path_(field_data_info.mmap_dir_path),
       field_meta_(field_meta),
       meta_(milvus::cachinglayer::StorageType::MEMORY,
             // For default-value fields, one logical chunk per caching cell.
@@ -103,7 +104,19 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                    ast.ToString());
         arrow::ArrayVector array_vec;
         array_vec.emplace_back(builder->Finish().ValueOrDie());
-        return milvus::create_chunk_buffer(field_meta_, array_vec, mmap_populate_);
+        if (!use_mmap_ || mmap_dir_path_.empty()) {
+            return milvus::create_chunk_buffer(
+                field_meta_, array_vec, mmap_populate_);
+        } else {
+            auto filepath =
+                std::filesystem::path(mmap_dir_path_) /
+                fmt::format(
+                    "seg_{}_f_{}_def", segment_id_, field_data_info.field_id);
+            std::filesystem::create_directories(filepath.parent_path());
+            // just use default load priority: proto::common::LoadPriority::HIGH
+            return milvus::create_chunk_buffer(
+                field_meta_, array_vec, mmap_populate_, filepath.string());
+        }
     };
 
     if (primary_cell_rows_ > 0) {
