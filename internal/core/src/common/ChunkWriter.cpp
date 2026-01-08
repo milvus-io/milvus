@@ -815,14 +815,14 @@ std::unordered_map<FieldId, std::shared_ptr<Chunk>>
 create_group_chunk(const std::vector<FieldId>& field_ids,
                    const std::vector<FieldMeta>& field_metas,
                    const std::vector<arrow::ArrayVector>& array_vec,
-                   const std::string& file_path,
                    bool mmap_populate,
+                   const std::string& file_path,
                    proto::common::LoadPriority load_priority) {
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
     for (size_t i = 0; i < field_ids.size(); i++) {
-        auto field_meta = field_metas[i];
+        const auto& field_meta = field_metas[i];
         cws.push_back(create_chunk_writer(field_meta));
     }
     std::vector<size_t> chunk_sizes;

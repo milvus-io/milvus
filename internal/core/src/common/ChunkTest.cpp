@@ -1208,7 +1208,7 @@ TEST(chunk, test_create_group_chunk_with_mmap) {
         boost::filesystem::remove(mmap_file);
     }
     auto chunks =
-        create_group_chunk(field_ids, field_metas, array_vecs, mmap_file);
+        create_group_chunk(field_ids, field_metas, array_vecs, true, mmap_file);
 
     // Verify all chunks were created
     EXPECT_EQ(chunks.size(), 2);
