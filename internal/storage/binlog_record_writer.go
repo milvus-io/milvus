@@ -81,6 +81,9 @@ type packedBinlogRecordWriterBase struct {
 
 	ttlFieldID     int64
 	ttlFieldValues []int64
+
+	// Track null counts per field for nullable fields
+	nullCounts map[FieldID]int64
 }
 
 func (pw *packedBinlogRecordWriterBase) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
@@ -167,6 +170,28 @@ func (pw *packedBinlogRecordWriterBase) GetBufferUncompressed() uint64 {
 	return uint64(pw.multiPartUploadSize)
 }
 
+func (pw *packedBinlogRecordWriterBase) collectNullCounts(r Record) {
+	if pw.nullCounts == nil {
+		pw.nullCounts = make(map[FieldID]int64)
+	}
+	allFields := typeutil.GetAllFieldSchemas(pw.schema)
+	for _, field := range allFields {
+		if col := r.Column(field.FieldID); col != nil {
+			pw.nullCounts[field.FieldID] += int64(col.NullN())
+		}
+	}
+}
+
+func (pw *packedBinlogRecordWriterBase) getNullCountForColumnGroup(columnGroup storagecommon.ColumnGroup) int64 {
+	var nullCount int64
+	for _, fieldID := range columnGroup.Fields {
+		if n, ok := pw.nullCounts[fieldID]; ok {
+			nullCount += n
+		}
+	}
+	return nullCount
+}
+
 var _ BinlogRecordWriter = (*PackedBinlogRecordWriter)(nil)
 
 type PackedBinlogRecordWriter struct {
@@ -221,6 +246,8 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	if err := pw.bm25Collector.Collect(r); err != nil {
 		return err
 	}
+
+	pw.collectNullCounts(r)
 
 	err := pw.writer.Write(r)
 	if err != nil {
@@ -277,6 +304,7 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
 			TimestampFrom: pw.tsFrom,
 			TimestampTo:   pw.tsTo,
+			NullCount:     pw.getNullCountForColumnGroup(columnGroup),
 		})
 	}
 	pw.manifest = pw.writer.GetWrittenManifest()
@@ -376,6 +404,8 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 		return err
 	}
 
+	pw.collectNullCounts(r)
+
 	err := pw.writer.Write(r)
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
@@ -428,6 +458,7 @@ func (pw *PackedManifestRecordWriter) finalizeBinlogs() {
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
 			TimestampFrom: pw.tsFrom,
 			TimestampTo:   pw.tsTo,
+			NullCount:     pw.getNullCountForColumnGroup(columnGroup),
 		})
 	}
 	pw.manifest = pw.writer.GetWrittenManifest()
