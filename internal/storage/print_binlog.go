@@ -21,14 +21,13 @@ import (
 	"os"
 
 	"github.com/cockroachdb/errors"
-	"github.com/twpayne/go-geom/encoding/wkb"
-	"github.com/twpayne/go-geom/encoding/wkt"
 	"golang.org/x/exp/mmap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -389,8 +388,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			return err
 		}
 		for i := 0; i < rows; i++ {
-			geomT, _ := wkb.Unmarshal(val[i])
-			wktStr, _ := wkt.Marshal(geomT)
+			wktStr, _ := common.ConvertWKBToWKT(val[i])
 			fmt.Printf("\t\t%d : %s\n", i, wktStr)
 		}
 		for i, v := range valids {

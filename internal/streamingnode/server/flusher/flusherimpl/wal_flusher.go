@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
@@ -22,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 var errChannelLifetimeUnrecoverable = errors.New("channel lifetime unrecoverable")
@@ -42,19 +45,22 @@ func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("flusher"),
 			zap.String("pchannel", param.ChannelInfo.String())),
-		metrics:         newFlusherMetrics(param.ChannelInfo),
-		RecoveryStorage: param.RecoveryStorage,
+		metrics:              newFlusherMetrics(param.ChannelInfo),
+		emptyTimeTickCounter: metrics.WALFlusherEmptyTimeTickFilteredTotal.WithLabelValues(paramtable.GetStringNodeID(), param.ChannelInfo.Name),
+		RecoveryStorage:      param.RecoveryStorage,
 	}
 	go flusher.Execute(param.RecoverySnapshot)
 	return flusher
 }
 
 type WALFlusherImpl struct {
-	notifier          *syncutil.AsyncTaskNotifier[struct{}]
-	wal               *syncutil.Future[wal.WAL]
-	flusherComponents *flusherComponents
-	logger            *log.MLogger
-	metrics           *flusherMetrics
+	notifier             *syncutil.AsyncTaskNotifier[struct{}]
+	wal                  *syncutil.Future[wal.WAL]
+	flusherComponents    *flusherComponents
+	logger               *log.MLogger
+	metrics              *flusherMetrics
+	lastDispatchTimeTick uint64 // The last time tick that the message is dispatched.
+	emptyTimeTickCounter prometheus.Counter
 	recovery.RecoveryStorage
 }
 
@@ -206,9 +212,24 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 
 // dispatch dispatches the message to the related handler for flusher components.
 func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
+	if msg.MessageType() == message.MessageTypeTimeTick && !msg.IsPersisted() {
+		// Currently, milvus use the timetick to synchronize the system periodically,
+		// so the wal will still produce empty timetick message after the last write operation is done.
+		// When there're huge amount of vchannel in one pchannel, every time tick will be dispatched,
+		// which will waste a lot of cpu resources.
+		// So we only dispatch the timetick message when the timetick-lastDispatchTimeTick is greater than a threshold.
+		timetick := msg.TimeTick()
+		threshold := paramtable.Get().StreamingCfg.FlushEmptyTimeTickMaxFilterInterval.GetAsDurationByParse()
+		if tsoutil.CalculateDuration(timetick, impl.lastDispatchTimeTick) < threshold.Milliseconds() {
+			impl.emptyTimeTickCounter.Inc()
+			return
+		}
+	}
+	timetick := msg.TimeTick()
 	// TODO: We will merge the flusher into recovery storage in future.
 	// Currently, flusher works as a separate component.
 	defer func() {
+		impl.lastDispatchTimeTick = timetick
 		if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 		}

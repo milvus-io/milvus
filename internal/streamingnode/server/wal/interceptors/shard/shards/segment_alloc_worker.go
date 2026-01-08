@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // asyncAllocSegment allocates a new growing segment asynchronously.
@@ -108,10 +107,6 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		w.Logger().Warn("failed to allocate segment id", zap.Error(err))
 		return err
 	}
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
 	// Getnerate growing segment limitation.
 	limitation := getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
 	// Create a new segment by sending a create segment message into wal directly.
@@ -121,7 +116,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 			CollectionId:   w.collectionID,
 			PartitionId:    w.partitionID,
 			SegmentId:      int64(segmentID),
-			StorageVersion: storageVersion,
+			StorageVersion: storage.StorageV2,
 			MaxRows:        limitation.SegmentRows,
 			MaxSegmentSize: limitation.SegmentSize,
 			Level:          datapb.SegmentLevel_L1,

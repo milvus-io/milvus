@@ -373,3 +373,27 @@ func TestGetCollectionTTL(t *testing.T) {
 		assert.EqualValues(t, time.Duration(randValue)*time.Second, result)
 	})
 }
+
+func TestWKTWKBConversion(t *testing.T) {
+	testCases := []struct {
+		name string
+		wkt  string
+	}{
+		{"Point Empty", "POINT EMPTY"},
+		{"Polygon Empty", "POLYGON EMPTY"},
+		{"Point with coords", "POINT (1 2)"},
+		{"Polygon with coords", "POLYGON ((30 10, 40 40, 20 40, 10 20, 30 10))"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			wkb, err := ConvertWKTToWKB(tc.wkt)
+			assert.NoError(t, err)
+			assert.NotNil(t, wkb)
+
+			wktResult, err := ConvertWKBToWKT(wkb)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.wkt, wktResult)
+		})
+	}
+}

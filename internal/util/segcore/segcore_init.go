@@ -1,5 +1,9 @@
 package segcore
 
+import (
+	_ "github.com/milvus-io/milvus/internal/util/cgo"
+)
+
 /*
 #cgo pkg-config: milvus_core
 

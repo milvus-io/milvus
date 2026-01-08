@@ -111,6 +111,9 @@ packages:
   github.com/milvus-io/milvus/internal/util/searchutil/optimizers:
     interfaces:
       QueryHook:
+  github.com/milvus-io/milvus/internal/util/pipeline:
+    interfaces:
+      LastestMVCCTimeTickGetter:
   github.com/milvus-io/milvus/internal/flushcommon/util:
     interfaces:
       MsgHandler:

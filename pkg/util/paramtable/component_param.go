@@ -285,7 +285,6 @@ type commonConfig struct {
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
 	// storage v2
-	EnableStorageV2                      ParamItem `refreshable:"false"`
 	Stv2SplitSystemColumn                ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePK            ParamItem `refreshable:"true"`
 	Stv2SystemColumnIncludePartitionKey  ParamItem `refreshable:"true"`
@@ -978,14 +977,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.MaxWLockConditionalWaitTime.Init(base.mgr)
-
-	p.EnableStorageV2 = ParamItem{
-		Key:          "common.storage.enablev2",
-		Version:      "2.3.1",
-		DefaultValue: "true",
-		Export:       true,
-	}
-	p.EnableStorageV2.Init(base.mgr)
 
 	p.UseLoonFFI = ParamItem{
 		Key:          "common.storage.useLoonFFI",
@@ -5957,6 +5948,7 @@ type dataNodeConfig struct {
 	ImportBaseBufferSize        ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
+	ImportMaxWriteRetryAttempts ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -6309,6 +6301,14 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ImportMemoryLimitPercentage.Init(base.mgr)
 
+	p.ImportMaxWriteRetryAttempts = ParamItem{
+		Key:          "dataNode.import.maxWriteRetryAttempts",
+		Version:      "2.6.9",
+		Doc:          "The maximum number of write retry attempts. 0 means unlimited.",
+		DefaultValue: "0",
+	}
+	p.ImportMaxWriteRetryAttempts.Init(base.mgr)
+
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
@@ -6493,6 +6493,10 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
+
+	// Empty TimeTick Filtering configration
+	DelegatorEmptyTimeTickMaxFilterInterval ParamItem `refreshable:"true"`
+	FlushEmptyTimeTickMaxFilterInterval     ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -6848,6 +6852,29 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
+
+	p.DelegatorEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.delegator.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of delegator, 1m by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.`,
+		DefaultValue: "1m",
+		Export:       false,
+	}
+	p.DelegatorEmptyTimeTickMaxFilterInterval.Init(base.mgr)
+
+	p.FlushEmptyTimeTickMaxFilterInterval = ParamItem{
+		Key:     "streaming.flush.emptyTimeTick.maxFilterInterval",
+		Version: "2.6.9",
+		Doc: `The max filter interval for empty time tick of flush, 1s by default.
+If the interval since last timetick is less than this config, the empty time tick will be filtered.
+Because current flusher need the empty time tick to trigger the cp update,
+too huge threshold will block the GetFlushState operation,
+so we set 1 second here as a threshold.`,
+		DefaultValue: "1s",
+		Export:       false,
+	}
+	p.FlushEmptyTimeTickMaxFilterInterval.Init(base.mgr)
 }
 
 // runtimeConfig is just a private environment value table.

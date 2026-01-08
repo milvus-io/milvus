@@ -926,7 +926,6 @@ func TestProxy(t *testing.T) {
 	params.Save(params.CommonCfg.SessionRetryTimes.Key, "500")
 	params.Save(params.CommonCfg.GracefulStopTimeout.Key, "3600")
 
-	params.Save(params.CommonCfg.EnableStorageV2.Key, "true")
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
 	params.DataCoordGrpcServerCfg.IP = "localhost"
@@ -935,8 +934,6 @@ func TestProxy(t *testing.T) {
 	params.DataNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 	params.Save(params.MQCfg.Type.Key, "pulsar")
-	params.CommonCfg.EnableStorageV2.SwapTempValue("false")
-	defer params.CommonCfg.EnableStorageV2.SwapTempValue("")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")

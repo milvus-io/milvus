@@ -35,12 +35,8 @@ type Params struct {
 }
 
 func GenParams() Params {
-	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-		storageVersion = storage.StorageV2
-	}
 	return Params{
-		StorageVersion:            storageVersion,
+		StorageVersion:            storage.StorageV2,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
