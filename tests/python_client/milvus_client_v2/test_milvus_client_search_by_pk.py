@@ -288,7 +288,6 @@ class TestMilvusClientSearchByPk(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="need return error or none @Marcelo chen")
     def test_search_by_pk_nullable_vector_field(self):
         """
         target: test search by pk with nullable vector field where some vectors are null
