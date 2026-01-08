@@ -41,6 +41,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/common.pb.h"
 #include "milvus-storage/reader.h"
+#include "segcore/SegmentLoadInfo.h"
 
 namespace milvus::segcore {
 
@@ -179,6 +180,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     Reopen(SchemaPtr sch) override;
+
+    void
+    Reopen(
+        const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
 
     void
     LazyCheckSchema(SchemaPtr sch) override;
@@ -937,6 +942,18 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
+    void
+    LoadBatchIndexes(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::map<FieldId, std::vector<const proto::segcore::FieldIndexInfo*>>&
+            field_id_to_index_info);
+
+    void
+    LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
+                       std::vector<std::pair<std::vector<FieldId>,
+                                             proto::segcore::FieldBinlog>>&
+                           field_binlog_to_load);
+
     /**
      * @brief Load all column groups from a manifest file path
      *
@@ -946,7 +963,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      * @param manifest_path JSON string containing base_path and version fields
      */
     void
-    LoadColumnGroups(const std::string& manifest_path);
+    LoadManifest(const std::string& manifest_path);
+
+    void
+    LoadColumnGroups(
+        const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
+        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        std::map<int, std::vector<FieldId>>& cg_field_ids_map);
 
     /**
      * @brief Load a single column group at the specified index
@@ -962,7 +985,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const std::shared_ptr<milvus_storage::api::Properties>& properties,
-        int64_t index);
+        int64_t index,
+        const std::vector<FieldId>& milvus_field_ids);
 
     void
     load_field_data_common(
@@ -972,11 +996,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         DataType data_type,
         bool enable_mmap,
         bool is_proxy_column);
-
-    // Convert proto::segcore::FieldIndexInfo to LoadIndexInfo
-    LoadIndexInfo
-    ConvertFieldIndexInfoToLoadIndexInfo(
-        const milvus::proto::segcore::FieldIndexInfo* field_index_info) const;
 
     std::shared_ptr<ChunkedColumnInterface>
     get_column(FieldId field_id) const {
@@ -1031,7 +1050,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
-    milvus::proto::segcore::SegmentLoadInfo segment_load_info_;
+
+    SegmentLoadInfo segment_load_info_;
 
     SchemaPtr schema_;
     int64_t id_;

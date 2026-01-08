@@ -1374,6 +1374,17 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 	return s.csegment.Load(ctx)
 }
 
+func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
+		LoadInfo: newLoadInfo,
+	})
+	if err != nil {
+		return err
+	}
+	s.loadInfo.Store(newLoadInfo)
+	return nil
+}
+
 type ReleaseScope int
 
 const (

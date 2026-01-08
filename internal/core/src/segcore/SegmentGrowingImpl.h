@@ -101,6 +101,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Reopen(SchemaPtr sch) override;
 
     void
+    Reopen(
+        const milvus::proto::segcore::SegmentLoadInfo& new_load_info) override;
+
+    void
     LazyCheckSchema(SchemaPtr sch) override;
 
     void
