@@ -226,8 +226,11 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) Execute(ctx context.Context) error {
-	log := log.Ctx(ctx).With(zap.String("clusterID", it.req.GetClusterID()), zap.Int64("buildID", it.req.GetBuildID()),
-		zap.Int64("collection", it.req.GetCollectionID()), zap.Int64("segmentID", it.req.GetSegmentID()),
+	log := log.Ctx(ctx).With(
+		zap.String("clusterID", it.req.GetClusterID()),
+		zap.Int64("buildID", it.req.GetBuildID()),
+		zap.Int64("collection", it.req.GetCollectionID()),
+		zap.Int64("segmentID", it.req.GetSegmentID()),
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()))
 
 	indexType := it.newIndexParams[common.IndexTypeKey]
@@ -303,11 +306,6 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		LackBinlogRows:            it.req.GetLackBinlogRows(),
 		StorageVersion:            it.req.GetStorageVersion(),
 	}
-
-	if it.pluginContext != nil {
-		buildIndexParams.StoragePluginContext = it.pluginContext
-	}
-
 	if buildIndexParams.StorageVersion == storage.StorageV2 {
 		buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			it.req.GetInsertLogs(),
@@ -318,6 +316,11 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		buildIndexParams.Manifest = it.req.GetManifest()
 	}
 	log.Info("create index", zap.Any("buildIndexParams", buildIndexParams))
+
+	// set plugin context after logging the indexParams to avoid logging sensitive data
+	if it.pluginContext != nil {
+		buildIndexParams.StoragePluginContext = it.pluginContext
+	}
 
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
