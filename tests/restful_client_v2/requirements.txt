@@ -6,7 +6,7 @@ pyyaml==6.0
 numpy==1.24.3
 allure-pytest>=2.8.18
 Faker==19.2.0
-pymilvus
+pymilvus==2.6.7rc4
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
 minio==7.2.0
