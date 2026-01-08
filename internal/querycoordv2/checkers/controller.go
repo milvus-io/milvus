@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 var errTypeNotFound = errors.New("checker type not found")
@@ -64,21 +63,11 @@ func NewCheckerController(
 	broker meta.Broker,
 	getBalancerFunc GetBalancerFunc,
 ) *CheckerController {
-	checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
-		resp, err := broker.GetSegmentInfo(ctx, segmentID)
-		if err := merr.CheckRPCCall(resp, err); err != nil {
-			log.Info("check segment exist failed", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.Error(err))
-			if errors.Is(err, merr.ErrSegmentNotFound) {
-				return false
-			}
-		}
-		return true
-	}
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
 	checkers := map[utils.CheckerType]Checker{
 		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
-		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc, checkSegmentExist),
+		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
 		utils.BalanceChecker: NewBalanceChecker(meta, targetMgr, nodeMgr, scheduler, getBalancerFunc),
 		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr, targetMgr),
 		// todo temporary work around must fix
