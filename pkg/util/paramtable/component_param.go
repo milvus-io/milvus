@@ -2545,6 +2545,8 @@ type queryCoordConfig struct {
 	BalanceCheckCollectionMaxCount    ParamItem `refreshable:"true"`
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
+
+	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3205,6 +3207,15 @@ Set to 0 to disable the penalty period.`,
 		Export:       true,
 	}
 	p.ResourceExhaustionCleanupInterval.Init(base.mgr)
+
+	p.UpdateTargetNeedSegmentDataReady = ParamItem{
+		Key:          "queryCoord.updateTargetNeedSegmentDataReady",
+		Version:      "2.6.8",
+		DefaultValue: "true",
+		Doc:          "update target need segment data ready",
+		Export:       false,
+	}
+	p.UpdateTargetNeedSegmentDataReady.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -5971,7 +5982,8 @@ type dataNodeConfig struct {
 	DeltalogFormat ParamItem `refreshable:"false"`
 
 	// index services config
-	BuildParallel ParamItem `refreshable:"false"`
+	BuildParallel               ParamItem `refreshable:"false"`
+	MaxVecIndexBuildConcurrency ParamItem `refreshable:"true"`
 
 	WorkerSlotUnit      ParamItem `refreshable:"true"`
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
@@ -6419,6 +6431,14 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.BuildParallel.Init(base.mgr)
+
+	p.MaxVecIndexBuildConcurrency = ParamItem{
+		Key:          "dataNode.index.maxVecIndexBuildConcurrency",
+		Version:      "2.6.9",
+		DefaultValue: "4",
+		Export:       false,
+	}
+	p.MaxVecIndexBuildConcurrency.Init(base.mgr)
 
 	p.WorkerSlotUnit = ParamItem{
 		Key:          "dataNode.workerSlotUnit",

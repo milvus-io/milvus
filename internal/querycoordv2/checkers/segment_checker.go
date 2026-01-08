@@ -128,9 +128,14 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret := make([]task.Task, 0)
 
 	// compare with targets to find the lack and redundancy of segments
-	lacks, loadPriorities, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
+	lacks, loadPriorities, redundancies, toUpdate := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
 	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, loadPriorities, replica)
 	task.SetReason("lacks of segment", tasks...)
+	task.SetPriority(task.TaskPriorityNormal, tasks...)
+	ret = append(ret, tasks...)
+
+	tasks = c.createSegmentReopenTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), toUpdate, replica)
+	task.SetReason("segment updated", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
@@ -225,7 +230,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	ctx context.Context,
 	collectionID int64,
 	replicaID int64,
-) (toLoad []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, toRelease []*meta.Segment) {
+) (toLoad []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, toRelease []*meta.Segment, toUpdate []*meta.Segment) {
 	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
@@ -235,14 +240,18 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	sort.Slice(dist, func(i, j int) bool {
 		return dist[i].Version < dist[j].Version
 	})
-	distMap := make(map[int64]int64)
+	distMap := make(map[int64]*meta.Segment)
 	for _, s := range dist {
-		distMap[s.GetID()] = s.Node
+		distMap[s.GetID()] = s
 	}
 
 	isSegmentLack := func(segment *datapb.SegmentInfo) bool {
 		_, existInDist := distMap[segment.ID]
 		return !existInDist
+	}
+	isSegmentUpdate := func(segment *datapb.SegmentInfo) bool {
+		segInDist, existInDist := distMap[segment.ID]
+		return existInDist && segInDist.ManifestPath != segment.GetManifestPath()
 	}
 
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
@@ -258,6 +267,9 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 				loadPriorities = append(loadPriorities, replica.LoadPriority())
 			}
 			toLoad = append(toLoad, segment)
+		}
+		if isSegmentUpdate(segment) {
+			toUpdate = append(toUpdate, distMap[segment.GetID()])
 		}
 	}
 
@@ -411,6 +423,35 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	}
 
 	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
+}
+
+func (c *SegmentChecker) createSegmentReopenTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica) []task.Task {
+	ret := make([]task.Task, 0, len(segments))
+	for _, s := range segments {
+		action := task.NewSegmentAction(s.Node, task.ActionTypeReopen, s.GetInsertChannel(), s.GetID())
+		task, err := task.NewSegmentTask(
+			ctx,
+			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
+			c.ID(),
+			s.GetCollectionID(),
+			replica,
+			replica.LoadPriority(),
+			action,
+		)
+		if err != nil {
+			log.Warn("create segment reopen task failed",
+				zap.Int64("collection", s.GetCollectionID()),
+				zap.Int64("replica", replica.GetID()),
+				zap.String("channel", s.GetInsertChannel()),
+				zap.Int64("from", s.Node),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		ret = append(ret, task)
+	}
+	return ret
 }
 
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replica *meta.Replica, scope querypb.DataScope) []task.Task {
