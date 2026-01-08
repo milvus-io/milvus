@@ -68,6 +68,11 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	minTsafe := uint64(math.MaxUint64)
 	node.delegators.Range(func(channel string, delegator delegator.ShardDelegator) bool {
 		tsafe := delegator.GetTSafe()
+		if delegator.CatchingUpStreamingData() {
+			// If the channel is on-catching up with streaming data.
+			// We should skip this channel to avoid the quota center to make wrong decision.
+			return true
+		}
 		if tsafe < minTsafe {
 			minTsafeChannel = channel
 			minTsafe = tsafe
