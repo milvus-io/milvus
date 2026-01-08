@@ -617,6 +617,13 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg(msg)
 	}
 
+	if typeutil.IsVectorType(t.fieldSchema.DataType) {
+		vectorFields := len(typeutil.GetVectorFieldSchemas(t.oldSchema))
+		if vectorFields >= Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+			return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+		}
+	}
+
 	if _, ok := schemapb.DataType_name[int32(t.fieldSchema.DataType)]; !ok || t.fieldSchema.GetDataType() == schemapb.DataType_None {
 		return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", t.fieldSchema.GetDataType()))
 	}
