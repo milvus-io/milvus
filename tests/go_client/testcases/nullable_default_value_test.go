@@ -183,7 +183,7 @@ func GetIndexesForVectorType(fieldType entity.FieldType) []IndexConfig {
 			{"IVF_PQ", "IVF_PQ", entity.L2, map[string]string{"nlist": "128", "m": "8", "nbits": "8"}},
 			{"HNSW", "HNSW", entity.L2, map[string]string{"M": "16", "efConstruction": "200"}},
 			{"SCANN", "SCANN", entity.L2, map[string]string{"nlist": "128", "with_raw_data": "true"}},
-			// {"DISKANN", "DISKANN", entity.L2, nil}, // Skip DISKANN for now
+			{"DISKANN", "DISKANN", entity.L2, nil},
 		}
 	case entity.FieldTypeBinaryVector:
 		return []IndexConfig{

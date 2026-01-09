@@ -521,6 +521,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         offsets.push_back(0);  // Initialize with 0 for cumulative offsets
     }
 
+    auto valid_data_path = index::GetValueFromConfig<std::string>(
+        config, index::VALID_DATA_PATH_KEY);
+    std::vector<uint8_t> valid_bitmap;
+    int64_t total_num_rows = 0;
+    bool nullable = false;
+
     // get batch raw data from s3 and write batch data to disk file
     // TODO: load and write of different batches at the same time
     std::vector<std::string> batch_files;
@@ -534,9 +540,28 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     auto FetchRawData = [&]() {
         auto field_datas = GetObjectData(rcm_.get(), batch_files);
         int batch_size = batch_files.size();
-        for (int i = 0; i < batch_size; i++) {
-            auto field_data = field_datas[i].get()->GetFieldData();
+        for (int idx = 0; idx < batch_size; idx++) {
+            auto field_data = field_datas[idx].get()->GetFieldData();
             num_rows += uint32_t(field_data->get_valid_rows());
+
+            if (valid_data_path.has_value() && field_data->IsNullable()) {
+                nullable = true;
+                auto rows = field_data->get_num_rows();
+                if (rows > 0) {
+                    auto new_size = (total_num_rows + rows + 7) / 8;
+                    if (new_size > static_cast<int64_t>(valid_bitmap.size())) {
+                        valid_bitmap.resize(new_size, 0);
+                    }
+                    for (int64_t i = 0; i < rows; ++i) {
+                        if (field_data->is_valid(i)) {
+                            auto bit_pos = total_num_rows + i;
+                            valid_bitmap[bit_pos / 8] |= (1 << (bit_pos % 8));
+                        }
+                    }
+                    total_num_rows += rows;
+                }
+            }
+
             cache_raw_data_to_disk_common<DataType>(
                 field_data,
                 local_chunk_manager,
@@ -595,6 +620,22 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                                    offsets_write_pos,
                                    offsets.data(),
                                    offsets.size() * sizeof(size_t));
+    }
+
+    if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
+        local_chunk_manager->CreateFile(valid_data_path.value());
+        int64_t valid_write_pos = 0;
+
+        local_chunk_manager->Write(valid_data_path.value(),
+                                   valid_write_pos,
+                                   &total_num_rows,
+                                   sizeof(size_t));
+        valid_write_pos += sizeof(size_t);
+
+        local_chunk_manager->Write(valid_data_path.value(),
+                                   valid_write_pos,
+                                   valid_bitmap.data(),
+                                   valid_bitmap.size());
     }
 
     return local_data_path;
@@ -732,6 +773,10 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         offsets.push_back(0);  // Initialize with 0 for cumulative offsets
     }
 
+    // Check if we need to track validity data for nullable vector fields
+    auto valid_data_path = index::GetValueFromConfig<std::string>(
+        config, index::VALID_DATA_PATH_KEY);
+
     // file format
     // num_rows(uint32) | dim(uint32) | index_data ([]uint8_t)
     uint32_t num_rows = 0;
@@ -760,8 +805,37 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                  dim,
                                                  fs_);
     }
+
+    bool nullable = false;
+    uint64_t total_num_rows = 0;
+    if (valid_data_path.has_value()) {
+        for (auto& field_data : field_datas) {
+            if (field_data->IsNullable()) {
+                nullable = true;
+            }
+            total_num_rows += field_data->get_num_rows();
+        }
+    }
+
+    std::vector<uint8_t> valid_bitmap;
+    if (nullable) {
+        valid_bitmap.resize((total_num_rows + 7) / 8, 0);
+    }
+
+    int64_t chunk_offset = 0;
     for (auto& field_data : field_datas) {
         num_rows += uint32_t(field_data->get_valid_rows());
+        if (nullable) {
+            auto rows = field_data->get_num_rows();
+            for (int64_t i = 0; i < rows; ++i) {
+                if (field_data->is_valid(i)) {
+                    auto bit_pos = chunk_offset + i;
+                    valid_bitmap[bit_pos / 8] |= (1 << (bit_pos % 8));
+                }
+            }
+            chunk_offset += rows;
+        }
+
         cache_raw_data_to_disk_common<T>(field_data,
                                          local_chunk_manager,
                                          local_data_path,
@@ -804,6 +878,22 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                    offsets_write_pos,
                                    offsets.data(),
                                    offsets.size() * sizeof(size_t));
+    }
+
+    if (nullable && valid_data_path.has_value() && total_num_rows > 0) {
+        local_chunk_manager->CreateFile(valid_data_path.value());
+        int64_t valid_write_pos = 0;
+
+        local_chunk_manager->Write(valid_data_path.value(),
+                                   valid_write_pos,
+                                   &total_num_rows,
+                                   sizeof(size_t));
+        valid_write_pos += sizeof(size_t);
+
+        local_chunk_manager->Write(valid_data_path.value(),
+                                   valid_write_pos,
+                                   valid_bitmap.data(),
+                                   valid_bitmap.size());
     }
 
     return local_data_path;
