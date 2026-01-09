@@ -1,0 +1,152 @@
+syntax = "proto3";
+package milvus.proto.view;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/viewpb";
+
+// QueryViewSyncService is the service to sync the query view between the nodes and coord.
+service QueryViewSyncService {
+    rpc Sync(stream SyncRequest) returns (stream SyncResponse) {
+    }
+}
+
+message DataViewOfCollection {
+    int64 collection_id = 1;
+    repeated DataViewOfShard shards = 2;
+    int64 data_version = 3;
+}
+
+message DataViewOfShard {
+    string vchannel = 1;
+    repeated DataViewOfPartition partitions = 2;
+}
+
+message DataViewOfPartition {
+    int64 partition_id = 1;
+    repeated DataViewOfSegment segments = 2;
+}
+
+message DataViewOfSegment {
+    int64 segment_id = 1;
+    int64 data_version =
+        2;  // Data version when this segment join the dataview.
+}
+
+enum QueryViewState {
+    QueryViewStateUnknown = 0;
+    QueryViewStatePreparing = 1;
+    QueryViewStateReady =
+        2;  // Mark as Ready if all node on these shard is ready
+    QueryViewStateUp =
+        3;  // Mark as Up if all node on these shard is up, and the view is enabled at streaming node.
+    QueryViewStateDown =
+        4;  // Mark as Down if the view is disabled at streaming node.
+    QueryViewStateUnrecoverable =
+        5;  // Mark as Unrecoverable if the view is unrecoverable on any node.
+    QueryViewStateDropping =
+        6;  // Mark as dropping to do the resource cleanup opeartion for the view.
+    QueryViewStateDropped =
+        7;  // Mark as dropped if the view is dropped and can be removed from recovery.
+}
+
+enum QueryViewSegmentState {
+    QueryViewSegmentStateUnknown = 0;
+    QueryViewSegmentStateNotReady = 1;
+    QueryViewSegmentStateReady = 2;
+}
+
+message QueryViewOfShard {
+    QueryViewMeta meta = 1;
+    repeated QueryViewOfQueryNode query_node = 2;
+    QueryViewOfStreamingNode streaming_node = 3;
+}
+
+message QueryViewMeta {
+    int64 collection_id = 1;
+    int64 replica_id = 2;
+    string vchannel = 3;
+    QueryViewVersion version = 4;
+    QueryViewState state = 5;
+    QueryViewSettings settings = 6;
+}
+
+message QueryViewSettings {
+    repeated int64 required_partitions =
+        1;  // the partitions that must be loaded to make the view available.
+    repeated int64 optional_partitions =
+        2;  // the partitions that need be loaded, but not influence the view availability.
+    repeated int64 required_fields =
+        3;  // the fields that must be loaded to make the view available.
+}
+
+message QueryViewOfStreamingNode {
+}
+
+message QueryViewOfQueryNode {
+    int64 node_id = 1;
+    repeated QueryViewOfPartition partitions =
+        2;  // partitions that need to be loaded, used for partitial partition loading.
+}
+
+message QueryViewVersion {
+    int64 data_version = 1;   // the data version when this view is created.
+    int64 query_version = 2;  // the query version when this view is created.
+}
+
+message QueryViewOfPartition {
+    int64 partition_id = 1;
+    repeated QueryViewOfSegment segments = 2;
+}
+
+message QueryViewOfSegment {
+    int64 segment_id = 1;
+    QueryViewSegmentState state = 2;  // segment is ready or not.
+}
+
+// SyncRequest is the request of the sync query view.
+message SyncRequest {
+    oneof request {
+        SyncQueryViewsRequest views = 1;
+        SyncCloseRequest close = 2;
+    }
+}
+
+// SyncQueryViewsRequest is the request of the sync query view.
+message SyncQueryViewsRequest {
+    repeated QueryViewOfShard query_views = 1;
+}
+
+// SyncCloseRequest is the request of the sync close.
+message SyncCloseRequest {
+}
+
+// SyncResponse is the response of the sync query view request.
+message SyncResponse {
+    oneof response {
+        SyncQueryViewsResponse views = 1;
+        SyncCloseResponse close = 2;
+    }
+}
+
+// SyncQueryViewsResponse is the response of the sync query view request.
+message SyncQueryViewsResponse {
+    repeated QueryViewOfShard query_views = 1;
+    oneof balance_attributes {
+        StreamingNodeBalanceAttributes streaming_node = 2;
+        QueryNodeBalanceAttributes query_node = 3;
+    }
+}
+
+// SyncCloseResponse is the response of the sync close.
+message SyncCloseResponse {
+}
+
+// StreamingNodeBalanceAttributes is the attributes of streaming node for the balance operation.
+message StreamingNodeBalanceAttributes {
+}
+
+// QueryNodeBalanceAttributes is the attributes of query node for the balance operation.
+// Adding various attributes to the QueryNodeBalanceAttributes to make the querycoord balance to make decision.
+message QueryNodeBalanceAttributes {
+    int64 memory_usage = 1;
+    int64 disk_usage = 2;
+}
