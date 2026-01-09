@@ -466,6 +466,11 @@ type GeometryFieldData struct {
 	ValidData []bool
 	Nullable  bool
 }
+type MolFieldData struct {
+	Data      [][]byte
+	ValidData []bool
+	Nullable  bool
+}
 
 // LogicalToPhysicalMapping maps logical offset to physical offset for nullable vector
 type LogicalToPhysicalMapping struct {
