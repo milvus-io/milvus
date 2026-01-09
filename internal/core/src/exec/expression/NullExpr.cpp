@@ -119,8 +119,8 @@ PhyNullExpr::ExecVisitorImpl(OffsetVector* input) {
     if (expr_->op_ == proto::plan::NullExpr_NullOp_IsNull) {
         res.flip();
     }
-    auto res_vec =
-        std::make_shared<ColumnVector>(std::move(res), std::move(valid_res));
+    auto res_vec = std::make_shared<ColumnVector>(
+        std::move(res), TargetBitmap(valid_res.size(), true));
     return res_vec;
 }
 
