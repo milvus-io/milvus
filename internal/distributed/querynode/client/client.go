@@ -391,6 +391,17 @@ func (c *Client) DropIndex(ctx context.Context, req *querypb.DropIndexRequest, _
 	})
 }
 
+func (c *Client) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*commonpb.Status, error) {
+		return client.UpdateIndex(ctx, req)
+	})
+}
+
 func (c *Client) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnalyzerRequest, _ ...grpc.CallOption) (*querypb.ValidateAnalyzerResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

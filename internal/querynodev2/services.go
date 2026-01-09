@@ -1682,6 +1682,14 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 	return merr.Success(), nil
 }
 
+func (node *QueryNode) UpdateIndex(ctx context.Context, req *querypb.UpdateIndexRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+	// UpdateIndex is currently a placeholder implementation
+	// The actual logic should handle AddIndex and DropIndex actions
+	// For now, return success to satisfy the interface
+	return merr.Success(), nil
+}
+
 func (node *QueryNode) GetHighlight(ctx context.Context, req *querypb.GetHighlightRequest) (*querypb.GetHighlightResponse, error) {
 	// check node healthy
 	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
