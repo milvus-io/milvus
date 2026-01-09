@@ -9,8 +9,8 @@ require (
 	github.com/aliyun/credentials-go v1.2.7 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.3.1
 	github.com/blang/semver/v4 v4.0.0
-	github.com/casbin/casbin/v2 v2.44.2
-	github.com/casbin/json-adapter/v2 v2.0.0
+	github.com/casbin/casbin/v2 v2.96.1
+	github.com/casbin/json-adapter/v2 v2.7.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-playground/validator/v10 v10.14.0
