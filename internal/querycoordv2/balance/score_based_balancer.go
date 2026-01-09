@@ -142,6 +142,10 @@ func (b *ScoreBasedBalancer) assignSegment(br *balanceReport, collectionID int64
 			// update the sourceNode and targetNode's score
 			if sourceNode != nil {
 				sourceNode.AddCurrentScoreDelta(-scoreChanges)
+				// sourceNode is still in the queue, fix its position
+				if sourceNode.getIndex() >= 0 {
+					queue.Fix(sourceNode)
+				}
 			}
 			targetNode.AddCurrentScoreDelta(scoreChanges)
 		}(s)
@@ -248,6 +252,10 @@ func (b *ScoreBasedBalancer) assignChannel(br *balanceReport, collectionID int64
 			// update the sourceNode and targetNode's score
 			if sourceNode != nil {
 				sourceNode.AddCurrentScoreDelta(-scoreChanges)
+				// sourceNode is still in the queue, fix its position
+				if sourceNode.getIndex() >= 0 {
+					queue.Fix(sourceNode)
+				}
 			}
 			targetNode.AddCurrentScoreDelta(scoreChanges)
 		}(ch)
