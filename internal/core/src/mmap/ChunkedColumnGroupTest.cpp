@@ -38,7 +38,7 @@ using namespace milvus;
 using namespace milvus::storage;
 
 std::shared_ptr<Chunk>
-create_chunk(const FixedVector<int64_t>& data) {
+create_chunk_int64(const FixedVector<int64_t>& data) {
     auto field_data = milvus::storage::CreateFieldData(storage::DataType::INT64,
                                                        DataType::NONE);
     field_data->FillFieldData(data.data(), data.size());
@@ -73,7 +73,7 @@ create_chunk(const FixedVector<int64_t>& data) {
 
 // Helper function to create chunks for string data
 std::shared_ptr<Chunk>
-create_chunk(const FixedVector<std::string>& data) {
+create_chunk_string(const FixedVector<std::string>& data) {
     auto field_data = milvus::storage::CreateFieldData(
         storage::DataType::VARCHAR, DataType::NONE);
     field_data->FillFieldData(data.data(), data.size());
@@ -139,8 +139,8 @@ class ChunkedColumnGroupTest : public ::testing::Test {
                                       std::nullopt);
 
         // Create chunks
-        int64_chunk = std::move(create_chunk(int64_data));
-        string_chunk = std::move(create_chunk(string_data));
+        int64_chunk = std::move(create_chunk_int64(int64_data));
+        string_chunk = std::move(create_chunk_string(string_data));
     }
 
     FixedVector<int64_t> int64_data;
@@ -177,12 +177,13 @@ TEST_F(ChunkedColumnGroupTest, GroupChunk) {
     EXPECT_EQ(all_chunks[FieldId(2)], string_chunk);
 
     // Add chunk
-    auto new_int64_chunk = create_chunk(FixedVector<int64_t>{6, 7, 8, 9, 10});
+    auto new_int64_chunk =
+        create_chunk_int64(FixedVector<int64_t>{6, 7, 8, 9, 10});
     EXPECT_NO_THROW(group_chunk->AddChunk(FieldId(3), new_int64_chunk));
     EXPECT_TRUE(group_chunk->HasChunk(FieldId(3)));
     EXPECT_EQ(group_chunk->GetChunk(FieldId(3))->RowNums(), 5);
     auto another_int64_chunk =
-        create_chunk(FixedVector<int64_t>{11, 12, 13, 14, 15});
+        create_chunk_int64(FixedVector<int64_t>{11, 12, 13, 14, 15});
     EXPECT_THROW(group_chunk->AddChunk(FieldId(3), another_int64_chunk),
                  std::exception);
 
