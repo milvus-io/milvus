@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -161,6 +162,8 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	defer hc.lifetime.Done()
 
 	logger := log.With(zap.String("pchannel", opts.PChannel), zap.String("vchannel", opts.VChannel), zap.String("handler", "consumer"))
+	// Use a local variable to track DeliverPolicy, so modifications in the closure don't affect the original opts
+	deliverPolicy := opts.DeliverPolicy
 	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
@@ -172,6 +175,12 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 				MesasgeHandler:         opts.MessageHandler,
 				IgnorePauseConsumption: opts.IgnorePauseConsumption,
 			})
+			// If the error is WALNameMismatch, change deliver policy to DeliverPolicyAll for next retry
+			if err != nil && status.AsStreamingError(err).IsWALNameMismatch() {
+				deliverPolicy = options.DeliverPolicyAll()
+				logger.Info("change deliver policy to DeliverPolicyAll because of WALNameMismatch", zap.Error(err))
+				return nil, err
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -194,6 +203,14 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 			MessageHandler:         opts.MessageHandler,
 			IgnorePauseConsumption: opts.IgnorePauseConsumption,
 		}, handlerService)
+
+		// If the error is WALNameMismatch, change deliver policy to DeliverPolicyAll for next retry
+		if err != nil && status.AsStreamingError(err).IsWALNameMismatch() {
+			deliverPolicy = options.DeliverPolicyAll()
+			logger.Info("change deliver policy to DeliverPolicyAll because of WALNameMismatch", zap.Error(err))
+			return nil, err
+		}
+
 		if err != nil {
 			return nil, err
 		}

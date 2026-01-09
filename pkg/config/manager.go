@@ -16,11 +16,14 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -86,6 +89,7 @@ type Manager struct {
 	keySourceMap  *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
 	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
 	forbiddenKeys *typeutil.ConcurrentSet[string]
+	immutableKeys *typeutil.ConcurrentSet[string]
 
 	cacheMutex  sync.RWMutex
 	configCache map[string]any
@@ -99,6 +103,7 @@ func NewManager() *Manager {
 		keySourceMap:  typeutil.NewConcurrentMap[string, string](),
 		overlays:      typeutil.NewConcurrentMap[string, string](),
 		forbiddenKeys: typeutil.NewConcurrentSet[string](),
+		immutableKeys: typeutil.NewConcurrentSet[string](),
 		configCache:   make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
@@ -307,6 +312,16 @@ func (m *Manager) ForbidUpdate(key string) {
 	m.forbiddenKeys.Insert(formatKey(key))
 }
 
+// It cannot be changed after the first startup, except for operation and maintenance
+func (m *Manager) ImmutableUpdate(key string) {
+	m.immutableKeys.Insert(formatKey(key))
+}
+
+// IsImmutable checks if a configuration key is marked as immutable
+func (m *Manager) IsImmutable(key string) bool {
+	return m.immutableKeys.Contain(formatKey(key))
+}
+
 func (m *Manager) UpdateSourceOptions(opts ...Option) {
 	var options Options
 	for _, opt := range opts {
@@ -471,4 +486,114 @@ func (m *Manager) getHighPrioritySource(srcNameA, srcNameB string) Source {
 	}
 
 	return sourceB
+}
+
+// GetEtcdSource returns the EtcdSource if available
+func (m *Manager) GetEtcdSource() (*EtcdSource, bool) {
+	etcdSource, ok := m.sources.Get("EtcdSource")
+	if !ok {
+		return nil, false
+	}
+
+	etcdSourceImpl, ok := etcdSource.(*EtcdSource)
+	if !ok {
+		return nil, false
+	}
+	return etcdSourceImpl, true
+}
+
+func (m *Manager) ProcessImmutableConfigs() error {
+	etcdSourceImpl, ok := m.GetEtcdSource()
+	if !ok {
+		log.Info("etcd source not enable,skip processing immutable configs")
+		return nil
+	}
+
+	var saveErrors []error
+	var savedConfigs []string
+	m.immutableKeys.Range(func(key string) bool {
+		confgSourceName, configValue, getConfigErr := m.GetConfig(key)
+		if getConfigErr != nil {
+			log.Warn("failed to get config", zap.String("key", key), zap.Error(getConfigErr))
+			return true
+		}
+
+		_, getFromEtcdErr := etcdSourceImpl.GetConfigurationByKey(key)
+		if errors.Is(getFromEtcdErr, ErrKeyNotFound) {
+			log.Info("immutable config not exist in etcd, saving to persistent storage",
+				zap.String("fromSource", confgSourceName), zap.String("key", key), zap.String("value", configValue))
+			if err := m.SaveConfigToEtcd(etcdSourceImpl, key, configValue); err != nil {
+				log.Error("failed to save immutable config to etcd",
+					zap.String("key", key), zap.String("value", configValue), zap.Error(err))
+				saveErrors = append(saveErrors, err)
+			} else {
+				log.Info("successfully saved immutable config to etcd", zap.String("key", key), zap.String("value", configValue))
+				savedConfigs = append(savedConfigs, key)
+			}
+		} else if getFromEtcdErr == nil {
+			log.Info("immutable config already exists in etcd", zap.String("key", key), zap.String("value", configValue))
+		} else {
+			log.Warn("failed to check config in etcd", zap.String("key", key), zap.Error(getFromEtcdErr))
+		}
+		return true
+	})
+
+	if len(savedConfigs) > 0 {
+		log.Info("triggering etcd source refresh after saving immutable configs", zap.Strings("savedConfigs", savedConfigs))
+		if refreshErr := etcdSourceImpl.refreshConfigurations(); refreshErr != nil {
+			log.Warn("failed to refresh etcd configurations after saving immutable configs", zap.Error(refreshErr))
+		} else {
+			log.Info("successfully refreshed etcd configurations after saving immutable configs")
+		}
+	}
+
+	if len(saveErrors) > 0 {
+		return fmt.Errorf("failed to save %d immutable configs to etcd", len(saveErrors))
+	}
+	return nil
+}
+
+func (m *Manager) SaveConfigToEtcd(etcdSource *EtcdSource, key, value string) error {
+	if etcdSource == nil || etcdSource.etcdCli == nil {
+		return errors.New("etcd client is not available")
+	}
+	etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, key)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := etcdSource.etcdCli.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(etcdKey), "=", 0)).
+		Then(clientv3.OpPut(etcdKey, value)).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("failed to put config to etcd: %w", err)
+	}
+	if !resp.Succeeded {
+		log.Info("config already exists in etcd, skip writing",
+			zap.String("etcdKey", etcdKey), zap.String("configKey", key), zap.String("value", value))
+		return nil
+	}
+	log.Info("config atomically saved to etcd",
+		zap.String("etcdKey", etcdKey), zap.String("configKey", key), zap.String("value", value))
+
+	return nil
+}
+
+// UpdateConfigInEtcd updates a configuration value in etcd.
+// Unlike SaveConfigToEtcd, this function will update the config even if it already exists.
+func (m *Manager) UpdateConfigInEtcd(etcdSource *EtcdSource, key, value string) error {
+	if etcdSource == nil || etcdSource.etcdCli == nil {
+		return errors.New("etcd client is not available")
+	}
+	fmtKey := formatKey(key)
+	etcdKey := fmt.Sprintf("%s/config/%s", etcdSource.keyPrefix, fmtKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := etcdSource.etcdCli.Put(ctx, etcdKey, value)
+	if err != nil {
+		return fmt.Errorf("failed to update config in etcd: %w", err)
+	}
+	log.Info("config updated in etcd",
+		zap.String("etcdKey", etcdKey), zap.String("configKey", fmtKey), zap.String("value", value))
+
+	return nil
 }
