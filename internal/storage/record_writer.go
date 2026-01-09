@@ -123,8 +123,7 @@ func (pw *packedRecordWriter) Close() error {
 			return err
 		}
 		for id, fpath := range pw.pathsMap {
-			truePath := path.Join(pw.bucketName, fpath)
-			size, err := packed.GetFileSize(truePath, pw.storageConfig)
+			size, err := packed.GetFileSize(fpath, pw.storageConfig)
 			if err != nil {
 				return err
 			}
