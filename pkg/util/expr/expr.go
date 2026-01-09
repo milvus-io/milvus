@@ -33,6 +33,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+const (
+	// AuthBypass is a special auth value that skips the auth check.
+	// This should only be used when authentication has already been verified externally.
+	AuthBypass = "__bypass__"
+)
+
 var (
 	v       *vm.VM
 	env     map[string]any
@@ -60,6 +66,16 @@ func Register(key string, value any) {
 	}
 }
 
+// HasRegistered checks if a key has been registered in the expr environment.
+// This is useful for determining which component is running (e.g., checking if "proxy" is registered).
+func HasRegistered(key string) bool {
+	if env == nil {
+		return false
+	}
+	_, ok := env[key]
+	return ok
+}
+
 func Exec(code, auth string) (res string, err error) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -75,7 +91,8 @@ func Exec(code, auth string) (res string, err error) {
 	if auth == "" {
 		return "", errors.New("the expr auth is empty")
 	}
-	if authKey != auth {
+	// Allow bypass when authentication has been verified externally (e.g., by HTTP handler)
+	if auth != AuthBypass && authKey != auth {
 		return "", errors.New("the expr auth is invalid")
 	}
 	program, err := expr.Compile(code, expr.Env(env), expr.WithContext("ctx"))
