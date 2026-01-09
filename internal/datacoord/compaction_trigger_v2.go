@@ -704,7 +704,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 
 	totalRows := lo.SumBy(view.GetSegmentsView(), func(v *SegmentView) int64 { return v.NumOfRows })
 
-	targetCount := view.(*ForceMergeSegmentView).targetCount
+	targetCount := view.(*ForceMergeSegmentView).targetSegmentCount
 	n := targetCount * paramtable.Get().DataCoordCfg.CompactionPreAllocateIDExpansionFactor.GetAsInt64()
 	startID, endID, err := m.allocator.AllocN(n)
 	if err != nil {
@@ -727,7 +727,7 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 		ResultSegments:     []int64{},
 		TotalRows:          totalRows,
 		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSize),
+		MaxSize:            int64(view.(*ForceMergeSegmentView).targetSegmentSize),
 		PreAllocatedSegmentIDs: &datapb.IDRange{
 			Begin: startID + 1,
 			End:   endID,
