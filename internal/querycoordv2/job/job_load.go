@@ -87,21 +87,36 @@ func (job *LoadCollectionJob) Execute() error {
 	vchannels := job.result.GetVChannelsWithoutControlChannel()
 
 	log := log.Ctx(job.ctx).With(zap.Int64("collectionID", req.GetCollectionId()))
+	log.Debug("start executing load collection job",
+		zap.Int64("dbID", req.GetDbId()),
+		zap.Int64s("partitionIDs", req.GetPartitionIds()),
+		zap.Int("numChannels", len(vchannels)),
+		zap.Int("numReplicas", len(req.GetReplicas())),
+	)
 	meta.GlobalFailedLoadCache.Remove(req.GetCollectionId())
 
 	// 1. create replica if not exist
+	log.Debug("spawning replicas with replica config")
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
 		Channels:     vchannels,
 		Configs:      req.GetReplicas(),
 	}); err != nil {
+		log.Debug("failed to spawn replicas", zap.Error(err))
 		return err
 	}
+	log.Debug("spawned replicas successfully")
 
+	log.Debug("describing collection from broker")
 	collInfo, err := job.broker.DescribeCollection(job.ctx, req.GetCollectionId())
 	if err != nil {
+		log.Debug("failed to describe collection", zap.Error(err))
 		return err
 	}
+	log.Debug("described collection successfully",
+		zap.String("collectionName", collInfo.GetSchema().GetName()),
+		zap.Int("numFields", len(collInfo.GetSchema().GetFields())),
+	)
 
 	// 2. put load info meta
 	fieldIndexIDs := make(map[int64]int64, len(req.GetLoadFields()))
@@ -172,11 +187,17 @@ func (job *LoadCollectionJob) Execute() error {
 	)
 
 	// 5. update next target, no need to rollback if pull target failed, target observer will pull target in periodically
+	log.Debug("updating next target")
 	if _, err = job.targetObserver.UpdateNextTarget(req.GetCollectionId()); err != nil {
+		log.Debug("failed to update next target", zap.Error(err))
 		return err
 	}
+	log.Debug("updated next target successfully")
 
 	// 6. register load task into collection observer
+	log.Debug("registering load task into collection observer",
+		zap.Int("numPartitions", len(incomingPartitions.Collect())),
+	)
 	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), incomingPartitions.Collect())
 
 	// 7. wait for partition released if any partition is released
