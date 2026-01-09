@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::log::init_log;
 use core::slice;
-use log::error;
+use log::info;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_void};
@@ -16,7 +16,7 @@ pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
 pub fn index_exist(path: &str) -> bool {
     let Ok(dir) = MmapDirectory::open(path) else {
         init_log();
-        error!("tantivy index_exist: failed to open directory: {}", path);
+        info!("tantivy index_exist: failed to open directory: {}, (used for debug now)", path);
         return false;
     };
     let exists = Index::exists(&dir).unwrap();
@@ -30,8 +30,8 @@ pub fn index_exist(path: &str) -> bool {
                     .collect()
             })
             .unwrap_or_default();
-        error!(
-            "tantivy index_exist: meta.json not found at {}, files: {:?}",
+        info!(
+            "tantivy index_exist: meta.json not found at {}, files: {:?}, (used for debug now)",
             path, files
         );
     }
