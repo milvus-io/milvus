@@ -3400,8 +3400,23 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		return merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
 	}
 
-	if !typeutil.IsVectorType(annField.GetDataType()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+	// Check if this is a BM25 function-based search
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.CollectionSchema.Functions)
+
+	// For BM25 search, we need to fetch text field; for vector search, we need vector field
+	var fieldToFetch string
+	if isBM25Search {
+		// BM25 search: fetch the input text field of the BM25 function
+		if len(bm25Function.InputFieldNames) == 0 {
+			return merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
+		}
+		fieldToFetch = bm25Function.InputFieldNames[0]
+	} else {
+		// Vector search: validate and fetch the vector field
+		if !typeutil.IsVectorType(annField.GetDataType()) {
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field (%s) to search is not of vector data type", annsFieldName))
+		}
+		fieldToFetch = annsFieldName
 	}
 
 	// Get primary key field
@@ -3418,12 +3433,13 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Create requery plan using IDs (no expr parsing overhead)
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 
-	// Build query request to fetch vectors by IDs
+	// Build query request to fetch data by IDs
+	// For BM25: fetch text field; for vector search: fetch vector field
 	queryReq := &milvuspb.QueryRequest{
 		Base:                  request.Base,
 		DbName:                request.DbName,
 		CollectionName:        request.CollectionName,
-		OutputFields:          []string{pkField.GetName(), annsFieldName}, // Only need the vector field
+		OutputFields:          []string{pkField.GetName(), fieldToFetch},
 		PartitionNames:        request.PartitionNames,
 		TravelTimestamp:       request.TravelTimestamp,
 		GuaranteeTimestamp:    request.GuaranteeTimestamp,
@@ -3508,17 +3524,19 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
-	// Extract vector field from query result
-	vectorFieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
-		return f.GetFieldName() == annsFieldName || f.GetType() == schemapb.DataType_ArrayOfStruct
+	// Extract the field data from query result
+	// For BM25: extract text field; for vector search: extract vector field
+	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
-	if vectorFieldData == nil {
-		return merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in query result")
+	if fieldData == nil {
+		return merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
 	}
 
-	// Convert to PlaceholderGroup
-	placeholderBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(vectorFieldData)
+	// For BM25: converts VarChar to VarChar placeholder (text input for BM25 function)
+	// For vector search: converts vector to vector placeholder
+	placeholderBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
 	if err != nil {
 		return err
 	}
