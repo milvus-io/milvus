@@ -206,6 +206,16 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 	}
 
 	var manifestPath string
+	getNullCount := func(columnGroup storagecommon.ColumnGroup) int64 {
+		var nullCount int64
+		for _, fieldID := range columnGroup.Fields {
+			if col := rec.Column(fieldID); col != nil {
+				nullCount += int64(col.NullN())
+			}
+		}
+		return nullCount
+	}
+
 	if bw.manifestPath != "" {
 		basePath, version, err := packed.UnmarshalManfestPath(bw.manifestPath)
 		if err != nil {
@@ -231,6 +241,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 						EntriesNum:    w.GetWrittenRowNum(),
 						TimestampFrom: tsFrom,
 						TimestampTo:   tsTo,
+						NullCount:     getNullCount(columnGroup),
 					},
 				},
 			}
@@ -267,6 +278,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 						EntriesNum:    w.GetWrittenRowNum(),
 						TimestampFrom: tsFrom,
 						TimestampTo:   tsTo,
+						NullCount:     getNullCount(columnGroup),
 					},
 				},
 			}

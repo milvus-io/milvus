@@ -38,6 +38,20 @@ func CalcRowCountFromBinLog(seg *datapb.SegmentInfo) int64 {
 	return rowCt
 }
 
+// CalcValidRowCountFromFieldBinLog calculates valid (non-null) row count for a specific field
+func CalcValidRowCountFromFieldBinLog(seg *datapb.SegmentInfo, fieldID int64) int64 {
+	for _, fieldBinlog := range seg.GetBinlogs() {
+		if fieldBinlog.GetFieldID() == fieldID {
+			var validRowCt int64
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				validRowCt += binlog.GetEntriesNum() - binlog.GetNullCount()
+			}
+			return validRowCt
+		}
+	}
+	return -1
+}
+
 // CalcDelRowCountFromDeltaLog calculates deleted rows of a L0 segment from delta logs
 func CalcDelRowCountFromDeltaLog(seg *datapb.SegmentInfo) int64 {
 	var rowCt int64

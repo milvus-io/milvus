@@ -555,6 +555,7 @@ message Binlog {
   // log_size represents the size after data serialized.
   // for stats_log, the memory_size always equal log_size.
   int64 memory_size = 7;
+  int64 null_count = 8;
 }
 
 message GetRecoveryInfoResponse {
