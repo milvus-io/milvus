@@ -230,6 +230,13 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 }
 
 func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
+	if coll == nil {
+		return false
+	}
+	if coll.IsExternal() {
+		log.Info("collection auto compaction disabled for external collection", zap.Int64("collectionID", coll.ID))
+		return false
+	}
 	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
 	if err != nil {
 		log.Warn("collection properties auto compaction not valid, returning false", zap.Error(err))
@@ -362,6 +369,13 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			log.Warn("get collection info failed, skip handling compaction", zap.Error(err))
 			if signal.collectionID != 0 {
 				return err
+			}
+			continue
+		}
+		if coll.IsExternal() {
+			log.Info("skip compaction for external collection", zap.Int64("collectionID", coll.ID))
+			if signal.collectionID != 0 {
+				return merr.WrapErrServiceUnavailable("external collection compaction disabled")
 			}
 			continue
 		}
