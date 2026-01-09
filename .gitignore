@@ -113,8 +113,9 @@ internal/core/src/pb/*.pb.cc
 **/legacypb/*.pb.go
 pkg/streaming/proto/**/*.pb.go
 
-#AI rules
+# AI rules
 WARP.md
+CLAUDE.md
 
 # Antlr
 .antlr
