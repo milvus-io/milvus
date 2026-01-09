@@ -554,6 +554,13 @@ func (req *DropIndexPropertiesReq) GetIndexName() string {
 	return req.IndexName
 }
 
+type StructArrayFieldSchema struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Fields      []*FieldSchema         `json:"fields"`
+	TypeParams  map[string]interface{} `json:"elementTypeParams"`
+}
+
 type FieldSchema struct {
 	FieldName         string                 `json:"fieldName" binding:"required"`
 	DataType          string                 `json:"dataType" binding:"required"`
@@ -589,7 +596,7 @@ func (field *FieldSchema) GetProto(ctx context.Context) (*schemapb.FieldSchema, 
 		log.Ctx(ctx).Warn("convert defaultValue fail", zap.Any("defaultValue", field.DefaultValue), zap.Error(err))
 		return nil, merr.WrapErrParameterInvalidMsg("convert defaultValue fail, err: %s", err.Error())
 	}
-	if dataType == schemapb.DataType_Array {
+	if dataType == schemapb.DataType_Array || dataType == schemapb.DataType_ArrayOfVector {
 		if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
 			log.Ctx(ctx).Warn("element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
 			return nil, merr.WrapErrParameterInvalidMsg("element data type %s is invalid(case sensitive)", field.ElementDataType)
@@ -621,10 +628,11 @@ type FunctionSchema struct {
 }
 
 type CollectionSchema struct {
-	Fields             []FieldSchema    `json:"fields"`
-	Functions          []FunctionSchema `json:"functions"`
-	AutoId             bool             `json:"autoID"`
-	EnableDynamicField bool             `json:"enableDynamicField"`
+	Fields             []FieldSchema            `json:"fields"`
+	StructArrayFields  []StructArrayFieldSchema `json:"structArrayFields"`
+	Functions          []FunctionSchema         `json:"functions"`
+	AutoId             bool                     `json:"autoID"`
+	EnableDynamicField bool                     `json:"enableDynamicField"`
 }
 
 type CollectionReq struct {
