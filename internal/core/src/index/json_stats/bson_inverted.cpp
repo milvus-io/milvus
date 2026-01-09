@@ -91,6 +91,9 @@ BsonInvertedIndex::BuildIndex() {
     std::vector<const char*> keys;
     std::vector<const int64_t*> json_offsets;
     std::vector<uintptr_t> json_offsets_lens;
+    keys.reserve(inverted_index_map_.size());
+    json_offsets.reserve(inverted_index_map_.size());
+    json_offsets_lens.reserve(inverted_index_map_.size());
     for (const auto& [key, offsets] : inverted_index_map_) {
         keys.push_back(key.c_str());
         json_offsets.push_back(offsets.data());
@@ -109,9 +112,9 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
     if (is_load_) {
         // convert shared_key_index/... to remote_prefix/shared_key_index/...
         std::vector<std::string> remote_files;
-        for (auto& file : index_files) {
-            auto remote_prefix =
-                disk_file_manager_->GetRemoteJsonStatsLogPrefix();
+        remote_files.reserve(index_files.size());
+        auto remote_prefix = disk_file_manager_->GetRemoteJsonStatsLogPrefix();
+        for (const auto& file : index_files) {
             boost::filesystem::path full_path =
                 boost::filesystem::path(remote_prefix) / file;
             remote_files.emplace_back(full_path.string());
