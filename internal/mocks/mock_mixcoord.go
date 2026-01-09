@@ -9003,6 +9003,54 @@ func (_c *MixCoord_SuspendNode_Call) RunAndReturn(run func(context.Context, *que
 	return _c
 }
 
+// SyncDcFileResource provides a mock function with given fields: ctx, resources, version
+func (_m *MixCoord) SyncDcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	ret := _m.Called(ctx, resources, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncDcFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*internalpb.FileResourceInfo, uint64) error); ok {
+		r0 = rf(ctx, resources, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_SyncDcFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncDcFileResource'
+type MixCoord_SyncDcFileResource_Call struct {
+	*mock.Call
+}
+
+// SyncDcFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resources []*internalpb.FileResourceInfo
+//   - version uint64
+func (_e *MixCoord_Expecter) SyncDcFileResource(ctx interface{}, resources interface{}, version interface{}) *MixCoord_SyncDcFileResource_Call {
+	return &MixCoord_SyncDcFileResource_Call{Call: _e.mock.On("SyncDcFileResource", ctx, resources, version)}
+}
+
+func (_c *MixCoord_SyncDcFileResource_Call) Run(run func(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64)) *MixCoord_SyncDcFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*internalpb.FileResourceInfo), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_SyncDcFileResource_Call) Return(_a0 error) *MixCoord_SyncDcFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_SyncDcFileResource_Call) RunAndReturn(run func(context.Context, []*internalpb.FileResourceInfo, uint64) error) *MixCoord_SyncDcFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncNewCreatedPartition provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) SyncNewCreatedPartition(_a0 context.Context, _a1 *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

@@ -271,6 +271,10 @@ func (h *mockMixCoord) SyncQcFileResource(ctx context.Context, resources []*inte
 	return nil
 }
 
+func (m *mockMixCoord) SyncDcFileResource(ctx context.Context, resources []*internalpb.FileResourceInfo, version uint64) error {
+	return nil
+}
+
 func (m *mockMixCoord) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	panic("not implemented") // TODO: Implement
 }

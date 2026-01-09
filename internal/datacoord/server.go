@@ -347,6 +347,7 @@ func (s *Server) initDataCoord() error {
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
 	s.fileManager = NewFileResourceManager(s.ctx, s.meta, s.nodeManager)
+
 	// Initialize copy segment meta and components
 	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta)
 	if err != nil {

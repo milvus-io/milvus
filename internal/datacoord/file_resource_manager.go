@@ -33,9 +33,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+type storageClient interface {
+	Exist(ctx context.Context, filePath string) (bool, error)
+}
+
 type FileResourceManager struct {
-	ctx  context.Context
-	meta *meta
+	ctx context.Context
 
 	// version distribution
 	nodeManager  session.NodeManager
@@ -44,7 +47,9 @@ type FileResourceManager struct {
 	notifyCh chan struct{}
 	sf       conc.Singleflight[any]
 	once     sync.Once
+	meta     *meta
 
+	mode fileresource.Mode // data node file resource mode
 	// close
 	closeCh chan struct{}
 	wg      sync.WaitGroup
@@ -53,12 +58,15 @@ type FileResourceManager struct {
 func NewFileResourceManager(ctx context.Context, meta *meta, nodeManager session.NodeManager) *FileResourceManager {
 	return &FileResourceManager{
 		ctx:          ctx,
-		meta:         meta,
 		nodeManager:  nodeManager,
+		meta:         meta,
 		distribution: map[int64]uint64{},
 
 		closeCh: make(chan struct{}),
 		sf:      conc.Singleflight[any]{},
+		mode:    fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
+
+		notifyCh: make(chan struct{}, 1),
 	}
 }
 
@@ -85,9 +93,8 @@ func (m *FileResourceManager) syncLoop() {
 }
 
 func (m *FileResourceManager) Start() {
-	if fileresource.IsSyncMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) {
+	if m.mode == fileresource.SyncMode {
 		m.once.Do(func() {
-			m.notifyCh = make(chan struct{}, 1)
 			m.wg.Add(1)
 			go m.syncLoop()
 		})
@@ -99,15 +106,22 @@ func (m *FileResourceManager) Close() {
 	m.wg.Wait()
 }
 
+func (m *FileResourceManager) UpdateResources(resources []*internalpb.FileResourceInfo, version uint64) {
+	m.meta.UpdateFileResources(m.ctx, resources, version)
+	m.Notify()
+}
+
 // notify sync file resource to datanode
 // if file resource mode was Sync
 func (m *FileResourceManager) Notify() {
-	if m == nil || m.notifyCh == nil {
+	if m == nil || m.mode != fileresource.SyncMode {
+		log.Info("notify sync file resource to datanode, but file resource mode is not sync")
 		return
 	}
 
 	select {
 	case m.notifyCh <- struct{}{}:
+		log.Info("notify sync file resource to datanode")
 	default:
 	}
 }
@@ -117,7 +131,7 @@ func (m *FileResourceManager) sync() error {
 
 	var syncErr error
 
-	resources, version := m.meta.ListFileResource(m.ctx)
+	resources, version := m.meta.ListFileResources(m.ctx)
 
 	newDistribution := make(map[int64]uint64)
 	for _, node := range nodes {

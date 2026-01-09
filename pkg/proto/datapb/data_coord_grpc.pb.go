@@ -72,9 +72,6 @@ const (
 	DataCoord_ImportV2_FullMethodName                    = "/milvus.proto.data.DataCoord/ImportV2"
 	DataCoord_GetImportProgress_FullMethodName           = "/milvus.proto.data.DataCoord/GetImportProgress"
 	DataCoord_ListImports_FullMethodName                 = "/milvus.proto.data.DataCoord/ListImports"
-	DataCoord_AddFileResource_FullMethodName             = "/milvus.proto.data.DataCoord/AddFileResource"
-	DataCoord_RemoveFileResource_FullMethodName          = "/milvus.proto.data.DataCoord/RemoveFileResource"
-	DataCoord_ListFileResources_FullMethodName           = "/milvus.proto.data.DataCoord/ListFileResources"
 	DataCoord_CreateSnapshot_FullMethodName              = "/milvus.proto.data.DataCoord/CreateSnapshot"
 	DataCoord_DropSnapshot_FullMethodName                = "/milvus.proto.data.DataCoord/DropSnapshot"
 	DataCoord_ListSnapshots_FullMethodName               = "/milvus.proto.data.DataCoord/ListSnapshots"
@@ -145,10 +142,6 @@ type DataCoordClient interface {
 	ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error)
 	GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error)
 	ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error)
-	// File Resource Management
-	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
 	// snapshot
 	CreateSnapshot(ctx context.Context, in *CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropSnapshot(ctx context.Context, in *DropSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -601,33 +594,6 @@ func (c *dataCoordClient) ListImports(ctx context.Context, in *internalpb.ListIm
 	return out, nil
 }
 
-func (c *dataCoordClient) AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, DataCoord_AddFileResource_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataCoordClient) RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, DataCoord_RemoveFileResource_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error) {
-	out := new(milvuspb.ListFileResourcesResponse)
-	err := c.cc.Invoke(ctx, DataCoord_ListFileResources_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *dataCoordClient) CreateSnapshot(ctx context.Context, in *CreateSnapshotRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, DataCoord_CreateSnapshot_FullMethodName, in, out, opts...)
@@ -752,10 +718,6 @@ type DataCoordServer interface {
 	ImportV2(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)
 	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
 	ListImports(context.Context, *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error)
-	// File Resource Management
-	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
-	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
-	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
 	// snapshot
 	CreateSnapshot(context.Context, *CreateSnapshotRequest) (*commonpb.Status, error)
 	DropSnapshot(context.Context, *DropSnapshotRequest) (*commonpb.Status, error)
@@ -913,15 +875,6 @@ func (UnimplementedDataCoordServer) GetImportProgress(context.Context, *internal
 }
 func (UnimplementedDataCoordServer) ListImports(context.Context, *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListImports not implemented")
-}
-func (UnimplementedDataCoordServer) AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AddFileResource not implemented")
-}
-func (UnimplementedDataCoordServer) RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RemoveFileResource not implemented")
-}
-func (UnimplementedDataCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
 }
 func (UnimplementedDataCoordServer) CreateSnapshot(context.Context, *CreateSnapshotRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateSnapshot not implemented")
@@ -1820,60 +1773,6 @@ func _DataCoord_ListImports_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataCoord_AddFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.AddFileResourceRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).AddFileResource(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_AddFileResource_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).AddFileResource(ctx, req.(*milvuspb.AddFileResourceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataCoord_RemoveFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.RemoveFileResourceRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).RemoveFileResource(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_RemoveFileResource_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).RemoveFileResource(ctx, req.(*milvuspb.RemoveFileResourceRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(milvuspb.ListFileResourcesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataCoordServer).ListFileResources(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DataCoord_ListFileResources_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataCoordServer).ListFileResources(ctx, req.(*milvuspb.ListFileResourcesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DataCoord_CreateSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateSnapshotRequest)
 	if err := dec(in); err != nil {
@@ -2198,18 +2097,6 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListImports",
 			Handler:    _DataCoord_ListImports_Handler,
-		},
-		{
-			MethodName: "AddFileResource",
-			Handler:    _DataCoord_AddFileResource_Handler,
-		},
-		{
-			MethodName: "RemoveFileResource",
-			Handler:    _DataCoord_RemoveFileResource_Handler,
-		},
-		{
-			MethodName: "ListFileResources",
-			Handler:    _DataCoord_ListFileResources_Handler,
 		},
 		{
 			MethodName: "CreateSnapshot",
