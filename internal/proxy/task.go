@@ -415,6 +415,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	isExternalCollection := typeutil.IsExternalCollection(t.schema)
+	if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
+		return err
+	}
+
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
@@ -446,9 +451,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate primary key definition
-	if err := validatePrimaryKey(t.schema); err != nil {
-		return err
+	// validate primary key definition when needed
+	if !isExternalCollection {
+		if err := validatePrimaryKey(t.schema); err != nil {
+			return err
+		}
 	}
 
 	// validate dynamic field
@@ -1004,6 +1011,8 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.Schema.Description = result.Schema.Description
 	t.result.Schema.AutoID = result.Schema.AutoID
 	t.result.Schema.EnableDynamicField = result.Schema.EnableDynamicField
+	t.result.Schema.ExternalSource = result.Schema.ExternalSource
+	t.result.Schema.ExternalSpec = result.Schema.ExternalSpec
 	t.result.CollectionID = result.CollectionID
 	t.result.VirtualChannelNames = result.VirtualChannelNames
 	t.result.PhysicalChannelNames = result.PhysicalChannelNames
@@ -1035,6 +1044,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 			ElementType:      field.ElementType,
 			Nullable:         field.Nullable,
 			IsFunctionOutput: field.IsFunctionOutput,
+			ExternalField:    field.GetExternalField(),
 		}
 	}
 

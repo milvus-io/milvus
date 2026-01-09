@@ -1078,6 +1078,8 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		EnableDynamicField: collInfo.EnableDynamicField,
 		Properties:         collInfo.Properties,
 		FileResourceIds:    collInfo.FileResourceIds,
+		ExternalSource:     collInfo.ExternalSource,
+		ExternalSpec:       collInfo.ExternalSpec,
 	}
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
