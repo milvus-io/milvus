@@ -1146,6 +1146,9 @@ func (sd *shardDelegator) Close() {
 	sd.tsCond.Broadcast()
 	sd.lifetime.Wait()
 
+	// Remove all candidates and refund bloom filter resources
+	sd.pkOracle.RemoveAndRefundAll()
+
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()
