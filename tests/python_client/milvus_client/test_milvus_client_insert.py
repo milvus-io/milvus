@@ -967,6 +967,12 @@ class TestInsertOperation(TestMilvusClientV2Base):
         
         results = self.insert(client, collection_name, rows)[0]
         assert results['insert_count'] == ct.default_nb
+        assert len(set(results['ids'])) == ct.default_nb
+
+        if pk_field == ct.default_int64_field_name:
+            assert all(isinstance(i, int) for i in results["ids"])
+        else:
+            assert all(isinstance(i, str) and i.isdigit() for i in results["ids"])
         
         self.flush(client, collection_name)
         num_entities = self.get_collection_stats(client, collection_name)[0]
@@ -1017,6 +1023,46 @@ class TestInsertOperation(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_auto_id_true_with_provided_pk(self, pk_field):
+        """
+        target: test insert ids fields values when auto_id=True
+        method: 1.create collection with auto_id=True 2.insert with provided pk
+        expected: insert failed
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create schema with auto_id=True and specific primary field
+        schema = self.create_schema(client, auto_id=True, enable_dynamic_field=True)[0]
+        if pk_field == ct.default_int64_field_name:
+            schema.add_field(pk_field, DataType.INT64, is_primary=True, auto_id=True)
+        else:
+            schema.add_field(pk_field, DataType.VARCHAR, max_length=ct.default_length, is_primary=True, auto_id=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        if pk_field != ct.default_string_field_name:
+            schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema, auto_id=True)
+
+        # Insert with primary key (auto_id)
+        rng = np.random.default_rng(seed=19530)
+        rows = []
+        for i in range(ct.default_nb):
+            row = {default_vector_field_name: list(rng.random((1, default_dim))[0]), default_float_field_name: i * 1.0}
+            if pk_field == ct.default_int64_field_name:
+                row[pk_field] = i
+                row[default_string_field_name] = str(i)
+            else:
+                row[pk_field] = str(i)
+            rows.append(row)
+
+        error = {ct.err_code: 1100, ct.err_msg: 'more fieldData has pass in: invalid parameter'}
+        self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.skip(reason="Covered by test_insert_auto_id_true")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_auto_id_true_list_data(self, pk_field):
         """
         target: test insert ids fields values when auto_id=True
@@ -1055,8 +1101,9 @@ class TestInsertOperation(TestMilvusClientV2Base):
         assert num_entities.get("row_count", None) == ct.default_nb
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.skip(reason="Covered by test_insert_auto_id_true")
     @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_auto_id_true_with_dataframe_values(self, pk_field):
+    def test_insert_with_dataframe_values(self, pk_field, auto_id):
         """
         target: test insert with dataframe data
         method: create collection with auto_id=True
