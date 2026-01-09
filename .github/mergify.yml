@@ -7,68 +7,21 @@
 # GLOBAL CONFIGURATIONS AND ALIASES
 # Define reusable conditions and patterns for better maintainability
 # ==============================================================================
-misc:
-  # File pattern matchers
-  - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
-  - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
-  
-  # Build and test status conditions
-  - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - 'status-success=Build and test AMD64 Ubuntu 20.04'
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
-  - when_build_and_test_status_failed: &Build_AND_TEST_STATUS_FAILED_ON_UBUNTU_20_OR_UBUNTU_22
-      - &failed_on_ubuntu_20 'check-failure=Build and test AMD64 Ubuntu 20.04'
-      - &failed_on_ubuntu_22 'check-failure=Build and test AMD64 Ubuntu 22.04'
-  - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
-      - 'status-success=go-sdk'
-      - 'status-success=milvus-sdk-go'
-      - 'status-success=ci-v2/go-sdk'
-  - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
-      - 'status-success=cpp-unit-test'
-      - 'status-success=UT for Cpp'
-      - 'status-success=ci-v2/ut-cpp'
-  - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
-      - 'status-success=go-unit-test'
-      - 'status-success=UT for Go'
-      - 'status-success=ci-v2/ut-go'
-  - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=integration-test'
-      - 'status-success=Integration Test'
-      - 'status-success=ci-v2/integration-test'
-  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
-      - 'status-success=cpu-e2e'
-      - 'status-success=ci-v2/e2e-default'
-  - when_build_success: &WHEN_BUILD_SUCCESS
-      - 'status-success=Build and test AMD64 Ubuntu 22.04'
-      - 'status-success=ci-v2/build'
-  - when_code_check_ubuntu_success: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
-      - 'status-success=ci-v2/code-check'
-  - when_code_check_macos_success: &WHEN_CODE_CHECK_MACOS_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
-      - 'status-success=Code Checker MacOS'
-  
-  # Branch configurations
-  - branch: &BRANCHES
-      - &MASTER_BRANCH base=master
-      - &2X_BRANCH base~=^2(\.\d+){1,2}$
+pull_request_rules:
+  # ==========================================================================
+  # DCO (Developer Certificate of Origin) MANAGEMENT
+  # Handles DCO compliance for all contributions
+  # ==========================================================================
+  - name: Add needs-dco label when DCO check failed
+    conditions:
+      - or: &BRANCHES
+          - &MASTER_BRANCH base=master
+          - &2X_BRANCH base~=^2(\.\d+){1,2}$
 
 # ==============================================================================
 # PULL REQUEST RULES
 # Organized by functionality for better maintenance and understanding
 # ==============================================================================
-pull_request_rules:
-  
-  # ==========================================================================
-  # DCO (Developer Certificate of Origin) MANAGEMENT
-  # Handles DCO compliance for all contributions
-  # ==========================================================================
-  
-  - name: Add needs-dco label when DCO check failed
-    conditions:
-      - or: *BRANCHES
       - -status-success=DCO
     actions:
       label:
@@ -95,25 +48,46 @@ pull_request_rules:
   # CONTINUOUS INTEGRATION (CI) STATUS MANAGEMENT
   # Rules for managing CI test results and labeling PRs accordingly
   # ==========================================================================
-  
-  - name: Test passed for code changed on master 
+  - name: Test passed for code changed on master
     conditions:
       - *MASTER_BRANCH
-      - or: *WHEN_BUILD_SUCCESS
-      - or: *WHEN_GO_SDK_STATUS_SUCCESS
-      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
-      - or: *WHEN_GO_UNIT_TEST_SUCCESS
-      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - or: *WHEN_E2E_TEST_SUCCESS
-      - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
-      - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
+      - or: &WHEN_BUILD_SUCCESS
+          - 'status-success=Build and test AMD64 Ubuntu 22.04'
+          - 'status-success=ci-v2/build'
+      - or:
+          - 'status-success=go-sdk'
+          - 'status-success=milvus-sdk-go'
+          - 'status-success=ci-v2/go-sdk'
+      - or: &WHEN_CPP_UNIT_TEST_SUCCESS
+          - 'status-success=cpp-unit-test'
+          - 'status-success=UT for Cpp'
+          - 'status-success=ci-v2/ut-cpp'
+      - or: &WHEN_GO_UNIT_TEST_SUCCESS
+          - 'status-success=go-unit-test'
+          - 'status-success=UT for Go'
+          - 'status-success=ci-v2/ut-go'
+      - or: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+          - 'status-success=integration-test'
+          - 'status-success=Integration Test'
+          - 'status-success=ci-v2/integration-test'
+      - or: &WHEN_E2E_TEST_SUCCESS
+          - 'status-success=cpu-e2e'
+          - 'status-success=ci-v2/e2e-default'
+      - or: &WHEN_CODE_CHECK_UBUNTU_SUCCESS
+          - 'status-success=Code Checker AMD64 Ubuntu 22.04'
+          - 'status-success=ci-v2/code-check'
+      - or: &WHEN_CODE_CHECK_MACOS_SUCCESS
+          - 'status-success=Code Checker MacOS 13'
+          - 'status-success=Code Checker MacOS'
+
+  # Branch configurations
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
       label:
         add:
           - ci-passed
-          
+
   - name: Test passed for code changed on 2.* branch
     conditions:
       - *2X_BRANCH
@@ -156,7 +130,7 @@ pull_request_rules:
     conditions:
       - or: *BRANCHES
       - or: *WHEN_E2E_TEST_SUCCESS
-      - *no_source_code_files
+      - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
     actions:
       label:
         add:
@@ -165,7 +139,7 @@ pull_request_rules:
   - name: Test passed for go unittest code changed-master
     conditions:
       - or: *BRANCHES
-      - *only_go_unittest_files
+      - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
       - or: *WHEN_BUILD_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
@@ -206,7 +180,7 @@ pull_request_rules:
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - or: *WHEN_CODE_CHECK_UBUNTU_SUCCESS
       - or: *WHEN_CODE_CHECK_MACOS_SUCCESS
-      - *source_code_files
+      - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
     actions:
       label:
         add:
@@ -240,87 +214,87 @@ pull_request_rules:
   - name: Remove ci-passed when any CI system fails during migration
     conditions:
       - or:
-        - *MASTER_BRANCH
-        - *2X_BRANCH
+          - *MASTER_BRANCH
+          - *2X_BRANCH
       - label!=manual-pass
       - *source_code_files
       # Comprehensive failure logic: remove ci-passed when any required system fails
       - or:
         # Build systems: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = Build and test AMD64 Ubuntu 22.04
-                  - status-success = ci-v2/build
-            - or:
-                - status-failure = Build and test AMD64 Ubuntu 22.04
-                - status-failure = ci-v2/build
+          - and:
+              - not:
+                  or:
+                    - status-success = Build and test AMD64 Ubuntu 22.04
+                    - status-success = ci-v2/build
+              - or:
+                  - status-failure = Build and test AMD64 Ubuntu 22.04
+                  - status-failure = ci-v2/build
         # Go unit tests: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = UT for Go
-                  - status-success = ci-v2/ut-go
-            - or:
-                - status-failure = UT for Go
-                - status-failure = ci-v2/ut-go
+          - and:
+              - not:
+                  or:
+                    - status-success = UT for Go
+                    - status-success = ci-v2/ut-go
+              - or:
+                  - status-failure = UT for Go
+                  - status-failure = ci-v2/ut-go
         # Integration tests: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = Integration Test
-                  - status-success = ci-v2/integration-test
-            - or:
-                - status-failure = Integration Test
-                - status-failure = ci-v2/integration-test
+          - and:
+              - not:
+                  or:
+                    - status-success = Integration Test
+                    - status-success = ci-v2/integration-test
+              - or:
+                  - status-failure = Integration Test
+                  - status-failure = ci-v2/integration-test
         # Cpp unit tests: remove if no success AND has failure (only when cpp files changed)
-        - and:
-          - *morethan_go_unittest_files
-          - not:
-              or:
-                - status-success = cpp-unit-test
-                - status-success = ci-v2/ut-cpp
-          - or:
-              - status-failure = cpp-unit-test
-              - status-failure = ci-v2/ut-cpp
+          - and:
+              - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+              - not:
+                  or:
+                    - status-success = cpp-unit-test
+                    - status-success = ci-v2/ut-cpp
+              - or:
+                  - status-failure = cpp-unit-test
+                  - status-failure = ci-v2/ut-cpp
         # Code checker Ubuntu: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = Code Checker AMD64 Ubuntu 22.04
-                  - status-success = ci-v2/code-check
-            - or:
-                - status-failure = Code Checker AMD64 Ubuntu 22.04
-                - status-failure = ci-v2/code-check
+          - and:
+              - not:
+                  or:
+                    - status-success = Code Checker AMD64 Ubuntu 22.04
+                    - status-success = ci-v2/code-check
+              - or:
+                  - status-failure = Code Checker AMD64 Ubuntu 22.04
+                  - status-failure = ci-v2/code-check
         # Code checker MacOS: remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = Code Checker MacOS 13
-                  - status-success = Code Checker MacOS
-            - or:
-                - status-failure = Code Checker MacOS 13
-                - status-failure = Code Checker MacOS
+          - and:
+              - not:
+                  or:
+                    - status-success = Code Checker MacOS 13
+                    - status-success = Code Checker MacOS
+              - or:
+                  - status-failure = Code Checker MacOS 13
+                  - status-failure = Code Checker MacOS
         # E2E tests: regular case - remove if no success AND has failure
-        - and:
-            - not:
-                or:
-                  - status-success = cpu-e2e
-                  - status-success = ci-v2/e2e-default
-            - or:
-                - status-failure = cpu-e2e
-                - status-failure = ci-v2/e2e-default
+          - and:
+              - not:
+                  or:
+                    - status-success = cpu-e2e
+                    - status-success = ci-v2/e2e-default
+              - or:
+                  - status-failure = cpu-e2e
+                  - status-failure = ci-v2/e2e-default
         # E2E tests: required case - remove if no success AND has failure (when not skipped)
-        - and:
-          - -title~=\[skip e2e\]
-          - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
-          - not:
-              or:
-                - status-success = cpu-e2e
-                - status-success = ci-v2/e2e-default
-          - or:
-              - status-failure = cpu-e2e
-              - status-failure = ci-v2/e2e-default
+          - and:
+              - -title~=\[skip e2e\]
+              - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
+              - not:
+                  or:
+                    - status-success = cpu-e2e
+                    - status-success = ci-v2/e2e-default
+              - or:
+                  - status-failure = cpu-e2e
+                  - status-failure = ci-v2/e2e-default
     actions:
       label:
         remove:
@@ -338,14 +312,14 @@ pull_request_rules:
           - -body~=\#[0-9]{1,6}(\s+|$)
           - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
       - or:
-        - and:
-          - label=kind/enhancement
-          - or:
-            - label=size/L
-            - label=size/XL
-            - label=size/XXL
-        - label=kind/bug
-        - label=kind/feature
+          - and:
+              - label=kind/enhancement
+              - or:
+                  - label=size/L
+                  - label=size/XL
+                  - label=size/XXL
+          - label=kind/bug
+          - label=kind/feature
       - -label=kind/doc
       - -label=kind/test
       - -title~=\[automated\]
@@ -416,8 +390,8 @@ pull_request_rules:
     conditions:
       - or: *BRANCHES
       - or:
-        - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
-        - body=^$
+          - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|build\(deps\):|\[automated\])'
+          - body=^$
     actions:
       label:
         add:
@@ -607,4 +581,4 @@ pull_request_rules:
           - lgtm
           - approved
 
-        
+
