@@ -5919,3 +5919,99 @@ func TestHighlightTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestAddCollectionFieldTask_ExternalCollection(t *testing.T) {
+	task := &addCollectionFieldTask{
+		oldSchema: &schemapb.CollectionSchema{
+			Name:           "external_col",
+			ExternalSource: "s3://bucket/path",
+		},
+		AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{
+			CollectionName: "external_col",
+		},
+	}
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "add field operation is not supported for external collection")
+}
+
+func TestAlterCollectionFieldTask_ExternalCollection(t *testing.T) {
+	// Initialize globalMetaCache to avoid nil pointer dereference
+	globalMetaCache = &MetaCache{}
+
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	task := &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			CollectionName: "external_col",
+			FieldName:      "id",
+		},
+	}
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "alter field operation is not supported for external collection")
+}
+
+func TestCreatePartitionTask_ExternalCollection(t *testing.T) {
+	// Initialize globalMetaCache to avoid nil pointer dereference
+	globalMetaCache = &MetaCache{}
+
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	task := &createPartitionTask{
+		CreatePartitionRequest: &milvuspb.CreatePartitionRequest{
+			CollectionName: "external_col",
+			PartitionName:  "partition1",
+		},
+	}
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "create partition operation is not supported for external collection")
+}
+
+func TestDropPartitionTask_ExternalCollection(t *testing.T) {
+	// Initialize globalMetaCache to avoid nil pointer dereference
+	globalMetaCache = &MetaCache{}
+
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	m1 := mockey.Mock((*MetaCache).GetCollectionSchema).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+
+	task := &dropPartitionTask{
+		DropPartitionRequest: &milvuspb.DropPartitionRequest{
+			CollectionName: "external_col",
+			PartitionName:  "partition1",
+		},
+	}
+	err := task.PreExecute(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "drop partition operation is not supported for external collection")
+}

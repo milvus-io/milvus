@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1061,4 +1062,41 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.NoError(t, dr.Run(ctx))
 		assert.Equal(t, int64(3), dr.result.DeleteCnt)
 	})
+}
+
+func TestDeleteRunner_ExternalCollection(t *testing.T) {
+	// Create external collection schema
+	externalSchema := &schemapb.CollectionSchema{
+		Name:           "external_col",
+		ExternalSource: "s3://bucket/path",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+
+	// Save original globalMetaCache and restore after test
+	metaCache := globalMetaCache
+	defer func() { globalMetaCache = metaCache }()
+
+	// Set globalMetaCache to a non-nil MetaCache instance for mockey to work
+	globalMetaCache = &MetaCache{}
+
+	m1 := mockey.Mock(mockey.GetMethod(&MetaCache{}, "GetDatabaseInfo")).Return(&databaseInfo{dbID: 0}, nil).Build()
+	m2 := mockey.Mock(mockey.GetMethod(&MetaCache{}, "GetCollectionID")).Return(int64(1), nil).Build()
+	m3 := mockey.Mock(mockey.GetMethod(&MetaCache{}, "GetCollectionSchema")).Return(newSchemaInfo(externalSchema), nil).Build()
+	defer m1.UnPatch()
+	defer m2.UnPatch()
+	defer m3.UnPatch()
+
+	dr := deleteRunner{
+		req: &milvuspb.DeleteRequest{
+			DbName:         "default",
+			CollectionName: "external_col",
+			Expr:           "id in [1, 2, 3]",
+		},
+	}
+
+	err := dr.Init(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "delete operation is not supported for external collection")
 }

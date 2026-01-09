@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
@@ -52,10 +53,17 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 	segments := genSegmentsForMeta(s.testLabel)
-	s.meta = &meta{segments: NewSegmentsInfo()}
+	s.meta = &meta{
+		segments:    NewSegmentsInfo(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+	}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
+	s.meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	})
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
@@ -153,6 +161,21 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 		}).Return(nil).Once()
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(19530, nil).Maybe()
 	s.triggerManager.notify(context.Background(), TriggerTypeLevelZeroViewChange, levelZeroViews)
+}
+
+func (s *CompactionTriggerManagerSuite) TestManualTriggerSkipExternal() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{
+		ID: 1,
+		Schema: &schemapb.CollectionSchema{
+			ExternalSource: "s3://external",
+		},
+	}, nil)
+	s.triggerManager.handler = handler
+
+	_, err := s.triggerManager.ManualTrigger(context.Background(), 1, true, false, 0)
+	s.Error(err)
+	s.Contains(err.Error(), "external collection")
 }
 
 func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
@@ -339,12 +362,17 @@ func TestCompactionAndImport(t *testing.T) {
 	catelog := mocks.NewDataCoordCatalog(t)
 	catelog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	meta := &meta{
-		segments: NewSegmentsInfo(),
-		catalog:  catelog,
+		segments:    NewSegmentsInfo(),
+		catalog:     catelog,
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
+	meta.collections.Insert(1, &collectionInfo{
+		ID:     1,
+		Schema: &schemapb.CollectionSchema{},
+	})
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{}, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{}, nil)
@@ -439,6 +467,9 @@ func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerInvalidParams() {
 	// Test with both clustering and L0 compaction false
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.triggerManager.handler = handler
 	triggerID, err := s.triggerManager.ManualTrigger(context.Background(), s.testLabel.CollectionID, false, false, 0)
 	s.NoError(err)
 	s.Equal(int64(0), triggerID)
