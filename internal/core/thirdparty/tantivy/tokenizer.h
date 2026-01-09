@@ -6,7 +6,7 @@
 #include "tantivy/rust-array.h"
 #include "token-stream.h"
 #include "log/Log.h"
-
+#include "common/Utils.h"
 namespace milvus::tantivy {
 
 struct Tokenizer {
@@ -70,7 +70,7 @@ struct Tokenizer {
     void* ptr_;
 };
 
-void
+inline void
 set_tokenizer_options(std::string&& params) {
     auto shared_params = std::make_shared<std::string>(params);
     auto res =

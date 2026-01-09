@@ -399,7 +399,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	for _, field := range collSchema.Fields {
-		if skipFunction && typeutil.IsBM25FunctionOutputField(field, collSchema) {
+		if skipFunction && (typeutil.IsBM25FunctionOutputField(field, collSchema) || typeutil.IsMinHashFunctionOutputField(field, collSchema)) {
 			continue
 		}
 
@@ -829,7 +829,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	}
 
 	handleFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
-		if typeutil.IsBM25FunctionOutputField(field, collSchema) {
+		if typeutil.IsBM25FunctionOutputField(field, collSchema) || typeutil.IsMinHashFunctionOutputField(field, collSchema) {
 			return nil, nil
 		}
 

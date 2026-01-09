@@ -1934,7 +1934,7 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 	searchReq.Req.MetricType = metric.IP
 
 	sd := &shardDelegator{
-		isBM25Field:                map[int64]bool{101: true},
+		functionFieldType:          map[int64]schemapb.FunctionType{101: schemapb.FunctionType_BM25},
 		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
 	}
 
@@ -2126,5 +2126,66 @@ func TestDelegatorCatchingUpStreamingData(t *testing.T) {
 
 		// Should still be catching up (threshold disabled)
 		assert.True(t, sd.CatchingUpStreamingData())
+	})
+}
+
+// MinHash Function test
+func (s *DelegatorSuite) TestDelegatorSearchWithMinHashFunction() {
+	// miss parametres
+	minHashFunctionSchema := &schemapb.FunctionSchema{
+		Type:           schemapb.FunctionType_MinHash,
+		InputFieldIds:  []int64{102},
+		OutputFieldIds: []int64{101, 102}, // invalid output field
+	}
+	schema1 := &schemapb.CollectionSchema{
+		Name: "TestCollection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:         "id",
+				FieldID:      100,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+				AutoID:       true,
+			}, {
+				Name:         "binary_vector",
+				FieldID:      101,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_BinaryVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "1024",
+					},
+				},
+			}, {
+				Name:     "text",
+				FieldID:  102,
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxLengthKey,
+						Value: "256",
+					},
+				},
+			},
+		},
+		Functions: []*schemapb.FunctionSchema{minHashFunctionSchema},
+	}
+
+	s.Run("init function failed", func() {
+		manager := segments.NewManager()
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		s.Error(err)
+	})
+
+	s.Run("init function ", func() {
+		minHashFunctionSchema.OutputFieldIds = []int64{101}
+		manager := segments.NewManager()
+		manager.Collection.PutOrRef(s.collectionID, schema1, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		s.NoError(err)
 	})
 }
