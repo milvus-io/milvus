@@ -1595,6 +1595,17 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
+// IsSegmentCompacting check if segment is compacting
+func (m *meta) IsSegmentCompacting(segmentID UniqueID) bool {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	seg := m.segments.GetSegment(segmentID)
+	if seg == nil {
+		return false
+	}
+	return seg.isCompacting
+}
+
 // CheckAndSetSegmentsCompacting check all segments are not compacting
 // if true, set them compacting and return true
 // if false, skip setting and

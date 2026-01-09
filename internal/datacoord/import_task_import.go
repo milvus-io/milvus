@@ -205,6 +205,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		totalRows := int64(0)
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
 			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs(), info.GetBm25Logs())
@@ -226,6 +227,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				return
 			}
 			log.Info("update import segment info done", WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Any("segmentInfo", info))...)
+			totalRows += info.GetImportedRows()
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
@@ -235,7 +237,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		}
 		importDuration := t.GetTR().RecordSpan()
 		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
-		log.Info("import done", WrapTaskLog(t, zap.Duration("taskTimeCost/import", importDuration))...)
+		log.Info("import done", WrapTaskLog(t, zap.Int64("totalRows", totalRows), zap.Duration("taskTimeCost/import", importDuration))...)
 	}
 	log.Info("query import", WrapTaskLog(t, zap.String("respState", resp.GetState().String()),
 		zap.String("reason", resp.GetReason()))...)
