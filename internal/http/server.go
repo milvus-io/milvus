@@ -108,20 +108,21 @@ func registerDefaults() {
 			code := req.URL.Query().Get("code")
 			var auth string
 
-			// Check if this is a Proxy node (has password verify capability)
-			if expr.HasRegistered("proxy") && passwordVerifyFunc != nil {
-				// On Proxy node: require root user authentication via HTTP Basic Auth
-				if err := checkExprRootAuth(req); err != nil {
-					w.WriteHeader(http.StatusUnauthorized)
-					w.Write([]byte(fmt.Sprintf(`{"msg": "%s"}`, err.Error())))
-					return
-				}
-				// Use bypass since we've already authenticated
-				auth = expr.AuthBypass
-			} else {
-				// On non-Proxy nodes: use the original auth parameter
-				auth = req.URL.Query().Get("auth")
+			// Only Proxy nodes can access /expr endpoint
+			if !expr.HasRegistered("proxy") || passwordVerifyFunc == nil {
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"msg": "/expr endpoint is only available on Proxy nodes"}`))
+				return
 			}
+
+			// On Proxy node: require root user authentication via HTTP Basic Auth
+			if err := checkExprRootAuth(req); err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(fmt.Sprintf(`{"msg": "%s"}`, err.Error())))
+				return
+			}
+			// Use bypass since we've already authenticated
+			auth = expr.AuthBypass
 
 			output, err := expr.Exec(code, auth)
 			if err != nil {

@@ -218,29 +218,21 @@ func (suite *HTTPServerTestSuite) TestExprHandler() {
 		suite.True(strings.Contains(string(body), "expr endpoint is disabled"))
 	})
 
-	suite.Run("enabled_without_proxy_uses_auth_param", func() {
+	suite.Run("disabled_on_non_proxy_nodes", func() {
 		// When enabled but not on Proxy node (no proxy registered, no passwordVerifyFunc),
-		// it should use the original auth parameter
+		// it should return 403 Forbidden
 		paramtable.Get().Save("common.security.exprEnabled", "true")
 
-		// Without auth param - should fail
-		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo"
+		// Should be forbidden on non-Proxy nodes
+		url := "http://localhost:" + DefaultListenPort + ExprPath + "?code=foo&auth=by-dev"
 		client := http.Client{}
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		resp, err := client.Do(req)
 		suite.Nil(err)
 		defer resp.Body.Close()
+		suite.Equal(http.StatusForbidden, resp.StatusCode)
 		body, _ := io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "failed to execute"))
-
-		// With correct auth param - should succeed
-		url = "http://localhost:" + DefaultListenPort + ExprPath + "?auth=by-dev&code=foo"
-		req, _ = http.NewRequest(http.MethodGet, url, nil)
-		resp, err = client.Do(req)
-		suite.Nil(err)
-		defer resp.Body.Close()
-		body, _ = io.ReadAll(resp.Body)
-		suite.True(strings.Contains(string(body), "hello"))
+		suite.True(strings.Contains(string(body), "only available on Proxy nodes"))
 	})
 
 	suite.Run("enabled_on_proxy_requires_root_auth", func() {
