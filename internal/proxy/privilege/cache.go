@@ -108,6 +108,7 @@ func (m *privilegeCache) GetCredentialInfo(ctx context.Context, username string)
 			Username: username,
 		}
 		resp, err := m.mixCoord.GetCredential(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
 		if err != nil {
 			return &internalpb.CredentialInfo{}, err
 		}
