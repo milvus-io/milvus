@@ -252,6 +252,38 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_binary_dim_not_match(self):
+        """
+        target: test insert binary with dim not match
+        method: insert binary data dim not equal to schema
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema)
+
+        # Insert binary data
+        rng = np.random.default_rng(seed=19530)
+        binary_vectors = cf.gen_binary_vectors(num=default_nb, dim=default_dim + 1)[1]
+        rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i),
+             default_binary_vec_field_name: binary_vectors[i]} for i in range(default_nb)]
+
+        error = {ct.err_code: 65536,
+                 ct.err_msg: f"of field data(binary_vector) is not equal to schema dim ({default_dim})"}
+        self.insert(client, collection_name, data=rows,
+                    check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_not_matched_data(self):
         """
         target: test milvus client: insert not matched data then defined
@@ -412,6 +444,59 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_insert_binary_default(self):
+        """
+        target: test insert binary data, test binary vector insert/search using client api
+        method: create collection, insert, search and query
+        expected: insert/search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create binary vector collection
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=ct.default_length)
+
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT", metric_type="HAMMING")
+
+        self.create_collection(client, collection_name, dimension=default_dim, schema=schema, index_params=index_params)
+
+        indexes = self.list_indexes(client, collection_name)[0]
+        assert ct.default_binary_vec_field_name in indexes
+
+        # Insert binary data
+        rows = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+
+        self.flush(client, collection_name)
+        num_entities = self.get_collection_stats(client, collection_name)[0]
+        assert num_entities.get("row_count", None) == ct.default_nb
+
+        # search
+        vectors_to_search = [rows[0][default_binary_vec_field_name]]
+        insert_ids = [i for i in range(default_nb)]
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "limit": default_limit,
+                                 "pk_name": default_primary_key_field_name})
+        # query
+        self.query(client, collection_name, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={"exp_limit": default_nb,
+                                "with_vec": False,
+                                "vector_type": DataType.BINARY_VECTOR})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_insert_different_fields(self):
         """
@@ -479,6 +564,24 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
                                  "pk_name": default_primary_key_field_name,
                                  "limit": 0})
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_non_data_type(self):
+        """
+        target: test insert with none type data
+        method: create collection
+        expected: milvus client does not support insert with none type data
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Create collection
+        self.create_collection(client, collection_name, dimension=default_dim)
+
+        # Try to insert with none type data
+        error = {ct.err_code: -1,
+                 ct.err_msg: f"wrong type of argument 'data',expected 'Dict' or list of 'Dict', got 'NoneType'"}
+        self.insert(client, collection_name, None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_insert_partition(self):
