@@ -1518,7 +1518,7 @@ message RestoreSnapshotRequest {
 message RestoreSnapshotResponse {
   common.Status status = 1;
   int64 job_id = 2; // restore job ID for async tracking (deprecated, use ListRestoreJobs)
-  int64 collection_id = 3; // target collection ID
+  int64 collection_id = 3; // deprecated
 }
 
 message GetRestoreSnapshotStateRequest {

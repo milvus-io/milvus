@@ -18,13 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -78,42 +75,14 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 	)
 	log.Info("restoreSnapshotV2AckCallback received")
 
-	// Read snapshot data
-	snapshotData, err := s.snapshotManager.ReadSnapshotData(ctx, header.SnapshotName)
-	if err != nil {
-		log.Error("failed to read snapshot data", zap.Error(err))
-		return err
-	}
-
 	// Restore data (create copy segment job)
 	// Use the pre-allocated jobID from the WAL message for idempotency
-	jobID, err := s.snapshotManager.RestoreData(ctx, snapshotData, header.CollectionId, header.JobId)
+	jobID, err := s.snapshotManager.RestoreData(ctx, header.SnapshotName, header.CollectionId, header.JobId)
 	if err != nil {
 		log.Error("failed to restore data", zap.Error(err))
 		return err
 	}
 
-	// Wait for restore to complete, checking for both success and failure states
-	for {
-		state, err := s.snapshotManager.GetRestoreState(ctx, jobID)
-		if err != nil {
-			log.Error("failed to get restore state", zap.Error(err))
-			return err
-		}
-		log.Info("restore snapshot state", zap.Any("state", state))
-
-		// Check for failure state to avoid infinite loop
-		if state.GetState() == datapb.RestoreSnapshotState_RestoreSnapshotFailed {
-			log.Error("restore snapshot failed", zap.String("reason", state.GetReason()))
-			return fmt.Errorf("restore snapshot failed: %s", state.GetReason())
-		}
-
-		if state.GetProgress() == 100 || state.GetState() == datapb.RestoreSnapshotState_RestoreSnapshotCompleted {
-			break
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	log.Info("restore snapshot callback completed", zap.Int64("jobID", jobID))
+	log.Info("restore snapshot callback completed, job created for async execution", zap.Int64("jobID", jobID))
 	return nil
 }

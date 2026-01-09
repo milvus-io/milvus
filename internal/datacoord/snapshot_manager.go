@@ -163,7 +163,7 @@ type SnapshotManager interface {
 	//   - validateResources: Function to validate that all resources exist
 	//
 	// Returns:
-	//   - collectionID: ID of the restored collection
+	//   - jobID: ID of the restore job (can be used for progress tracking)
 	//   - error: If any step fails
 	RestoreSnapshot(
 		ctx context.Context,
@@ -217,14 +217,14 @@ type SnapshotManager interface {
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - snapshotData: Pre-loaded snapshot data
+	//   - snapshotName: Name of the snapshot to restore
 	//   - collectionID: ID of the target collection (already created)
 	//   - jobID: Pre-allocated job ID for idempotency (from WAL message)
 	//
 	// Returns:
 	//   - jobID: The restore job ID (same as input if job created, or existing job ID)
 	//   - error: If mapping fails or job creation fails
-	RestoreData(ctx context.Context, snapshotData *SnapshotData, collectionID int64, jobID int64) (int64, error)
+	RestoreData(ctx context.Context, snapshotName string, collectionID int64, jobID int64) (int64, error)
 
 	// Restore state query
 
@@ -529,8 +529,8 @@ func (sm *snapshotManager) RestoreSnapshot(
 		return 0, fmt.Errorf("failed to broadcast restore message: %w", err)
 	}
 
-	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID))
-	return collectionID, nil
+	log.Info("restore snapshot completed", zap.Int64("collectionID", collectionID), zap.Int64("jobID", jobID))
+	return jobID, nil
 }
 
 // RestoreCollection creates a new collection and its user partitions based on snapshot data.
@@ -681,12 +681,12 @@ func (sm *snapshotManager) RestoreIndexes(
 //  4. Create copy segment job
 func (sm *snapshotManager) RestoreData(
 	ctx context.Context,
-	snapshotData *SnapshotData,
+	snapshotName string,
 	collectionID int64,
 	jobID int64,
 ) (int64, error) {
 	log := log.Ctx(ctx).With(
-		zap.String("snapshot", snapshotData.SnapshotInfo.GetName()),
+		zap.String("snapshot", snapshotName),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("jobID", jobID),
 	)
@@ -698,6 +698,12 @@ func (sm *snapshotManager) RestoreData(
 	if existingJob != nil {
 		log.Info("job already exists, skip creation (idempotent)")
 		return jobID, nil
+	}
+
+	snapshotData, err := sm.ReadSnapshotData(ctx, snapshotName)
+	if err != nil {
+		log.Error("failed to read snapshot data", zap.Error(err))
+		return 0, fmt.Errorf("failed to read snapshot data: %w", err)
 	}
 
 	// ========== Phase 2: Build partition mapping ==========

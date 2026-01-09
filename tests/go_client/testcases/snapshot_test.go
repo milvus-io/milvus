@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"testing"
@@ -9,15 +10,51 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
 var snapshotPrefix = "snapshot"
+
+// waitForRestoreComplete polls GetRestoreSnapshotState until the restore job completes or fails.
+// Returns the final RestoreSnapshotInfo and any error.
+func waitForRestoreComplete(ctx context.Context, mc *base.MilvusClient, jobID int64, timeout time.Duration) (*milvuspb.RestoreSnapshotInfo, error) {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 1 * time.Second
+
+	for time.Now().Before(deadline) {
+		opt := client.NewGetRestoreSnapshotStateOption(jobID)
+		info, err := mc.GetRestoreSnapshotState(ctx, opt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get restore state: %w", err)
+		}
+
+		switch info.GetState() {
+		case milvuspb.RestoreSnapshotState_RestoreSnapshotCompleted:
+			log.Info("restore snapshot completed",
+				zap.Int64("jobID", jobID),
+				zap.String("collectionName", info.GetCollectionName()))
+			return info, nil
+		case milvuspb.RestoreSnapshotState_RestoreSnapshotFailed:
+			return info, fmt.Errorf("restore snapshot failed: jobID=%d, reason=%s", jobID, info.GetReason())
+		default:
+			// Still pending or executing
+			log.Info("waiting for restore to complete",
+				zap.Int64("jobID", jobID),
+				zap.String("state", info.GetState().String()),
+				zap.Int32("progress", info.GetProgress()))
+			time.Sleep(pollInterval)
+		}
+	}
+
+	return nil, fmt.Errorf("timeout waiting for restore to complete: jobID=%d", jobID)
+}
 
 // TestCreateSnapshot tests creating a snapshot for a collection
 func TestCreateSnapshot(t *testing.T) {
@@ -161,7 +198,11 @@ func TestSnapshotRestoreWithMultiSegment(t *testing.T) {
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Verify restored collection exists
@@ -295,7 +336,11 @@ func TestSnapshotRestoreWithMultiShardMultiPartition(t *testing.T) {
 	// Step 4: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Verify restored collection exists
@@ -483,7 +528,11 @@ func TestSnapshotRestoreWithMultiFields(t *testing.T) {
 	// Step 6: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Verify restored collection exists
@@ -634,7 +683,11 @@ func TestSnapshotRestoreEmptyCollection(t *testing.T) {
 	// Step 8: Restore snapshot to a new collection
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
-	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Step 9: Verify restored collection exists
@@ -935,7 +988,11 @@ func TestSnapshotRestoreWithJSONStats(t *testing.T) {
 	restoredCollName := fmt.Sprintf("restored_%s", collName)
 	restoreOpt := client.NewRestoreSnapshotOption(snapshotName, restoredCollName)
 	log.Info("Restoring snapshot", zap.String("target_collection", restoredCollName))
-	_, err = mc.RestoreSnapshot(ctx, restoreOpt)
+	jobID, err := mc.RestoreSnapshot(ctx, restoreOpt)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobID, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Step 9: Verify restored collection exists
@@ -1064,7 +1121,11 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	restoredCollNameV1 := fmt.Sprintf("restored_v1_%s", collName)
 	restoreOptV1 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV1)
 	log.Info("Restoring snapshot after partition drop", zap.String("target", restoredCollNameV1))
-	_, err = mc.RestoreSnapshot(ctx, restoreOptV1)
+	jobIDV1, err := mc.RestoreSnapshot(ctx, restoreOptV1)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobIDV1, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Verify restored collection v1 exists
@@ -1122,7 +1183,11 @@ func TestSnapshotRestoreAfterDropPartitionAndCollection(t *testing.T) {
 	restoredCollNameV2 := fmt.Sprintf("restored_v2_%s", collName)
 	restoreOptV2 := client.NewRestoreSnapshotOption(snapshotName, restoredCollNameV2)
 	log.Info("Restoring snapshot after collection drop", zap.String("target", restoredCollNameV2))
-	_, err = mc.RestoreSnapshot(ctx, restoreOptV2)
+	jobIDV2, err := mc.RestoreSnapshot(ctx, restoreOptV2)
+	common.CheckErr(t, err, true)
+
+	// Wait for restore to complete
+	_, err = waitForRestoreComplete(ctx, mc, jobIDV2, 1*time.Minute)
 	common.CheckErr(t, err, true)
 
 	// Verify restored collection v2 exists
