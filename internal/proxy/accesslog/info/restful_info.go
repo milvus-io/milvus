@@ -282,3 +282,7 @@ func (i *RestfulInfo) TemplateValueLength() string {
 
 	return fmt.Sprint(m)
 }
+
+func (i *RestfulInfo) ClientRequestTime() string {
+	return Unknown
+}
